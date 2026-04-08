@@ -16,6 +16,7 @@ type (
 		GRPC    GRPC
 		RMQ     RMQ
 		NATS    NATS
+		AgentFW AgentFW
 		Metrics Metrics
 		Swagger Swagger
 	}
@@ -59,6 +60,19 @@ type (
 	NATS struct {
 		ServerExchange string `env:"NATS_RPC_SERVER,required"`
 		URL            string `env:"NATS_URL,required"`
+	}
+
+	// AgentFW -.
+	AgentFW struct {
+		Enabled bool `env:"AGENTFW_ENABLED" envDefault:"false"`
+
+		TemporalAddress   string `env:"AGENTFW_TEMPORAL_ADDRESS" envDefault:"127.0.0.1:7233"`
+		TemporalNamespace string `env:"AGENTFW_TEMPORAL_NAMESPACE" envDefault:"default"`
+		TemporalTaskQueue string `env:"AGENTFW_TEMPORAL_TASK_QUEUE" envDefault:"agent-framework"`
+
+		MaxConcurrentWorkflowTaskPollers int `env:"AGENTFW_MAX_CONCURRENT_WORKFLOW_TASK_POLLERS" envDefault:"2"`
+		MaxConcurrentActivityTaskPollers int `env:"AGENTFW_MAX_CONCURRENT_ACTIVITY_TASK_POLLERS" envDefault:"2"`
+		MaxConcurrentActivityExecution   int `env:"AGENTFW_MAX_CONCURRENT_ACTIVITY_EXECUTION" envDefault:"100"`
 	}
 
 	// Metrics -.

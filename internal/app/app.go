@@ -8,6 +8,8 @@ import (
 	"syscall"
 
 	"github.com/evrone/go-clean-template/config"
+	agentfwconfig "github.com/evrone/go-clean-template/internal/agentfw/config"
+	agentfwruntime "github.com/evrone/go-clean-template/internal/agentfw/runtime"
 	amqprpc "github.com/evrone/go-clean-template/internal/controller/amqp_rpc"
 	"github.com/evrone/go-clean-template/internal/controller/grpc"
 	natsrpc "github.com/evrone/go-clean-template/internal/controller/nats_rpc"
@@ -26,6 +28,24 @@ import (
 // Run creates objects via constructors.
 func Run(cfg *config.Config) { //nolint: gocyclo,cyclop,funlen,gocritic,nolintlint
 	l := logger.New(cfg.Log.Level)
+	var temporalRuntime *agentfwruntime.TemporalRuntime
+
+	if cfg.AgentFW.Enabled {
+		fwCfg := agentfwconfig.FromAppConfig(cfg)
+		runtime, err := agentfwruntime.NewTemporalRuntime(fwCfg.Temporal)
+		if err != nil {
+			l.Fatal(fmt.Errorf("app - Run - agentfw.NewTemporalRuntime: %w", err))
+		}
+
+		registrar := agentfwruntime.NewDefaultRegistrar()
+		if err := agentfwruntime.StartWorker(runtime, registrar); err != nil {
+			runtime.Close()
+			l.Fatal(fmt.Errorf("app - Run - agentfw.StartWorker: %w", err))
+		}
+
+		temporalRuntime = runtime
+		l.Info("app - Run - agent framework worker started on task queue: %s", fwCfg.Temporal.TaskQueue)
+	}
 
 	// Repository
 	pg, err := postgres.New(cfg.PG.URL, postgres.MaxPoolSize(cfg.PG.PoolMax))
@@ -106,5 +126,9 @@ func Run(cfg *config.Config) { //nolint: gocyclo,cyclop,funlen,gocritic,nolintli
 	err = natsServer.Shutdown()
 	if err != nil {
 		l.Error(fmt.Errorf("app - Run - natsServer.Shutdown: %w", err))
+	}
+
+	if temporalRuntime != nil {
+		agentfwruntime.StopWorker(temporalRuntime)
 	}
 }
