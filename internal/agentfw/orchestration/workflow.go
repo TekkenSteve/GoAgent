@@ -85,6 +85,14 @@ func AgentWorkflow(ctx workflow.Context, input WorkflowInput) (WorkflowResult, e
 			}
 		}
 
+		// Ensure "resumed" state transitions to "running" before activity execution
+		if status.LifecycleState == "resumed" {
+			status.LifecycleState = "running"
+			status.UpdatedAt = workflow.Now(ctx)
+		}
+
+		var actRes EchoActivityResult
+
 		var actRes EchoActivityResult
 		if err := workflow.ExecuteActivity(ctx, EchoActivityName, EchoActivityInput{
 			RunID: status.RunID,

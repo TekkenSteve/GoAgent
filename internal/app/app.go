@@ -36,10 +36,10 @@ func Run(cfg *config.Config) { //nolint: gocyclo,cyclop,funlen,gocritic,nolintli
 		if err != nil {
 			l.Fatal(fmt.Errorf("app - Run - agentfw.NewTemporalRuntime: %w", err))
 		}
+		defer runtime.Close()
 
 		registrar := agentfwruntime.NewDefaultRegistrar()
 		if err := agentfwruntime.StartWorker(runtime, registrar); err != nil {
-			runtime.Close()
 			l.Fatal(fmt.Errorf("app - Run - agentfw.StartWorker: %w", err))
 		}
 
