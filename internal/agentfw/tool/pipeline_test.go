@@ -6,7 +6,7 @@ import (
 	"sync"
 	"testing"
 	"time"
-
+	"fmt"
 	"github.com/stretchr/testify/require"
 )
 
@@ -43,7 +43,8 @@ func (p *mapPersister) Persist(_ context.Context, _ ToolRequest, normalized map[
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	p.counter++
-	ref := "persist-" + time.Unix(0, int64(p.counter)).UTC().Format("150405.000")
+	// ref := "persist-" + time.Unix(0, int64(p.counter)).UTC().Format("150405.000")
+	ref := fmt.Sprintf("persist-%d", p.counter)
 	p.data[ref] = normalized
 	return ref, nil
 }

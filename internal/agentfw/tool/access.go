@@ -41,7 +41,7 @@ func (a TierAuthorizer) Authorize(ctx context.Context, req ToolRequest) error {
 	}
 
 	if a.Audit != nil {
-		_ = a.Audit.Write(ctx, AuditRecord{
+		if err := a.Audit.Write(ctx, AuditRecord{
 			RunID:      req.RunID,
 			AccountID:  req.AccountID,
 			ProjectID:  req.ProjectID,
@@ -49,7 +49,9 @@ func (a TierAuthorizer) Authorize(ctx context.Context, req ToolRequest) error {
 			Allowed:    allowed,
 			Reason:     reason,
 			OccurredAt: "policy-evaluated",
-		})
+		}); err != nil {
+			return fmt.Errorf("audit write failed: %w", err)
+		}
 	}
 
 	if !allowed {

@@ -42,15 +42,31 @@ func (a SecurityAuditor) Emit(ctx context.Context, event SecurityAuditEvent) err
 type DefaultRedactionPolicy struct{}
 
 // Redact masks security-sensitive values.
+import "strings"
+
+var sensitiveKeys = map[string]struct{}{
+	"token": {}, "secret": {}, "password": {}, "api_key": {}, "authorization": {},
+}
+
+// Redact masks security-sensitive values.
 func (DefaultRedactionPolicy) Redact(payload map[string]any) map[string]any {
+	return redactMap(payload)
+}
+
+func redactMap(payload map[string]any) map[string]any {
+	if payload == nil {
+		return nil
+	}
 	out := make(map[string]any, len(payload))
 	for k, v := range payload {
-		switch k {
-		case "token", "secret", "password", "api_key", "authorization":
+		if _, sensitive := sensitiveKeys[strings.ToLower(k)]; sensitive {
 			out[k] = "[REDACTED]"
-		default:
+		} else if nested, ok := v.(map[string]any); ok {
+			out[k] = redactMap(nested)
+		} else {
 			out[k] = v
 		}
 	}
 	return out
+}
 }

@@ -38,14 +38,49 @@ type DefaultSecretRedactor struct{}
 
 // Redact masks known sensitive keys in output payload.
 func (DefaultSecretRedactor) Redact(input map[string]any) map[string]any {
+	return redactMap(input)
+}
+
+func isSensitiveKey(k string) bool {
+	lk := strings.ToLower(k)
+	return strings.Contains(lk, "secret") ||
+		strings.Contains(lk, "token") ||
+		strings.Contains(lk, "password") ||
+		strings.Contains(lk, "api_key") ||
+		strings.Contains(lk, "apikey") ||
+		strings.Contains(lk, "credential")
+}
+
+func redactMap(input map[string]any) map[string]any {
 	out := make(map[string]any, len(input))
 	for k, v := range input {
-		lk := strings.ToLower(k)
-		if strings.Contains(lk, "secret") || strings.Contains(lk, "token") || strings.Contains(lk, "password") || strings.Contains(lk, "api_key") {
+		if isSensitiveKey(k) {
 			out[k] = "[REDACTED]"
 			continue
 		}
-		out[k] = v
+		switch val := v.(type) {
+		case map[string]any:
+			out[k] = redactMap(val)
+		case []any:
+			out[k] = redactSlice(val)
+		default:
+			out[k] = v
+		}
+	}
+	return out
+}
+
+func redactSlice(input []any) []any {
+	out := make([]any, len(input))
+	for i, v := range input {
+		switch val := v.(type) {
+		case map[string]any:
+			out[i] = redactMap(val)
+		case []any:
+			out[i] = redactSlice(val)
+		default:
+			out[i] = v
+		}
 	}
 	return out
 }

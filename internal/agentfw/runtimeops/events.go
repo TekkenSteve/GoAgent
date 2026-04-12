@@ -56,6 +56,13 @@ func (s *Sequencer) Next(runID string) int64 {
 	return s.seq[runID]
 }
 
+// Remove cleans up sequence state for a completed run.
+func (s *Sequencer) Remove(runID string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	delete(s.seq, runID)
+}
+
 // FailOpenPublisher swallows publish failures and records them through callback.
 type FailOpenPublisher struct {
 	Inner          EventPublisher

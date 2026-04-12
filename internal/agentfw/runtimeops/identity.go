@@ -29,6 +29,9 @@ func ValidateRunIdentity(id RunIdentity) error {
 
 // AttachIdentityToEvent injects identity into stream event payload.
 func AttachIdentityToEvent(event *StreamEvent, id RunIdentity) error {
+	if event == nil {
+		return fmt.Errorf("event cannot be nil")
+	}
 	if err := ValidateRunIdentity(id); err != nil {
 		return err
 	}
@@ -40,10 +43,10 @@ func AttachIdentityToEvent(event *StreamEvent, id RunIdentity) error {
 	event.Payload["thread_run_id"] = id.ThreadRunID
 	event.Payload["idempotency_key"] = id.IdempotencyKey
 	return nil
-}
-
-// AttachIdentityToUsage injects identity into usage records.
 func AttachIdentityToUsage(record *UsageRecord, id RunIdentity) error {
+	if record == nil {
+		return fmt.Errorf("record cannot be nil")
+	}
 	if err := ValidateRunIdentity(id); err != nil {
 		return err
 	}

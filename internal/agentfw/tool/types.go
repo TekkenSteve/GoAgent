@@ -34,6 +34,15 @@ type RawResult struct {
 	Payload map[string]any
 }
 
+// IsolationLevel indicates the execution isolation semantics.
+type IsolationLevel string
+
+const (
+	IsolationNone           IsolationLevel = "none"
+	IsolationReadCommitted  IsolationLevel = "read_committed"
+	IsolationSerializable   IsolationLevel = "serializable"
+)
+
 // Result is normalized tool execution output.
 type Result struct {
 	RunID          string

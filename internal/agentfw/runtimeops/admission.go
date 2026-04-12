@@ -17,8 +17,12 @@ type AdmissionController struct {
 
 // NewAdmissionController creates a slot controller with per-account limits.
 func NewAdmissionController(limits map[string]int) *AdmissionController {
+	limitsCopy := make(map[string]int, len(limits))
+	for k, v := range limits {
+		limitsCopy[k] = v
+	}
 	return &AdmissionController{
-		limits: limits,
+		limits: limitsCopy,
 		active: map[string]int{},
 	}
 }

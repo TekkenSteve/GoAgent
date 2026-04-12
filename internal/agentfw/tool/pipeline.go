@@ -73,7 +73,11 @@ func (p Pipeline) Execute(ctx context.Context, req ToolRequest) (Result, error) 
 			return Result{}, fmt.Errorf("%w: %v", ErrExecution, execErr)
 		}
 		if policy.RetryBackoff > 0 {
-			time.Sleep(policy.RetryBackoff)
+			select {
+			case <-time.After(policy.RetryBackoff):
+			case <-ctx.Done():
+				return Result{}, fmt.Errorf("%w: %v", ErrExecution, ctx.Err())
+			}
 		}
 	}
 
