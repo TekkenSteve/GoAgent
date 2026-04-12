@@ -86,6 +86,18 @@ linter-dotenv: ### check by dotenv linter
 	dotenv-linter
 .PHONY: linter-dotenv
 
+check-workflow-determinism: ### prevent forbidden non-determinism in workflow code
+	./scripts/agentfw/check_workflow_determinism.sh .
+.PHONY: check-workflow-determinism
+
+agentfw-load-suite: ### run reproducible agent framework load/soak suites
+	./scripts/agentfw/run_load_suites.sh
+.PHONY: agentfw-load-suite
+
+agentfw-security-suite: ### run agent framework security validation suites
+	./scripts/agentfw/run_security_suites.sh
+.PHONY: agentfw-security-suite
+
 test: ### run test
 	go test -v -race -covermode atomic -coverprofile=coverage.txt ./internal/... ./pkg/...
 .PHONY: test

@@ -10,6 +10,7 @@ import (
 	"github.com/evrone/go-clean-template/config"
 	agentfwconfig "github.com/evrone/go-clean-template/internal/agentfw/config"
 	agentfwruntime "github.com/evrone/go-clean-template/internal/agentfw/runtime"
+	agentfwops "github.com/evrone/go-clean-template/internal/agentfw/runtimeops"
 	amqprpc "github.com/evrone/go-clean-template/internal/controller/amqp_rpc"
 	"github.com/evrone/go-clean-template/internal/controller/grpc"
 	natsrpc "github.com/evrone/go-clean-template/internal/controller/nats_rpc"
@@ -32,19 +33,31 @@ func Run(cfg *config.Config) { //nolint: gocyclo,cyclop,funlen,gocritic,nolintli
 
 	if cfg.AgentFW.Enabled {
 		fwCfg := agentfwconfig.FromAppConfig(cfg)
-		runtime, err := agentfwruntime.NewTemporalRuntime(fwCfg.Temporal)
-		if err != nil {
-			l.Fatal(fmt.Errorf("app - Run - agentfw.NewTemporalRuntime: %w", err))
-		}
-		defer runtime.Close()
+		selector := agentfwops.NewRolloutSelector(agentfwops.RolloutConfig{
+			Mode:                agentfwops.RolloutMode(fwCfg.Rollout.Mode),
+			Percent:             fwCfg.Rollout.Percent,
+			AllowlistAccounts:   fwCfg.Rollout.AllowlistAccounts,
+			RollbackForceLegacy: fwCfg.Rollout.RollbackForceLegacy,
+			HashSalt:            fwCfg.Rollout.HashSalt,
+		})
+		controlDecision := selector.Decide("", "bootstrap")
+		if !controlDecision.UseTemporal {
+			l.Info("app - Run - agent framework temporal worker skipped: %s", controlDecision.Reason)
+		} else {
+			runtime, err := agentfwruntime.NewTemporalRuntime(fwCfg.Temporal)
+			if err != nil {
+				l.Fatal(fmt.Errorf("app - Run - agentfw.NewTemporalRuntime: %w", err))
+			}
+			defer runtime.Close()
 
-		registrar := agentfwruntime.NewDefaultRegistrar()
-		if err := agentfwruntime.StartWorker(runtime, registrar); err != nil {
-			l.Fatal(fmt.Errorf("app - Run - agentfw.StartWorker: %w", err))
-		}
+			registrar := agentfwruntime.NewDefaultRegistrar()
+			if err := agentfwruntime.StartWorker(runtime, registrar); err != nil {
+				l.Fatal(fmt.Errorf("app - Run - agentfw.StartWorker: %w", err))
+			}
 
-		temporalRuntime = runtime
-		l.Info("app - Run - agent framework worker started on task queue: %s", fwCfg.Temporal.TaskQueue)
+			temporalRuntime = runtime
+			l.Info("app - Run - agent framework worker started on task queue: %s", fwCfg.Temporal.TaskQueue)
+		}
 	}
 
 	// Repository

@@ -16,6 +16,13 @@ type WorkflowInput struct {
 	Request ExecuteRequest
 	// TargetSteps is used for deterministic progression in baseline orchestration.
 	TargetSteps int32
+	// ContinuePolicy controls Continue-As-New trigger checks.
+	ContinuePolicy ContinueAsNewPolicy
+	// Runtime hints are deterministic policy inputs from prior activity outputs.
+	HistoryLengthHint int
+	StateSizeHint     int
+	// Continuation payload from previous workflow run.
+	Continuation ContinuationPayload
 }
 
 // WorkflowResult is the deterministic workflow output payload.
@@ -38,8 +45,18 @@ func AgentWorkflow(ctx workflow.Context, input WorkflowInput) (WorkflowResult, e
 	status := RunStatus{
 		RunID:          input.Request.RunID,
 		LifecycleState: "created",
-		Step:           0,
+		Step:           input.Continuation.CarriedStep,
 		UpdatedAt:      workflow.Now(ctx),
+	}
+	if status.RunID == "" {
+		status.RunID = input.Continuation.RunID
+	}
+	baseRequestedAt := input.Continuation.InitialRequestedAt
+	if baseRequestedAt.IsZero() {
+		baseRequestedAt = input.Request.RequestedAt
+	}
+	if baseRequestedAt.IsZero() {
+		baseRequestedAt = status.UpdatedAt
 	}
 
 	if err := workflow.SetQueryHandler(ctx, QueryRunStatus, func() (RunStatus, error) {
@@ -92,8 +109,6 @@ func AgentWorkflow(ctx workflow.Context, input WorkflowInput) (WorkflowResult, e
 		}
 
 		var actRes EchoActivityResult
-
-		var actRes EchoActivityResult
 		if err := workflow.ExecuteActivity(ctx, EchoActivityName, EchoActivityInput{
 			RunID: status.RunID,
 		}).Get(ctx, &actRes); err != nil {
@@ -105,6 +120,23 @@ func AgentWorkflow(ctx workflow.Context, input WorkflowInput) (WorkflowResult, e
 
 		status.Step++
 		status.UpdatedAt = workflow.Now(ctx)
+
+		decision := EvaluateContinueAsNew(input.ContinuePolicy, ContinueAsNewSnapshot{
+			HistoryLength:   input.HistoryLengthHint + int(status.Step),
+			StateSizeBytes:  input.StateSizeHint,
+			Step:            status.Step,
+			Elapsed:         status.UpdatedAt.Sub(baseRequestedAt),
+			ContinuationCnt: input.Continuation.ContinuationCount,
+		})
+		if decision.ShouldContinue {
+			payload, err := BuildContinuationPayload(input, status, workflow.GetInfo(ctx).WorkflowExecution.ID, status.UpdatedAt)
+			if err != nil {
+				return WorkflowResult{}, err
+			}
+			nextInput := input
+			nextInput.Continuation = payload
+			return WorkflowResult{}, workflow.NewContinueAsNewError(ctx, AgentWorkflow, nextInput)
+		}
 	}
 
 	status.LifecycleState = "completed"
