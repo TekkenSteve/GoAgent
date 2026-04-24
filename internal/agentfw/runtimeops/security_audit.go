@@ -1,6 +1,9 @@
 package runtimeops
 
-import "context"
+import (
+	"context"
+	"strings"
+)
 
 // SecurityAuditEvent captures security-sensitive decisions.
 type SecurityAuditEvent struct {
@@ -41,9 +44,6 @@ func (a SecurityAuditor) Emit(ctx context.Context, event SecurityAuditEvent) err
 // DefaultRedactionPolicy masks known sensitive fields.
 type DefaultRedactionPolicy struct{}
 
-// Redact masks security-sensitive values.
-import "strings"
-
 var sensitiveKeys = map[string]struct{}{
 	"token": {}, "secret": {}, "password": {}, "api_key": {}, "authorization": {},
 }
@@ -68,5 +68,4 @@ func redactMap(payload map[string]any) map[string]any {
 		}
 	}
 	return out
-}
 }

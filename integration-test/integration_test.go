@@ -11,9 +11,9 @@ import (
 	"testing"
 	"time"
 
-	protov1 "github.com/evrone/go-clean-template/docs/proto/v1"
-	natsClient "github.com/evrone/go-clean-template/pkg/nats/nats_rpc/client"
-	rmqClient "github.com/evrone/go-clean-template/pkg/rabbitmq/rmq_rpc/client"
+	protov1 "github.com/TekkenSteve/GoAgent/docs/proto/v1"
+	natsClient "github.com/TekkenSteve/GoAgent/pkg/nats/nats_rpc/client"
+	rmqClient "github.com/TekkenSteve/GoAgent/pkg/rabbitmq/rmq_rpc/client"
 	"github.com/goccy/go-json"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"

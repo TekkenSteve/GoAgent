@@ -4,7 +4,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/evrone/go-clean-template/pkg/logger"
+	"github.com/TekkenSteve/GoAgent/pkg/logger"
 	"github.com/gofiber/fiber/v2"
 )
 

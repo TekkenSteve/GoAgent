@@ -1,7 +1,7 @@
 package runtime
 
 import (
-	"github.com/evrone/go-clean-template/internal/agentfw/orchestration"
+	"github.com/TekkenSteve/GoAgent/internal/agentfw/orchestration"
 	"go.temporal.io/sdk/activity"
 	"go.temporal.io/sdk/workflow"
 )

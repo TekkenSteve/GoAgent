@@ -10,9 +10,9 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	"github.com/evrone/go-clean-template/internal/agentfw/orchestration"
-	"github.com/evrone/go-clean-template/internal/agentfw/runtimeops"
-	"github.com/evrone/go-clean-template/internal/agentfw/tool"
+	"github.com/TekkenSteve/GoAgent/internal/agentfw/orchestration"
+	"github.com/TekkenSteve/GoAgent/internal/agentfw/runtimeops"
+	"github.com/TekkenSteve/GoAgent/internal/agentfw/tool"
 )
 
 type noopValidator struct{}

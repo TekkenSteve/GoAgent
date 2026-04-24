@@ -220,6 +220,6 @@ func TestTierAuthorizationAndAudit(t *testing.T) {
 
 func TestIsolationRouting(t *testing.T) {
 	policy := SideEffectIsolationPolicy{}
-	require.Equal(t, IsolationShared, policy.Resolve(ToolRequest{ToolName: "search"}))
-	require.Equal(t, IsolationIsolated, policy.Resolve(ToolRequest{ToolName: "write-db", SideEffecting: true}))
+	require.Equal(t, ExecutionIsolationShared, policy.Resolve(ToolRequest{ToolName: "search"}))
+	require.Equal(t, ExecutionIsolationIsolated, policy.Resolve(ToolRequest{ToolName: "write-db", SideEffecting: true}))
 }

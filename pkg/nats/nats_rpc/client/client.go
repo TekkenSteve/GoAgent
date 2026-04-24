@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"time"
 
-	natsrpc "github.com/evrone/go-clean-template/pkg/nats/nats_rpc"
+	natsrpc "github.com/TekkenSteve/GoAgent/pkg/nats/nats_rpc"
 	"github.com/goccy/go-json"
 	"github.com/nats-io/nats.go"
 )

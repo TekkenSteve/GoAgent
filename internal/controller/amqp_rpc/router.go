@@ -1,10 +1,10 @@
 package v1
 
 import (
-	v1 "github.com/evrone/go-clean-template/internal/controller/amqp_rpc/v1"
-	"github.com/evrone/go-clean-template/internal/usecase"
-	"github.com/evrone/go-clean-template/pkg/logger"
-	"github.com/evrone/go-clean-template/pkg/rabbitmq/rmq_rpc/server"
+	v1 "github.com/TekkenSteve/GoAgent/internal/controller/amqp_rpc/v1"
+	"github.com/TekkenSteve/GoAgent/internal/usecase"
+	"github.com/TekkenSteve/GoAgent/pkg/logger"
+	"github.com/TekkenSteve/GoAgent/pkg/rabbitmq/rmq_rpc/server"
 )
 
 // NewRouter -.

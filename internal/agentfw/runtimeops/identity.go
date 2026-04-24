@@ -43,6 +43,8 @@ func AttachIdentityToEvent(event *StreamEvent, id RunIdentity) error {
 	event.Payload["thread_run_id"] = id.ThreadRunID
 	event.Payload["idempotency_key"] = id.IdempotencyKey
 	return nil
+}
+
 func AttachIdentityToUsage(record *UsageRecord, id RunIdentity) error {
 	if record == nil {
 		return fmt.Errorf("record cannot be nil")

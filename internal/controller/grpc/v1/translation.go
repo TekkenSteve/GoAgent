@@ -4,8 +4,8 @@ import (
 	"context"
 	"fmt"
 
-	v1 "github.com/evrone/go-clean-template/docs/proto/v1"
-	"github.com/evrone/go-clean-template/internal/controller/grpc/v1/response"
+	v1 "github.com/TekkenSteve/GoAgent/docs/proto/v1"
+	"github.com/TekkenSteve/GoAgent/internal/controller/grpc/v1/response"
 )
 
 func (r *V1) GetHistory(ctx context.Context, _ *v1.GetHistoryRequest) (*v1.GetHistoryResponse, error) {

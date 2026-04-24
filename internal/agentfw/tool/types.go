@@ -45,14 +45,14 @@ const (
 
 // Result is normalized tool execution output.
 type Result struct {
-	RunID          string
-	ToolCallID     string
-	ToolName       string
-	Output         map[string]any
-	PersistedRef   string
-	FromIdempotent bool
-	Attempts       int
-	IsolationLevel IsolationLevel
+	RunID              string
+	ToolCallID         string
+	ToolName           string
+	Output             map[string]any
+	PersistedRef       string
+	FromIdempotent     bool
+	Attempts           int
+	ExecutionIsolation ExecutionIsolation
 }
 
 // ToolPolicy defines per-tool timeout/retry/idempotency rules.

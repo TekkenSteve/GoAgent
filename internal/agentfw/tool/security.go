@@ -4,28 +4,28 @@ import (
 	"strings"
 )
 
-// IsolationLevel controls routing for tool execution boundaries.
-type IsolationLevel string
+// ExecutionIsolation indicates where a tool should be executed.
+type ExecutionIsolation string
 
 const (
-	IsolationShared   IsolationLevel = "shared"
-	IsolationIsolated IsolationLevel = "isolated"
+	ExecutionIsolationShared   ExecutionIsolation = "shared"   // Execute in shared worker pool
+	ExecutionIsolationIsolated ExecutionIsolation = "isolated" // Execute in isolated sandbox
 )
 
-// IsolationPolicy resolves execution isolation level for a request.
+// IsolationPolicy resolves execution isolation boundary for a request.
 type IsolationPolicy interface {
-	Resolve(req ToolRequest) IsolationLevel
+	Resolve(req ToolRequest) ExecutionIsolation
 }
 
-// SideEffectIsolationPolicy routes side-effecting tools to isolated pools.
+// SideEffectIsolationPolicy routes side-effecting tools to isolated execution boundaries.
 type SideEffectIsolationPolicy struct{}
 
-// Resolve returns isolated level when tool is side-effecting.
-func (SideEffectIsolationPolicy) Resolve(req ToolRequest) IsolationLevel {
+// Resolve returns isolated boundary for side-effecting tools, shared otherwise.
+func (SideEffectIsolationPolicy) Resolve(req ToolRequest) ExecutionIsolation {
 	if req.SideEffecting {
-		return IsolationIsolated
+		return ExecutionIsolationIsolated
 	}
-	return IsolationShared
+	return ExecutionIsolationShared
 }
 
 // SecretRedactor masks sensitive values before persistence/telemetry.

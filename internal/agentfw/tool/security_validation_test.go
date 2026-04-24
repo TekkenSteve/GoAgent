@@ -55,8 +55,8 @@ func (allowAllAuth) Authorize(_ context.Context, _ ToolRequest) error { return n
 
 func TestSecuritySuiteIsolationBoundaryRouting(t *testing.T) {
 	policy := SideEffectIsolationPolicy{}
-	require.Equal(t, IsolationShared, policy.Resolve(ToolRequest{ToolName: "search", SideEffecting: false}))
-	require.Equal(t, IsolationIsolated, policy.Resolve(ToolRequest{ToolName: "payments.charge", SideEffecting: true}))
+	require.Equal(t, ExecutionIsolationShared, policy.Resolve(ToolRequest{ToolName: "search", SideEffecting: false}))
+	require.Equal(t, ExecutionIsolationIsolated, policy.Resolve(ToolRequest{ToolName: "payments.charge", SideEffecting: true}))
 }
 
 func TestSecuritySuiteSecretRedactionBeforePersistence(t *testing.T) {

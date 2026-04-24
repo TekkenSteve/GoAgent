@@ -4,7 +4,7 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/evrone/go-clean-template/pkg/nats/nats_rpc/server"
+	"github.com/TekkenSteve/GoAgent/pkg/nats/nats_rpc/server"
 	"github.com/nats-io/nats.go"
 )
 

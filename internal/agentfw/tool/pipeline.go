@@ -102,20 +102,20 @@ func (p Pipeline) Execute(ctx context.Context, req ToolRequest) (Result, error) 
 		ref = persistRef
 	}
 
-	level := IsolationShared
+	isolation := ExecutionIsolationShared
 	if p.Isolation != nil {
-		level = p.Isolation.Resolve(req)
+		isolation = p.Isolation.Resolve(req)
 	}
 
 	result := Result{
-		RunID:          req.RunID,
-		ToolCallID:     req.ToolCallID,
-		ToolName:       req.ToolName,
-		Output:         normalized,
-		PersistedRef:   ref,
-		FromIdempotent: false,
-		Attempts:       attempts,
-		IsolationLevel: level,
+		RunID:              req.RunID,
+		ToolCallID:         req.ToolCallID,
+		ToolName:           req.ToolName,
+		Output:             normalized,
+		PersistedRef:       ref,
+		FromIdempotent:     false,
+		Attempts:           attempts,
+		ExecutionIsolation: isolation,
 	}
 
 	if policy.EnableIdempotent && req.IdempotencyKey != "" && p.Idempotency != nil {
