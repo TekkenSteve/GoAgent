@@ -1,17 +1,17 @@
 # Agent Framework
 
-基于 Clean Architecture 原则构建的 Go 微服务框架，集成了 Agent 运行时和编排能力。
+A Go microservices framework built on Clean Architecture principles, integrating Agent runtime and orchestration capabilities.
 
-## 特性
+## Features
 
-- 遵循 Clean Architecture 设计原则
-- 支持多种服务器类型（REST API、gRPC、AMQP RPC、NATS RPC）
-- 内置 Agent 框架和运行时
-- 完整的可观测性支持（日志、指标、追踪）
-- 数据库迁移管理
-- 依赖注入设计
+- Follows Clean Architecture design principles
+- Supports multiple server types (REST API, gRPC, AMQP RPC, NATS RPC)
+- Built-in Agent framework and runtime
+- Complete observability support (logging, metrics, tracing)
+- Database migration management
+- Dependency injection design
 
-## 技术栈
+## Technology Stack
 
 [![Web Framework](https://img.shields.io/badge/Fiber-Web%20Framework-blue)](https://github.com/gofiber/fiber)
 [![API Documentation](https://img.shields.io/badge/Swagger-API%20Documentation-blue)](https://github.com/swaggo/swag)
@@ -24,37 +24,37 @@
 [![Testing](https://img.shields.io/badge/Testify-Testing%20Framework-blue)](https://github.com/stretchr/testify)
 [![Mocking](https://img.shields.io/badge/Mock-Mocking%20Library-blue)](https://go.uber.org/mock)
 
-## 快速开始
+## Quick Start
 
-### 本地开发
+### Local Development
 
 ```sh
-# 启动依赖服务 (Postgres, RabbitMQ, NATS)
+# Start dependency services (Postgres, RabbitMQ, NATS)
 make compose-up
 
-# 运行应用（包含数据库迁移）
+# Run the application (includes database migration)
 make run
 ```
 
-### 集成测试
+### Integration Tests
 
 ```sh
-# 启动完整测试环境
+# Start full test environment
 make compose-up-integration-test
 ```
 
-### 完整 Docker 栈
+### Full Docker Stack
 
 ```sh
-make compose-up-all 
+make compose-up-all
 ```
 
-### 服务端点
+### Service Endpoints
 
 - REST API:
-  - http://127.0.0.1:8080/healthz - 健康检查
-  - http://127.0.0.1:8080/metrics - Prometheus 指标
-  - http://127.0.0.1:8080/swagger - API 文档
+  - http://127.0.0.1:8080/healthz - Health check
+  - http://127.0.0.1:8080/metrics - Prometheus metrics
+  - http://127.0.0.1:8080/swagger - API documentation
 - gRPC:
   - `tcp://127.0.0.1:8081`
 - AMQP RPC:
@@ -64,72 +64,72 @@ make compose-up-all
 - PostgreSQL:
   - `postgres://user:myAwEsOm3pa55@w0rd@127.0.0.1:5432/db`
 
-## 项目结构
+## Project Structure
 
-### 核心目录
+### Core Directories
 
-- `cmd/app/` - 应用入口点
-- `config/` - 配置管理（基于环境变量）
-- `internal/` - 私有应用代码
-  - `app/` - 应用初始化和依赖注入
-  - `controller/` - 服务器处理层（REST、gRPC、RPC）
-  - `usecase/` - 业务逻辑层
-  - `entity/` - 业务实体
-  - `repo/` - 数据访问层
-  - `agentfw/` - Agent 框架实现
-- `pkg/` - 可复用的公共包
-- `docs/` - API 文档和 Proto 文件
-- `integration-test/` - 集成测试
+- `cmd/app/` - Application entry point
+- `config/` - Configuration management (environment variable based)
+- `internal/` - Private application code
+  - `app/` - Application initialization and dependency injection
+  - `controller/` - Server handling layer (REST, gRPC, RPC)
+  - `usecase/` - Business logic layer
+  - `entity/` - Business entities
+  - `repo/` - Data access layer
+  - `agentfw/` - Agent framework implementation
+- `pkg/` - Reusable public packages
+- `docs/` - API documentation and Proto files
+- `integration-test/` - Integration tests
 
-### 配置管理
+### Configuration Management
 
-遵循 [12-Factor App](https://12factor.net/) 原则，所有配置通过环境变量管理。
+Follows the [12-Factor App](https://12factor.net/) principles. All configuration is managed through environment variables.
 
-配置文件：[config/config.go](config/config.go)  
-示例配置：[.env.example](.env.example)
+Configuration file: [config/config.go](config/config.go)  
+Example configuration: [.env.example](.env.example)
 
-## 架构设计
+## Architecture Design
 
-### Clean Architecture 原则
+### Clean Architecture Principles
 
-本项目遵循 Robert Martin (Uncle Bob) 的 Clean Architecture 原则：
+This project follows Robert Martin (Uncle Bob)'s Clean Architecture principles:
 
-1. **依赖倒置**：依赖方向从外层指向内层
-2. **业务逻辑独立**：核心业务逻辑不依赖外部框架和工具
-3. **可测试性**：通过接口隔离，便于单元测试
-4. **关注点分离**：清晰的层次划分
+1. **Dependency Inversion**: Dependencies flow from outer layers to inner layers
+2. **Independent Business Logic**: Core business logic does not depend on external frameworks and tools
+3. **Testability**: Interface isolation enables easy unit testing
+4. **Separation of Concerns**: Clear layer separation
 
-### 分层架构
+### Layered Architecture
 
 ```
 ┌─────────────────────────────────────┐
-│   Controller (HTTP/gRPC/RPC)        │  外层：接口适配
+│   Controller (HTTP/gRPC/RPC)        │  Outer Layer: Interface Adapters
 ├─────────────────────────────────────┤
-│   Use Case (Business Logic)         │  内层：业务逻辑
+│   Use Case (Business Logic)         │  Inner Layer: Business Logic
 ├─────────────────────────────────────┤
-│   Repository / WebAPI               │  外层：数据访问
+│   Repository / WebAPI               │  Outer Layer: Data Access
 ├─────────────────────────────────────┤
-│   Database / External Services      │  外层：基础设施
+│   Database / External Services      │  Outer Layer: Infrastructure
 └─────────────────────────────────────┘
 ```
 
-**内层（业务逻辑）**：
-- 只使用 Go 标准库
-- 不依赖外层实现
-- 通过接口与外层交互
+**Inner Layer (Business Logic)**:
+- Uses only Go standard library
+- Does not depend on outer layer implementations
+- Interacts with outer layers through interfaces
 
-**外层（基础设施）**：
-- 实现内层定义的接口
-- 处理具体的技术实现
-- 组件间通过业务逻辑层通信
+**Outer Layer (Infrastructure)**:
+- Implements interfaces defined by the inner layer
+- Handles specific technical implementations
+- Components communicate through the business logic layer
 
-### 依赖注入
+### Dependency Injection
 
-通过构造函数注入依赖，保持业务逻辑的独立性和可测试性：
+Dependencies are injected through constructors, maintaining the independence and testability of business logic:
 
 ```go
 type UseCase struct {
-    repo Repository  // 接口依赖
+    repo Repository  // Interface dependency
 }
 
 func New(r Repository) *UseCase {
@@ -137,55 +137,55 @@ func New(r Repository) *UseCase {
 }
 ```
 
-这种设计使得：
-- 业务逻辑可独立测试
-- 实现可轻松替换
-- 便于生成 Mock 对象
+This design enables:
+- Independent testing of business logic
+- Easy replacement of implementations
+- Convenient generation of Mock objects
 
-### API 版本管理
+### API Versioning
 
-支持简单的版本管理策略，通过目录结构区分版本：
+Supports a simple versioning strategy, with versions distinguished by directory structure:
 
 - REST API: `internal/controller/restapi/v1`, `v2`...
 - gRPC: `internal/controller/grpc/v1`, `v2`...
 - RPC: `internal/controller/amqp_rpc/v1`, `v2`...
 
-## 开发指南
+## Development Guide
 
-### 数据库迁移
+### Database Migrations
 
 ```sh
-# 运行迁移
+# Run migrations
 go run -tags migrate ./cmd/app
 
-# 或使用 make
+# Or use make
 make run
 ```
 
-### 生成代码
+### Code Generation
 
 ```sh
-# 生成 Swagger 文档
+# Generate Swagger documentation
 make swag
 
-# 生成 gRPC 代码
+# Generate gRPC code
 make proto
 
-# 生成 Mock
+# Generate Mocks
 make mock
 ```
 
-### 代码检查
+### Code Quality
 
 ```sh
-# 运行 linter
+# Run linter
 make lint
 
-# 格式化代码
+# Format code
 make fmt
 ```
 
-## 参考资料
+## References
 
 - [Clean Architecture](https://blog.cleancoder.com/uncle-bob/2012/08/13/the-clean-architecture.html) - Robert Martin
 - [The Twelve-Factor App](https://12factor.net/)
@@ -193,4 +193,4 @@ make fmt
 
 ## License
 
-MIT License - 详见 [LICENSE](LICENSE) 文件
+MIT License - See [LICENSE](LICENSE) file for details
