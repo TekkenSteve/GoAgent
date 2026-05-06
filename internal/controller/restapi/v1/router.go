@@ -7,14 +7,14 @@ import (
 	"github.com/gofiber/fiber/v2"
 )
 
-// NewTranslationRoutes -.
-func NewTranslationRoutes(apiV1Group fiber.Router, t usecase.Translation, l logger.Interface) {
+// NewAgentRoutes registers agent-related REST API endpoints under the /agent group.
+func NewAgentRoutes(apiV1Group fiber.Router, t usecase.AgentExecutor, l logger.Interface) {
 	r := &V1{t: t, l: l, v: validator.New(validator.WithRequiredStructEnabled())}
 
-	translationGroup := apiV1Group.Group("/translation")
+	agentGroup := apiV1Group.Group("/agent")
 
 	{
-		translationGroup.Get("/history", r.history)
-		translationGroup.Post("/do-translate", r.doTranslate)
+		agentGroup.Post("/execute", r.execute)
+		agentGroup.Get("/status/:run_id", r.status)
 	}
 }

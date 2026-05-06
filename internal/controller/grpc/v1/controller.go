@@ -11,7 +11,7 @@ import (
 type V1 struct {
 	v1.TranslationServer
 
-	t usecase.Translation
+	t usecase.AgentExecutor
 	l logger.Interface
 	v *validator.Validate
 }

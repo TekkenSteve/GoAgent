@@ -8,16 +8,16 @@ import (
 	"syscall"
 
 	"github.com/TekkenSteve/GoAgent/config"
-	agentfwconfig "github.com/TekkenSteve/GoAgent/internal/agentfw/config"
+	agentfwconfig 	"github.com/TekkenSteve/GoAgent/internal/agentfw/config"
 	agentfwruntime "github.com/TekkenSteve/GoAgent/internal/agentfw/runtime"
 	agentfwops "github.com/TekkenSteve/GoAgent/internal/agentfw/runtimeops"
-	amqprpc "github.com/TekkenSteve/GoAgent/internal/controller/amqp_rpc"
+	amqp_rpc "github.com/TekkenSteve/GoAgent/internal/controller/amqp_rpc"
 	"github.com/TekkenSteve/GoAgent/internal/controller/grpc"
-	natsrpc "github.com/TekkenSteve/GoAgent/internal/controller/nats_rpc"
+	nats_rpc "github.com/TekkenSteve/GoAgent/internal/controller/nats_rpc"
 	"github.com/TekkenSteve/GoAgent/internal/controller/restapi"
-	"github.com/TekkenSteve/GoAgent/internal/repo/persistent"
-	"github.com/TekkenSteve/GoAgent/internal/repo/webapi"
-	"github.com/TekkenSteve/GoAgent/internal/usecase/translation"
+	agentfwusecase "github.com/TekkenSteve/GoAgent/internal/usecase/executor"
+	"github.com/TekkenSteve/GoAgent/internal/usecase"
+	temporalrepo "github.com/TekkenSteve/GoAgent/internal/repo/persistent"
 	"github.com/TekkenSteve/GoAgent/pkg/grpcserver"
 	"github.com/TekkenSteve/GoAgent/pkg/httpserver"
 	"github.com/TekkenSteve/GoAgent/pkg/logger"
@@ -31,33 +31,31 @@ func Run(cfg *config.Config) { //nolint: gocyclo,cyclop,funlen,gocritic,nolintli
 	l := logger.New(cfg.Log.Level)
 	var temporalRuntime *agentfwruntime.TemporalRuntime
 
-	if cfg.AgentFW.Enabled {
-		fwCfg := agentfwconfig.FromAppConfig(cfg)
-		selector := agentfwops.NewRolloutSelector(agentfwops.RolloutConfig{
-			Mode:                agentfwops.RolloutMode(fwCfg.Rollout.Mode),
-			Percent:             fwCfg.Rollout.Percent,
-			AllowlistAccounts:   fwCfg.Rollout.AllowlistAccounts,
-			RollbackForceLegacy: fwCfg.Rollout.RollbackForceLegacy,
-			HashSalt:            fwCfg.Rollout.HashSalt,
-		})
-		controlDecision := selector.Decide("", "bootstrap")
-		if !controlDecision.UseTemporal {
-			l.Info("app - Run - agent framework temporal worker skipped: %s", controlDecision.Reason)
-		} else {
-			runtime, err := agentfwruntime.NewTemporalRuntime(fwCfg.Temporal)
-			if err != nil {
-				l.Fatal(fmt.Errorf("app - Run - agentfw.NewTemporalRuntime: %w", err))
-			}
-			defer runtime.Close()
-
-			registrar := agentfwruntime.NewDefaultRegistrar()
-			if err := agentfwruntime.StartWorker(runtime, registrar); err != nil {
-				l.Fatal(fmt.Errorf("app - Run - agentfw.StartWorker: %w", err))
-			}
-
-			temporalRuntime = runtime
-			l.Info("app - Run - agent framework worker started on task queue: %s", fwCfg.Temporal.TaskQueue)
+	fwCfg := agentfwconfig.FromAppConfig(cfg)
+	selector := agentfwops.NewRolloutSelector(agentfwops.RolloutConfig{
+		Mode:                agentfwops.RolloutMode(fwCfg.Rollout.Mode),
+		Percent:             fwCfg.Rollout.Percent,
+		AllowlistAccounts:   fwCfg.Rollout.AllowlistAccounts,
+		RollbackForceLegacy: fwCfg.Rollout.RollbackForceLegacy,
+		HashSalt:            fwCfg.Rollout.HashSalt,
+	})
+	controlDecision := selector.Decide("", "bootstrap")
+	if !controlDecision.UseTemporal {
+		l.Info("app - Run - agent framework temporal worker skipped: %s", controlDecision.Reason)
+	} else {
+		runtime, err := agentfwruntime.NewTemporalRuntime(fwCfg.Temporal)
+		if err != nil {
+			l.Fatal(fmt.Errorf("app - Run - agentfw.NewTemporalRuntime: %w", err))
 		}
+		defer runtime.Close()
+
+		registrar := agentfwruntime.NewDefaultRegistrar()
+		if err := agentfwruntime.StartWorker(runtime, registrar); err != nil {
+			l.Fatal(fmt.Errorf("app - Run - agentfw.StartWorker: %w", err))
+		}
+
+		temporalRuntime = runtime
+		l.Info("app - Run - agent framework worker started on task queue: %s", fwCfg.Temporal.TaskQueue)
 	}
 
 	// Repository
@@ -68,13 +66,16 @@ func Run(cfg *config.Config) { //nolint: gocyclo,cyclop,funlen,gocritic,nolintli
 	defer pg.Close()
 
 	// Use-Case
-	translationUseCase := translation.New(
-		persistent.New(pg),
-		webapi.New(),
-	)
+	var agentExecutor usecase.AgentExecutor
+	if temporalRuntime != nil {
+		temporalRepo := temporalrepo.NewExecutorTemporal(temporalRuntime.Client, fwCfg.Temporal)
+		agentExecutor = agentfwusecase.New(temporalRepo)
+	} else {
+		l.Warn("app - Run - agent executor is nil, agent endpoints will be unavailable")
+	}
 
 	// RabbitMQ RPC Server
-	rmqRouter := amqprpc.NewRouter(translationUseCase, l)
+	rmqRouter := amqp_rpc.NewRouter(agentExecutor, l)
 
 	rmqServer, err := rmqRPCServer.New(cfg.RMQ.URL, cfg.RMQ.ServerExchange, rmqRouter, l)
 	if err != nil {
@@ -82,7 +83,7 @@ func Run(cfg *config.Config) { //nolint: gocyclo,cyclop,funlen,gocritic,nolintli
 	}
 
 	// NATS RPC Server
-	natsRouter := natsrpc.NewRouter(translationUseCase, l)
+	natsRouter := nats_rpc.NewRouter(agentExecutor, l)
 
 	natsServer, err := natsRPCServer.New(cfg.NATS.URL, cfg.NATS.ServerExchange, natsRouter, l)
 	if err != nil {
@@ -91,11 +92,11 @@ func Run(cfg *config.Config) { //nolint: gocyclo,cyclop,funlen,gocritic,nolintli
 
 	// gRPC Server
 	grpcServer := grpcserver.New(l, grpcserver.Port(cfg.GRPC.Port))
-	grpc.NewRouter(grpcServer.App, translationUseCase, l)
+	grpc.NewRouter(grpcServer.App, agentExecutor, l)
 
 	// HTTP Server
 	httpServer := httpserver.New(l, httpserver.Port(cfg.HTTP.Port), httpserver.Prefork(cfg.HTTP.UsePreforkMode))
-	restapi.NewRouter(httpServer.App, cfg, translationUseCase, l)
+	restapi.NewRouter(httpServer.App, cfg, agentExecutor, l)
 
 	// Start servers
 	rmqServer.Start()

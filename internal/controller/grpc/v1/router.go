@@ -8,8 +8,8 @@ import (
 	pbgrpc "google.golang.org/grpc"
 )
 
-// NewTranslationRoutes -.
-func NewTranslationRoutes(app *pbgrpc.Server, t usecase.Translation, l logger.Interface) {
+// NewAgentRoutes -.
+func NewAgentRoutes(app *pbgrpc.Server, t usecase.AgentExecutor, l logger.Interface) {
 	r := &V1{t: t, l: l, v: validator.New(validator.WithRequiredStructEnabled())}
 
 	{

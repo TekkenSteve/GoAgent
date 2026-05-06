@@ -1,0 +1,61 @@
+package executor
+
+import (
+	"context"
+	"fmt"
+
+	"github.com/TekkenSteve/GoAgent/internal/entity"
+	"github.com/TekkenSteve/GoAgent/internal/repo"
+)
+
+// UseCase -.
+type UseCase struct {
+	temporal repo.ExecutorRepo
+}
+
+// New -.
+func New(r repo.ExecutorRepo) *UseCase {
+	return &UseCase{temporal: r}
+}
+
+// Execute -.
+func (uc *UseCase) Execute(ctx context.Context, req entity.ExecuteRequest) (entity.RunStatus, error) {
+	status, err := uc.temporal.StartExecution(ctx, req)
+	if err != nil {
+		return entity.RunStatus{}, fmt.Errorf("UseCase - Execute - uc.temporal.StartExecution: %w", err)
+	}
+
+	return status, nil
+}
+
+// GetStatus -.
+func (uc *UseCase) GetStatus(ctx context.Context, runID string) (entity.RunStatus, error) {
+	status, err := uc.temporal.GetStatus(ctx, runID)
+	if err != nil {
+		return entity.RunStatus{}, fmt.Errorf("UseCase - GetStatus - uc.temporal.GetStatus: %w", err)
+	}
+
+	return status, nil
+}
+
+// Control -.
+func (uc *UseCase) Control(ctx context.Context, runID string, op entity.ControlOperation) error {
+	var err error
+
+	switch op {
+	case entity.ControlPause:
+		err = uc.temporal.Pause(ctx, runID)
+	case entity.ControlResume:
+		err = uc.temporal.Resume(ctx, runID)
+	case entity.ControlCancel:
+		err = uc.temporal.Cancel(ctx, runID)
+	default:
+		return fmt.Errorf("UseCase - Control - unknown operation: %s", op)
+	}
+
+	if err != nil {
+		return fmt.Errorf("UseCase - Control - uc.temporal.%s: %w", op, err)
+	}
+
+	return nil
+}

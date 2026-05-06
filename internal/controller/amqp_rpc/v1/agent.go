@@ -1,0 +1,59 @@
+package v1
+
+import (
+	"context"
+	"fmt"
+
+	"github.com/TekkenSteve/GoAgent/internal/controller/amqp_rpc/v1/request"
+	"github.com/TekkenSteve/GoAgent/internal/controller/amqp_rpc/v1/response"
+	"github.com/TekkenSteve/GoAgent/internal/entity"
+	"github.com/TekkenSteve/GoAgent/pkg/rabbitmq/rmq_rpc/server"
+	amqp "github.com/rabbitmq/amqp091-go"
+	"github.com/goccy/go-json"
+)
+
+func (r *V1) execute() server.CallHandler {
+	return func(d *amqp.Delivery) (any, error) {
+		var req request.Execute
+		if err := json.Unmarshal(d.Body, &req); err != nil {
+			r.l.Error(err, "amqp_rpc - V1 - execute")
+			return nil, fmt.Errorf("amqp_rpc - V1 - execute: %w", err)
+		}
+
+		status, err := r.t.Execute(context.Background(), entity.ExecuteRequest{
+			RunID:          req.RunID,
+			ThreadID:        req.ThreadID,
+			ProjectID:       req.ProjectID,
+			AccountID:       req.AccountID,
+			ModelRef:        req.ModelRef,
+			AgentID:         req.AgentID,
+			AgentVersionID:  req.AgentVersionID,
+			ToolSchemaVer:   req.ToolSchemaVer,
+			UserMessage:     req.UserMessage,
+			IsNewThread:     req.IsNewThread,
+			BypassAdmission: req.BypassAdmission,
+			IdempotencyKey:  req.IdempotencyKey,
+			EventSchemaVer:  req.EventSchemaVer,
+			WorkflowVersion: req.WorkflowVersion,
+		})
+		if err != nil {
+			r.l.Error(err, "amqp_rpc - V1 - execute")
+			return nil, fmt.Errorf("amqp_rpc - V1 - execute: %w", err)
+		}
+
+		return response.NewRunStatus(status), nil
+	}
+}
+
+func (r *V1) getStatus() server.CallHandler {
+	return func(d *amqp.Delivery) (any, error) {
+		runID := d.Headers["run_id"].(string)
+		status, err := r.t.GetStatus(context.Background(), runID)
+		if err != nil {
+			r.l.Error(err, "amqp_rpc - V1 - getStatus")
+			return nil, fmt.Errorf("amqp_rpc - V1 - getStatus: %w", err)
+		}
+
+		return response.NewRunStatus(status), nil
+	}
+}

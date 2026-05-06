@@ -1,4 +1,3 @@
-// Package repo implements application outer layer logic. Each logic group in own file.
 package repo
 
 import (
@@ -7,17 +6,29 @@ import (
 	"github.com/TekkenSteve/GoAgent/internal/entity"
 )
 
-//go:generate mockgen -source=contracts.go -destination=../usecase/mocks_repo_test.go -package=usecase_test
-
 type (
-	// TranslationRepo -.
-	TranslationRepo interface {
-		Store(context.Context, entity.Translation) error
-		GetHistory(context.Context) ([]entity.Translation, error)
+	// WarmStateRepo persists operational state outside workflow history.
+	WarmStateRepo interface {
+		PersistMessage(ctx context.Context, record entity.MessageRecord) (string, error)
+		PersistToolResult(ctx context.Context, record entity.ToolResultRecord) (string, error)
+		GetMessage(ctx context.Context, ref string) (entity.MessageRecord, bool, error)
+		GetToolResult(ctx context.Context, ref string) (entity.ToolResultRecord, bool, error)
 	}
-
-	// TranslationWebAPI -.
-	TranslationWebAPI interface {
-		Translate(entity.Translation) (entity.Translation, error)
+	// ColdStateRepo persists archival state outside workflow history.
+	ColdStateRepo interface {
+		PersistArchive(ctx context.Context, record entity.ArchiveRecord) (string, error)
+		GetArchive(ctx context.Context, ref string) (entity.ArchiveRecord, bool, error)
+	}
+	// WorkflowStateRepo binds warm and cold adapters as boundary contracts for orchestration.
+	WorkflowStateRepo interface {
+		WarmStateRepo
+		ColdStateRepo
+	}
+	ExecutorRepo interface {
+		StartExecution(ctx context.Context, req entity.ExecuteRequest) (entity.RunStatus, error)
+		GetStatus(ctx context.Context, runID string) (entity.RunStatus, error)
+		Pause(ctx context.Context, runID string) error
+		Resume(ctx context.Context, runID string) error
+		Cancel(ctx context.Context, runID string) error
 	}
 )
