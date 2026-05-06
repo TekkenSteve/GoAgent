@@ -53,6 +53,7 @@ func runSkipAuthTest(t *testing.T, method string) {
 
 	resp, err := interceptor(t.Context(), nil, info, handler)
 
+	require.NoError(t, err)
 	assert.Equal(t, respOK, resp)
 	assert.True(t, called)
 }

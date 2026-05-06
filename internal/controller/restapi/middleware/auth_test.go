@@ -1,14 +1,15 @@
 package middleware_test
 
 import (
+	"net/http/httptest"
 	"testing"
 	"time"
 
 	"github.com/TekkenSteve/GoAgent/internal/controller/restapi/middleware"
 	"github.com/TekkenSteve/GoAgent/pkg/jwt"
+	"github.com/gofiber/fiber/v2"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"github.com/gofiber/fiber/v2"
 )
 
 func newJWTManager(t *testing.T) *jwt.Manager {
