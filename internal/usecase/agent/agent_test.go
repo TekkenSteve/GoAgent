@@ -14,7 +14,8 @@ func TestExecuteStep_EmptyMessage(t *testing.T) {
 		&mockLLM{response: entity.LLMResponse{Content: "Continuing!", FinishReason: "stop", Usage: entity.Usage{PromptTokens: 5, CompletionTokens: 3, TotalTokens: 8}}},
 		&mockTool{},
 		nil,
-	)
+		nil,
+)
 
 	result, err := uc.ExecuteStep(context.Background(), agent.StepRequest{
 		RunID:   "run-1",
@@ -39,7 +40,8 @@ func TestExecuteStep_TextOnly(t *testing.T) {
 		&mockLLM{response: entity.LLMResponse{Content: "Hello!", FinishReason: "stop", Usage: entity.Usage{PromptTokens: 10, CompletionTokens: 5, TotalTokens: 15}}},
 		&mockTool{},
 		nil,
-	)
+	nil,
+)
 
 	result, err := uc.ExecuteStep(context.Background(), agent.StepRequest{
 		RunID:   "run-1",
@@ -94,7 +96,8 @@ func TestExecuteStep_ToolCallThenText(t *testing.T) {
 			ToolName: "search", Output: map[string]any{"temp": "72F"},
 		}},
 		nil,
-	)
+	nil,
+)
 
 	result, err := uc.ExecuteStep(context.Background(), agent.StepRequest{
 		RunID:   "run-1",
@@ -138,7 +141,8 @@ func TestExecuteStep_ToolExecutionError(t *testing.T) {
 		},
 		&mockTool{err: errors.New("tool crashed")},
 		nil,
-	)
+	nil,
+)
 
 	result, err := uc.ExecuteStep(context.Background(), agent.StepRequest{
 		RunID:   "run-1",
@@ -186,7 +190,8 @@ func TestExecuteStep_MaxToolRounds(t *testing.T) {
 		},
 		&mockTool{result: entity.ToolResult{ToolName: "loop_tool", Output: map[string]any{"done": true}}},
 		nil,
-	)
+	nil,
+)
 
 	result, err := uc.ExecuteStep(context.Background(), agent.StepRequest{
 		RunID:   "run-1",

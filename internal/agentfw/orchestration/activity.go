@@ -25,6 +25,7 @@ type StepActivityInput struct {
 // StepActivityOutput is the serializable output for AgentStepActivity.
 type StepActivityOutput struct {
 	Messages     []entity.Message
+	FullMessages []entity.Message // full accumulated state, replaces prior history when non-nil
 	ToolResults  []entity.ToolResult
 	Usage        entity.Usage
 	FinishReason string
@@ -57,6 +58,7 @@ func (a *AgentActivities) ExecuteStep(ctx context.Context, input StepActivityInp
 
 	return StepActivityOutput{
 		Messages:     result.Messages,
+		FullMessages: result.CompleteState,
 		ToolResults:  result.ToolResults,
 		Usage:        result.Usage,
 		FinishReason: string(result.FinishReason),

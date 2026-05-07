@@ -136,8 +136,13 @@ func AgentWorkflow(ctx workflow.Context, input WorkflowInput) (WorkflowResult, e
 			return WorkflowResult{}, err
 		}
 
-		// Accumulate new messages from this step
-		messages = append(messages, actRes.Messages...)
+		// Accumulate new messages from this step.
+		// FullMessages replaces prior history (e.g., after compression).
+		if actRes.FullMessages != nil {
+			messages = actRes.FullMessages
+		} else {
+			messages = append(messages, actRes.Messages...)
+		}
 
 		status.Step++
 		status.UpdatedAt = workflow.Now(ctx)

@@ -13,11 +13,16 @@ import (
 )
 
 func mockStepActivity(_ context.Context, input StepActivityInput) (StepActivityOutput, error) {
+	newMsgs := []entity.Message{
+		{Role: entity.RoleAssistant, Content: "Step response for " + input.RunID},
+	}
+	fullMsgs := make([]entity.Message, 0, len(input.History)+len(newMsgs))
+	fullMsgs = append(fullMsgs, input.History...)
+	fullMsgs = append(fullMsgs, newMsgs...)
 	return StepActivityOutput{
-		Messages: []entity.Message{
-			{Role: entity.RoleAssistant, Content: "Step response for " + input.RunID},
-		},
-		Usage: entity.Usage{PromptTokens: 10, CompletionTokens: 5, TotalTokens: 15},
+		Messages:     newMsgs,
+		FullMessages: fullMsgs,
+		Usage:        entity.Usage{PromptTokens: 10, CompletionTokens: 5, TotalTokens: 15},
 	}, nil
 }
 

@@ -22,22 +22,28 @@ type StepRequest struct {
 
 // StepResult is the output of a single agent step.
 type StepResult struct {
+	// Messages contains the new messages generated (delta from History), for logging/inspection.
+	// Callers should use CompleteState to replace accumulated history.
 	Messages    []entity.Message
-	ToolResults []entity.ToolResult
-	Usage       entity.Usage
-	FinishReason entity.FinishReason
+	// CompleteState is the full accumulated message state after this step.
+	// When compression occurs, this replaces the prior history entirely.
+	CompleteState []entity.Message
+	ToolResults   []entity.ToolResult
+	Usage         entity.Usage
+	FinishReason  entity.FinishReason
 }
 
 // UseCase -.
 type UseCase struct {
-	llm   repo.LLMProvider
-	tools repo.ToolExecutor
-	state repo.WarmStateRepo
+	llm        repo.LLMProvider
+	tools      repo.ToolExecutor
+	state      repo.WarmStateRepo
+	compressor repo.ContextCompressor
 }
 
 // New -.
-func New(llm repo.LLMProvider, tools repo.ToolExecutor, state repo.WarmStateRepo) *UseCase {
-	return &UseCase{llm: llm, tools: tools, state: state}
+func New(llm repo.LLMProvider, tools repo.ToolExecutor, state repo.WarmStateRepo, compressor repo.ContextCompressor) *UseCase {
+	return &UseCase{llm: llm, tools: tools, state: state, compressor: compressor}
 }
 
 // ExecuteStep runs one LLM invocation plus subsequent tool rounds.
@@ -53,6 +59,14 @@ func (uc *UseCase) ExecuteStep(ctx context.Context, req StepRequest) (*StepResul
 	var finalUsage entity.Usage
 
 	for round := 0; round < maxToolRounds; round++ {
+		// Compress messages if approaching context limits (before LLM call)
+		if uc.compressor != nil {
+			compressed, _, err := uc.compressor.Compress(ctx, messages, req.Config)
+			if err == nil {
+				messages = compressed
+			} // on error, continue with original messages
+		}
+
 		llmReq := entity.LLMRequest{
 			Messages: messages,
 			Tools:    req.Tools,
@@ -114,11 +128,20 @@ func (uc *UseCase) ExecuteStep(ctx context.Context, req StepRequest) (*StepResul
 		}
 	}
 
+	// Compute delta safely: after compression messages may be shorter than history.
+	var delta []entity.Message
+	if len(messages) >= len(req.History) {
+		delta = messages[len(req.History):]
+	} else {
+		delta = messages // delta concept breaks down, return full state
+	}
+
 	return &StepResult{
-		Messages:     messages[len(req.History):],
-		ToolResults:  allToolResults,
-		Usage:        finalUsage,
-		FinishReason: entity.FinishStop,
+		Messages:      delta,
+		CompleteState: messages,
+		ToolResults:   allToolResults,
+		Usage:         finalUsage,
+		FinishReason:  entity.FinishStop,
 	}, nil
 }
 

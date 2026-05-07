@@ -32,6 +32,10 @@ type (
 	ToolExecutor interface {
 		Execute(ctx context.Context, req entity.ToolRequest) (entity.ToolResult, error)
 	}
+	// ContextCompressor reduces message token count when approaching context limits.
+	ContextCompressor interface {
+		Compress(ctx context.Context, messages []entity.Message, config entity.LLMConfig) ([]entity.Message, bool, error)
+	}
 	ExecutorRepo interface {
 		StartExecution(ctx context.Context, req entity.ExecuteRequest) (entity.RunStatus, error)
 		GetStatus(ctx context.Context, runID string) (entity.RunStatus, error)

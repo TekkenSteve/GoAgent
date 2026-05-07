@@ -18,6 +18,7 @@ import (
 	nats_rpc "github.com/TekkenSteve/GoAgent/internal/controller/nats_rpc"
 	"github.com/TekkenSteve/GoAgent/internal/controller/restapi"
 	"github.com/TekkenSteve/GoAgent/internal/repo/llm"
+	"github.com/TekkenSteve/GoAgent/internal/repo/compressor"
 	"github.com/TekkenSteve/GoAgent/internal/repo/framework"
 	temporalrepo "github.com/TekkenSteve/GoAgent/internal/repo/persistent"
 	"github.com/TekkenSteve/GoAgent/internal/usecase"
@@ -65,7 +66,10 @@ func Run(cfg *config.Config) { //nolint: gocyclo,cyclop,funlen,gocritic,nolintli
 			toolPipe := tool.Pipeline{}
 			toolExecutor := framework.NewToolPipeline(toolPipe)
 
-			agentUC := agent.New(llmProvider, toolExecutor, nil)
+			agentCompressor := compressor.New(compressor.Config{
+				LLM: llmProvider,
+			})
+			agentUC := agent.New(llmProvider, toolExecutor, nil, agentCompressor)
 
 			activities = orchestration.NewAgentActivities(agentUC)
 			l.Info("app - Run - agent components initialized (model: %s)", cfg.AgentFW.LLMModel)
