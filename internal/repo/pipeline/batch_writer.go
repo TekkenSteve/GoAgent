@@ -24,8 +24,7 @@ type PostgresWriter interface {
 }
 
 // BatchWriter asynchronously flushes WAL entries to Postgres.
-// It follows Suna's BatchWriter pattern: periodic flush from WAL to Postgres,
-// with retry and DLQ escalation for failed entries.
+// Periodic flush from WAL to Postgres, with retry and DLQ escalation for failed entries.
 type BatchWriter struct {
 	wal           *WriteAheadLog
 	dlq           *DeadLetterQueue

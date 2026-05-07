@@ -15,7 +15,7 @@ func TestExecuteStep_EmptyMessage(t *testing.T) {
 		&mockTool{},
 		nil,
 		nil,
-)
+	)
 
 	result, err := uc.ExecuteStep(context.Background(), agent.StepRequest{
 		RunID:   "run-1",
@@ -40,8 +40,8 @@ func TestExecuteStep_TextOnly(t *testing.T) {
 		&mockLLM{response: entity.LLMResponse{Content: "Hello!", FinishReason: "stop", Usage: entity.Usage{PromptTokens: 10, CompletionTokens: 5, TotalTokens: 15}}},
 		&mockTool{},
 		nil,
-	nil,
-)
+		nil,
+	)
 
 	result, err := uc.ExecuteStep(context.Background(), agent.StepRequest{
 		RunID:   "run-1",
@@ -85,9 +85,9 @@ func TestExecuteStep_ToolCallThenText(t *testing.T) {
 					Usage:        entity.Usage{PromptTokens: 10, CompletionTokens: 5, TotalTokens: 15},
 				},
 				{
-					Content: "The weather is sunny!",
+					Content:      "The weather is sunny!",
 					FinishReason: "stop",
-					Usage:   entity.Usage{PromptTokens: 20, CompletionTokens: 10, TotalTokens: 30},
+					Usage:        entity.Usage{PromptTokens: 20, CompletionTokens: 10, TotalTokens: 30},
 				},
 			},
 			callCount: &callCount,
@@ -96,8 +96,8 @@ func TestExecuteStep_ToolCallThenText(t *testing.T) {
 			ToolName: "search", Output: map[string]any{"temp": "72F"},
 		}},
 		nil,
-	nil,
-)
+		nil,
+	)
 
 	result, err := uc.ExecuteStep(context.Background(), agent.StepRequest{
 		RunID:   "run-1",
@@ -132,17 +132,17 @@ func TestExecuteStep_ToolExecutionError(t *testing.T) {
 					Usage:        entity.Usage{PromptTokens: 10, CompletionTokens: 5, TotalTokens: 15},
 				},
 				{
-					Content: "The tool failed but I handled it.",
+					Content:      "The tool failed but I handled it.",
 					FinishReason: "stop",
-					Usage:   entity.Usage{PromptTokens: 25, CompletionTokens: 8, TotalTokens: 33},
+					Usage:        entity.Usage{PromptTokens: 25, CompletionTokens: 8, TotalTokens: 33},
 				},
 			},
 			callCount: &callCount,
 		},
 		&mockTool{err: errors.New("tool crashed")},
 		nil,
-	nil,
-)
+		nil,
+	)
 
 	result, err := uc.ExecuteStep(context.Background(), agent.StepRequest{
 		RunID:   "run-1",
@@ -172,7 +172,6 @@ func TestExecuteStep_MaxToolRounds(t *testing.T) {
 	uc := agent.New(
 		&mockLLM{
 			responses: func() []entity.LLMResponse {
-				// Generate maxToolRounds+1 responses all asking for tool calls
 				resps := make([]entity.LLMResponse, 12)
 				for i := range resps {
 					resps[i] = entity.LLMResponse{
@@ -190,8 +189,8 @@ func TestExecuteStep_MaxToolRounds(t *testing.T) {
 		},
 		&mockTool{result: entity.ToolResult{ToolName: "loop_tool", Output: map[string]any{"done": true}}},
 		nil,
-	nil,
-)
+		nil,
+	)
 
 	result, err := uc.ExecuteStep(context.Background(), agent.StepRequest{
 		RunID:   "run-1",
@@ -207,15 +206,285 @@ func TestExecuteStep_MaxToolRounds(t *testing.T) {
 	}
 }
 
+func TestExecuteStep_WithSystemPrompt(t *testing.T) {
+	uc := agent.New(
+		&mockLLM{response: entity.LLMResponse{Content: "Understood!", FinishReason: "stop", Usage: entity.Usage{PromptTokens: 10, CompletionTokens: 3, TotalTokens: 13}}},
+		&mockTool{},
+		nil,
+		nil,
+	)
+
+	result, err := uc.ExecuteStep(context.Background(), agent.StepRequest{
+		RunID:        "run-1",
+		SystemPrompt: "You are a helpful assistant.",
+		Message:      "Hello",
+		Config:       entity.LLMConfig{Model: "gpt-4"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Messages should be: system + user + assistant
+	if len(result.Messages) != 3 {
+		t.Fatalf("expected 3 messages (system+user+assistant), got %d", len(result.Messages))
+	}
+	if result.Messages[0].Role != entity.RoleSystem {
+		t.Errorf("expected first message to be system role, got %v", result.Messages[0].Role)
+	}
+	if result.Messages[0].Content != "You are a helpful assistant." {
+		t.Errorf("expected system prompt content, got %q", result.Messages[0].Content)
+	}
+	if result.Messages[1].Role != entity.RoleUser {
+		t.Errorf("expected second message to be user role, got %v", result.Messages[1].Role)
+	}
+	if result.Messages[2].Role != entity.RoleAssistant {
+		t.Errorf("expected third message to be assistant role, got %v", result.Messages[2].Role)
+	}
+}
+
+func TestExecuteStep_WithHistoryDoesNotReinjectSystemPrompt(t *testing.T) {
+	uc := agent.New(
+		&mockLLM{response: entity.LLMResponse{Content: "Continuing!", FinishReason: "stop", Usage: entity.Usage{PromptTokens: 5, CompletionTokens: 3, TotalTokens: 8}}},
+		&mockTool{},
+		nil,
+		nil,
+	)
+
+	result, err := uc.ExecuteStep(context.Background(), agent.StepRequest{
+		RunID:        "run-1",
+		SystemPrompt: "You are a helpful assistant.",
+		Message:      "",
+		History: []entity.Message{
+			{Role: entity.RoleSystem, Content: "You are a helpful assistant."},
+			{Role: entity.RoleUser, Content: "Hi"},
+			{Role: entity.RoleAssistant, Content: "Hello!"},
+		},
+		Config: entity.LLMConfig{Model: "gpt-4"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	// System prompt should NOT be re-injected when history exists
+	if len(result.Messages) != 1 {
+		t.Fatalf("expected 1 new message (assistant), got %d", len(result.Messages))
+	}
+	if result.Messages[0].Role != entity.RoleAssistant {
+		t.Errorf("expected assistant message, got %v", result.Messages[0].Role)
+	}
+}
+
+func TestPrep_InvalidToolDefinition(t *testing.T) {
+	uc := agent.New(
+		&mockLLM{},
+		&mockTool{},
+		nil,
+		nil,
+	)
+
+	_, err := uc.ExecuteStep(context.Background(), agent.StepRequest{
+		RunID:   "run-1",
+		Message: "test",
+		Tools: []entity.ToolDef{
+			{Type: "function", Function: entity.ToolFuncDef{Name: ""}}, // missing name
+		},
+		Config: entity.LLMConfig{Model: "gpt-4"},
+	})
+	if err == nil {
+		t.Fatal("expected error for invalid tool definition")
+	}
+
+	var agentErr *entity.AgentError
+	if !errors.As(err, &agentErr) {
+		t.Fatalf("expected entity.AgentError, got %T", err)
+	}
+	if agentErr.Code != entity.ErrorCodeValidation {
+		t.Errorf("expected ErrorCodeValidation, got %s", agentErr.Code)
+	}
+}
+
+func TestPrep_ToolMissingType(t *testing.T) {
+	uc := agent.New(
+		&mockLLM{},
+		&mockTool{},
+		nil,
+		nil,
+	)
+
+	_, err := uc.ExecuteStep(context.Background(), agent.StepRequest{
+		RunID:   "run-1",
+		Message: "test",
+		Tools: []entity.ToolDef{
+			{Function: entity.ToolFuncDef{Name: "valid_name"}}, // missing type
+		},
+		Config: entity.LLMConfig{Model: "gpt-4"},
+	})
+	if err == nil {
+		t.Fatal("expected error for tool missing type")
+	}
+
+	var agentErr *entity.AgentError
+	if !errors.As(err, &agentErr) {
+		t.Fatalf("expected entity.AgentError, got %T", err)
+	}
+	if agentErr.Code != entity.ErrorCodeValidation {
+		t.Errorf("expected ErrorCodeValidation, got %s", agentErr.Code)
+	}
+}
+
+func TestExecuteStep_LLMError_Timeout(t *testing.T) {
+	uc := agent.New(
+		&mockLLM{err: errors.New("context deadline exceeded")},
+		&mockTool{},
+		nil,
+		nil,
+	)
+
+	_, err := uc.ExecuteStep(context.Background(), agent.StepRequest{
+		RunID:   "run-1",
+		Message: "Hello",
+		Config:  entity.LLMConfig{Model: "gpt-4"},
+	})
+	if err == nil {
+		t.Fatal("expected error from LLM timeout")
+	}
+
+	var agentErr *entity.AgentError
+	if !errors.As(err, &agentErr) {
+		t.Fatalf("expected entity.AgentError, got %T", err)
+	}
+	if agentErr.Code != entity.ErrorCodeLLMTimeout {
+		t.Errorf("expected ErrorCodeLLMTimeout, got %s", agentErr.Code)
+	}
+	if !agentErr.Retryable {
+		t.Errorf("timeout error should be retryable")
+	}
+}
+
+func TestExecuteStep_LLMError_RateLimit(t *testing.T) {
+	uc := agent.New(
+		&mockLLM{err: errors.New("429 too many requests")},
+		&mockTool{},
+		nil,
+		nil,
+	)
+
+	_, err := uc.ExecuteStep(context.Background(), agent.StepRequest{
+		RunID:   "run-1",
+		Message: "Hello",
+		Config:  entity.LLMConfig{Model: "gpt-4"},
+	})
+	if err == nil {
+		t.Fatal("expected error from LLM rate limit")
+	}
+
+	var agentErr *entity.AgentError
+	if !errors.As(err, &agentErr) {
+		t.Fatalf("expected entity.AgentError, got %T", err)
+	}
+	if agentErr.Code != entity.ErrorCodeLLMRateLimit {
+		t.Errorf("expected ErrorCodeLLMRateLimit, got %s", agentErr.Code)
+	}
+}
+
+func TestExecuteStep_LLMError_ContentFilter(t *testing.T) {
+	uc := agent.New(
+		&mockLLM{err: errors.New("content filter triggered")},
+		&mockTool{},
+		nil,
+		nil,
+	)
+
+	_, err := uc.ExecuteStep(context.Background(), agent.StepRequest{
+		RunID:   "run-1",
+		Message: "Hello",
+		Config:  entity.LLMConfig{Model: "gpt-4"},
+	})
+	if err == nil {
+		t.Fatal("expected error from content filter")
+	}
+
+	var agentErr *entity.AgentError
+	if !errors.As(err, &agentErr) {
+		t.Fatalf("expected entity.AgentError, got %T", err)
+	}
+	if agentErr.Code != entity.ErrorCodeLLMContentFilter {
+		t.Errorf("expected ErrorCodeLLMContentFilter, got %s", agentErr.Code)
+	}
+	if agentErr.Retryable {
+		t.Errorf("content filter error should not be retryable")
+	}
+}
+
+func TestExecuteStep_LLMError_ContextLength(t *testing.T) {
+	uc := agent.New(
+		&mockLLM{err: errors.New("maximum context length exceeded")},
+		&mockTool{},
+		nil,
+		nil,
+	)
+
+	_, err := uc.ExecuteStep(context.Background(), agent.StepRequest{
+		RunID:   "run-1",
+		Message: "Hello",
+		Config:  entity.LLMConfig{Model: "gpt-4"},
+	})
+	if err == nil {
+		t.Fatal("expected error from context length")
+	}
+
+	var agentErr *entity.AgentError
+	if !errors.As(err, &agentErr) {
+		t.Fatalf("expected entity.AgentError, got %T", err)
+	}
+	if agentErr.Code != entity.ErrorCodeContextLength {
+		t.Errorf("expected ErrorCodeContextLength, got %s", agentErr.Code)
+	}
+	if agentErr.Retryable {
+		t.Errorf("context length error should not be retryable")
+	}
+}
+
+func TestExecuteStep_LLMError_Default(t *testing.T) {
+	uc := agent.New(
+		&mockLLM{err: errors.New("some unexpected API error")},
+		&mockTool{},
+		nil,
+		nil,
+	)
+
+	_, err := uc.ExecuteStep(context.Background(), agent.StepRequest{
+		RunID:   "run-1",
+		Message: "Hello",
+		Config:  entity.LLMConfig{Model: "gpt-4"},
+	})
+	if err == nil {
+		t.Fatal("expected error from LLM")
+	}
+
+	var agentErr *entity.AgentError
+	if !errors.As(err, &agentErr) {
+		t.Fatalf("expected entity.AgentError, got %T", err)
+	}
+	if agentErr.Code != entity.ErrorCodeLLM {
+		t.Errorf("expected ErrorCodeLLM, got %s", agentErr.Code)
+	}
+	if !agentErr.Retryable {
+		t.Errorf("default LLM error should be retryable")
+	}
+}
+
 // -- mocks --
 
 type mockLLM struct {
 	response  entity.LLMResponse
 	responses []entity.LLMResponse
 	callCount *int
+	err       error
 }
 
 func (m *mockLLM) Chat(_ context.Context, _ entity.LLMRequest) (entity.LLMResponse, error) {
+	if m.err != nil {
+		return entity.LLMResponse{}, m.err
+	}
 	if m.callCount != nil {
 		*m.callCount++
 	}

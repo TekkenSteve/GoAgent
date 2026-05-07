@@ -14,7 +14,8 @@ const (
 
 // WorkflowInput is the deterministic workflow input payload.
 type WorkflowInput struct {
-	Request ExecuteRequest
+	Request      ExecuteRequest
+	SystemPrompt string // optional system instructions for the agent
 	// TargetSteps is used for deterministic progression in baseline orchestration.
 	TargetSteps int32
 	// Tools define available LLM-callable tool definitions.
@@ -124,11 +125,12 @@ func AgentWorkflow(ctx workflow.Context, input WorkflowInput) (WorkflowResult, e
 
 		var actRes StepActivityOutput
 		if err := workflow.ExecuteActivity(ctx, AgentStepActivityName, StepActivityInput{
-			RunID:   status.RunID,
-			Message: userMessage,
-			History: messages,
-			Tools:   input.Tools,
-			Config:  llmConfig,
+			RunID:        status.RunID,
+			SystemPrompt: input.SystemPrompt,
+			Message:      userMessage,
+			History:      messages,
+			Tools:        input.Tools,
+			Config:       llmConfig,
 		}).Get(ctx, &actRes); err != nil {
 			status.LifecycleState = "failed"
 			status.Reason = err.Error()

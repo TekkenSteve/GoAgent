@@ -1,4 +1,4 @@
-// Package redis implements dual-pool Redis client following Suna's pattern:
+// Package redis implements dual-pool Redis client:
 //   - General pool: for non-blocking ops (GET, SET, XADD)
 //   - Stream pool: for blocking ops (XREAD, XREADGROUP), prevents connection starvation
 //   - Timeout protection: all operations wrapped with per-operation timeout
@@ -44,7 +44,7 @@ type Config struct {
 	MaxRetries      int
 }
 
-// Redis is a dual-connection-pool Redis client following the Suna pattern.
+// Redis is a dual-connection-pool Redis client.
 // GeneralClient and StreamClient use isolated pools so blocking XREAD
 // on the stream pool cannot starve the general pool.
 //

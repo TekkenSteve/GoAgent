@@ -15,11 +15,12 @@ const (
 
 // StepActivityInput is the serializable input for AgentStepActivity.
 type StepActivityInput struct {
-	RunID   string
-	Message string
-	History []entity.Message
-	Tools   []entity.ToolDef
-	Config  entity.LLMConfig
+	RunID        string
+	SystemPrompt string // optional system instructions, injected on first step
+	Message      string
+	History      []entity.Message
+	Tools        []entity.ToolDef
+	Config       entity.LLMConfig
 }
 
 // StepActivityOutput is the serializable output for AgentStepActivity.
@@ -44,11 +45,12 @@ func NewAgentActivities(uc *agent.UseCase) *AgentActivities {
 // ExecuteStep runs one agent step (LLM call + tool rounds) via the usecase.
 func (a *AgentActivities) ExecuteStep(ctx context.Context, input StepActivityInput) (StepActivityOutput, error) {
 	req := agent.StepRequest{
-		RunID:   input.RunID,
-		Message: input.Message,
-		History: input.History,
-		Tools:   input.Tools,
-		Config:  input.Config,
+		RunID:        input.RunID,
+		SystemPrompt: input.SystemPrompt,
+		Message:      input.Message,
+		History:      input.History,
+		Tools:        input.Tools,
+		Config:       input.Config,
 	}
 
 	result, err := a.agentUC.ExecuteStep(ctx, req)

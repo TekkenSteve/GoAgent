@@ -1,6 +1,6 @@
 // Package compressor provides context compression for long-running agent conversations.
 // It implements tiered strategies: LLM-based archival summarization, working memory
-// truncation, and emergency truncation — matching Suna's ContextArchiver pattern.
+// truncation, and emergency truncation.
 package compressor
 
 import (
@@ -155,10 +155,7 @@ func (c *Compressor) contextWindow(model string) int {
 // and replaces the archival portion with the summary message.
 func (c *Compressor) archive(ctx context.Context, messages []entity.Message, config entity.LLMConfig) ([]entity.Message, error) {
 	total := len(messages)
-	workingSize := min(total-c.minToCompress, c.maxWorkingMemory)
-	if workingSize < c.minWorkingMemory {
-		workingSize = c.minWorkingMemory
-	}
+	workingSize := max(min(total-c.minToCompress, c.maxWorkingMemory), c.minWorkingMemory)
 
 	splitIdx := total - workingSize
 	// Don't split in the middle of a tool/assistant pair

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
 
 	"github.com/TekkenSteve/GoAgent/internal/entity"
 	"github.com/TekkenSteve/GoAgent/internal/repo"
@@ -13,11 +14,12 @@ const maxToolRounds = 10
 
 // StepRequest is the input for a single agent step (one LLM call + tool rounds).
 type StepRequest struct {
-	RunID   string
-	Message string
-	History []entity.Message
-	Tools   []entity.ToolDef
-	Config  entity.LLMConfig
+	RunID        string
+	SystemPrompt string // optional system instructions, injected on first step
+	Message      string
+	History      []entity.Message
+	Tools        []entity.ToolDef
+	Config       entity.LLMConfig
 }
 
 // StepResult is the output of a single agent step.
@@ -49,33 +51,42 @@ func New(llm repo.LLMProvider, tools repo.ToolExecutor, wal repo.WALAppender, co
 // ExecuteStep runs one LLM invocation plus subsequent tool rounds.
 // It returns the messages generated, tool results, and usage statistics.
 func (uc *UseCase) ExecuteStep(ctx context.Context, req StepRequest) (*StepResult, error) {
-	messages := make([]entity.Message, 0, len(req.History)+1+maxToolRounds*2)
-	messages = append(messages, req.History...)
-	if req.Message != "" {
-		messages = append(messages, entity.Message{Role: entity.RoleUser, Content: req.Message})
+	// Phase 1: Prep — validate and initialise execution context
+	prepResult, err := uc.Prep(ctx, PrepRequest{
+		SystemPrompt: req.SystemPrompt,
+		UserMessage:  req.Message,
+		History:      req.History,
+		Tools:        req.Tools,
+		Config:       req.Config,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("AgentUseCase - ExecuteStep - Prep: %w", err)
 	}
 
+	messages := prepResult.Messages
+	tools := prepResult.Tools
+
+	// Phase 2: Execute — LLM call + tool execution loop
 	var allToolResults []entity.ToolResult
 	var finalUsage entity.Usage
 
 	for range maxToolRounds {
 		// Compress messages if approaching context limits (before LLM call)
 		if uc.compressor != nil {
-			compressed, _, err := uc.compressor.Compress(ctx, messages, req.Config)
-			if err == nil {
+			if compressed, _, err := uc.compressor.Compress(ctx, messages, req.Config); err == nil {
 				messages = compressed
 			} // on error, continue with original messages
 		}
 
 		llmReq := entity.LLMRequest{
 			Messages: messages,
-			Tools:    req.Tools,
+			Tools:    tools,
 			Config:   req.Config,
 		}
 
 		resp, err := uc.llm.Chat(ctx, llmReq)
 		if err != nil {
-			return nil, fmt.Errorf("AgentUseCase - ExecuteStep - uc.llm.Chat: %w", err)
+			return nil, classifyLLMError(err)
 		}
 
 		finalUsage = resp.Usage
@@ -137,7 +148,7 @@ func (uc *UseCase) ExecuteStep(ctx context.Context, req StepRequest) (*StepResul
 	if len(messages) >= len(req.History) {
 		delta = messages[len(req.History):]
 	} else {
-		delta = messages // delta concept breaks down, return full state
+		delta = messages
 	}
 
 	return &StepResult{
@@ -147,6 +158,68 @@ func (uc *UseCase) ExecuteStep(ctx context.Context, req StepRequest) (*StepResul
 		Usage:         finalUsage,
 		FinishReason:  entity.FinishStop,
 	}, nil
+}
+
+// classifyLLMError wraps common LLM provider errors into structured AgentError types.
+func classifyLLMError(err error) error {
+	errStr := err.Error()
+
+	switch {
+	case containsAny(errStr, "timeout", "deadline exceeded", "context deadline"):
+		return &entity.AgentError{
+			Code:        entity.ErrorCodeLLMTimeout,
+			Message:     errStr,
+			UserMessage: "The AI model took too long to respond. Please try again.",
+			Recoverable: true,
+			Retryable:   true,
+			Err:         err,
+		}
+	case containsAny(errStr, "rate limit", "429", "too many requests"):
+		return &entity.AgentError{
+			Code:        entity.ErrorCodeLLMRateLimit,
+			Message:     errStr,
+			UserMessage: "The AI service is currently rate-limited. Please wait and try again.",
+			Recoverable: true,
+			Retryable:   true,
+			Err:         err,
+		}
+	case containsAny(errStr, "content_filter", "content filter", "safety system"):
+		return &entity.AgentError{
+			Code:        entity.ErrorCodeLLMContentFilter,
+			Message:     errStr,
+			UserMessage: "The response was filtered due to content safety guidelines.",
+			Recoverable: false,
+			Retryable:   false,
+			Err:         err,
+		}
+	case containsAny(errStr, "context_length", "maximum context length", "token limit"):
+		return &entity.AgentError{
+			Code:        entity.ErrorCodeContextLength,
+			Message:     errStr,
+			UserMessage: "The conversation is too long for the AI model to process.",
+			Recoverable: true,
+			Retryable:   false,
+			Err:         err,
+		}
+	default:
+		return &entity.AgentError{
+			Code:        entity.ErrorCodeLLM,
+			Message:     errStr,
+			UserMessage: "The AI model returned an unexpected error. Please try again.",
+			Recoverable: true,
+			Retryable:   true,
+			Err:         err,
+		}
+	}
+}
+
+func containsAny(s string, substrs ...string) bool {
+	for _, sub := range substrs {
+		if strings.Contains(s, sub) {
+			return true
+		}
+	}
+	return false
 }
 
 func parseArgsJSON(raw string) map[string]any {
