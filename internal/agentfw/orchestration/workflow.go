@@ -3,6 +3,7 @@ package orchestration
 import (
 	"time"
 
+	"github.com/TekkenSteve/GoAgent/internal/entity"
 	"go.temporal.io/sdk/workflow"
 )
 
@@ -16,6 +17,8 @@ type WorkflowInput struct {
 	Request ExecuteRequest
 	// TargetSteps is used for deterministic progression in baseline orchestration.
 	TargetSteps int32
+	// Tools define available LLM-callable tool definitions.
+	Tools []entity.ToolDef
 	// ContinuePolicy controls Continue-As-New trigger checks.
 	ContinuePolicy ContinueAsNewPolicy
 	// Runtime hints are deterministic policy inputs from prior activity outputs.
@@ -33,9 +36,7 @@ type WorkflowResult struct {
 	CompletedAt    time.Time
 }
 
-// AgentWorkflow is the minimal orchestration placeholder.
-//
-// Business steps will be implemented incrementally from OpenSpec tasks.
+// AgentWorkflow is the agent orchestration workflow.
 func AgentWorkflow(ctx workflow.Context, input WorkflowInput) (WorkflowResult, error) {
 	targetSteps := input.TargetSteps
 	if targetSteps <= 0 {
@@ -69,9 +70,16 @@ func AgentWorkflow(ctx workflow.Context, input WorkflowInput) (WorkflowResult, e
 	status.UpdatedAt = workflow.Now(ctx)
 
 	ao := workflow.ActivityOptions{
-		StartToCloseTimeout: 5 * time.Second,
+		StartToCloseTimeout: 300 * time.Second,
 	}
 	ctx = workflow.WithActivityOptions(ctx, ao)
+
+	// Accumulated conversation messages across steps
+	var messages []entity.Message
+
+	llmConfig := entity.LLMConfig{
+		Model: input.Request.ModelRef,
+	}
 
 	for status.Step < targetSteps {
 		cancelled, err := applyPendingControlSignals(ctx, &status)
@@ -108,9 +116,19 @@ func AgentWorkflow(ctx workflow.Context, input WorkflowInput) (WorkflowResult, e
 			status.UpdatedAt = workflow.Now(ctx)
 		}
 
-		var actRes EchoActivityResult
-		if err := workflow.ExecuteActivity(ctx, EchoActivityName, EchoActivityInput{
-			RunID: status.RunID,
+		// On first step, pass user message; on auto-continue steps, pass empty message
+		userMessage := ""
+		if status.Step == 0 {
+			userMessage = input.Request.UserMessage
+		}
+
+		var actRes StepActivityOutput
+		if err := workflow.ExecuteActivity(ctx, AgentStepActivityName, StepActivityInput{
+			RunID:   status.RunID,
+			Message: userMessage,
+			History: messages,
+			Tools:   input.Tools,
+			Config:  llmConfig,
 		}).Get(ctx, &actRes); err != nil {
 			status.LifecycleState = "failed"
 			status.Reason = err.Error()
@@ -118,11 +136,15 @@ func AgentWorkflow(ctx workflow.Context, input WorkflowInput) (WorkflowResult, e
 			return WorkflowResult{}, err
 		}
 
+		// Accumulate new messages from this step
+		messages = append(messages, actRes.Messages...)
+
 		status.Step++
 		status.UpdatedAt = workflow.Now(ctx)
 
+		// Evaluate Continue-As-New after each step
 		decision := EvaluateContinueAsNew(input.ContinuePolicy, ContinueAsNewSnapshot{
-			HistoryLength:   input.HistoryLengthHint + int(status.Step),
+			HistoryLength:   input.HistoryLengthHint + len(messages),
 			StateSizeBytes:  input.StateSizeHint,
 			Step:            status.Step,
 			Elapsed:         status.UpdatedAt.Sub(baseRequestedAt),

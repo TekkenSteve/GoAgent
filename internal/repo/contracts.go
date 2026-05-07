@@ -24,6 +24,14 @@ type (
 		WarmStateRepo
 		ColdStateRepo
 	}
+	// LLMProvider performs LLM inference.
+	LLMProvider interface {
+		Chat(ctx context.Context, req entity.LLMRequest) (entity.LLMResponse, error)
+	}
+	// ToolExecutor executes a single tool call.
+	ToolExecutor interface {
+		Execute(ctx context.Context, req entity.ToolRequest) (entity.ToolResult, error)
+	}
 	ExecutorRepo interface {
 		StartExecution(ctx context.Context, req entity.ExecuteRequest) (entity.RunStatus, error)
 		GetStatus(ctx context.Context, runID string) (entity.RunStatus, error)

@@ -1,14 +1,25 @@
 package orchestration
 
 import (
+	"context"
 	"testing"
 	"time"
 
+	"github.com/TekkenSteve/GoAgent/internal/entity"
 	"github.com/stretchr/testify/require"
 	"go.temporal.io/sdk/activity"
 	"go.temporal.io/sdk/testsuite"
 	"go.temporal.io/sdk/workflow"
 )
+
+func mockStepActivity(_ context.Context, input StepActivityInput) (StepActivityOutput, error) {
+	return StepActivityOutput{
+		Messages: []entity.Message{
+			{Role: entity.RoleAssistant, Content: "Step response for " + input.RunID},
+		},
+		Usage: entity.Usage{PromptTokens: 10, CompletionTokens: 5, TotalTokens: 15},
+	}, nil
+}
 
 func newWorkflowTestEnv() *testsuite.TestWorkflowEnvironment {
 	var suite testsuite.WorkflowTestSuite
@@ -16,8 +27,8 @@ func newWorkflowTestEnv() *testsuite.TestWorkflowEnvironment {
 	env.RegisterWorkflowWithOptions(AgentWorkflow, workflow.RegisterOptions{
 		Name: AgentWorkflowName,
 	})
-	env.RegisterActivityWithOptions(EchoActivity, activity.RegisterOptions{
-		Name: EchoActivityName,
+	env.RegisterActivityWithOptions(mockStepActivity, activity.RegisterOptions{
+		Name: AgentStepActivityName,
 	})
 	return env
 }

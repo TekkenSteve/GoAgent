@@ -8,16 +8,21 @@ import (
 	"syscall"
 
 	"github.com/TekkenSteve/GoAgent/config"
-	agentfwconfig 	"github.com/TekkenSteve/GoAgent/internal/agentfw/config"
+	agentfwconfig "github.com/TekkenSteve/GoAgent/internal/agentfw/config"
+	"github.com/TekkenSteve/GoAgent/internal/agentfw/orchestration"
 	agentfwruntime "github.com/TekkenSteve/GoAgent/internal/agentfw/runtime"
 	agentfwops "github.com/TekkenSteve/GoAgent/internal/agentfw/runtimeops"
+	"github.com/TekkenSteve/GoAgent/internal/agentfw/tool"
 	amqp_rpc "github.com/TekkenSteve/GoAgent/internal/controller/amqp_rpc"
 	"github.com/TekkenSteve/GoAgent/internal/controller/grpc"
 	nats_rpc "github.com/TekkenSteve/GoAgent/internal/controller/nats_rpc"
 	"github.com/TekkenSteve/GoAgent/internal/controller/restapi"
-	agentfwusecase "github.com/TekkenSteve/GoAgent/internal/usecase/executor"
-	"github.com/TekkenSteve/GoAgent/internal/usecase"
+	"github.com/TekkenSteve/GoAgent/internal/repo/llm"
+	"github.com/TekkenSteve/GoAgent/internal/repo/framework"
 	temporalrepo "github.com/TekkenSteve/GoAgent/internal/repo/persistent"
+	"github.com/TekkenSteve/GoAgent/internal/usecase"
+	"github.com/TekkenSteve/GoAgent/internal/usecase/agent"
+	agentfwusecase "github.com/TekkenSteve/GoAgent/internal/usecase/executor"
 	"github.com/TekkenSteve/GoAgent/pkg/grpcserver"
 	"github.com/TekkenSteve/GoAgent/pkg/httpserver"
 	"github.com/TekkenSteve/GoAgent/pkg/logger"
@@ -49,7 +54,26 @@ func Run(cfg *config.Config) { //nolint: gocyclo,cyclop,funlen,gocritic,nolintli
 		}
 		defer runtime.Close()
 
-		registrar := agentfwruntime.NewDefaultRegistrar()
+		// Build agent components when LLM is configured
+		var activities *orchestration.AgentActivities
+		if cfg.AgentFW.LLMAPIKey != "" {
+			llmProvider := llm.New(llm.Config{
+				BaseURL: cfg.AgentFW.LLMBaseURL,
+				APIKey:  cfg.AgentFW.LLMAPIKey,
+			})
+
+			toolPipe := tool.Pipeline{}
+			toolExecutor := framework.NewToolPipeline(toolPipe)
+
+			agentUC := agent.New(llmProvider, toolExecutor, nil)
+
+			activities = orchestration.NewAgentActivities(agentUC)
+			l.Info("app - Run - agent components initialized (model: %s)", cfg.AgentFW.LLMModel)
+		} else {
+			l.Warn("app - Run - LLM API key not configured, agent execution will not be available")
+		}
+
+		registrar := agentfwruntime.NewDefaultRegistrar(activities)
 		if err := agentfwruntime.StartWorker(runtime, registrar); err != nil {
 			l.Fatal(fmt.Errorf("app - Run - agentfw.StartWorker: %w", err))
 		}
