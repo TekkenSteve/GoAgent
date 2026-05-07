@@ -32,6 +32,12 @@ type (
 	ToolExecutor interface {
 		Execute(ctx context.Context, req entity.ToolRequest) (entity.ToolResult, error)
 	}
+	// WALAppender appends entries to a write-ahead log for async persistence.
+	// The agent usecase writes to the WAL; a BatchWriter flushes WAL → Postgres.
+	WALAppender interface {
+		AppendMessage(ctx context.Context, runID string, record entity.MessageRecord) error
+		AppendToolResult(ctx context.Context, runID string, record entity.ToolResultRecord) error
+	}
 	// ContextCompressor reduces message token count when approaching context limits.
 	ContextCompressor interface {
 		Compress(ctx context.Context, messages []entity.Message, config entity.LLMConfig) ([]entity.Message, bool, error)

@@ -6,6 +6,7 @@ package compressor
 import (
 	"context"
 	"fmt"
+	"maps"
 
 	"github.com/TekkenSteve/GoAgent/internal/entity"
 	"github.com/TekkenSteve/GoAgent/internal/repo"
@@ -62,19 +63,19 @@ type Compressor struct {
 }
 
 var defaultModelWindows = map[string]int{
-	"gpt-4.1-mini":               1000000,
-	"gpt-4.1":                    1000000,
-	"gpt-4o-mini":                128000,
-	"gpt-4o":                     128000,
-	"gpt-4-turbo":                128000,
-	"gpt-4":                      8192,
-	"gpt-3.5-turbo":              16385,
-	"claude-sonnet-4-20250514":   200000,
-	"claude-3-5-sonnet-latest":   200000,
-	"claude-3-haiku":             200000,
-	"claude-opus-4-20250514":     200000,
-	"deepseek-chat":              65536,
-	"deepseek-v4-flash":          65536,
+	"gpt-4.1-mini":             1000000,
+	"gpt-4.1":                  1000000,
+	"gpt-4o-mini":              128000,
+	"gpt-4o":                   128000,
+	"gpt-4-turbo":              128000,
+	"gpt-4":                    8192,
+	"gpt-3.5-turbo":            16385,
+	"claude-sonnet-4-20250514": 200000,
+	"claude-3-5-sonnet-latest": 200000,
+	"claude-3-haiku":           200000,
+	"claude-opus-4-20250514":   200000,
+	"deepseek-chat":            65536,
+	"deepseek-v4-flash":        65536,
 }
 
 // New creates a Compressor. If cfg.LLM is nil, archival summarization is skipped.
@@ -92,13 +93,9 @@ func New(cfg Config) *Compressor {
 	c.minToCompress = nonZero(cfg.MinToCompress, defaultMinToCompress)
 
 	// Copy built-in defaults
-	for k, v := range defaultModelWindows {
-		c.modelWindows[k] = v
-	}
+	maps.Copy(c.modelWindows, defaultModelWindows)
 	// Apply user overrides
-	for k, v := range cfg.ModelWindows {
-		c.modelWindows[k] = v
-	}
+	maps.Copy(c.modelWindows, cfg.ModelWindows)
 	return c
 }
 
@@ -158,10 +155,7 @@ func (c *Compressor) contextWindow(model string) int {
 // and replaces the archival portion with the summary message.
 func (c *Compressor) archive(ctx context.Context, messages []entity.Message, config entity.LLMConfig) ([]entity.Message, error) {
 	total := len(messages)
-	workingSize := c.maxWorkingMemory
-	if total-c.minToCompress < workingSize {
-		workingSize = total - c.minToCompress
-	}
+	workingSize := min(total-c.minToCompress, c.maxWorkingMemory)
 	if workingSize < c.minWorkingMemory {
 		workingSize = c.minWorkingMemory
 	}

@@ -85,9 +85,10 @@ type LLMResponse struct {
 
 // MessageRecord is a warm-state message payload.
 type MessageRecord struct {
-	RunID   string `json:"run_id"    example:"run-550e8400-e29b-41d4-a716-446655440000"`
-	Role    string `json:"role"      example:"user"`
-	Content string `json:"content"    example:"Hello, can you help me?"`
+	RunID      string `json:"run_id"    example:"run-550e8400-e29b-41d4-a716-446655440000"`
+	Role       string `json:"role"      example:"user"`
+	Content    string `json:"content"    example:"Hello, can you help me?"`
+	ToolCallID string `json:"tool_call_id,omitempty" example:"call-550e8400-e29b-41d4-a716-446655440000"`
 } // @name entity.MessageRecord
 
 // WarmRefs points to operational data persisted outside workflow history.

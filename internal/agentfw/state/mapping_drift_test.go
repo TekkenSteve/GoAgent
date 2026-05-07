@@ -30,7 +30,6 @@ func TestWorkflowHotStateLayerTags(t *testing.T) {
 	}
 
 	for field := range tp.Fields() {
-		field := field
 		tag := field.Tag.Get("layer")
 		require.Equal(t, expected[field.Name], tag, "field %s must stay in expected layer", field.Name)
 	}

@@ -24,7 +24,7 @@ type StepRequest struct {
 type StepResult struct {
 	// Messages contains the new messages generated (delta from History), for logging/inspection.
 	// Callers should use CompleteState to replace accumulated history.
-	Messages    []entity.Message
+	Messages []entity.Message
 	// CompleteState is the full accumulated message state after this step.
 	// When compression occurs, this replaces the prior history entirely.
 	CompleteState []entity.Message
@@ -37,13 +37,13 @@ type StepResult struct {
 type UseCase struct {
 	llm        repo.LLMProvider
 	tools      repo.ToolExecutor
-	state      repo.WarmStateRepo
+	wal        repo.WALAppender
 	compressor repo.ContextCompressor
 }
 
 // New -.
-func New(llm repo.LLMProvider, tools repo.ToolExecutor, state repo.WarmStateRepo, compressor repo.ContextCompressor) *UseCase {
-	return &UseCase{llm: llm, tools: tools, state: state, compressor: compressor}
+func New(llm repo.LLMProvider, tools repo.ToolExecutor, wal repo.WALAppender, compressor repo.ContextCompressor) *UseCase {
+	return &UseCase{llm: llm, tools: tools, wal: wal, compressor: compressor}
 }
 
 // ExecuteStep runs one LLM invocation plus subsequent tool rounds.
@@ -58,7 +58,7 @@ func (uc *UseCase) ExecuteStep(ctx context.Context, req StepRequest) (*StepResul
 	var allToolResults []entity.ToolResult
 	var finalUsage entity.Usage
 
-	for round := 0; round < maxToolRounds; round++ {
+	for range maxToolRounds {
 		// Compress messages if approaching context limits (before LLM call)
 		if uc.compressor != nil {
 			compressed, _, err := uc.compressor.Compress(ctx, messages, req.Config)
@@ -89,6 +89,7 @@ func (uc *UseCase) ExecuteStep(ctx context.Context, req StepRequest) (*StepResul
 			assistantMsg.ToolCalls = resp.ToolCalls
 		}
 		messages = append(messages, assistantMsg)
+		uc.appendMessageToWAL(ctx, req.RunID, assistantMsg)
 
 		if len(resp.ToolCalls) == 0 {
 			break
@@ -112,6 +113,7 @@ func (uc *UseCase) ExecuteStep(ctx context.Context, req StepRequest) (*StepResul
 			}
 
 			allToolResults = append(allToolResults, toolResult)
+			uc.appendToolResultToWAL(ctx, req.RunID, toolResult, tc)
 
 			content := ""
 			if execErr != nil {
@@ -120,11 +122,13 @@ func (uc *UseCase) ExecuteStep(ctx context.Context, req StepRequest) (*StepResul
 				content = fmt.Sprintf("%v", toolResult.Output)
 			}
 
-			messages = append(messages, entity.Message{
+			toolMsg := entity.Message{
 				Role:       entity.RoleTool,
 				ToolCallID: tc.ID,
 				Content:    content,
-			})
+			}
+			messages = append(messages, toolMsg)
+			uc.appendMessageToWAL(ctx, req.RunID, toolMsg)
 		}
 	}
 
@@ -154,4 +158,45 @@ func parseArgsJSON(raw string) map[string]any {
 		return nil
 	}
 	return args
+}
+
+// appendMessageToWAL best-effort appends a message record to the write-ahead log.
+func (uc *UseCase) appendMessageToWAL(ctx context.Context, runID string, msg entity.Message) {
+	if uc.wal == nil {
+		return
+	}
+	toolCallID := ""
+	if len(msg.ToolCalls) > 0 {
+		toolCallID = msg.ToolCalls[0].ID
+	}
+	if err := uc.wal.AppendMessage(ctx, runID, entity.MessageRecord{
+		RunID:      runID,
+		Role:       string(msg.Role),
+		Content:    msg.Content,
+		ToolCallID: toolCallID,
+	}); err != nil {
+		fmt.Printf("WARN: WAL append message failed (run=%s, role=%s): %v\n", runID, msg.Role, err)
+	}
+}
+
+// appendToolResultToWAL best-effort appends a tool result record to the write-ahead log.
+func (uc *UseCase) appendToolResultToWAL(ctx context.Context, runID string, result entity.ToolResult, tc entity.ToolCall) {
+	if uc.wal == nil {
+		return
+	}
+	var resultJSON string
+	if result.Output != nil {
+		b, err := json.Marshal(result.Output)
+		if err == nil {
+			resultJSON = string(b)
+		}
+	}
+	if err := uc.wal.AppendToolResult(ctx, runID, entity.ToolResultRecord{
+		RunID:      runID,
+		ToolCallID: tc.ID,
+		ToolName:   tc.Function.Name,
+		ResultJSON: resultJSON,
+	}); err != nil {
+		fmt.Printf("WARN: WAL append tool result failed (run=%s, tool=%s): %v\n", runID, tc.Function.Name, err)
+	}
 }

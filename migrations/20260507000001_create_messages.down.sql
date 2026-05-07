@@ -1,0 +1,3 @@
+DROP TABLE IF EXISTS archives;
+DROP TABLE IF EXISTS tool_results;
+DROP TABLE IF EXISTS messages;

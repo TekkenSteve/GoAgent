@@ -2,6 +2,7 @@
 package app
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"os/signal"
@@ -17,9 +18,10 @@ import (
 	"github.com/TekkenSteve/GoAgent/internal/controller/grpc"
 	nats_rpc "github.com/TekkenSteve/GoAgent/internal/controller/nats_rpc"
 	"github.com/TekkenSteve/GoAgent/internal/controller/restapi"
-	"github.com/TekkenSteve/GoAgent/internal/repo/llm"
+	pipelinepkg "github.com/TekkenSteve/GoAgent/internal/repo/pipeline"
 	"github.com/TekkenSteve/GoAgent/internal/repo/compressor"
 	"github.com/TekkenSteve/GoAgent/internal/repo/framework"
+	"github.com/TekkenSteve/GoAgent/internal/repo/llm"
 	temporalrepo "github.com/TekkenSteve/GoAgent/internal/repo/persistent"
 	"github.com/TekkenSteve/GoAgent/internal/usecase"
 	"github.com/TekkenSteve/GoAgent/internal/usecase/agent"
@@ -29,6 +31,7 @@ import (
 	"github.com/TekkenSteve/GoAgent/pkg/logger"
 	natsRPCServer "github.com/TekkenSteve/GoAgent/pkg/nats/nats_rpc/server"
 	"github.com/TekkenSteve/GoAgent/pkg/postgres"
+	goredis "github.com/TekkenSteve/GoAgent/pkg/redis"
 	rmqRPCServer "github.com/TekkenSteve/GoAgent/pkg/rabbitmq/rmq_rpc/server"
 )
 
@@ -36,6 +39,7 @@ import (
 func Run(cfg *config.Config) { //nolint: gocyclo,cyclop,funlen,gocritic,nolintlint
 	l := logger.New(cfg.Log.Level)
 	var temporalRuntime *agentfwruntime.TemporalRuntime
+	var batchWriter *pipelinepkg.BatchWriter
 
 	fwCfg := agentfwconfig.FromAppConfig(cfg)
 	selector := agentfwops.NewRolloutSelector(agentfwops.RolloutConfig{
@@ -46,6 +50,23 @@ func Run(cfg *config.Config) { //nolint: gocyclo,cyclop,funlen,gocritic,nolintli
 		HashSalt:            fwCfg.Rollout.HashSalt,
 	})
 	controlDecision := selector.Decide("", "bootstrap")
+
+	// Repository — created early for agent components below
+	pg, err := postgres.New(cfg.PG.URL, postgres.MaxPoolSize(cfg.PG.PoolMax))
+	if err != nil {
+		l.Fatal(fmt.Errorf("app - Run - postgres.New: %w", err))
+	}
+	defer pg.Close()
+
+	ctx := context.Background()
+
+	// Redis — for write-ahead log and warm-state persistence
+	rdb, err := goredis.New(ctx, cfg.Redis.URL)
+	if err != nil {
+		l.Fatal(fmt.Errorf("app - Run - redis.New: %w", err))
+	}
+	defer rdb.Close()
+
 	if !controlDecision.UseTemporal {
 		l.Info("app - Run - agent framework temporal worker skipped: %s", controlDecision.Reason)
 	} else {
@@ -69,7 +90,17 @@ func Run(cfg *config.Config) { //nolint: gocyclo,cyclop,funlen,gocritic,nolintli
 			agentCompressor := compressor.New(compressor.Config{
 				LLM: llmProvider,
 			})
-			agentUC := agent.New(llmProvider, toolExecutor, nil, agentCompressor)
+
+			// WAL + BatchWriter for async persistence (Redis Stream → Postgres)
+			wal := pipelinepkg.NewWriteAheadLog(rdb.GeneralClient)
+			dlq := pipelinepkg.NewDeadLetterQueue(rdb.GeneralClient)
+			messageRepo := temporalrepo.NewMessageRepo(pg)
+
+			batchWriter = pipelinepkg.NewBatchWriter(wal, dlq, messageRepo, l)
+			batchWriter.Start()
+			defer batchWriter.Stop()
+
+			agentUC := agent.New(llmProvider, toolExecutor, wal, agentCompressor)
 
 			activities = orchestration.NewAgentActivities(agentUC)
 			l.Info("app - Run - agent components initialized (model: %s)", cfg.AgentFW.LLMModel)
@@ -85,13 +116,6 @@ func Run(cfg *config.Config) { //nolint: gocyclo,cyclop,funlen,gocritic,nolintli
 		temporalRuntime = runtime
 		l.Info("app - Run - agent framework worker started on task queue: %s", fwCfg.Temporal.TaskQueue)
 	}
-
-	// Repository
-	pg, err := postgres.New(cfg.PG.URL, postgres.MaxPoolSize(cfg.PG.PoolMax))
-	if err != nil {
-		l.Fatal(fmt.Errorf("app - Run - postgres.New: %w", err))
-	}
-	defer pg.Close()
 
 	// Use-Case
 	var agentExecutor usecase.AgentExecutor

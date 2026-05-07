@@ -16,6 +16,7 @@ type (
 		GRPC    GRPC
 		RMQ     RMQ
 		NATS    NATS
+		Redis   Redis
 		AgentFW AgentFW
 		Metrics Metrics
 		Swagger Swagger
@@ -60,6 +61,11 @@ type (
 	NATS struct {
 		ServerExchange string `env:"NATS_RPC_SERVER,required"`
 		URL            string `env:"NATS_URL,required"`
+	}
+
+	// Redis -.
+	Redis struct {
+		URL string `env:"REDIS_URL,required"`
 	}
 
 	// AgentFW -.
