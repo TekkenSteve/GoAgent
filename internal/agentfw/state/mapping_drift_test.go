@@ -8,7 +8,7 @@ import (
 )
 
 func TestWorkflowHotStateLayerTags(t *testing.T) {
-	tp := reflect.TypeOf(WorkflowHotState{})
+	tp := reflect.TypeFor[WorkflowHotState]()
 
 	expected := map[string]string{
 		"RunID":             "hot",
@@ -29,21 +29,21 @@ func TestWorkflowHotStateLayerTags(t *testing.T) {
 		"Continuation":      "hot",
 	}
 
-	for i := 0; i < tp.NumField(); i++ {
-		field := tp.Field(i)
+	for field := range tp.Fields() {
+		field := field
 		tag := field.Tag.Get("layer")
 		require.Equal(t, expected[field.Name], tag, "field %s must stay in expected layer", field.Name)
 	}
 }
 
 func TestWarmAndColdRefsLayerTags(t *testing.T) {
-	warm := reflect.TypeOf(WarmRefs{})
-	for i := 0; i < warm.NumField(); i++ {
-		require.Equal(t, "warm", warm.Field(i).Tag.Get("layer"))
+	warm := reflect.TypeFor[WarmRefs]()
+	for field := range warm.Fields() {
+		require.Equal(t, "warm", field.Tag.Get("layer"))
 	}
 
-	cold := reflect.TypeOf(ColdRefs{})
-	for i := 0; i < cold.NumField(); i++ {
-		require.Equal(t, "cold", cold.Field(i).Tag.Get("layer"))
+	cold := reflect.TypeFor[ColdRefs]()
+	for field := range cold.Fields() {
+		require.Equal(t, "cold", field.Tag.Get("layer"))
 	}
 }

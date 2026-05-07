@@ -75,10 +75,8 @@ func TestLoadSuiteShortTaskThroughput(t *testing.T) {
 	var wg sync.WaitGroup
 	start := time.Now()
 
-	for i := 0; i < workers; i++ {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+	for range workers {
+		wg.Go(func() {
 			for id := range jobs {
 				_, err := pipeline.Execute(context.Background(), tool.ToolRequest{
 					RunID:      "load-short",
@@ -90,10 +88,10 @@ func TestLoadSuiteShortTaskThroughput(t *testing.T) {
 					errs.Add(1)
 				}
 			}
-		}()
+		})
 	}
 
-	for i := 0; i < totalRequests; i++ {
+	for i := range totalRequests {
 		jobs <- i
 	}
 	close(jobs)
@@ -113,8 +111,8 @@ func TestLoadSuiteLongSessionContinuationStability(t *testing.T) {
 
 	input := orchestration.WorkflowInput{
 		Request: orchestration.ExecuteRequest{
-			RunID:      "run-cont",
-			ThreadID:   "thread-1",
+			RunID:       "run-cont",
+			ThreadID:    "thread-1",
 			RequestedAt: time.Unix(1, 0).UTC(),
 		},
 		Continuation: orchestration.ContinuationPayload{RunID: "run-cont"},
@@ -160,10 +158,9 @@ func TestLoadSuiteProviderInstabilityProfile(t *testing.T) {
 	executor := &profileExecutor{profile: profile}
 
 	pipeline := tool.Pipeline{
-		Validator:           noopValidator{},
-		Authorizer:          allowAllAuthorizer{},
-		Executor:            executor,
-		TransientClassifier: transientClassifier{},
+		Validator:  noopValidator{},
+		Authorizer: allowAllAuthorizer{},
+		Executor:   executor,
 		Policies: staticPolicy{p: tool.ToolPolicy{
 			Timeout:      2 * time.Second,
 			MaxAttempts:  3,
@@ -173,7 +170,7 @@ func TestLoadSuiteProviderInstabilityProfile(t *testing.T) {
 
 	const total = 300
 	var success int
-	for i := 0; i < total; i++ {
+	for i := range total {
 		_, err := pipeline.Execute(context.Background(), tool.ToolRequest{
 			RunID:      "load-provider",
 			ToolCallID: "call",

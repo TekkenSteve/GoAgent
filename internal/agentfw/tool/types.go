@@ -38,9 +38,9 @@ type RawResult struct {
 type IsolationLevel string
 
 const (
-	IsolationNone           IsolationLevel = "none"
-	IsolationReadCommitted  IsolationLevel = "read_committed"
-	IsolationSerializable   IsolationLevel = "serializable"
+	IsolationNone          IsolationLevel = "none"
+	IsolationReadCommitted IsolationLevel = "read_committed"
+	IsolationSerializable  IsolationLevel = "serializable"
 )
 
 // Result is normalized tool execution output.
@@ -97,11 +97,6 @@ type PolicyProvider interface {
 type IdempotencyStore interface {
 	Get(ctx context.Context, key string) (Result, bool, error)
 	Put(ctx context.Context, key string, result Result) error
-}
-
-// TransientClassifier decides if an error should be retried.
-type TransientClassifier interface {
-	IsTransient(err error) bool
 }
 
 // ErrValidation indicates the request payload is invalid.

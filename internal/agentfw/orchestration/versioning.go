@@ -1,5 +1,7 @@
 package orchestration
 
+import "slices"
+
 import "fmt"
 
 // VersionPins are versions pinned at run start.
@@ -31,19 +33,9 @@ func ValidateVersionPins(pins VersionPins, compatibility VersionCompatibility) e
 }
 
 func containsInt(values []int, target int) bool {
-	for _, v := range values {
-		if v == target {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(values, target)
 }
 
 func containsStr(values []string, target string) bool {
-	for _, v := range values {
-		if v == target {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(values, target)
 }

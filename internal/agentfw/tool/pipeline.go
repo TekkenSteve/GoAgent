@@ -8,16 +8,15 @@ import (
 
 // Pipeline executes standardized tool stages.
 type Pipeline struct {
-	Validator           Validator
-	Authorizer          Authorizer
-	Executor            Executor
-	Normalizer          Normalizer
-	Persister           Persister
-	Policies            PolicyProvider
-	Idempotency         IdempotencyStore
-	TransientClassifier TransientClassifier
-	Isolation           IsolationPolicy
-	Redactor            SecretRedactor
+	Validator   Validator
+	Authorizer  Authorizer
+	Executor    Executor
+	Normalizer  Normalizer
+	Persister   Persister
+	Policies    PolicyProvider
+	Idempotency IdempotencyStore
+	Isolation   IsolationPolicy
+	Redactor    SecretRedactor
 }
 
 // Execute runs validate -> authorize -> execute -> normalize -> persist.
@@ -68,10 +67,6 @@ func (p Pipeline) Execute(ctx context.Context, req ToolRequest) (Result, error) 
 			break
 		}
 
-		transient := p.TransientClassifier != nil && p.TransientClassifier.IsTransient(execErr)
-		if !transient || attempts >= policy.MaxAttempts {
-			return Result{}, fmt.Errorf("%w: %v", ErrExecution, execErr)
-		}
 		if policy.RetryBackoff > 0 {
 			select {
 			case <-time.After(policy.RetryBackoff):

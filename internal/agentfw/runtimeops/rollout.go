@@ -99,6 +99,6 @@ func (s RolloutSelector) Decide(accountID, runID string) RolloutDecision {
 
 func stableBucket(hashSalt, accountID, runID string) int {
 	h := fnv.New32a()
-	_, _ = h.Write([]byte(fmt.Sprintf("%s:%s:%s", hashSalt, accountID, runID)))
+	_, _ = h.Write(fmt.Appendf(nil, "%s:%s:%s", hashSalt, accountID, runID))
 	return int(h.Sum32() % 100)
 }

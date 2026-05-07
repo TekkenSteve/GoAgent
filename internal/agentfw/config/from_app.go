@@ -19,7 +19,7 @@ func FromAppConfig(cfg *appconfig.Config) Config {
 	if base.Rollout.HashSalt == "" {
 		base.Rollout.HashSalt = "agentfw-v1"
 	}
-	for _, accountID := range strings.Split(cfg.AgentFW.RolloutAllowlist, ",") {
+	for accountID := range strings.SplitSeq(cfg.AgentFW.RolloutAllowlist, ",") {
 		accountID = strings.TrimSpace(accountID)
 		if accountID == "" {
 			continue

@@ -3,10 +3,11 @@ package tool
 import (
 	"context"
 	"errors"
+	"fmt"
 	"sync"
 	"testing"
 	"time"
-	"fmt"
+
 	"github.com/stretchr/testify/require"
 )
 
@@ -151,15 +152,14 @@ func TestPipelineValidateAuthorizeExecuteNormalizePersist(t *testing.T) {
 func TestPipelineRetryAndIdempotency(t *testing.T) {
 	executor := &flakyExecutor{failFirst: 1}
 	p := Pipeline{
-		Validator:           requiredArgValidator{},
-		Authorizer:          allowAllAuthorizer{},
-		Executor:            executor,
-		Normalizer:          passthroughNormalizer{},
-		Persister:           newMapPersister(),
-		Policies:            staticPolicyProvider{policy: ToolPolicy{Timeout: time.Second, MaxAttempts: 3, RetryBackoff: time.Millisecond, EnableIdempotent: true}},
-		Idempotency:         newMapIdempotency(),
-		TransientClassifier: transientClassifier{},
-		Redactor:            DefaultSecretRedactor{},
+		Validator:   requiredArgValidator{},
+		Authorizer:  allowAllAuthorizer{},
+		Executor:    executor,
+		Normalizer:  passthroughNormalizer{},
+		Persister:   newMapPersister(),
+		Policies:    staticPolicyProvider{policy: ToolPolicy{Timeout: time.Second, MaxAttempts: 3, RetryBackoff: time.Millisecond, EnableIdempotent: true}},
+		Idempotency: newMapIdempotency(),
+		Redactor:    DefaultSecretRedactor{},
 	}
 
 	req := ToolRequest{
