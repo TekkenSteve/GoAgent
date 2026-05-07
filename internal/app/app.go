@@ -26,6 +26,7 @@ import (
 	"github.com/TekkenSteve/GoAgent/internal/usecase"
 	"github.com/TekkenSteve/GoAgent/internal/usecase/agent"
 	agentfwusecase "github.com/TekkenSteve/GoAgent/internal/usecase/executor"
+	"github.com/TekkenSteve/GoAgent/internal/usecase/history"
 	"github.com/TekkenSteve/GoAgent/pkg/grpcserver"
 	"github.com/TekkenSteve/GoAgent/pkg/httpserver"
 	"github.com/TekkenSteve/GoAgent/pkg/logger"
@@ -57,6 +58,8 @@ func Run(cfg *config.Config) { //nolint: gocyclo,cyclop,funlen,gocritic,nolintli
 		l.Fatal(fmt.Errorf("app - Run - postgres.New: %w", err))
 	}
 	defer pg.Close()
+
+	messageRepo := temporalrepo.NewMessageRepo(pg)
 
 	ctx := context.Background()
 
@@ -94,7 +97,6 @@ func Run(cfg *config.Config) { //nolint: gocyclo,cyclop,funlen,gocritic,nolintli
 			// WAL + BatchWriter for async persistence (Redis Stream → Postgres)
 			wal := pipelinepkg.NewWriteAheadLog(rdb.GeneralClient)
 			dlq := pipelinepkg.NewDeadLetterQueue(rdb.GeneralClient)
-			messageRepo := temporalrepo.NewMessageRepo(pg)
 
 			batchWriter = pipelinepkg.NewBatchWriter(wal, dlq, messageRepo, l)
 			batchWriter.Start()
@@ -126,6 +128,8 @@ func Run(cfg *config.Config) { //nolint: gocyclo,cyclop,funlen,gocritic,nolintli
 		l.Warn("app - Run - agent executor is nil, agent endpoints will be unavailable")
 	}
 
+	historyUC := history.New(messageRepo)
+
 	// RabbitMQ RPC Server
 	rmqRouter := amqp_rpc.NewRouter(agentExecutor, l)
 
@@ -148,7 +152,7 @@ func Run(cfg *config.Config) { //nolint: gocyclo,cyclop,funlen,gocritic,nolintli
 
 	// HTTP Server
 	httpServer := httpserver.New(l, httpserver.Port(cfg.HTTP.Port), httpserver.Prefork(cfg.HTTP.UsePreforkMode))
-	restapi.NewRouter(httpServer.App, cfg, agentExecutor, l)
+	restapi.NewRouter(httpServer.App, cfg, agentExecutor, historyUC, l)
 
 	// Start servers
 	rmqServer.Start()

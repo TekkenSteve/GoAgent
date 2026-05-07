@@ -13,4 +13,9 @@ type (
 		GetStatus(ctx context.Context, runID string) (entity.RunStatus, error)
 		Control(ctx context.Context, runID string, op entity.ControlOperation) error
 	}
+	// HistoryQuery is the business interface for querying agent run history.
+	HistoryQuery interface {
+		ListMessages(ctx context.Context, runID string, limit, offset uint64) ([]entity.MessageRecord, error)
+		ListToolResults(ctx context.Context, runID string, limit, offset uint64) ([]entity.ToolResultRecord, error)
+	}
 )

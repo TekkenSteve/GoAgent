@@ -139,6 +139,76 @@ func (r *MessageRepo) PersistArchive(ctx context.Context, record entity.ArchiveR
 	return strconv.FormatInt(id, 10), nil
 }
 
+// ListMessagesByRun retrieves paginated message records for a run.
+func (r *MessageRepo) ListMessagesByRun(ctx context.Context, runID string, limit, offset uint64) ([]entity.MessageRecord, error) {
+	sql, args, err := r.Builder.
+		Select("run_id", "role", "content", "tool_call_id").
+		From("messages").
+		Where(sq.Eq{"run_id": runID}).
+		OrderBy("id ASC").
+		Limit(limit).
+		Offset(offset).
+		ToSql()
+	if err != nil {
+		return nil, fmt.Errorf("MessageRepo - ListMessagesByRun - builder: %w", err)
+	}
+
+	rows, err := r.Pool.Query(ctx, sql, args...)
+	if err != nil {
+		return nil, fmt.Errorf("MessageRepo - ListMessagesByRun - query: %w", err)
+	}
+	defer rows.Close()
+
+	var records []entity.MessageRecord
+	for rows.Next() {
+		var record entity.MessageRecord
+		if err := rows.Scan(&record.RunID, &record.Role, &record.Content, &record.ToolCallID); err != nil {
+			return nil, fmt.Errorf("MessageRepo - ListMessagesByRun - scan: %w", err)
+		}
+		records = append(records, record)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("MessageRepo - ListMessagesByRun - rows: %w", err)
+	}
+
+	return records, nil
+}
+
+// ListToolResultsByRun retrieves paginated tool result records for a run.
+func (r *MessageRepo) ListToolResultsByRun(ctx context.Context, runID string, limit, offset uint64) ([]entity.ToolResultRecord, error) {
+	sql, args, err := r.Builder.
+		Select("run_id", "tool_call_id", "tool_name", "result_json").
+		From("tool_results").
+		Where(sq.Eq{"run_id": runID}).
+		OrderBy("id ASC").
+		Limit(limit).
+		Offset(offset).
+		ToSql()
+	if err != nil {
+		return nil, fmt.Errorf("MessageRepo - ListToolResultsByRun - builder: %w", err)
+	}
+
+	rows, err := r.Pool.Query(ctx, sql, args...)
+	if err != nil {
+		return nil, fmt.Errorf("MessageRepo - ListToolResultsByRun - query: %w", err)
+	}
+	defer rows.Close()
+
+	var records []entity.ToolResultRecord
+	for rows.Next() {
+		var record entity.ToolResultRecord
+		if err := rows.Scan(&record.RunID, &record.ToolCallID, &record.ToolName, &record.ResultJSON); err != nil {
+			return nil, fmt.Errorf("MessageRepo - ListToolResultsByRun - scan: %w", err)
+		}
+		records = append(records, record)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("MessageRepo - ListToolResultsByRun - rows: %w", err)
+	}
+
+	return records, nil
+}
+
 // GetArchive retrieves an archive record by its ref ID.
 func (r *MessageRepo) GetArchive(ctx context.Context, ref string) (entity.ArchiveRecord, bool, error) {
 	id, err := strconv.ParseInt(ref, 10, 64)

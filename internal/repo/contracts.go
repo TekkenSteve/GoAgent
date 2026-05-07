@@ -7,12 +7,14 @@ import (
 )
 
 type (
-	// WarmStateRepo persists operational state outside workflow history.
+	// WarmStateRepo persists and queries operational state outside workflow history.
 	WarmStateRepo interface {
 		PersistMessage(ctx context.Context, record entity.MessageRecord) (string, error)
 		PersistToolResult(ctx context.Context, record entity.ToolResultRecord) (string, error)
 		GetMessage(ctx context.Context, ref string) (entity.MessageRecord, bool, error)
 		GetToolResult(ctx context.Context, ref string) (entity.ToolResultRecord, bool, error)
+		ListMessagesByRun(ctx context.Context, runID string, limit, offset uint64) ([]entity.MessageRecord, error)
+		ListToolResultsByRun(ctx context.Context, runID string, limit, offset uint64) ([]entity.ToolResultRecord, error)
 	}
 	// ColdStateRepo persists archival state outside workflow history.
 	ColdStateRepo interface {
