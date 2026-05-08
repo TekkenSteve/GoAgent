@@ -1,4 +1,4 @@
-package llm
+package webapi
 
 import (
 	"bytes"
@@ -145,11 +145,12 @@ type openAIToolFuncDef struct {
 }
 
 type openAIRequest struct {
-	Model       string           `json:"model"`
-	Messages    []openAIMessage  `json:"messages"`
-	MaxTokens   int              `json:"max_tokens,omitempty"`
-	Temperature float64          `json:"temperature,omitempty"`
-	Tools       []openAITool     `json:"tools,omitempty"`
+	Model       string          `json:"model"`
+	Messages    []openAIMessage `json:"messages"`
+	MaxTokens   int             `json:"max_tokens,omitempty"`
+	Temperature float64         `json:"temperature,omitempty"`
+	Tools       []openAITool    `json:"tools,omitempty"`
+	Stream      bool            `json:"stream,omitempty"`
 }
 
 type openAIResponse struct {

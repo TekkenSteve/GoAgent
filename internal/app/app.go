@@ -21,7 +21,7 @@ import (
 	pipelinepkg "github.com/TekkenSteve/GoAgent/internal/repo/pipeline"
 	"github.com/TekkenSteve/GoAgent/internal/repo/compressor"
 	"github.com/TekkenSteve/GoAgent/internal/repo/framework"
-	"github.com/TekkenSteve/GoAgent/internal/repo/llm"
+	"github.com/TekkenSteve/GoAgent/internal/repo/webapi"
 	temporalrepo "github.com/TekkenSteve/GoAgent/internal/repo/persistent"
 	"github.com/TekkenSteve/GoAgent/internal/usecase"
 	"github.com/TekkenSteve/GoAgent/internal/usecase/agent"
@@ -41,6 +41,7 @@ func Run(cfg *config.Config) { //nolint: gocyclo,cyclop,funlen,gocritic,nolintli
 	l := logger.New(cfg.Log.Level)
 	var temporalRuntime *agentfwruntime.TemporalRuntime
 	var batchWriter *pipelinepkg.BatchWriter
+	var agentUC *agent.UseCase
 
 	fwCfg := agentfwconfig.FromAppConfig(cfg)
 	selector := agentfwops.NewRolloutSelector(agentfwops.RolloutConfig{
@@ -82,7 +83,7 @@ func Run(cfg *config.Config) { //nolint: gocyclo,cyclop,funlen,gocritic,nolintli
 		// Build agent components when LLM is configured
 		var activities *orchestration.AgentActivities
 		if cfg.AgentFW.LLMAPIKey != "" {
-			llmProvider := llm.New(llm.Config{
+			llmProvider := webapi.New(webapi.Config{
 				BaseURL: cfg.AgentFW.LLMBaseURL,
 				APIKey:  cfg.AgentFW.LLMAPIKey,
 			})
@@ -102,7 +103,7 @@ func Run(cfg *config.Config) { //nolint: gocyclo,cyclop,funlen,gocritic,nolintli
 			batchWriter.Start()
 			defer batchWriter.Stop()
 
-			agentUC := agent.New(llmProvider, toolExecutor, wal, agentCompressor)
+			agentUC = agent.New(llmProvider, toolExecutor, wal, agentCompressor)
 
 			activities = orchestration.NewAgentActivities(agentUC)
 			l.Info("app - Run - agent components initialized (model: %s)", cfg.AgentFW.LLMModel)
@@ -130,6 +131,13 @@ func Run(cfg *config.Config) { //nolint: gocyclo,cyclop,funlen,gocritic,nolintli
 
 	historyUC := history.New(messageRepo)
 
+	var streamExecutor usecase.StreamExecutor
+	if agentUC != nil {
+		streamExecutor = agentUC
+	} else {
+		l.Warn("app - Run - stream executor unavailable (agent usecase not initialized)")
+	}
+
 	// RabbitMQ RPC Server
 	rmqRouter := amqp_rpc.NewRouter(agentExecutor, l)
 
@@ -152,7 +160,7 @@ func Run(cfg *config.Config) { //nolint: gocyclo,cyclop,funlen,gocritic,nolintli
 
 	// HTTP Server
 	httpServer := httpserver.New(l, httpserver.Port(cfg.HTTP.Port), httpserver.Prefork(cfg.HTTP.UsePreforkMode))
-	restapi.NewRouter(httpServer.App, cfg, agentExecutor, historyUC, l)
+	restapi.NewRouter(httpServer.App, cfg, agentExecutor, historyUC, streamExecutor, l, rdb)
 
 	// Start servers
 	rmqServer.Start()

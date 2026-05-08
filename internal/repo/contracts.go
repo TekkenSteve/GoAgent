@@ -30,6 +30,10 @@ type (
 	LLMProvider interface {
 		Chat(ctx context.Context, req entity.LLMRequest) (entity.LLMResponse, error)
 	}
+	// LLMStreamProvider optionally streams chat responses token by token.
+	LLMStreamProvider interface {
+		ChatStream(ctx context.Context, req entity.LLMRequest) (<-chan entity.LLMStreamChunk, error)
+	}
 	// ToolExecutor executes a single tool call.
 	ToolExecutor interface {
 		Execute(ctx context.Context, req entity.ToolRequest) (entity.ToolResult, error)

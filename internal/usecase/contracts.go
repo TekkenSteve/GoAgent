@@ -18,4 +18,13 @@ type (
 		ListMessages(ctx context.Context, runID string, limit, offset uint64) ([]entity.MessageRecord, error)
 		ListToolResults(ctx context.Context, runID string, limit, offset uint64) ([]entity.ToolResultRecord, error)
 	}
+	// StreamEventWriter is the destination for streaming events.
+	// Implementations write to Redis Stream, channel, etc.
+	StreamEventWriter interface {
+		WriteEvent(ctx context.Context, event entity.StreamEvent) error
+	}
+	// StreamExecutor executes agent steps with streaming output.
+	StreamExecutor interface {
+		ExecuteStream(ctx context.Context, req entity.StreamRequest, writer StreamEventWriter) error
+	}
 )

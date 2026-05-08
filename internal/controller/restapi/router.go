@@ -10,6 +10,7 @@ import (
 	v1 "github.com/TekkenSteve/GoAgent/internal/controller/restapi/v1"
 	"github.com/TekkenSteve/GoAgent/internal/usecase"
 	"github.com/TekkenSteve/GoAgent/pkg/logger"
+	"github.com/TekkenSteve/GoAgent/pkg/redis"
 	"github.com/gofiber/fiber/v2"
 	"github.com/gofiber/swagger"
 )
@@ -21,7 +22,7 @@ import (
 // @version     1.0
 // @host        localhost:8080
 // @BasePath    /v1
-func NewRouter(app *fiber.App, cfg *config.Config, t usecase.AgentExecutor, h usecase.HistoryQuery, l logger.Interface) {
+func NewRouter(app *fiber.App, cfg *config.Config, t usecase.AgentExecutor, h usecase.HistoryQuery, s usecase.StreamExecutor, l logger.Interface, rdb *redis.Redis) {
 	// Options
 	app.Use(middleware.Logger(l))
 	app.Use(middleware.Recovery(l))
@@ -44,6 +45,6 @@ func NewRouter(app *fiber.App, cfg *config.Config, t usecase.AgentExecutor, h us
 	// Routers
 	apiV1Group := app.Group("/v1")
 	{
-		v1.NewAgentRoutes(apiV1Group, t, h, l)
+		v1.NewAgentRoutes(apiV1Group, t, h, s, l, rdb)
 	}
 }
