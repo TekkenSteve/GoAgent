@@ -38,6 +38,16 @@ type LLMConfig struct {
 	Temperature float64 `json:"temperature"`
 } // @name entity.LLMConfig
 
+// DefaultLLMConfig returns a sensible baseline for LLM inference parameters.
+// Callers can override individual fields per-request.
+func DefaultLLMConfig() LLMConfig {
+	return LLMConfig{
+		Model:       "gpt-4.1-mini",
+		MaxTokens:   4096,
+		Temperature: 0,
+	}
+}
+
 // ToolDef is a tool definition for LLM function calling.
 type ToolDef struct {
 	Type     string      `json:"type"`

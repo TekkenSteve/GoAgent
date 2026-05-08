@@ -21,6 +21,7 @@ import (
 	pipelinepkg "github.com/TekkenSteve/GoAgent/internal/repo/pipeline"
 	"github.com/TekkenSteve/GoAgent/internal/repo/compressor"
 	"github.com/TekkenSteve/GoAgent/internal/repo/framework"
+	"github.com/TekkenSteve/GoAgent/internal/repo/toolkit"
 	"github.com/TekkenSteve/GoAgent/internal/repo/webapi"
 	temporalrepo "github.com/TekkenSteve/GoAgent/internal/repo/persistent"
 	"github.com/TekkenSteve/GoAgent/internal/usecase"
@@ -88,7 +89,36 @@ func Run(cfg *config.Config) { //nolint: gocyclo,cyclop,funlen,gocritic,nolintli
 				APIKey:  cfg.AgentFW.LLMAPIKey,
 			})
 
-			toolPipe := tool.Pipeline{}
+			// Tool registry — register tools with env-sourced API keys
+			toolRegistry := toolkit.NewRegistry()
+
+			if apiKey := os.Getenv("TAVILY_API_KEY"); apiKey != "" {
+				if err := toolRegistry.Register(toolkit.NewWebSearch(toolkit.WebSearchConfig{
+					Provider: "tavily",
+					APIKey:   apiKey,
+				})); err != nil {
+					l.Warn("app - Run - register web_search: %v", err)
+				}
+			}
+			if apiKey := os.Getenv("FIRECRAWL_API_KEY"); apiKey != "" {
+				if err := toolRegistry.Register(toolkit.NewScrapeWebpage(toolkit.ScrapeWebpageConfig{
+					APIKey: apiKey,
+				})); err != nil {
+					l.Warn("app - Run - register scrape_webpage: %v", err)
+				}
+			}
+			if endpoint := os.Getenv("CODE_INTERPRETER_ENDPOINT"); endpoint != "" {
+				if err := toolRegistry.Register(toolkit.NewCodeInterpreter(toolkit.CodeInterpreterConfig{
+					Endpoint: endpoint,
+					APIKey:   os.Getenv("CODE_INTERPRETER_API_KEY"),
+				})); err != nil {
+					l.Warn("app - Run - register code_interpreter: %v", err)
+				}
+			}
+
+			toolPipe := tool.Pipeline{
+				Executor: toolRegistry,
+			}
 			toolExecutor := framework.NewToolPipeline(toolPipe)
 
 			agentCompressor := compressor.New(compressor.Config{
@@ -103,10 +133,10 @@ func Run(cfg *config.Config) { //nolint: gocyclo,cyclop,funlen,gocritic,nolintli
 			batchWriter.Start()
 			defer batchWriter.Stop()
 
-			agentUC = agent.New(llmProvider, toolExecutor, wal, agentCompressor)
+			agentUC = agent.New(llmProvider, toolExecutor, wal, agentCompressor, toolRegistry)
 
 			activities = orchestration.NewAgentActivities(agentUC)
-			l.Info("app - Run - agent components initialized (model: %s)", cfg.AgentFW.LLMModel)
+			l.Info("app - Run - agent components initialized")
 		} else {
 			l.Warn("app - Run - LLM API key not configured, agent execution will not be available")
 		}

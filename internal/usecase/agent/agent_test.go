@@ -15,6 +15,7 @@ func TestExecuteStep_EmptyMessage(t *testing.T) {
 		&mockTool{},
 		nil,
 		nil,
+	nil,
 	)
 
 	result, err := uc.ExecuteStep(context.Background(), agent.StepRequest{
@@ -41,6 +42,7 @@ func TestExecuteStep_TextOnly(t *testing.T) {
 		&mockTool{},
 		nil,
 		nil,
+	nil,
 	)
 
 	result, err := uc.ExecuteStep(context.Background(), agent.StepRequest{
@@ -97,6 +99,7 @@ func TestExecuteStep_ToolCallThenText(t *testing.T) {
 		}},
 		nil,
 		nil,
+	nil,
 	)
 
 	result, err := uc.ExecuteStep(context.Background(), agent.StepRequest{
@@ -142,6 +145,7 @@ func TestExecuteStep_ToolExecutionError(t *testing.T) {
 		&mockTool{err: errors.New("tool crashed")},
 		nil,
 		nil,
+	nil,
 	)
 
 	result, err := uc.ExecuteStep(context.Background(), agent.StepRequest{
@@ -190,6 +194,7 @@ func TestExecuteStep_MaxToolRounds(t *testing.T) {
 		&mockTool{result: entity.ToolResult{ToolName: "loop_tool", Output: map[string]any{"done": true}}},
 		nil,
 		nil,
+	nil,
 	)
 
 	result, err := uc.ExecuteStep(context.Background(), agent.StepRequest{
@@ -212,6 +217,7 @@ func TestExecuteStep_WithSystemPrompt(t *testing.T) {
 		&mockTool{},
 		nil,
 		nil,
+	nil,
 	)
 
 	result, err := uc.ExecuteStep(context.Background(), agent.StepRequest{
@@ -247,6 +253,7 @@ func TestExecuteStep_WithHistoryDoesNotReinjectSystemPrompt(t *testing.T) {
 		&mockTool{},
 		nil,
 		nil,
+	nil,
 	)
 
 	result, err := uc.ExecuteStep(context.Background(), agent.StepRequest{
@@ -278,6 +285,7 @@ func TestPrep_InvalidToolDefinition(t *testing.T) {
 		&mockTool{},
 		nil,
 		nil,
+	nil,
 	)
 
 	_, err := uc.ExecuteStep(context.Background(), agent.StepRequest{
@@ -307,6 +315,7 @@ func TestPrep_ToolMissingType(t *testing.T) {
 		&mockTool{},
 		nil,
 		nil,
+	nil,
 	)
 
 	_, err := uc.ExecuteStep(context.Background(), agent.StepRequest{
@@ -336,6 +345,7 @@ func TestExecuteStep_LLMError_Timeout(t *testing.T) {
 		&mockTool{},
 		nil,
 		nil,
+	nil,
 	)
 
 	_, err := uc.ExecuteStep(context.Background(), agent.StepRequest{
@@ -365,6 +375,7 @@ func TestExecuteStep_LLMError_RateLimit(t *testing.T) {
 		&mockTool{},
 		nil,
 		nil,
+	nil,
 	)
 
 	_, err := uc.ExecuteStep(context.Background(), agent.StepRequest{
@@ -391,6 +402,7 @@ func TestExecuteStep_LLMError_ContentFilter(t *testing.T) {
 		&mockTool{},
 		nil,
 		nil,
+	nil,
 	)
 
 	_, err := uc.ExecuteStep(context.Background(), agent.StepRequest{
@@ -420,6 +432,7 @@ func TestExecuteStep_LLMError_ContextLength(t *testing.T) {
 		&mockTool{},
 		nil,
 		nil,
+	nil,
 	)
 
 	_, err := uc.ExecuteStep(context.Background(), agent.StepRequest{
@@ -449,6 +462,7 @@ func TestExecuteStep_LLMError_Default(t *testing.T) {
 		&mockTool{},
 		nil,
 		nil,
+	nil,
 	)
 
 	_, err := uc.ExecuteStep(context.Background(), agent.StepRequest{

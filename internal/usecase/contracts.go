@@ -27,4 +27,10 @@ type (
 	StreamExecutor interface {
 		ExecuteStream(ctx context.Context, req entity.StreamRequest, writer StreamEventWriter) error
 	}
+	// ToolDefProvider supplies LLM function calling definitions for available tools.
+	// The agent usecase calls this to auto-populate tool definitions when none are
+	// explicitly provided in the request.
+	ToolDefProvider interface {
+		Definitions() []entity.ToolDef
+	}
 )

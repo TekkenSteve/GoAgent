@@ -14,6 +14,12 @@ import (
 // Prep is synchronous; the event loop runs in a background goroutine.
 // Events are written to the provided StreamEventWriter (e.g. Redis Stream).
 func (uc *UseCase) ExecuteStream(ctx context.Context, req entity.StreamRequest, writer usecase.StreamEventWriter) error {
+	// Auto-populate tool definitions from registry if not explicitly provided
+	tools := req.Tools
+	if len(tools) == 0 && uc.toolDefs != nil {
+		tools = uc.toolDefs.Definitions()
+	}
+
 	// Emit prep_stage: initializing before Prep begins
 	writer.WriteEvent(ctx, entity.StreamEvent{
 		Type:     entity.StreamEventPrepStage,
@@ -25,7 +31,7 @@ func (uc *UseCase) ExecuteStream(ctx context.Context, req entity.StreamRequest, 
 		SystemPrompt: req.SystemPrompt,
 		UserMessage:  req.Message,
 		History:      req.History,
-		Tools:        req.Tools,
+		Tools:        tools,
 		Config:       req.Config,
 	})
 	if err != nil {
@@ -51,7 +57,7 @@ func (uc *UseCase) ExecuteStream(ctx context.Context, req entity.StreamRequest, 
 	}
 
 	messages := prepResult.Messages
-	tools := prepResult.Tools
+	tools = prepResult.Tools
 
 	go func() {
 		for range maxToolRounds {

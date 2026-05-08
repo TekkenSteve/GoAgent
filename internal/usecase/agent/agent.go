@@ -8,6 +8,7 @@ import (
 
 	"github.com/TekkenSteve/GoAgent/internal/entity"
 	"github.com/TekkenSteve/GoAgent/internal/repo"
+	"github.com/TekkenSteve/GoAgent/internal/usecase"
 )
 
 const maxToolRounds = 10
@@ -41,22 +42,29 @@ type UseCase struct {
 	tools      repo.ToolExecutor
 	wal        repo.WALAppender
 	compressor repo.ContextCompressor
+	toolDefs   usecase.ToolDefProvider
 }
 
 // New -.
-func New(llm repo.LLMProvider, tools repo.ToolExecutor, wal repo.WALAppender, compressor repo.ContextCompressor) *UseCase {
-	return &UseCase{llm: llm, tools: tools, wal: wal, compressor: compressor}
+func New(llm repo.LLMProvider, tools repo.ToolExecutor, wal repo.WALAppender, compressor repo.ContextCompressor, toolDefs usecase.ToolDefProvider) *UseCase {
+	return &UseCase{llm: llm, tools: tools, wal: wal, compressor: compressor, toolDefs: toolDefs}
 }
 
 // ExecuteStep runs one LLM invocation plus subsequent tool rounds.
 // It returns the messages generated, tool results, and usage statistics.
 func (uc *UseCase) ExecuteStep(ctx context.Context, req StepRequest) (*StepResult, error) {
+	// Auto-populate tool definitions from registry if not explicitly provided
+	tools := req.Tools
+	if len(tools) == 0 && uc.toolDefs != nil {
+		tools = uc.toolDefs.Definitions()
+	}
+
 	// Phase 1: Prep — validate and initialise execution context
 	prepResult, err := uc.Prep(ctx, PrepRequest{
 		SystemPrompt: req.SystemPrompt,
 		UserMessage:  req.Message,
 		History:      req.History,
-		Tools:        req.Tools,
+		Tools:        tools,
 		Config:       req.Config,
 	})
 	if err != nil {
@@ -64,7 +72,7 @@ func (uc *UseCase) ExecuteStep(ctx context.Context, req StepRequest) (*StepResul
 	}
 
 	messages := prepResult.Messages
-	tools := prepResult.Tools
+	tools = prepResult.Tools
 
 	// Phase 2: Execute — LLM call + tool execution loop
 	var allToolResults []entity.ToolResult
