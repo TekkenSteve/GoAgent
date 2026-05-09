@@ -1,53 +1,86 @@
 package entity
 
-// StreamEventType categorises streaming events sent to the client.
-type StreamEventType string
+import "time"
+
+// ——— Three-dimensional orthogonal enumeration ———
+
+type EventSource string
 
 const (
-	StreamEventContent       StreamEventType = "content"
-	StreamEventReasoning     StreamEventType = "reasoning"
-	StreamEventToolCall      StreamEventType = "tool_call"
-	StreamEventToolResult    StreamEventType = "tool_result"
-	StreamEventError         StreamEventType = "error"
-	StreamEventDone          StreamEventType = "done"
-	StreamEventThinking      StreamEventType = "thinking"
-	StreamEventPrepStage     StreamEventType = "prep_stage"
-	StreamEventContextUsage  StreamEventType = "context_usage"
+	SourceLLM    EventSource = "llm"
+	SourceTool   EventSource = "tool"
+	SourceAgent  EventSource = "agent"
+	SourceSystem EventSource = "system"
+	SourceUser   EventSource = "user"
 )
 
-// StreamEvent is a single event yielded during streaming execution.
-type StreamEvent struct {
-	Type         StreamEventType `json:"type"`
-	Content      string          `json:"content,omitempty"`
-	Reasoning    string          `json:"reasoning,omitempty"`
-	ToolName     string          `json:"tool_name,omitempty"`
-	ToolInput    string          `json:"tool_input,omitempty"`
-	ToolOutput   string          `json:"tool_output,omitempty"`
-	Error        string          `json:"error,omitempty"`
-	Usage        *Usage          `json:"usage,omitempty"`
-	FinishReason string          `json:"finish_reason,omitempty"`
+type EventPhase string
 
-	// Prep stage fields
-	Stage    string `json:"stage,omitempty"`    // "initializing", "ready", "summarizing"
-	Progress int    `json:"progress,omitempty"` // 0-100 progress percentage
+const (
+	PhaseRequest   EventPhase = "request"
+	PhaseStart     EventPhase = "start"
+	PhaseDelta     EventPhase = "delta"
+	PhaseFinish    EventPhase = "finish"
+	PhaseError     EventPhase = "error"
+	PhaseInterrupt EventPhase = "interrupt"
+)
 
-	// Context usage fields
-	MessageCount   int   `json:"message_count,omitempty"`    // current message count
-	MessagesBefore *int  `json:"messages_before,omitempty"`  // message count before compression
-	MessagesAfter  *int  `json:"messages_after,omitempty"`   // message count after compression
-	Compressed     *bool `json:"compressed,omitempty"`       // whether compression was applied
+type EventContentType string
+
+const (
+	ContentText       EventContentType = "text"
+	ContentReasoning  EventContentType = "reasoning"
+	ContentToolCall   EventContentType = "tool_call"
+	ContentToolResult EventContentType = "tool_result"
+	ContentState      EventContentType = "state"
+	ContentStatus     EventContentType = "status"
+	ContentCommand    EventContentType = "command"
+	ContentFeedback   EventContentType = "feedback"
+)
+
+// BaseEvent is the common metadata for all events.
+type BaseEvent struct {
+	EventType   string            `json:"event_type"`
+	Source      EventSource       `json:"source"`
+	Phase       EventPhase        `json:"phase"`
+	ContentType EventContentType  `json:"content_type"`
+	SessionID   string            `json:"session_id,omitempty"`
+	RunID       string            `json:"run_id,omitempty"`
+	EventID     string            `json:"event_id,omitempty"`
+	Timestamp   time.Time         `json:"timestamp"`
+	TraceID     string            `json:"trace_id,omitempty"`
+	Tags        map[string]string `json:"tags,omitempty"`
 }
 
-// LLMStreamChunk is a single chunk from an LLM streaming response.
+// StreamEvent is the core interface of the event system.
+// Open for implementation outside the package (for test mocks, plugin extensions),
+// but deserialization security is guaranteed by EventRegistry — unregistered types cannot be restored from JSON.
+type StreamEvent interface {
+	Base() BaseEvent
+	EventType() string
+}
+
+// ToolCallDelta is an incremental fragment of a single tool call's parameters.
+// It belongs to the internal type at the repo layer and is defined in the entity due to embedding LLMStreamChunk.
+type ToolCallDelta struct {
+	Index      int    `json:"index"`
+	ToolCallID string `json:"tool_call_id,omitempty"`
+	Name       string `json:"name,omitempty"`
+	ArgsDelta  string `json:"args_delta,omitempty"`
+}
+
+// LLMStreamChunk is a single chunk in an LLM streaming response.
+// TODO(phase2): 迁移到 repo/webapi/types.go
 type LLMStreamChunk struct {
-	Content      string
-	Reasoning    string
-	ToolCalls    []ToolCall
-	FinishReason FinishReason
-	Usage        Usage
+	Content        string
+	Reasoning      string
+	ToolCalls      []ToolCall
+	ToolCallDeltas []ToolCallDelta
+	FinishReason   FinishReason
+	Usage          Usage
 }
 
-// StreamRequest is an execution request for the streaming agent path.
+// StreamRequest is the request parameters executed by the streaming Agent.
 type StreamRequest struct {
 	RunID        string
 	SystemPrompt string

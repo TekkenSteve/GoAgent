@@ -117,10 +117,12 @@ func (p *Provider) ChatStream(ctx context.Context, req entity.LLMRequest) (<-cha
 				}
 			}
 
-			// Accumulate tool call deltas
+			// Accumulate tool call deltas and emit intermediate events
 			for _, tc := range delta.ToolCalls {
+				first := false
 				if _, ok := accum[tc.Index]; !ok {
 					accum[tc.Index] = &toolCallAcc{}
+					first = true
 				}
 				if tc.ID != "" {
 					accum[tc.Index].ID = tc.ID
@@ -131,6 +133,29 @@ func (p *Provider) ChatStream(ctx context.Context, req entity.LLMRequest) (<-cha
 					}
 					if tc.Function.Arguments != "" {
 						accum[tc.Index].Arguments += tc.Function.Arguments
+					}
+				}
+
+				// Emit intermediate delta for real-time UI
+				// First delta per index carries ID/Name; subsequent ones carry args delta
+				var deltaChunk entity.LLMStreamChunk
+				if first && (tc.ID != "" || (tc.Function != nil && tc.Function.Name != "")) {
+					deltaChunk.ToolCallDeltas = []entity.ToolCallDelta{{
+						Index:      tc.Index,
+						ToolCallID: tc.ID,
+						Name:       tc.Function.Name,
+					}}
+				} else if tc.Function != nil && tc.Function.Arguments != "" {
+					deltaChunk.ToolCallDeltas = []entity.ToolCallDelta{{
+						Index:     tc.Index,
+						ArgsDelta: tc.Function.Arguments,
+					}}
+				}
+				if len(deltaChunk.ToolCallDeltas) > 0 {
+					select {
+					case ch <- deltaChunk:
+					case <-ctx.Done():
+						return
 					}
 				}
 			}

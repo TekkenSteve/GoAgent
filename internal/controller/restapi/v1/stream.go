@@ -92,10 +92,7 @@ func (r *V1) stream(ctx *fiber.Ctx) error {
 			defer close(doneCh)
 			if err := r.s.ExecuteStream(streamCtx, req, writer); err != nil {
 				// Validation/config error — write as event
-				writer.WriteEvent(streamCtx, entity.StreamEvent{
-					Type:  entity.StreamEventError,
-					Error: err.Error(),
-				})
+				writer.WriteEvent(streamCtx, entity.NewAgentErrorEvent("EXECUTION_ERROR", err.Error()))
 			}
 		}()
 
@@ -133,9 +130,11 @@ func (r *V1) stream(ctx *fiber.Ctx) error {
 				}
 
 				// Check for terminal event
-				var evt entity.StreamEvent
-				if json.Unmarshal([]byte(payload), &evt) == nil {
-					if evt.Type == entity.StreamEventError || evt.Type == entity.StreamEventDone {
+					evt, err := entity.UnmarshalEvent([]byte(payload))
+				if err == nil {
+					// Terminal event detection via type assertion
+					switch evt.(type) {
+					case *entity.AgentRunFinishEvent, *entity.AgentErrorEvent:
 						return
 					}
 				}
