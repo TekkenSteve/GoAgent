@@ -459,6 +459,23 @@ func (r *Redis) StreamAdd(ctx context.Context, stream string, values map[string]
 	})
 }
 
+// StreamAddWithID appends a message to a stream with a custom ID.
+// The ID should be in the format "sequence-0" for EventStore compatibility.
+func (r *Redis) StreamAddWithID(ctx context.Context, stream, id string, values map[string]any, maxLen int) (string, error) {
+	return execVal(r, ctx, _defaultStreamTimeout, func(ctx context.Context) (string, error) {
+		args := &goredis.XAddArgs{
+			Stream: stream,
+			ID:     id,
+			Values: values,
+		}
+		if maxLen > 0 {
+			args.MaxLen = int64(maxLen)
+			args.Approx = true
+		}
+		return r.GeneralClient.XAdd(ctx, args).Result()
+	})
+}
+
 // StreamRead reads from a stream. Uses StreamClient if blocking (prevents starvation),
 // GeneralClient otherwise.
 func (r *Redis) StreamRead(ctx context.Context, stream, lastID string, count int, block time.Duration) ([]goredis.XStream, error) {
@@ -479,6 +496,9 @@ func (r *Redis) StreamRead(ctx context.Context, stream, lastID string, count int
 // StreamRange returns a range of entries from a stream.
 func (r *Redis) StreamRange(ctx context.Context, stream, start, end string, count int) ([]goredis.XMessage, error) {
 	return execVal(r, ctx, _defaultStreamTimeout, func(ctx context.Context) ([]goredis.XMessage, error) {
+		if count > 0 {
+			return r.GeneralClient.XRangeN(ctx, stream, start, end, int64(count)).Result()
+		}
 		return r.GeneralClient.XRange(ctx, stream, start, end).Result()
 	})
 }

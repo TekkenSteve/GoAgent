@@ -5,23 +5,23 @@ import (
 	"context"
 	"encoding/json"
 	"net"
+	"strconv"
+	"strings"
 	"time"
 
+	"github.com/TekkenSteve/GoAgent/internal/agentfw/stream"
 	"github.com/TekkenSteve/GoAgent/internal/entity"
-	"github.com/TekkenSteve/GoAgent/pkg/redis"
 	"github.com/TekkenSteve/GoAgent/pkg/sse"
 	"github.com/gofiber/fiber/v2"
 )
 
 const (
-	eventStreamMaxLen  = 1000
-	eventStreamTTL     = 1 * time.Hour
-	pingInterval       = 30 * time.Second
-	deadWorkerTimeout  = 2 * time.Minute
+	pingInterval      = 30 * time.Second
+	deadWorkerTimeout = 2 * time.Minute
 )
 
 // stream handles GET /agent/stream.
-// It starts agent execution, writes events to a Redis Stream,
+// It starts agent execution, writes events to the EventStore,
 // and streams them back to the client via Server-Sent Events.
 func (r *V1) stream(ctx *fiber.Ctx) error {
 	message := ctx.Query("message")
@@ -38,11 +38,12 @@ func (r *V1) stream(ctx *fiber.Ctx) error {
 	}
 	systemPrompt := ctx.Query("system_prompt", "")
 	lastEventID := ctx.Query("last_event_id", "0")
-	if lastEventID == "" {
-		lastEventID = "0"
-	}
 
-	streamKey := "event:run:" + runID
+	// In non-Temporal mode, runID doubles as the sessionID.
+	sessionID := runID
+
+	// Parse last event sequence. Supports both plain integer and "seq-0" formats.
+	lastSequence := parseLastSequence(lastEventID)
 
 	// Create cancel context to stop the stream when client disconnects
 	streamCtx, cancel := context.WithCancel(context.Background())
@@ -57,16 +58,19 @@ func (r *V1) stream(ctx *fiber.Ctx) error {
 		},
 	}
 
-	// Subscribe to the Redis Stream BEFORE starting execution.
-	// XREAD from lastEventID means catch-up on existing events, then live stream.
-	// This eliminates the race between execution writes and subscriber reads.
-	sub := r.rdb.Hub().Subscribe(streamKey, lastEventID)
+	// Subscribe to the EventStore BEFORE starting execution.
+	// lastSequence controls catch-up: 0 means live-only, >0 replays from after that seq.
+	sub, err := r.subscriber.Subscribe(streamCtx, sessionID, lastSequence)
+	if err != nil {
+		return errorResponse(ctx, 500, "failed to subscribe to event stream")
+	}
 	defer sub.Close()
 
-	// Create event writer that writes to the same Redis Stream
-	writer := &runEventStreamWriter{
-		rdb:       r.rdb,
-		streamKey: streamKey,
+	// Create event writer that writes to the EventStore.
+	writer := &eventStoreWriter{
+		store:     r.eventStore,
+		sessionID: sessionID,
+		runID:     runID,
 	}
 
 	// Hijack the connection for SSE (fasthttp does not support response flushing)
@@ -85,8 +89,8 @@ func (r *V1) stream(ctx *fiber.Ctx) error {
 		bw.WriteString("\r\n")
 		bw.Flush()
 
-		// Start execution in background — writes events to Redis
-		// doneCh signals that the execution goroutine has exited
+		// Start execution in background — writes events to EventStore.
+		// doneCh signals that the execution goroutine has exited.
 		doneCh := make(chan struct{})
 		go func() {
 			defer close(doneCh)
@@ -102,41 +106,36 @@ func (r *V1) stream(ctx *fiber.Ctx) error {
 		bw.Flush()
 
 		// Ping ticker keeps the connection alive.
-		// If the stream is idle, we send a ping every 30s so
-		// reverse proxies and browsers don't drop the connection.
 		pingTicker := time.NewTicker(pingInterval)
 		defer pingTicker.Stop()
 
 		// Track last activity for dead worker detection
 		lastActivity := time.Now()
 
-		// Stream events from Redis via StreamHub
 		for {
 			select {
-			case entry, ok := <-sub.C:
+			case stored, ok := <-sub.C:
 				if !ok {
 					return
-				}
-				payload := entry.Values["payload"]
-				if payload == "" {
-					continue
 				}
 
 				lastActivity = time.Now()
 
-				sse.WriteEvent(bw, sse.Event{Data: payload})
+				// Serialize event via gateway (SSEGateway = direct JSON)
+				payload, err := r.gateway.Convert(stored.Event)
+				if err != nil {
+					continue
+				}
+
+				sse.WriteEvent(bw, sse.Event{Data: string(payload)})
 				if flushErr := bw.Flush(); flushErr != nil {
 					return
 				}
 
-				// Check for terminal event
-					evt, err := entity.UnmarshalEvent([]byte(payload))
-				if err == nil {
-					// Terminal event detection via type assertion
-					switch evt.(type) {
-					case *entity.AgentRunFinishEvent, *entity.AgentErrorEvent:
-						return
-					}
+				// Check for terminal event via type assertion
+				switch stored.Event.(type) {
+				case *entity.AgentRunFinishEvent, *entity.AgentErrorEvent:
+					return
 				}
 
 			case <-pingTicker.C:
@@ -149,7 +148,6 @@ func (r *V1) stream(ctx *fiber.Ctx) error {
 				// Dead worker detection: if no events received for too long,
 				// the execution goroutine may have crashed silently.
 				if time.Since(lastActivity) > deadWorkerTimeout {
-					// Check if execution goroutine is still running
 					select {
 					case <-doneCh:
 						// Execution exited without terminal event — write error
@@ -170,22 +168,36 @@ func (r *V1) stream(ctx *fiber.Ctx) error {
 	return nil
 }
 
-// runEventStreamWriter implements usecase.StreamEventWriter by writing to a Redis Stream.
-type runEventStreamWriter struct {
-	rdb       *redis.Redis
-	streamKey string
+// eventStoreWriter implements usecase.StreamEventWriter by appending to EventStore.
+type eventStoreWriter struct {
+	store     stream.EventStore
+	sessionID string
+	runID     string
 }
 
-func (w *runEventStreamWriter) WriteEvent(ctx context.Context, event entity.StreamEvent) error {
-	data, err := json.Marshal(event)
-	if err != nil {
-		return err
+func (w *eventStoreWriter) WriteEvent(ctx context.Context, event entity.StreamEvent) error {
+	_, err := w.store.Append(ctx, w.sessionID, w.runID, event)
+	return err
+}
+
+// parseLastSequence converts the last_event_id query parameter to a sequence number.
+// Supports formats: "" / "0" / "$" → 0 (start from beginning),
+// "123" → 123, "123-0" → 123 (Redis Stream ID format).
+func parseLastSequence(s string) int64 {
+	s = strings.TrimSpace(s)
+	if s == "" || s == "0" || s == "$" {
+		return 0
 	}
-	_, err = w.rdb.StreamAdd(ctx, w.streamKey, map[string]any{"payload": string(data)}, eventStreamMaxLen)
-	if err != nil {
-		return err
+	// Try plain integer first
+	if seq, err := strconv.ParseInt(s, 10, 64); err == nil {
+		return seq
 	}
-	// Best-effort TTL so finished run streams expire
-	w.rdb.Expire(ctx, w.streamKey, eventStreamTTL)
-	return nil
+	// Try "seq-0" format (Redis Stream ID)
+	parts := strings.SplitN(s, "-", 2)
+	if len(parts) > 0 {
+		if seq, err := strconv.ParseInt(parts[0], 10, 64); err == nil {
+			return seq
+		}
+	}
+	return 0
 }
