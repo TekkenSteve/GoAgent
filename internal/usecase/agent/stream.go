@@ -270,15 +270,8 @@ func (uc *UseCase) executeStreamLoop(ctx context.Context, req entity.StreamReque
 			messages = append(messages, toolMsg)
 			uc.appendMessageToWAL(ctx, req.RunID, toolMsg)
 		}
-
-		// Phase 4 placeholder: non-blocking command channel check
-		// select {
-		// case cmd := <-uc.commandCh:
-		//     // handle cancel/pause/resume
-		// default:
-		// }
 	}
 }
 
-func intPtr(n int) *int     { return &n }
+func intPtr(n int) *int    { return &n }
 func boolPtr(b bool) *bool { return &b }

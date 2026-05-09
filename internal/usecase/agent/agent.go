@@ -43,7 +43,6 @@ type UseCase struct {
 	wal        repo.WALAppender
 	compressor repo.ContextCompressor
 	toolDefs   usecase.ToolDefProvider
-	commandCh  chan entity.StreamEvent // Phase 1: nil; Phase 4: wired for cancel/pause/resume
 }
 
 // New -.

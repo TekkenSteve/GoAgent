@@ -19,6 +19,7 @@ import (
 	"github.com/TekkenSteve/GoAgent/internal/controller/grpc"
 	nats_rpc "github.com/TekkenSteve/GoAgent/internal/controller/nats_rpc"
 	"github.com/TekkenSteve/GoAgent/internal/controller/restapi"
+	restapiv1 "github.com/TekkenSteve/GoAgent/internal/controller/restapi/v1"
 	pipelinepkg "github.com/TekkenSteve/GoAgent/internal/repo/pipeline"
 	"github.com/TekkenSteve/GoAgent/internal/repo/compressor"
 	"github.com/TekkenSteve/GoAgent/internal/repo/framework"
@@ -44,6 +45,9 @@ func Run(cfg *config.Config) { //nolint: gocyclo,cyclop,funlen,gocritic,nolintli
 	var temporalRuntime *agentfwruntime.TemporalRuntime
 	var batchWriter *pipelinepkg.BatchWriter
 	var agentUC *agent.UseCase
+	var wsHub *stream.WebSocketHub
+	var cancelWorkflow restapiv1.CancelWorkflowFn
+	var signalWorkflow restapiv1.SignalWorkflowFn
 
 	fwCfg := agentfwconfig.FromAppConfig(cfg)
 	selector := agentfwops.NewRolloutSelector(agentfwops.RolloutConfig{
@@ -78,6 +82,9 @@ func Run(cfg *config.Config) { //nolint: gocyclo,cyclop,funlen,gocritic,nolintli
 	eventStore := stream.NewRedisEventStore(rdb, eventSequencer)
 	streamSubscriber := stream.NewRedisSubscriber(rdb.Hub())
 	sseGateway := stream.NewSSEGateway()
+
+	// WebSocket Hub for bidirectional streaming (Phase 4)
+	wsHub = stream.NewWebSocketHub()
 
 	if !controlDecision.UseTemporal {
 		l.Info("app - Run - agent framework temporal worker skipped: %s", controlDecision.Reason)
@@ -142,6 +149,7 @@ func Run(cfg *config.Config) { //nolint: gocyclo,cyclop,funlen,gocritic,nolintli
 
 			agentUC = agent.New(llmProvider, toolExecutor, wal, agentCompressor, toolRegistry)
 
+
 			activities = orchestration.NewAgentActivities(agentUC, eventStore)
 			l.Info("app - Run - agent components initialized")
 		} else {
@@ -154,6 +162,17 @@ func Run(cfg *config.Config) { //nolint: gocyclo,cyclop,funlen,gocritic,nolintli
 		}
 
 		temporalRuntime = runtime
+
+		// SignalWorkflow function for WS handler (Temporal mode) — pause/resume.
+		signalWorkflow = func(ctx context.Context, workflowID, signalName string, arg interface{}) error {
+			return temporalRuntime.Client.SignalWorkflow(ctx, workflowID, "", signalName, arg)
+		}
+
+		// CancelWorkflow function for WS handler (Temporal mode) — cancel.
+		cancelWorkflow = func(ctx context.Context, workflowID string) error {
+			return temporalRuntime.Client.CancelWorkflow(ctx, workflowID, "")
+		}
+
 		l.Info("app - Run - agent framework worker started on task queue: %s", fwCfg.Temporal.TaskQueue)
 	}
 
@@ -202,7 +221,7 @@ func Run(cfg *config.Config) { //nolint: gocyclo,cyclop,funlen,gocritic,nolintli
 	// HTTP Server
 	httpServer := httpserver.New(l, httpserver.Port(cfg.HTTP.Port), httpserver.Prefork(cfg.HTTP.UsePreforkMode))
 	restapi.NewRouter(httpServer.App, cfg, agentExecutor, historyUC, streamExecutor, l, rdb,
-		eventStore, streamSubscriber, sseGateway)
+		eventStore, streamSubscriber, sseGateway, wsHub, cancelWorkflow, signalWorkflow)
 
 	// Start servers
 	rmqServer.Start()

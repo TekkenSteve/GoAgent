@@ -33,6 +33,11 @@ type StreamWorkflowInput struct {
 // StreamWorkflow is a single-activity workflow that executes the agent with
 // streaming output. Events are written to the EventStore by the activity
 // and consumed by the TemporalStreamExecutor on the controller side.
+//
+// The workflow accepts "agent-command" signals for external control:
+//   - "cancel": completes the workflow, cancelling the running activity
+//   - "pause":  enters a wait loop until "resume" or "cancel" is received
+//   - "resume": exits the pause wait loop
 func StreamWorkflow(ctx workflow.Context, input StreamWorkflowInput) error {
 	ctx = workflow.WithActivityOptions(ctx, workflow.ActivityOptions{
 		StartToCloseTimeout: 10 * time.Minute,
@@ -44,7 +49,61 @@ func StreamWorkflow(ctx workflow.Context, input StreamWorkflowInput) error {
 		},
 	})
 
-	return workflow.ExecuteActivity(ctx, StreamStepActivityName, input).Get(ctx, nil)
+	// Signal channel for external control (cancel/pause/resume).
+	// The controller sends signals via client.SignalWorkflow().
+	signalCh := workflow.GetSignalChannel(ctx, "agent-command")
+	var signal string
+
+	future := workflow.ExecuteActivity(ctx, StreamStepActivityName, input)
+
+	// Activity-completion select loop with interleaved signal handling.
+	// Signals are checked between activity heartbeats and on completion.
+	for {
+		selector := workflow.NewSelector(ctx)
+
+		var gotSignal bool
+		selector.AddReceive(signalCh, func(c workflow.ReceiveChannel, _ bool) {
+			_ = c.Receive(ctx, &signal)
+			gotSignal = true
+		})
+
+		var futureDone bool
+		selector.AddFuture(future, func(f workflow.Future) {
+			futureDone = true
+		})
+
+		selector.Select(ctx)
+
+		if gotSignal {
+			_ = gotSignal
+			switch signal {
+			case "cancel":
+				// Workflow returns immediately → Temporal cancels the
+				// running activity → activity ctx.Err() fires → cleanup.
+				return nil
+			case "pause":
+				// Wait for resume or cancel signal. The activity keeps
+				// running during pause (event streaming continues).
+			pauseLoop:
+				for {
+					var s string
+					signalCh.Receive(ctx, &s)
+					switch s {
+					case "resume":
+						break pauseLoop
+					case "cancel":
+						return nil
+					}
+				}
+				// Resume: fall through and continue the select loop.
+				continue
+			}
+		}
+
+		if futureDone {
+			return future.Get(ctx, nil)
+		}
+	}
 }
 
 // temporalEventWriter implements usecase.StreamEventWriter by appending events
