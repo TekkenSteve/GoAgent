@@ -10,11 +10,8 @@ import (
 )
 
 // NewAgentRoutes registers agent-related REST API endpoints under the /agent group.
-func NewAgentRoutes(apiV1Group fiber.Router, t usecase.AgentExecutor, h usecase.HistoryQuery, s usecase.StreamExecutor, l logger.Interface, rdb *redis.Redis) {
-	sequencer := stream.NewRedisSequencer(rdb)
-	eventStore := stream.NewRedisEventStore(rdb, sequencer)
-	subscriber := stream.NewRedisSubscriber(rdb.Hub())
-	gateway := stream.NewSSEGateway()
+func NewAgentRoutes(apiV1Group fiber.Router, t usecase.AgentExecutor, h usecase.HistoryQuery, s usecase.StreamExecutor, l logger.Interface, rdb *redis.Redis,
+	eventStore stream.EventStore, subscriber stream.Subscriber, gateway stream.StatelessGateway) {
 
 	r := &V1{
 		t: t, h: h, s: s, l: l, v: validator.New(validator.WithRequiredStructEnabled()), rdb: rdb,

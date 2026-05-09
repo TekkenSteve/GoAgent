@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/TekkenSteve/GoAgent/internal/agentfw/stream"
 	"github.com/TekkenSteve/GoAgent/internal/entity"
 	"github.com/TekkenSteve/GoAgent/internal/usecase/agent"
 )
@@ -34,12 +35,13 @@ type StepActivityOutput struct {
 
 // AgentActivities provides Temporal activity implementations for agent execution.
 type AgentActivities struct {
-	agentUC *agent.UseCase
+	agentUC    *agent.UseCase
+	eventStore stream.EventStore
 }
 
 // NewAgentActivities creates activities wired to the agent usecase.
-func NewAgentActivities(uc *agent.UseCase) *AgentActivities {
-	return &AgentActivities{agentUC: uc}
+func NewAgentActivities(uc *agent.UseCase, eventStore stream.EventStore) *AgentActivities {
+	return &AgentActivities{agentUC: uc, eventStore: eventStore}
 }
 
 // ExecuteStep runs one agent step (LLM call + tool rounds) via the usecase.
