@@ -26,6 +26,17 @@ type (
 		WarmStateRepo
 		ColdStateRepo
 	}
+	// AgentRepo persists agent definitions and version snapshots.
+	AgentRepo interface {
+		Create(ctx context.Context, req entity.CreateAgentRequest) (entity.AgentRecord, error)
+		Get(ctx context.Context, agentID string) (entity.AgentRecord, bool, error)
+		Update(ctx context.Context, agentID string, req entity.UpdateAgentRequest) (entity.AgentRecord, error)
+		Delete(ctx context.Context, agentID string) error
+		ListByAccount(ctx context.Context, accountID string) ([]entity.AgentRecord, error)
+		CreateVersion(ctx context.Context, record entity.AgentVersionRecord) error
+		GetVersion(ctx context.Context, versionID string) (entity.AgentVersionRecord, bool, error)
+		ListVersions(ctx context.Context, agentID string) ([]entity.AgentVersionRecord, error)
+	}
 	// LLMProvider performs LLM inference.
 	LLMProvider interface {
 		Chat(ctx context.Context, req entity.LLMRequest) (entity.LLMResponse, error)
@@ -54,5 +65,6 @@ type (
 		Pause(ctx context.Context, runID string) error
 		Resume(ctx context.Context, runID string) error
 		Cancel(ctx context.Context, runID string) error
+		StartOrchestration(ctx context.Context, input entity.OrchestrationInput) (entity.RunStatus, error)
 	}
 )

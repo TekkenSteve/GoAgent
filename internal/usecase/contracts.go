@@ -18,6 +18,10 @@ type (
 		ListMessages(ctx context.Context, runID string, limit, offset uint64) ([]entity.MessageRecord, error)
 		ListToolResults(ctx context.Context, runID string, limit, offset uint64) ([]entity.ToolResultRecord, error)
 	}
+	// OrchestrationExecutor starts and manages orchestration workflows.
+	OrchestrationExecutor interface {
+		ExecuteOrchestration(ctx context.Context, input entity.OrchestrationInput) (entity.RunStatus, error)
+	}
 	// StreamEventWriter is the destination for streaming events.
 	// Implementations write to Redis Stream, channel, etc.
 	StreamEventWriter interface {

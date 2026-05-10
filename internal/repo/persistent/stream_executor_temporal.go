@@ -12,8 +12,8 @@ import (
 
 // TemporalStreamExecutor implements usecase.StreamExecutor by running agent
 // execution inside a Temporal workflow. Events are written to the EventStore
-// by the workflow activity via temporalEventWriter with heartbeats, and the
-// controller reads them via its existing EventStore subscription.
+// by workflow activities, and the controller reads them via its existing
+// EventStore subscription.
 type TemporalStreamExecutor struct {
 	client    client.Client
 	taskQueue string
@@ -28,13 +28,14 @@ func NewTemporalStreamExecutor(c client.Client, taskQueue string) *TemporalStrea
 }
 
 // ExecuteStream starts a Temporal streaming workflow and returns immediately.
-// The workflow activity writes events to the EventStore, which the controller
+// The workflow activities write events to the EventStore, which the controller
 // consumes via its EventStore subscription.
 func (e *TemporalStreamExecutor) ExecuteStream(ctx context.Context, req entity.StreamRequest, _ usecase.StreamEventWriter) error {
 	workflowID := "agentfw-stream-" + req.RunID
 
-	input := orchestration.StreamWorkflowInput{
+	input := orchestration.InitStreamInput{
 		SessionID:    req.RunID,
+		RunID:        req.RunID,
 		SystemPrompt: req.SystemPrompt,
 		Message:      req.Message,
 		History:      req.History,

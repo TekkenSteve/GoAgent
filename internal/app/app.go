@@ -21,6 +21,7 @@ import (
 	"github.com/TekkenSteve/GoAgent/internal/controller/restapi"
 	restapiv1 "github.com/TekkenSteve/GoAgent/internal/controller/restapi/v1"
 	pipelinepkg "github.com/TekkenSteve/GoAgent/internal/repo/pipeline"
+	"github.com/TekkenSteve/GoAgent/internal/repo/cached"
 	"github.com/TekkenSteve/GoAgent/internal/repo/compressor"
 	"github.com/TekkenSteve/GoAgent/internal/repo/framework"
 	"github.com/TekkenSteve/GoAgent/internal/repo/toolkit"
@@ -67,6 +68,8 @@ func Run(cfg *config.Config) { //nolint: gocyclo,cyclop,funlen,gocritic,nolintli
 	defer pg.Close()
 
 	messageRepo := temporalrepo.NewMessageRepo(pg)
+	persistentAgentRepo := temporalrepo.NewAgentRepo(pg)
+	agentRepo := cached.NewAgentRepo(persistentAgentRepo)
 
 	ctx := context.Background()
 
@@ -147,7 +150,7 @@ func Run(cfg *config.Config) { //nolint: gocyclo,cyclop,funlen,gocritic,nolintli
 			batchWriter.Start()
 			defer batchWriter.Stop()
 
-			agentUC = agent.New(llmProvider, toolExecutor, wal, agentCompressor, toolRegistry)
+			agentUC = agent.New(llmProvider, toolExecutor, wal, agentCompressor, toolRegistry, agentRepo)
 
 
 			activities = orchestration.NewAgentActivities(agentUC, eventStore)

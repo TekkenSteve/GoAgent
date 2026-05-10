@@ -36,25 +36,10 @@ func NewExecutorTemporal(c client.Client, cfg config.Temporal) *ExecutorTemporal
 func (r *ExecutorTemporal) StartExecution(ctx context.Context, req entity.ExecuteRequest) (entity.RunStatus, error) {
 	workflowID := r.opts.workflowIDPrefix + req.RunID
 
-	input := orchestration.WorkflowInput{
-		Request: orchestration.ExecuteRequest{
-			RunID:           req.RunID,
-			ThreadID:        req.ThreadID,
-			ProjectID:       req.ProjectID,
-			AccountID:       req.AccountID,
-			ModelRef:        req.ModelRef,
-			AgentID:         req.AgentID,
-			AgentVersionID:  req.AgentVersionID,
-			AgentConfigVer:  req.AgentConfigVer,
-			ToolSchemaVer:   req.ToolSchemaVer,
-			UserMessage:     req.UserMessage,
-			IsNewThread:     req.IsNewThread,
-			BypassAdmission: req.BypassAdmission,
-			IdempotencyKey:  req.IdempotencyKey,
-			EventSchemaVer:  req.EventSchemaVer,
-			WorkflowVersion: req.WorkflowVersion,
-			RequestedAt:     req.RequestedAt,
-		},
+	input := orchestration.AgentWorkflowInput{
+		RunID:   req.RunID,
+		Message: req.UserMessage,
+		Config:  entity.LLMConfig{Model: req.ModelRef},
 	}
 
 	opts := client.StartWorkflowOptions{
@@ -91,10 +76,31 @@ func (r *ExecutorTemporal) GetStatus(ctx context.Context, runID string) (entity.
 	return status, nil
 }
 
+func (r *ExecutorTemporal) StartOrchestration(ctx context.Context, input entity.OrchestrationInput) (entity.RunStatus, error) {
+	workflowID := "orch-" + r.opts.workflowIDPrefix + input.RunID
+
+	opts := client.StartWorkflowOptions{
+		ID:        workflowID,
+		TaskQueue: r.opts.taskQueue,
+	}
+
+	_, err := r.client.ExecuteWorkflow(ctx, opts, orchestration.OrchestrationWorkflowName, input)
+	if err != nil {
+		return entity.RunStatus{}, fmt.Errorf("ExecutorTemporal - StartOrchestration - r.client.ExecuteWorkflow: %w", err)
+	}
+
+	return entity.RunStatus{
+		RunID:          input.RunID,
+		LifecycleState: string(entity.LifecycleCreated),
+		Step:           0,
+		UpdatedAt:      time.Now(),
+	}, nil
+}
+
 func (r *ExecutorTemporal) Pause(ctx context.Context, runID string) error {
 	workflowID := r.opts.workflowIDPrefix + runID
 
-	if err := r.client.SignalWorkflow(ctx, workflowID, "", orchestration.SignalPause, nil); err != nil {
+	if err := r.client.SignalWorkflow(ctx, workflowID, "", orchestration.AgentCommandSignal, "pause"); err != nil {
 		return fmt.Errorf("ExecutorTemporal - Pause - r.client.SignalWorkflow: %w", err)
 	}
 
@@ -104,7 +110,7 @@ func (r *ExecutorTemporal) Pause(ctx context.Context, runID string) error {
 func (r *ExecutorTemporal) Resume(ctx context.Context, runID string) error {
 	workflowID := r.opts.workflowIDPrefix + runID
 
-	if err := r.client.SignalWorkflow(ctx, workflowID, "", orchestration.SignalResume, nil); err != nil {
+	if err := r.client.SignalWorkflow(ctx, workflowID, "", orchestration.AgentCommandSignal, "resume"); err != nil {
 		return fmt.Errorf("ExecutorTemporal - Resume - r.client.SignalWorkflow: %w", err)
 	}
 
@@ -114,7 +120,7 @@ func (r *ExecutorTemporal) Resume(ctx context.Context, runID string) error {
 func (r *ExecutorTemporal) Cancel(ctx context.Context, runID string) error {
 	workflowID := r.opts.workflowIDPrefix + runID
 
-	if err := r.client.SignalWorkflow(ctx, workflowID, "", orchestration.SignalCancel, nil); err != nil {
+	if err := r.client.SignalWorkflow(ctx, workflowID, "", orchestration.AgentCommandSignal, "cancel"); err != nil {
 		return fmt.Errorf("ExecutorTemporal - Cancel - r.client.SignalWorkflow: %w", err)
 	}
 

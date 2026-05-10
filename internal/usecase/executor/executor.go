@@ -28,6 +28,15 @@ func (uc *UseCase) Execute(ctx context.Context, req entity.ExecuteRequest) (enti
 	return status, nil
 }
 
+// ExecuteOrchestration starts an OrchestrationWorkflow from a TeamSpec or step queue.
+func (uc *UseCase) ExecuteOrchestration(ctx context.Context, input entity.OrchestrationInput) (entity.RunStatus, error) {
+	status, err := uc.temporal.StartOrchestration(ctx, input)
+	if err != nil {
+		return entity.RunStatus{}, fmt.Errorf("UseCase - ExecuteOrchestration - uc.temporal.StartOrchestration: %w", err)
+	}
+	return status, nil
+}
+
 // GetStatus -.
 func (uc *UseCase) GetStatus(ctx context.Context, runID string) (entity.RunStatus, error) {
 	status, err := uc.temporal.GetStatus(ctx, runID)

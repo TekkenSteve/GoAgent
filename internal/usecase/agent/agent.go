@@ -5,10 +5,12 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/TekkenSteve/GoAgent/internal/entity"
 	"github.com/TekkenSteve/GoAgent/internal/repo"
 	"github.com/TekkenSteve/GoAgent/internal/usecase"
+	"github.com/google/uuid"
 )
 
 const maxToolRounds = 10
@@ -43,11 +45,211 @@ type UseCase struct {
 	wal        repo.WALAppender
 	compressor repo.ContextCompressor
 	toolDefs   usecase.ToolDefProvider
+	agentRepo  repo.AgentRepo // optional; nil in tests or when agent management is not wired
 }
 
 // New -.
-func New(llm repo.LLMProvider, tools repo.ToolExecutor, wal repo.WALAppender, compressor repo.ContextCompressor, toolDefs usecase.ToolDefProvider) *UseCase {
-	return &UseCase{llm: llm, tools: tools, wal: wal, compressor: compressor, toolDefs: toolDefs}
+func New(llm repo.LLMProvider, tools repo.ToolExecutor, wal repo.WALAppender, compressor repo.ContextCompressor, toolDefs usecase.ToolDefProvider, agentRepo repo.AgentRepo) *UseCase {
+	return &UseCase{llm: llm, tools: tools, wal: wal, compressor: compressor, toolDefs: toolDefs, agentRepo: agentRepo}
+}
+
+// ——— Fine-grained step types for Temporal-native orchestration ———
+
+// LLMStepReq is the input for a single LLM call.
+type LLMStepReq struct {
+	RunID    string
+	Messages []entity.Message
+	Tools    []entity.ToolDef
+	Config   entity.LLMConfig
+}
+
+// LLMStepResult is the output of a single LLM call.
+type LLMStepResult struct {
+	AssistantMsg entity.Message
+	ToolCalls    []entity.ToolCall
+	Usage        entity.Usage
+	FinishReason string
+}
+
+// ToolExecResult is the output of a single tool execution.
+type ToolExecResult struct {
+	ToolMsg    entity.Message
+	Output     string
+	ExitCode   int
+	IsError    bool
+	DurationMs int64
+}
+
+// LLMStep performs a single LLM call with optional compression.
+// It writes the assistant message to WAL and returns the result.
+func (uc *UseCase) LLMStep(ctx context.Context, runID string, messages []entity.Message, tools []entity.ToolDef, config entity.LLMConfig) (*LLMStepResult, error) {
+	llmReq := entity.LLMRequest{
+		Messages: messages,
+		Tools:    tools,
+		Config:   config,
+	}
+
+	resp, err := uc.llm.Chat(ctx, llmReq)
+	if err != nil {
+		return nil, classifyLLMError(err)
+	}
+
+	assistantMsg := entity.Message{
+		Role:    entity.RoleAssistant,
+		Content: resp.Content,
+	}
+	if len(resp.ToolCalls) > 0 {
+		assistantMsg.ToolCalls = resp.ToolCalls
+	}
+
+	// Best-effort WAL append
+	uc.appendMessageToWAL(ctx, runID, assistantMsg)
+
+	return &LLMStepResult{
+		AssistantMsg: assistantMsg,
+		ToolCalls:    resp.ToolCalls,
+		Usage:        resp.Usage,
+	}, nil
+}
+
+// ExecTool executes a single tool call and writes results to WAL.
+func (uc *UseCase) ExecTool(ctx context.Context, runID string, tc entity.ToolCall) (*ToolExecResult, error) {
+	toolReq := entity.ToolRequest{
+		RunID:      runID,
+		ToolCallID: tc.ID,
+		ToolName:   tc.Function.Name,
+		Args:       parseArgsJSON(tc.Function.Arguments),
+	}
+
+	execStart := time.Now()
+	result, execErr := uc.tools.Execute(ctx, toolReq)
+	durationMs := time.Since(execStart).Milliseconds()
+
+	uc.appendToolResultToWAL(ctx, runID, result, tc)
+
+	output := ""
+	exitCode := 0
+	isError := execErr != nil
+
+	if execErr != nil {
+		output = fmt.Sprintf("Error executing tool %q: %v", tc.Function.Name, execErr)
+		exitCode = 1
+	} else if result.Output != nil {
+		if b, err := json.Marshal(result.Output); err == nil {
+			output = string(b)
+		}
+	}
+
+	content := ""
+	if execErr != nil {
+		content = fmt.Sprintf("Error executing tool %q: %v", tc.Function.Name, execErr)
+	} else if result.Output != nil {
+		content = fmt.Sprintf("%v", result.Output)
+	}
+
+	toolMsg := entity.Message{
+		Role:       entity.RoleTool,
+		ToolCallID: tc.ID,
+		Content:    content,
+	}
+	uc.appendMessageToWAL(ctx, runID, toolMsg)
+
+	return &ToolExecResult{
+		ToolMsg:    toolMsg,
+		Output:     output,
+		ExitCode:   exitCode,
+		IsError:    isError,
+		DurationMs: durationMs,
+	}, nil
+}
+
+// CompressIfNeeded compresses messages when approaching context limits.
+// Returns the (possibly compressed) messages and whether compression occurred.
+func (uc *UseCase) CompressIfNeeded(ctx context.Context, messages []entity.Message, config entity.LLMConfig) ([]entity.Message, bool, error) {
+	if uc.compressor == nil {
+		return messages, false, nil
+	}
+	compressedMsgs, compressed, err := uc.compressor.Compress(ctx, messages, config)
+	if err != nil {
+		return messages, false, err
+	}
+	return compressedMsgs, compressed, nil
+}
+
+// ——— Agent management ———
+
+// GetAgent returns the agent record for the given ID, using cache when available.
+func (uc *UseCase) GetAgent(ctx context.Context, agentID string) (entity.AgentRecord, error) {
+	if uc.agentRepo == nil {
+		return entity.AgentRecord{}, fmt.Errorf("agent repo not available")
+	}
+	record, exists, err := uc.agentRepo.Get(ctx, agentID)
+	if err != nil {
+		return entity.AgentRecord{}, fmt.Errorf("GetAgent: %w", err)
+	}
+	if !exists {
+		return entity.AgentRecord{}, fmt.Errorf("agent not found: %s", agentID)
+	}
+	return record, nil
+}
+
+// UpdateAgent updates an agent record. If config fields (system_prompt, model_ref,
+// config) change, it auto-creates a version snapshot before applying the update.
+func (uc *UseCase) UpdateAgent(ctx context.Context, agentID string, req entity.UpdateAgentRequest) (entity.AgentRecord, error) {
+	if uc.agentRepo == nil {
+		return entity.AgentRecord{}, fmt.Errorf("agent repo not available")
+	}
+
+	// Fetch current record to detect field changes
+	current, err := uc.GetAgent(ctx, agentID)
+	if err != nil {
+		return entity.AgentRecord{}, err
+	}
+
+	// Detect config-relevant field changes and auto-version
+	systemPromptChanged := req.SystemPrompt != nil && *req.SystemPrompt != current.SystemPrompt
+	modelRefChanged := req.ModelRef != nil && *req.ModelRef != current.ModelRef
+	configChanged := req.Config != nil
+
+	if systemPromptChanged || modelRefChanged || configChanged {
+		newVersionID := uuid.New().String()
+		now := time.Now().UTC()
+
+		version := entity.AgentVersionRecord{
+			VersionID:   newVersionID,
+			AgentID:     agentID,
+			VersionName: fmt.Sprintf("v-%s", now.Format("20060102-150405")),
+			SystemPrompt: func() string {
+				if req.SystemPrompt != nil {
+					return *req.SystemPrompt
+				}
+				return current.SystemPrompt
+			}(),
+			ModelRef: func() string {
+				if req.ModelRef != nil {
+					return *req.ModelRef
+				}
+				return current.ModelRef
+			}(),
+			Config: func() entity.LLMConfig {
+				if req.Config != nil {
+					return *req.Config
+				}
+				return current.Config
+			}(),
+			ChangeDescription: "auto-saved on config update",
+			CreatedAt:         now,
+		}
+
+		if err := uc.agentRepo.CreateVersion(ctx, version); err != nil {
+			return entity.AgentRecord{}, fmt.Errorf("UpdateAgent - create version: %w", err)
+		}
+
+		req.CurrentVersion = &newVersionID
+	}
+
+	// Delegate to repo for the actual DB write
+	return uc.agentRepo.Update(ctx, agentID, req)
 }
 
 // ExecuteStep runs one LLM invocation plus subsequent tool rounds.

@@ -1,45 +1,29 @@
 package orchestration
 
 import (
-	"context"
+	"encoding/json"
 	"fmt"
 	"time"
 
-	"github.com/TekkenSteve/GoAgent/internal/agentfw/stream"
 	"github.com/TekkenSteve/GoAgent/internal/entity"
-	"github.com/TekkenSteve/GoAgent/internal/usecase"
-	"go.temporal.io/sdk/activity"
 	"go.temporal.io/sdk/temporal"
 	"go.temporal.io/sdk/workflow"
 )
 
-const (
-	// StreamWorkflowName is the workflow type name for streaming agent execution.
-	StreamWorkflowName = "agentfw.stream-workflow.v1"
-	// StreamStepActivityName is the activity name for the streaming agent step.
-	StreamStepActivityName = "agentfw.stream-step-activity.v1"
-)
+const maxToolRounds = 10
 
-// StreamWorkflowInput is the serializable input for the streaming workflow.
-type StreamWorkflowInput struct {
-	SessionID    string
-	SystemPrompt string
-	Message      string
-	History      []entity.Message
-	Tools        []entity.ToolDef
-	Config       entity.LLMConfig
-}
-
-// StreamWorkflow is a single-activity workflow that executes the agent with
-// streaming output. Events are written to the EventStore by the activity
-// and consumed by the TemporalStreamExecutor on the controller side.
+// StreamAgentWorkflow is the streaming agent workflow with step-level activities.
+// Each LLM call and tool execution is a separate Temporal activity, providing
+// full visibility into the agent loop via workflow history.
 //
-// The workflow accepts "agent-command" signals for external control:
-//   - "cancel": completes the workflow, cancelling the running activity
-//   - "pause":  enters a wait loop until "resume" or "cancel" is received
-//   - "resume": exits the pause wait loop
-func StreamWorkflow(ctx workflow.Context, input StreamWorkflowInput) error {
-	ctx = workflow.WithActivityOptions(ctx, workflow.ActivityOptions{
+// Signals (agent-command):
+//   - "cancel": terminates the workflow immediately
+//   - "pause":   blocks until "resume" or "cancel"
+//   - "resume":  exits the pause loop
+func StreamAgentWorkflow(ctx workflow.Context, input InitStreamInput) error {
+	signalCh := workflow.GetSignalChannel(ctx, AgentCommandSignal)
+
+	ao := workflow.ActivityOptions{
 		StartToCloseTimeout: 10 * time.Minute,
 		HeartbeatTimeout:    30 * time.Second,
 		RetryPolicy: &temporal.RetryPolicy{
@@ -47,126 +31,134 @@ func StreamWorkflow(ctx workflow.Context, input StreamWorkflowInput) error {
 			MaximumInterval:    time.Minute,
 			MaximumAttempts:    3,
 		},
-	})
+	}
+	ctx = workflow.WithActivityOptions(ctx, ao)
 
-	// Signal channel for external control (cancel/pause/resume).
-	// The controller sends signals via client.SignalWorkflow().
-	signalCh := workflow.GetSignalChannel(ctx, "agent-command")
-	var signal string
+	// Init phase: write start events + Prep
+	var initResult InitStreamOutput
+	if err := workflow.ExecuteActivity(ctx, InitStreamActivityName, input).Get(ctx, &initResult); err != nil {
+		return fmt.Errorf("stream workflow - init: %w", err)
+	}
 
-	future := workflow.ExecuteActivity(ctx, StreamStepActivityName, input)
+	messages := initResult.Messages
+	tools := initResult.Tools
 
-	// Activity-completion select loop with interleaved signal handling.
-	// Signals are checked between activity heartbeats and on completion.
-	for {
-		selector := workflow.NewSelector(ctx)
+	// Agent loop
+	for round := 0; round < maxToolRounds; round++ {
+		if cancelled, _ := checkStreamSignal(signalCh, ctx); cancelled {
+			return nil
+		}
 
-		var gotSignal bool
-		selector.AddReceive(signalCh, func(c workflow.ReceiveChannel, _ bool) {
-			_ = c.Receive(ctx, &signal)
-			gotSignal = true
-		})
+		// Repair tool call pairing before LLM call — the workflow owns
+		// message lifecycle for the streaming path as well.
+		messages = entity.RepairToolCallPairing(messages)
 
-		var futureDone bool
-		selector.AddFuture(future, func(f workflow.Future) {
-			futureDone = true
-		})
+		// Streaming LLM call — writes delta events to EventStore
+		var llmResult LLMStreamOutput
+		if err := workflow.ExecuteActivity(ctx, LLMStreamActivityName, LLMStreamInput{
+			SessionID: input.SessionID,
+			RunID:     input.RunID,
+			Messages:  messages,
+			Tools:     tools,
+			Config:    input.Config,
+		}).Get(ctx, &llmResult); err != nil {
+			return fmt.Errorf("stream workflow - llm round %d: %w", round, err)
+		}
 
-		selector.Select(ctx)
+		// Track messages for next round
+		assistantMsg := entity.Message{Role: entity.RoleAssistant}
+		if len(llmResult.ToolCalls) > 0 {
+			assistantMsg.ToolCalls = llmResult.ToolCalls
+		}
+		messages = append(messages, assistantMsg)
 
-		if gotSignal {
-			_ = gotSignal
-			switch signal {
-			case "cancel":
-				// Workflow returns immediately → Temporal cancels the
-				// running activity → activity ctx.Err() fires → cleanup.
-				return nil
-			case "pause":
-				// Wait for resume or cancel signal. The activity keeps
-				// running during pause (event streaming continues).
-			pauseLoop:
-				for {
-					var s string
-					signalCh.Receive(ctx, &s)
-					switch s {
-					case "resume":
-						break pauseLoop
-					case "cancel":
-						return nil
-					}
-				}
-				// Resume: fall through and continue the select loop.
-				continue
+		if len(llmResult.ToolCalls) == 0 {
+			var usage *entity.Usage
+			if llmResult.Usage.TotalTokens > 0 {
+				usage = &llmResult.Usage
 			}
+			_ = workflow.ExecuteActivity(ctx, FinishStreamActivityName, FinishStreamInput{
+				SessionID: input.SessionID,
+				RunID:     input.RunID,
+				Event:     entity.NewAgentRunFinishEvent(llmResult.FinishReason, usage),
+			}).Get(ctx, nil)
+			return nil
 		}
 
-		if futureDone {
-			return future.Get(ctx, nil)
+		// Execute each tool call
+		for _, tc := range llmResult.ToolCalls {
+			if cancelled, _ := checkStreamSignal(signalCh, ctx); cancelled {
+				return nil
+			}
+
+			var toolResult ToolOutput
+			if err := workflow.ExecuteActivity(ctx, ToolExecStreamActivityName, ToolInput{
+				RunID:      input.RunID,
+				ToolCallID: tc.ID,
+				ToolName:   tc.Function.Name,
+				Args:       parseArgsJSON(tc.Function.Arguments),
+			}).Get(ctx, &toolResult); err != nil {
+				return fmt.Errorf("stream workflow - tool exec %s: %w", tc.Function.Name, err)
+			}
+
+			toolMsg := entity.Message{
+				Role:       entity.RoleTool,
+				ToolCallID: tc.ID,
+				Content:    toolResult.Output,
+			}
+			messages = append(messages, toolMsg)
 		}
 	}
-}
 
-// temporalEventWriter implements usecase.StreamEventWriter by appending events
-// to the EventStore and recording Temporal heartbeats for liveness tracking.
-// On activity retry, it replays the heartbeat to skip already-written events.
-type temporalEventWriter struct {
-	eventStore      stream.EventStore
-	sessionID       string
-	runID           string
-	resumeSequence  int64
-	currentSequence int64
-}
-
-func (w *temporalEventWriter) WriteEvent(ctx context.Context, event entity.StreamEvent) error {
-	// On retry, skip events that were already written in the previous attempt.
-	if w.currentSequence < w.resumeSequence {
-		w.currentSequence++
-		return nil
-	}
-
-	seq, err := w.eventStore.Append(ctx, w.sessionID, w.runID, event)
-	if err != nil {
-		return fmt.Errorf("temporal event writer append: %w", err)
-	}
-	w.currentSequence = seq
-
-	// Heartbeat notifies Temporal Server that the activity is still alive.
-	// The heartbeat payload carries the last written sequence for retry recovery.
-	activity.RecordHeartbeat(ctx, seq)
+	_ = workflow.ExecuteActivity(ctx, FinishStreamActivityName, FinishStreamInput{
+		SessionID: input.SessionID,
+		RunID:     input.RunID,
+		Event:     entity.NewAgentRunFinishEvent("max_rounds", nil),
+	}).Get(ctx, nil)
 	return nil
 }
 
-// ExecuteStreamingStep runs the agent with streaming output inside a Temporal activity.
-// Events are written to the EventStore via temporalEventWriter, which also records
-// heartbeats. On retry, the heartbeat payload allows skipping already-written events.
-func (a *AgentActivities) ExecuteStreamingStep(ctx context.Context, input StreamWorkflowInput) error {
-	actInfo := activity.GetInfo(ctx)
-
-	// Recover resume sequence from heartbeat on retry.
-	var resumeSequence int64
-	if err := activity.GetHeartbeatDetails(ctx, &resumeSequence); err != nil {
-		resumeSequence = 0
+// checkStreamSignal does a non-blocking read on the signal channel.
+// Returns true if the workflow should cancel.
+func checkStreamSignal(signalCh workflow.ReceiveChannel, ctx workflow.Context) (bool, error) {
+	var signal string
+	if ok := signalCh.ReceiveAsync(&signal); !ok {
+		return false, nil
 	}
-
-	writer := &temporalEventWriter{
-		eventStore:      a.eventStore,
-		sessionID:       input.SessionID,
-		runID:           actInfo.ActivityID,
-		resumeSequence:  resumeSequence,
-		currentSequence: 0,
+	switch signal {
+	case "cancel":
+		return true, nil
+	case "pause":
+		return waitForResume(signalCh, ctx)
+	case "resume":
+		return false, nil
 	}
-
-	req := entity.StreamRequest{
-		RunID:        input.SessionID,
-		SystemPrompt: input.SystemPrompt,
-		Message:      input.Message,
-		History:      input.History,
-		Tools:        input.Tools,
-		Config:       input.Config,
-	}
-
-	return a.agentUC.ExecuteStreamSync(ctx, req, writer)
+	return false, nil
 }
 
-// compile-time interface check
-var _ usecase.StreamEventWriter = (*temporalEventWriter)(nil)
+// waitForResume blocks the workflow until "resume" or "cancel" signal arrives.
+func waitForResume(signalCh workflow.ReceiveChannel, ctx workflow.Context) (bool, error) {
+	for {
+		var s string
+		signalCh.Receive(ctx, &s)
+		switch s {
+		case "resume":
+			return false, nil
+		case "cancel":
+			return true, nil
+		}
+	}
+}
+
+// parseArgsJSON parses a JSON object string into a map for tool execution.
+// This is called in workflow code (json.Unmarshal is deterministic on map[string]any).
+func parseArgsJSON(raw string) map[string]any {
+	if raw == "" {
+		return nil
+	}
+	var args map[string]any
+	if err := json.Unmarshal([]byte(raw), &args); err != nil {
+		return nil
+	}
+	return args
+}

@@ -1,64 +1,40 @@
 package orchestration
 
 import (
+	"fmt"
 	"time"
 
 	"github.com/TekkenSteve/GoAgent/internal/entity"
+	"go.temporal.io/sdk/temporal"
 	"go.temporal.io/sdk/workflow"
 )
 
-const (
-	// AgentWorkflowName is the public workflow type name for agent execution.
-	AgentWorkflowName = "agentfw.agent-workflow.v1"
-)
+// AgentWorkflow is the step-level agent workflow with fine-grained activities.
+// Each LLM call and tool execution is a separate Temporal activity, providing
+// full visibility into the agent loop via workflow history.
+//
+// Signal (agent-command):
+//   - "cancel": terminates the workflow immediately
+//   - "pause":   blocks until "resume" or "cancel"
+//   - "resume":  exits the pause loop
+func AgentWorkflow(ctx workflow.Context, input AgentWorkflowInput) (WorkflowResult, error) {
+	signalCh := workflow.GetSignalChannel(ctx, AgentCommandSignal)
 
-// WorkflowInput is the deterministic workflow input payload.
-type WorkflowInput struct {
-	Request      ExecuteRequest
-	SystemPrompt string // optional system instructions for the agent
-	// TargetSteps is used for deterministic progression in baseline orchestration.
-	TargetSteps int32
-	// Tools define available LLM-callable tool definitions.
-	Tools []entity.ToolDef
-	// ContinuePolicy controls Continue-As-New trigger checks.
-	ContinuePolicy ContinueAsNewPolicy
-	// Runtime hints are deterministic policy inputs from prior activity outputs.
-	HistoryLengthHint int
-	StateSizeHint     int
-	// Continuation payload from previous workflow run.
-	Continuation ContinuationPayload
-}
-
-// WorkflowResult is the deterministic workflow output payload.
-type WorkflowResult struct {
-	RunID          string
-	LifecycleState string
-	Step           int32
-	CompletedAt    time.Time
-}
-
-// AgentWorkflow is the agent orchestration workflow.
-func AgentWorkflow(ctx workflow.Context, input WorkflowInput) (WorkflowResult, error) {
-	targetSteps := input.TargetSteps
-	if targetSteps <= 0 {
-		targetSteps = 1
+	ao := workflow.ActivityOptions{
+		StartToCloseTimeout: 10 * time.Minute,
+		RetryPolicy: &temporal.RetryPolicy{
+			InitialInterval: time.Second,
+			MaximumInterval: time.Minute,
+			MaximumAttempts: 3,
+		},
 	}
+	ctx = workflow.WithActivityOptions(ctx, ao)
 
 	status := RunStatus{
-		RunID:          input.Request.RunID,
-		LifecycleState: "created",
+		RunID:          input.RunID,
+		LifecycleState: "running",
 		Step:           input.Continuation.CarriedStep,
 		UpdatedAt:      workflow.Now(ctx),
-	}
-	if status.RunID == "" {
-		status.RunID = input.Continuation.RunID
-	}
-	baseRequestedAt := input.Continuation.InitialRequestedAt
-	if baseRequestedAt.IsZero() {
-		baseRequestedAt = input.Request.RequestedAt
-	}
-	if baseRequestedAt.IsZero() {
-		baseRequestedAt = status.UpdatedAt
 	}
 
 	if err := workflow.SetQueryHandler(ctx, QueryRunStatus, func() (RunStatus, error) {
@@ -67,27 +43,45 @@ func AgentWorkflow(ctx workflow.Context, input WorkflowInput) (WorkflowResult, e
 		return WorkflowResult{}, err
 	}
 
-	status.LifecycleState = "running"
-	status.UpdatedAt = workflow.Now(ctx)
-
-	ao := workflow.ActivityOptions{
-		StartToCloseTimeout: 300 * time.Second,
+	// Init phase: Prepare
+	var prepResult PrepareOutput
+	if err := workflow.ExecuteActivity(ctx, PrepareActivityName, PrepareInput{
+		SystemPrompt: input.SystemPrompt,
+		Message:      input.Message,
+		History:      input.History,
+		Tools:        input.Tools,
+		Config:       input.Config,
+	}).Get(ctx, &prepResult); err != nil {
+		return WorkflowResult{
+			RunID:          input.RunID,
+			LifecycleState: "failed",
+			Step:           status.Step,
+			CompletedAt:    workflow.Now(ctx),
+		}, err
 	}
-	ctx = workflow.WithActivityOptions(ctx, ao)
 
-	// Accumulated conversation messages across steps
-	var messages []entity.Message
+	messages := prepResult.Messages
+	tools := prepResult.Tools
 
-	llmConfig := entity.LLMConfig{
-		Model: input.Request.ModelRef,
+	if !prepResult.CanProceed() {
+		return WorkflowResult{
+			RunID:          input.RunID,
+			LifecycleState: "failed",
+			Step:           status.Step,
+			CompletedAt:    workflow.Now(ctx),
+		}, fmt.Errorf("agent workflow - prep checks failed: billing=%v limits=%v errors=%v",
+			prepResult.Billing, prepResult.Limits, prepResult.Errors)
 	}
 
-	for status.Step < targetSteps {
-		cancelled, err := applyPendingControlSignals(ctx, &status)
-		if err != nil {
-			return WorkflowResult{}, err
-		}
-		if cancelled {
+	// Track base time for Continue-As-New wall-clock check
+	baseRequestedAt := input.Continuation.InitialRequestedAt
+	if baseRequestedAt.IsZero() {
+		baseRequestedAt = workflow.Now(ctx)
+	}
+
+	// Agent loop
+	for round := 0; round < maxToolRounds; round++ {
+		if cancelled, _ := checkStreamSignal(signalCh, ctx); cancelled {
 			return WorkflowResult{
 				RunID:          status.RunID,
 				LifecycleState: "cancelled",
@@ -96,12 +90,49 @@ func AgentWorkflow(ctx workflow.Context, input WorkflowInput) (WorkflowResult, e
 			}, nil
 		}
 
-		if status.LifecycleState == "paused" {
-			cancelled, err = waitForResumeOrCancel(ctx, &status)
-			if err != nil {
-				return WorkflowResult{}, err
-			}
-			if cancelled {
+		// Repair tool call pairing before LLM call — the workflow owns
+		// message lifecycle, ensuring no orphaned tool results or
+		// unanswered tool calls leak through to the model.
+		messages = entity.RepairToolCallPairing(messages)
+
+		// Single sync LLM call
+		var llmResult LLMStepOutput
+		if err := workflow.ExecuteActivity(ctx, LLMStepActivityName, LLMStepInput{
+			RunID:    input.RunID,
+			Messages: messages,
+			Tools:    tools,
+			Config:   input.Config,
+		}).Get(ctx, &llmResult); err != nil {
+			return WorkflowResult{
+				RunID:          status.RunID,
+				LifecycleState: "failed",
+				Step:           status.Step,
+				CompletedAt:    workflow.Now(ctx),
+			}, fmt.Errorf("agent workflow - llm round %d: %w", round, err)
+		}
+
+		// Track assistant message
+		assistantMsg := entity.Message{Role: entity.RoleAssistant}
+		if len(llmResult.ToolCalls) > 0 {
+			assistantMsg.ToolCalls = llmResult.ToolCalls
+		}
+		messages = append(messages, assistantMsg)
+
+		status.Step++
+		status.UpdatedAt = workflow.Now(ctx)
+
+		if len(llmResult.ToolCalls) == 0 {
+			return WorkflowResult{
+				RunID:          status.RunID,
+				LifecycleState: "completed",
+				Step:           status.Step,
+				CompletedAt:    workflow.Now(ctx),
+			}, nil
+		}
+
+		// Execute each tool call
+		for _, tc := range llmResult.ToolCalls {
+			if cancelled, _ := checkStreamSignal(signalCh, ctx); cancelled {
 				return WorkflowResult{
 					RunID:          status.RunID,
 					LifecycleState: "cancelled",
@@ -109,58 +140,41 @@ func AgentWorkflow(ctx workflow.Context, input WorkflowInput) (WorkflowResult, e
 					CompletedAt:    workflow.Now(ctx),
 				}, nil
 			}
+
+			var toolResult ToolOutput
+			if err := workflow.ExecuteActivity(ctx, ToolExecActivityName, ToolInput{
+				RunID:      input.RunID,
+				ToolCallID: tc.ID,
+				ToolName:   tc.Function.Name,
+				Args:       parseArgsJSON(tc.Function.Arguments),
+			}).Get(ctx, &toolResult); err != nil {
+				return WorkflowResult{}, fmt.Errorf("agent workflow - tool exec %s: %w", tc.Function.Name, err)
+			}
+
+			toolMsg := entity.Message{
+				Role:       entity.RoleTool,
+				ToolCallID: tc.ID,
+				Content:    toolResult.Output,
+			}
+			messages = append(messages, toolMsg)
 		}
 
-		// Ensure "resumed" state transitions to "running" before activity execution
-		if status.LifecycleState == "resumed" {
-			status.LifecycleState = "running"
-			status.UpdatedAt = workflow.Now(ctx)
-		}
-
-		// On first step, pass user message; on auto-continue steps, pass empty message
-		userMessage := ""
-		if status.Step == 0 {
-			userMessage = input.Request.UserMessage
-		}
-
-		var actRes StepActivityOutput
-		if err := workflow.ExecuteActivity(ctx, AgentStepActivityName, StepActivityInput{
-			RunID:        status.RunID,
-			SystemPrompt: input.SystemPrompt,
-			Message:      userMessage,
-			History:      messages,
-			Tools:        input.Tools,
-			Config:       llmConfig,
-		}).Get(ctx, &actRes); err != nil {
-			status.LifecycleState = "failed"
-			status.Reason = err.Error()
-			status.UpdatedAt = workflow.Now(ctx)
-			return WorkflowResult{}, err
-		}
-
-		// Accumulate new messages from this step.
-		// FullMessages replaces prior history (e.g., after compression).
-		if actRes.FullMessages != nil {
-			messages = actRes.FullMessages
-		} else {
-			messages = append(messages, actRes.Messages...)
-		}
-
-		status.Step++
-		status.UpdatedAt = workflow.Now(ctx)
-
-		// Evaluate Continue-As-New after each step
+		// Evaluate Continue-As-New after each round
 		decision := EvaluateContinueAsNew(input.ContinuePolicy, ContinueAsNewSnapshot{
-			HistoryLength:   input.HistoryLengthHint + len(messages),
-			StateSizeBytes:  input.StateSizeHint,
+			HistoryLength:   len(messages),
+			StateSizeBytes:  0, // not tracked at workflow level
 			Step:            status.Step,
-			Elapsed:         status.UpdatedAt.Sub(baseRequestedAt),
+			Elapsed:         workflow.Now(ctx).Sub(baseRequestedAt),
 			ContinuationCnt: input.Continuation.ContinuationCount,
 		})
 		if decision.ShouldContinue {
-			payload, err := BuildContinuationPayload(input, status, workflow.GetInfo(ctx).WorkflowExecution.ID, status.UpdatedAt)
-			if err != nil {
-				return WorkflowResult{}, err
+			payload := ContinuationPayload{
+				RunID:              status.RunID,
+				ContinuationCount:  input.Continuation.ContinuationCount + 1,
+				PreviousWorkflowID: workflow.GetInfo(ctx).WorkflowExecution.ID,
+				CarriedStep:        status.Step,
+				CarriedAt:          workflow.Now(ctx),
+				InitialRequestedAt: baseRequestedAt,
 			}
 			nextInput := input
 			nextInput.Continuation = payload
@@ -168,112 +182,10 @@ func AgentWorkflow(ctx workflow.Context, input WorkflowInput) (WorkflowResult, e
 		}
 	}
 
-	status.LifecycleState = "completed"
-	status.UpdatedAt = workflow.Now(ctx)
-
 	return WorkflowResult{
 		RunID:          status.RunID,
-		LifecycleState: status.LifecycleState,
+		LifecycleState: "completed",
 		Step:           status.Step,
-		CompletedAt:    status.UpdatedAt,
+		CompletedAt:    workflow.Now(ctx),
 	}, nil
-}
-
-func applyPendingControlSignals(ctx workflow.Context, status *RunStatus) (bool, error) {
-	pauseCh := workflow.GetSignalChannel(ctx, SignalPause)
-	resumeCh := workflow.GetSignalChannel(ctx, SignalResume)
-	cancelCh := workflow.GetSignalChannel(ctx, SignalCancel)
-
-	var ignored string
-	for {
-		handled := false
-
-		if cancelCh.ReceiveAsync(&ignored) {
-			if err := ValidateControlOperation(status.LifecycleState, ControlCancel); err != nil {
-				status.Reason = err.Error()
-				status.UpdatedAt = workflow.Now(ctx)
-				handled = true
-			} else {
-				status.LifecycleState = "cancelled"
-				status.UpdatedAt = workflow.Now(ctx)
-				return true, nil
-			}
-		}
-
-		if pauseCh.ReceiveAsync(&ignored) {
-			if err := ValidateControlOperation(status.LifecycleState, ControlPause); err != nil {
-				status.Reason = err.Error()
-				status.UpdatedAt = workflow.Now(ctx)
-			} else {
-				status.LifecycleState = "paused"
-				status.Reason = ""
-				status.UpdatedAt = workflow.Now(ctx)
-			}
-			handled = true
-		}
-
-		if resumeCh.ReceiveAsync(&ignored) {
-			if err := ValidateControlOperation(status.LifecycleState, ControlResume); err != nil {
-				status.Reason = err.Error()
-				status.UpdatedAt = workflow.Now(ctx)
-			} else {
-				status.LifecycleState = "resumed"
-				status.Reason = ""
-				status.UpdatedAt = workflow.Now(ctx)
-			}
-			handled = true
-		}
-
-		if !handled {
-			return false, nil
-		}
-	}
-}
-
-func waitForResumeOrCancel(ctx workflow.Context, status *RunStatus) (bool, error) {
-	pauseCh := workflow.GetSignalChannel(ctx, SignalPause)
-	resumeCh := workflow.GetSignalChannel(ctx, SignalResume)
-	cancelCh := workflow.GetSignalChannel(ctx, SignalCancel)
-
-	for {
-		var signalPayload string
-		selector := workflow.NewSelector(ctx)
-
-		selector.AddReceive(cancelCh, func(c workflow.ReceiveChannel, _ bool) {
-			c.Receive(ctx, &signalPayload)
-			status.LifecycleState = "cancelled"
-			status.UpdatedAt = workflow.Now(ctx)
-		})
-
-		selector.AddReceive(resumeCh, func(c workflow.ReceiveChannel, _ bool) {
-			c.Receive(ctx, &signalPayload)
-			if err := ValidateControlOperation(status.LifecycleState, ControlResume); err != nil {
-				status.Reason = err.Error()
-			} else {
-				status.LifecycleState = "resumed"
-				status.Reason = ""
-			}
-			status.UpdatedAt = workflow.Now(ctx)
-		})
-
-		selector.AddReceive(pauseCh, func(c workflow.ReceiveChannel, _ bool) {
-			c.Receive(ctx, &signalPayload)
-			if err := ValidateControlOperation(status.LifecycleState, ControlPause); err != nil {
-				status.Reason = err.Error()
-				status.UpdatedAt = workflow.Now(ctx)
-			}
-		})
-
-		selector.Select(ctx)
-
-		if status.LifecycleState == "cancelled" {
-			return true, nil
-		}
-
-		if status.LifecycleState == "resumed" {
-			status.LifecycleState = "running"
-			status.UpdatedAt = workflow.Now(ctx)
-			return false, nil
-		}
-	}
 }

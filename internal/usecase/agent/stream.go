@@ -57,6 +57,88 @@ func (uc *UseCase) ExecuteStream(ctx context.Context, req entity.StreamRequest, 
 	return nil
 }
 
+// LLMStreamCall performs a single streaming LLM call, writing delta events
+// to the writer as chunks arrive. It returns the accumulated result (tool calls,
+// usage, finish reason) for workflow-level decision making.
+func (uc *UseCase) LLMStreamCall(ctx context.Context, runID string, messages []entity.Message, tools []entity.ToolDef, config entity.LLMConfig, writer usecase.StreamEventWriter) (*LLMStepResult, error) {
+	streamLLM, ok := uc.llm.(repo.LLMStreamProvider)
+	if !ok {
+		return nil, &entity.AgentError{
+			Code:        entity.ErrorCodeInternal,
+			Message:     "LLM provider does not support ChatStream",
+			UserMessage: "Streaming is not available with the configured AI provider.",
+			Recoverable: false,
+			Retryable:   false,
+		}
+	}
+
+	llmReq := entity.LLMRequest{
+		Messages: messages,
+		Tools:    tools,
+		Config:   config,
+	}
+
+	streamCh, err := streamLLM.ChatStream(ctx, llmReq)
+	if err != nil {
+		return nil, classifyLLMError(err)
+	}
+
+	var toolCalls []entity.ToolCall
+	var llmUsage entity.Usage
+	var finishReason string
+	toolCallIndex := 0
+
+	for chunk := range streamCh {
+		if chunk.Content != "" {
+			writer.WriteEvent(ctx, entity.NewTextDeltaEvent(chunk.Content, 0))
+		}
+		if chunk.Reasoning != "" {
+			writer.WriteEvent(ctx, entity.NewReasoningDeltaEvent(chunk.Reasoning))
+		}
+		for _, d := range chunk.ToolCallDeltas {
+			if d.Name != "" && d.ToolCallID != "" {
+				writer.WriteEvent(ctx, entity.NewToolCallStartEvent(d.ToolCallID, d.Name, d.Index))
+			} else if d.ArgsDelta != "" {
+				writer.WriteEvent(ctx, entity.NewToolCallDeltaEvent(d.ToolCallID, d.ArgsDelta))
+			}
+		}
+		if len(chunk.ToolCalls) > 0 {
+			toolCalls = chunk.ToolCalls
+		}
+		if chunk.Usage.TotalTokens > 0 {
+			llmUsage = chunk.Usage
+		}
+		if chunk.FinishReason != "" {
+			finishReason = string(chunk.FinishReason)
+		}
+	}
+
+	if ctx.Err() != nil {
+		return nil, ctx.Err()
+	}
+
+	// Emit ToolCallFinish for each complete tool call
+	for _, tc := range toolCalls {
+		toolCallIndex++
+		writer.WriteEvent(ctx, entity.NewToolCallFinishEvent(
+			tc.ID, tc.Function.Name, tc.Function.Arguments,
+		))
+	}
+
+	assistantMsg := entity.Message{Role: entity.RoleAssistant}
+	if len(toolCalls) > 0 {
+		assistantMsg.ToolCalls = toolCalls
+	}
+	uc.appendMessageToWAL(ctx, runID, assistantMsg)
+
+	return &LLMStepResult{
+		AssistantMsg: assistantMsg,
+		ToolCalls:    toolCalls,
+		Usage:        llmUsage,
+		FinishReason: finishReason,
+	}, nil
+}
+
 // ExecuteStreamSync is the synchronous version of ExecuteStream.
 // It blocks until execution completes. Used by Temporal activities
 // to keep the activity alive for the duration of streaming execution.

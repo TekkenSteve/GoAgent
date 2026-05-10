@@ -2,7 +2,6 @@ package agent
 
 import (
 	"context"
-	"fmt"
 
 	"github.com/TekkenSteve/GoAgent/internal/entity"
 )
@@ -23,31 +22,10 @@ type PrepResult struct {
 }
 
 // Prep initialises the execution context before the first step.
-// It validates tool definitions and constructs the initial message list
-// with the system prompt injected at the front.
+// It constructs the initial message list with the system prompt injected at the front.
+// Tool validation and pairing repair are handled by the orchestration layer
+// (PrepareActivity and per-call repair in the workflow loop).
 func (uc *UseCase) Prep(ctx context.Context, req PrepRequest) (*PrepResult, error) {
-	// Validate tool definitions
-	for i, tool := range req.Tools {
-		if tool.Function.Name == "" {
-			return nil, &entity.AgentError{
-				Code:        entity.ErrorCodeValidation,
-				Message:     fmt.Sprintf("tool definition at index %d missing name", i),
-				UserMessage: "Agent configuration error: a tool is missing its name",
-				Recoverable: false,
-				Retryable:   true,
-			}
-		}
-		if tool.Type == "" {
-			return nil, &entity.AgentError{
-				Code:        entity.ErrorCodeValidation,
-				Message:     fmt.Sprintf("tool %q missing type field", tool.Function.Name),
-				UserMessage: "Agent configuration error: a tool is missing its type",
-				Recoverable: false,
-				Retryable:   true,
-			}
-		}
-	}
-
 	// Build initial message list
 	messages := make([]entity.Message, 0, len(req.History)+2)
 

@@ -16,6 +16,7 @@ func TestExecuteStep_EmptyMessage(t *testing.T) {
 		nil,
 		nil,
 	nil,
+		nil,
 	)
 
 	result, err := uc.ExecuteStep(context.Background(), agent.StepRequest{
@@ -43,6 +44,7 @@ func TestExecuteStep_TextOnly(t *testing.T) {
 		nil,
 		nil,
 	nil,
+		nil,
 	)
 
 	result, err := uc.ExecuteStep(context.Background(), agent.StepRequest{
@@ -100,6 +102,7 @@ func TestExecuteStep_ToolCallThenText(t *testing.T) {
 		nil,
 		nil,
 	nil,
+		nil,
 	)
 
 	result, err := uc.ExecuteStep(context.Background(), agent.StepRequest{
@@ -146,6 +149,7 @@ func TestExecuteStep_ToolExecutionError(t *testing.T) {
 		nil,
 		nil,
 	nil,
+		nil,
 	)
 
 	result, err := uc.ExecuteStep(context.Background(), agent.StepRequest{
@@ -195,6 +199,7 @@ func TestExecuteStep_MaxToolRounds(t *testing.T) {
 		nil,
 		nil,
 	nil,
+		nil,
 	)
 
 	result, err := uc.ExecuteStep(context.Background(), agent.StepRequest{
@@ -218,6 +223,7 @@ func TestExecuteStep_WithSystemPrompt(t *testing.T) {
 		nil,
 		nil,
 	nil,
+		nil,
 	)
 
 	result, err := uc.ExecuteStep(context.Background(), agent.StepRequest{
@@ -254,6 +260,7 @@ func TestExecuteStep_WithHistoryDoesNotReinjectSystemPrompt(t *testing.T) {
 		nil,
 		nil,
 	nil,
+		nil,
 	)
 
 	result, err := uc.ExecuteStep(context.Background(), agent.StepRequest{
@@ -280,62 +287,58 @@ func TestExecuteStep_WithHistoryDoesNotReinjectSystemPrompt(t *testing.T) {
 }
 
 func TestPrep_InvalidToolDefinition(t *testing.T) {
+	// Tool validation is now handled by the orchestration layer (PrepareActivity),
+	// not the usecase. The usecase passes through tools without validation.
 	uc := agent.New(
-		&mockLLM{},
+		&mockLLM{response: entity.LLMResponse{Content: "ok", FinishReason: "stop", Usage: entity.Usage{PromptTokens: 1, CompletionTokens: 1, TotalTokens: 2}}},
 		&mockTool{},
 		nil,
 		nil,
 	nil,
+		nil,
 	)
 
-	_, err := uc.ExecuteStep(context.Background(), agent.StepRequest{
+	result, err := uc.ExecuteStep(context.Background(), agent.StepRequest{
 		RunID:   "run-1",
 		Message: "test",
 		Tools: []entity.ToolDef{
-			{Type: "function", Function: entity.ToolFuncDef{Name: ""}}, // missing name
+			{Type: "function", Function: entity.ToolFuncDef{Name: ""}}, // missing name — passes through
 		},
 		Config: entity.LLMConfig{Model: "gpt-4"},
 	})
-	if err == nil {
-		t.Fatal("expected error for invalid tool definition")
+	if err != nil {
+		t.Fatalf("tool validation is not a usecase concern; unexpected error: %v", err)
 	}
-
-	var agentErr *entity.AgentError
-	if !errors.As(err, &agentErr) {
-		t.Fatalf("expected entity.AgentError, got %T", err)
-	}
-	if agentErr.Code != entity.ErrorCodeValidation {
-		t.Errorf("expected ErrorCodeValidation, got %s", agentErr.Code)
+	if len(result.Messages) == 0 {
+		t.Fatal("expected messages from successful execution")
 	}
 }
 
 func TestPrep_ToolMissingType(t *testing.T) {
+	// Tool validation is now handled by the orchestration layer (PrepareActivity),
+	// not the usecase. The usecase passes through tools without validation.
 	uc := agent.New(
-		&mockLLM{},
+		&mockLLM{response: entity.LLMResponse{Content: "ok", FinishReason: "stop", Usage: entity.Usage{PromptTokens: 1, CompletionTokens: 1, TotalTokens: 2}}},
 		&mockTool{},
 		nil,
 		nil,
 	nil,
+		nil,
 	)
 
-	_, err := uc.ExecuteStep(context.Background(), agent.StepRequest{
+	result, err := uc.ExecuteStep(context.Background(), agent.StepRequest{
 		RunID:   "run-1",
 		Message: "test",
 		Tools: []entity.ToolDef{
-			{Function: entity.ToolFuncDef{Name: "valid_name"}}, // missing type
+			{Function: entity.ToolFuncDef{Name: "valid_name"}}, // missing type — passes through
 		},
 		Config: entity.LLMConfig{Model: "gpt-4"},
 	})
-	if err == nil {
-		t.Fatal("expected error for tool missing type")
+	if err != nil {
+		t.Fatalf("tool validation is not a usecase concern; unexpected error: %v", err)
 	}
-
-	var agentErr *entity.AgentError
-	if !errors.As(err, &agentErr) {
-		t.Fatalf("expected entity.AgentError, got %T", err)
-	}
-	if agentErr.Code != entity.ErrorCodeValidation {
-		t.Errorf("expected ErrorCodeValidation, got %s", agentErr.Code)
+	if len(result.Messages) == 0 {
+		t.Fatal("expected messages from successful execution")
 	}
 }
 
@@ -346,6 +349,7 @@ func TestExecuteStep_LLMError_Timeout(t *testing.T) {
 		nil,
 		nil,
 	nil,
+		nil,
 	)
 
 	_, err := uc.ExecuteStep(context.Background(), agent.StepRequest{
@@ -376,6 +380,7 @@ func TestExecuteStep_LLMError_RateLimit(t *testing.T) {
 		nil,
 		nil,
 	nil,
+		nil,
 	)
 
 	_, err := uc.ExecuteStep(context.Background(), agent.StepRequest{
@@ -403,6 +408,7 @@ func TestExecuteStep_LLMError_ContentFilter(t *testing.T) {
 		nil,
 		nil,
 	nil,
+		nil,
 	)
 
 	_, err := uc.ExecuteStep(context.Background(), agent.StepRequest{
@@ -433,6 +439,7 @@ func TestExecuteStep_LLMError_ContextLength(t *testing.T) {
 		nil,
 		nil,
 	nil,
+		nil,
 	)
 
 	_, err := uc.ExecuteStep(context.Background(), agent.StepRequest{
@@ -463,6 +470,7 @@ func TestExecuteStep_LLMError_Default(t *testing.T) {
 		nil,
 		nil,
 	nil,
+		nil,
 	)
 
 	_, err := uc.ExecuteStep(context.Background(), agent.StepRequest{

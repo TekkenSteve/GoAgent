@@ -21,7 +21,7 @@ const (
 // It upgrades the HTTP connection to WebSocket and streams agent execution
 // events to the client. Unlike SSE, WebSocket supports bidirectional
 // communication — client commands (cancel, pause, resume) are read from the
-// same connection and forwarded to the use-case commandCh.
+// same connection and forwarded via Temporal SignalWorkflow.
 //
 // Query parameters are identical to the SSE /agent/stream endpoint.
 func (r *V1) ws(ctx *fiber.Ctx) error {
@@ -108,7 +108,7 @@ func (r *V1) ws(ctx *fiber.Ctx) error {
 		ack, _ := json.Marshal(map[string]string{"event_type": "ack", "run_id": runID})
 		_ = writeWSMessage(conn, websocket.TextMessage, ack)
 
-		// --- command pump: client → commandCh / CancelWorkflow ---
+		// --- command pump: client → Temporal SignalWorkflow ---
 		// Runs in a separate goroutine so commands are not blocked by event pumping.
 		cmdErr := make(chan error, 1)
 		go func() {

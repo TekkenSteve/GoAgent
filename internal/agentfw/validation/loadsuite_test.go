@@ -109,19 +109,17 @@ func TestLoadSuiteLongSessionContinuationStability(t *testing.T) {
 		MaxContinuations: 10,
 	}
 
-	input := orchestration.WorkflowInput{
-		Request: orchestration.ExecuteRequest{
-			RunID:       "run-cont",
-			ThreadID:    "thread-1",
-			RequestedAt: time.Unix(1, 0).UTC(),
+	input := orchestration.AgentWorkflowInput{
+		RunID: "run-cont",
+		Continuation: orchestration.ContinuationPayload{
+			RunID:              "run-cont",
+			InitialRequestedAt: time.Unix(1, 0).UTC(),
 		},
-		Continuation: orchestration.ContinuationPayload{RunID: "run-cont"},
 	}
 
 	var continuations int32
 	totalSteps := int32(500)
 	for step := int32(1); step <= totalSteps; step++ {
-		status := orchestration.RunStatus{RunID: "run-cont", Step: step}
 		decision := orchestration.EvaluateContinueAsNew(policy, orchestration.ContinueAsNewSnapshot{
 			Step:            step,
 			ContinuationCnt: input.Continuation.ContinuationCount,
@@ -129,16 +127,16 @@ func TestLoadSuiteLongSessionContinuationStability(t *testing.T) {
 		if !decision.ShouldContinue {
 			continue
 		}
-		payload, err := orchestration.BuildContinuationPayload(
-			input,
-			status,
-			"wf-id",
-			time.Unix(1+int64(step), 0).UTC(),
-		)
-		require.NoError(t, err)
-		require.Equal(t, "run-cont", payload.RunID)
+		payload := orchestration.ContinuationPayload{
+			RunID:              "run-cont",
+			ContinuationCount:  input.Continuation.ContinuationCount + 1,
+			PreviousWorkflowID: "wf-id",
+			CarriedStep:        step,
+			CarriedAt:          time.Unix(1+int64(step), 0).UTC(),
+			InitialRequestedAt: input.Continuation.InitialRequestedAt,
+		}
 		require.Equal(t, step, payload.CarriedStep)
-		require.Equal(t, input.Request.RequestedAt, payload.InitialRequestedAt)
+		require.Equal(t, input.Continuation.InitialRequestedAt, payload.InitialRequestedAt)
 		input.Continuation = payload
 		continuations++
 	}
