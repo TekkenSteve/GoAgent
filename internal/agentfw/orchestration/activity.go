@@ -39,6 +39,7 @@ type MCPManagerProvider interface {
 	EnsureConnected(ctx context.Context, configs []entity.MCPServerConfig) ([]entity.ToolDef, []string)
 }
 
+
 // NewAgentActivities creates activities wired to the agent usecase.
 func NewAgentActivities(uc *agentuc.UseCase, eventStore stream.EventStore, l logger.Interface) *AgentActivities {
 	return &AgentActivities{agentUC: uc, eventStore: eventStore, logger: l}
@@ -61,6 +62,7 @@ func (a *AgentActivities) WithMCPManager(m MCPManagerProvider) *AgentActivities 
 	a.mcpManager = m
 	return a
 }
+
 
 // ——— Activities (step-level, Temporal-native) ———
 
@@ -158,18 +160,11 @@ func (a *AgentActivities) prepBilling(ctx context.Context, input PrepBillingInpu
 	}, nil
 }
 
-// prepLimits validates rate limits and context limits.
+// prepLimits validates concurrent run limits (pass-through: no counter configured).
 func (a *AgentActivities) prepLimits(ctx context.Context, input PrepLimitsInput) (*PrepLimitsOutput, error) {
-	maxMessages := 500
-	if input.MessageCount > maxMessages {
-		return &PrepLimitsOutput{
-			Approved:     false,
-			ContextLimit: maxMessages,
-		}, nil
-	}
 	return &PrepLimitsOutput{
-		Approved:     true,
-		ContextLimit: maxMessages,
+		Approved:        true,
+		ConcurrentLimit: 10,
 	}, nil
 }
 
@@ -406,6 +401,7 @@ func (a *AgentActivities) FireTriggerActivity(ctx context.Context, triggerID str
 		Config:       entity.LLMConfig{Model: model},
 	}, nil
 }
+
 
 // ——— Internal helpers ———
 

@@ -85,9 +85,10 @@ type PrepLimitsInput struct {
 
 // PrepLimitsOutput is the output of limit validation.
 type PrepLimitsOutput struct {
-	Approved     bool
-	RateLimit    int
-	ContextLimit int
+	Approved       bool
+	ConcurrentLimit int
+	RunningCount   int
+	ErrorCode      string
 }
 
 // PrepToolsInput is the input for tool definition validation.
@@ -113,6 +114,7 @@ type PrepMCPOutput struct {
 	Tools  []entity.ToolDef
 	Errors []string
 }
+
 
 // LLMStepInput is the input for a single sync LLM call activity.
 type LLMStepInput struct {

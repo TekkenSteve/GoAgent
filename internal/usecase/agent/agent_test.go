@@ -889,3 +889,274 @@ func TestUpdateAgent_Errors(t *testing.T) {
 		}
 	})
 }
+
+// --- Prep tests ---
+
+func TestPrep_WithSystemPrompt(t *testing.T) {
+	t.Parallel()
+
+	uc := agent.New(nil, nil, nil, nil, nil, nil)
+	result, err := uc.Prep(context.Background(), agent.PrepRequest{
+		SystemPrompt: "You are a helpful assistant.",
+		UserMessage:  "Hello",
+		Config:       entity.LLMConfig{Model: "gpt-4"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(result.Messages) != 2 {
+		t.Fatalf("expected 2 messages (system+user), got %d", len(result.Messages))
+	}
+	if result.Messages[0].Role != entity.RoleSystem {
+		t.Errorf("expected system role, got %v", result.Messages[0].Role)
+	}
+	if result.Messages[0].Content != "You are a helpful assistant." {
+		t.Errorf("expected system prompt, got %q", result.Messages[0].Content)
+	}
+	if result.Messages[1].Role != entity.RoleUser || result.Messages[1].Content != "Hello" {
+		t.Errorf("expected user message, got %v", result.Messages[1])
+	}
+}
+
+func TestPrep_WithHistoryNoSystemPrompt(t *testing.T) {
+	t.Parallel()
+
+	uc := agent.New(nil, nil, nil, nil, nil, nil)
+	result, err := uc.Prep(context.Background(), agent.PrepRequest{
+		SystemPrompt: "You are a helpful assistant.",
+		UserMessage:  "Continue",
+		History: []entity.Message{
+			{Role: entity.RoleUser, Content: "Hi"},
+			{Role: entity.RoleAssistant, Content: "Hello!"},
+		},
+		Config: entity.LLMConfig{Model: "gpt-4"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	// System prompt should NOT be re-injected when history exists
+	if len(result.Messages) != 3 {
+		t.Fatalf("expected 3 messages (history+user), got %d", len(result.Messages))
+	}
+	if result.Messages[0].Role != entity.RoleUser || result.Messages[0].Content != "Hi" {
+		t.Errorf("expected first message from history, got %v", result.Messages[0])
+	}
+}
+
+func TestPrep_EmptyMessage(t *testing.T) {
+	t.Parallel()
+
+	uc := agent.New(nil, nil, nil, nil, nil, nil)
+	result, err := uc.Prep(context.Background(), agent.PrepRequest{
+		SystemPrompt: "You are a helpful assistant.",
+		Config:       entity.LLMConfig{Model: "gpt-4"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(result.Messages) != 1 {
+		t.Fatalf("expected 1 message (system only), got %d", len(result.Messages))
+	}
+	if result.Messages[0].Role != entity.RoleSystem {
+		t.Errorf("expected system role, got %v", result.Messages[0].Role)
+	}
+}
+
+func TestPrep_WithTools(t *testing.T) {
+	t.Parallel()
+
+	uc := agent.New(nil, nil, nil, nil, nil, nil)
+	tools := []entity.ToolDef{
+		{Type: "function", Function: entity.ToolFuncDef{Name: "search", Description: "Search the web"}},
+	}
+	result, err := uc.Prep(context.Background(), agent.PrepRequest{
+		UserMessage: "Search something",
+		Tools:       tools,
+		Config:      entity.LLMConfig{Model: "gpt-4"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(result.Tools) != 1 {
+		t.Fatalf("expected 1 tool, got %d", len(result.Tools))
+	}
+	if result.Tools[0].Function.Name != "search" {
+		t.Errorf("expected search tool, got %s", result.Tools[0].Function.Name)
+	}
+}
+
+// --- LLMStep tests ---
+
+func TestLLMStep_TextResponse(t *testing.T) {
+	t.Parallel()
+
+	uc := agent.New(
+		&mockLLM{response: entity.LLMResponse{
+			Content: "Hello!", FinishReason: "stop",
+			Usage: entity.Usage{PromptTokens: 10, CompletionTokens: 5, TotalTokens: 15},
+		}},
+		&mockTool{},
+		nil, nil, nil, nil,
+	)
+
+	result, err := uc.LLMStep(context.Background(), "run-1",
+		[]entity.Message{{Role: entity.RoleUser, Content: "Hi"}},
+		[]entity.ToolDef{},
+		entity.LLMConfig{Model: "gpt-4"},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.AssistantMsg.Role != entity.RoleAssistant {
+		t.Errorf("expected assistant role, got %v", result.AssistantMsg.Role)
+	}
+	if result.AssistantMsg.Content != "Hello!" {
+		t.Errorf("expected 'Hello!', got %q", result.AssistantMsg.Content)
+	}
+	if len(result.ToolCalls) != 0 {
+		t.Errorf("expected no tool calls, got %d", len(result.ToolCalls))
+	}
+	if result.Usage.TotalTokens != 15 {
+		t.Errorf("expected 15 total tokens, got %d", result.Usage.TotalTokens)
+	}
+}
+
+func TestLLMStep_ToolCallResponse(t *testing.T) {
+	t.Parallel()
+
+	uc := agent.New(
+		&mockLLM{response: entity.LLMResponse{
+			ToolCalls: []entity.ToolCall{{
+				ID: "call-1", Type: "function",
+				Function: entity.ToolCallFunction{Name: "search", Arguments: `{"q":"weather"}`},
+			}},
+			FinishReason: "tool_calls",
+			Usage:        entity.Usage{PromptTokens: 10, CompletionTokens: 5, TotalTokens: 15},
+		}},
+		&mockTool{},
+		nil, nil, nil, nil,
+	)
+
+	result, err := uc.LLMStep(context.Background(), "run-1",
+		[]entity.Message{{Role: entity.RoleUser, Content: "Weather?"}},
+		[]entity.ToolDef{{Type: "function", Function: entity.ToolFuncDef{Name: "search"}}},
+		entity.LLMConfig{Model: "gpt-4"},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(result.ToolCalls) != 1 {
+		t.Fatalf("expected 1 tool call, got %d", len(result.ToolCalls))
+	}
+	if result.ToolCalls[0].Function.Name != "search" {
+		t.Errorf("expected search tool, got %s", result.ToolCalls[0].Function.Name)
+	}
+	if result.AssistantMsg.Role != entity.RoleAssistant {
+		t.Errorf("expected assistant role, got %v", result.AssistantMsg.Role)
+	}
+}
+
+func TestLLMStep_LLMError(t *testing.T) {
+	t.Parallel()
+
+	uc := agent.New(
+		&mockLLM{err: errors.New("rate limit exceeded")},
+		&mockTool{},
+		nil, nil, nil, nil,
+	)
+
+	_, err := uc.LLMStep(context.Background(), "run-1",
+		[]entity.Message{{Role: entity.RoleUser, Content: "Hi"}},
+		nil,
+		entity.LLMConfig{Model: "gpt-4"},
+	)
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	var agentErr *entity.AgentError
+	if !errors.As(err, &agentErr) {
+		t.Fatalf("expected AgentError, got %T", err)
+	}
+	if agentErr.Code != entity.ErrorCodeLLMRateLimit {
+		t.Errorf("expected rate limit code, got %s", agentErr.Code)
+	}
+}
+
+// --- ExecTool tests ---
+
+func TestExecTool_Success(t *testing.T) {
+	t.Parallel()
+
+	uc := agent.New(
+		&mockLLM{},
+		&mockTool{result: entity.ToolResult{
+			ToolName: "search", Output: map[string]any{"temp": "72F"},
+		}},
+		nil, nil, nil, nil,
+	)
+
+	result, err := uc.ExecTool(context.Background(), "run-1", entity.ToolCall{
+		ID: "call-1", Type: "function",
+		Function: entity.ToolCallFunction{Name: "search", Arguments: `{"q":"weather"}`},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Output == "" {
+		t.Error("expected non-empty output")
+	}
+	if result.IsError {
+		t.Error("expected no error")
+	}
+	if result.ToolMsg.Role != entity.RoleTool {
+		t.Errorf("expected tool role, got %v", result.ToolMsg.Role)
+	}
+}
+
+func TestExecTool_Error(t *testing.T) {
+	t.Parallel()
+
+	uc := agent.New(
+		&mockLLM{},
+		&mockTool{err: errors.New("tool execution failed")},
+		nil, nil, nil, nil,
+	)
+
+	result, err := uc.ExecTool(context.Background(), "run-1", entity.ToolCall{
+		ID: "call-1", Type: "function",
+		Function: entity.ToolCallFunction{Name: "fail_tool", Arguments: `{}`},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !result.IsError {
+		t.Error("expected isError=true")
+	}
+	if result.ExitCode != 1 {
+		t.Errorf("expected exit code 1, got %d", result.ExitCode)
+	}
+	if result.Output == "" {
+		t.Error("expected error message in output")
+	}
+}
+
+func TestExecTool_InvalidArgs(t *testing.T) {
+	t.Parallel()
+
+	uc := agent.New(
+		&mockLLM{},
+		&mockTool{result: entity.ToolResult{ToolName: "noop", Output: map[string]any{"ok": true}}},
+		nil, nil, nil, nil,
+	)
+
+	result, err := uc.ExecTool(context.Background(), "run-1", entity.ToolCall{
+		ID: "call-1", Type: "function",
+		Function: entity.ToolCallFunction{Name: "noop", Arguments: ""},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.IsError {
+		t.Error("expected no error")
+	}
+}
