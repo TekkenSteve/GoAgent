@@ -3,9 +3,11 @@ package trigger
 import (
 	"context"
 	"fmt"
+	"time"
 
 	"github.com/TekkenSteve/GoAgent/internal/entity"
 	"github.com/TekkenSteve/GoAgent/internal/repo"
+	"github.com/google/uuid"
 )
 
 // UseCase manages trigger lifecycle and coordinates scheduling.
@@ -152,4 +154,96 @@ func (uc *UseCase) Toggle(ctx context.Context, triggerID string, isActive bool) 
 // prompt used, execution variables, and any error.  Logging is best-effort.
 func (uc *UseCase) LogTriggerExecution(ctx context.Context, triggerID string, opts entity.TriggerEventLog) {
 	_ = uc.triggerRepo.InsertTriggerEvent(ctx, opts)
+}
+
+// HandleEvent processes an incoming webhook event for event-type triggers.
+// It finds all active event triggers matching the event_slug, resolves prompt
+// variables from the payload, records the fire, and returns resolved data
+// for workflow execution. Returns an error if no matching triggers are found.
+func (uc *UseCase) HandleEvent(ctx context.Context, eventSlug string, payload map[string]string) ([]entity.TriggerFireResult, error) {
+	allActive, err := uc.triggerRepo.ListActive(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("TriggerUseCase - HandleEvent - list active: %w", err)
+	}
+
+	var matches []entity.TriggerSpec
+	for _, t := range allActive {
+		if t.TriggerType == entity.TriggerEvent && t.EventSlug == eventSlug {
+			matches = append(matches, t)
+		}
+	}
+	if len(matches) == 0 {
+		return nil, fmt.Errorf("TriggerUseCase - HandleEvent - no active triggers for event: %s", eventSlug)
+	}
+
+	results := make([]entity.TriggerFireResult, 0, len(matches))
+	for _, t := range matches {
+		// Record the fire timestamp
+		if err := uc.triggerRepo.RecordFired(ctx, t.ID); err != nil {
+			uc.LogTriggerExecution(ctx, t.ID, entity.TriggerEventLog{
+				TriggerID:   t.ID,
+				TemplateID:  t.TemplateID,
+				TriggerType: t.TriggerType,
+				Success:     false,
+				Message:     fmt.Sprintf("RecordFired failed: %v", err),
+				FiredAt:     time.Now().UTC(),
+			})
+			continue
+		}
+
+		// Resolve prompt variables from the webhook payload
+		specCopy := t
+		specCopy.TemplateVarsVals = payload
+		resolvedPrompt := specCopy.ResolvePrompt()
+
+		// Load template for system prompt and default model
+		tmpl, exists, err := uc.templateRepo.Get(ctx, t.TemplateID)
+		if err != nil || !exists {
+			continue
+		}
+
+		systemPrompt := tmpl.SystemPrompt
+		if resolvedPrompt != "" {
+			if systemPrompt != "" {
+				systemPrompt += "\n" + resolvedPrompt
+			} else {
+				systemPrompt = resolvedPrompt
+			}
+		}
+
+		model := tmpl.DefaultModel
+		if model == "" {
+			model = "gpt-4"
+		}
+
+		runID := uuid.New().String()
+		now := time.Now().UTC()
+
+		results = append(results, entity.TriggerFireResult{
+			TriggerID:    t.ID,
+			RunID:        runID,
+			Name:         t.Name,
+			SystemPrompt: systemPrompt,
+			Message:      resolvedPrompt,
+			ModelRef:     model,
+			FiredAt:      now,
+		})
+
+		// Rich audit log
+		uc.LogTriggerExecution(ctx, t.ID, entity.TriggerEventLog{
+			TriggerID:     t.ID,
+			TemplateID:    t.TemplateID,
+			TriggerType:   t.TriggerType,
+			Success:       true,
+			AgentPrompt:   resolvedPrompt,
+			ExecVariables: payload,
+			FiredAt:       now,
+		})
+	}
+
+	if len(results) == 0 {
+		return nil, fmt.Errorf("TriggerUseCase - HandleEvent - all matching triggers failed: %s", eventSlug)
+	}
+
+	return results, nil
 }

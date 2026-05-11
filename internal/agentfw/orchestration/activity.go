@@ -19,12 +19,24 @@ type AgentActivities struct {
 	triggerUC    *triggeruc.UseCase
 	eventStore   stream.EventStore
 	templateRepo WorkflowTemplateRepoProvider
+	mcpManager   MCPManagerProvider
 	logger       logger.Interface
 }
 
 // WorkflowTemplateRepoProvider is the subset of repo.WorkflowTemplateRepo needed by activities.
 type WorkflowTemplateRepoProvider interface {
 	Get(ctx context.Context, templateID string) (entity.WorkflowTemplate, bool, error)
+}
+
+// MCPManagerProvider is the subset of the MCP manager needed by activities.
+// Server configs are passed in at Prep time,
+// and connections are established on demand.
+type MCPManagerProvider interface {
+	// EnsureConnected JIT-connects to the given MCP servers (if not already
+	// connected), discovers their tools, and returns the combined definitions
+	// plus any connection errors. Tool registration for execution happens
+	// internally in the manager.
+	EnsureConnected(ctx context.Context, configs []entity.MCPServerConfig) ([]entity.ToolDef, []string)
 }
 
 // NewAgentActivities creates activities wired to the agent usecase.
@@ -41,6 +53,12 @@ func (a *AgentActivities) WithTemplateRepo(repo WorkflowTemplateRepoProvider) *A
 // WithTriggerUC sets the trigger usecase for FireTriggerActivity.
 func (a *AgentActivities) WithTriggerUC(uc *triggeruc.UseCase) *AgentActivities {
 	a.triggerUC = uc
+	return a
+}
+
+// WithMCPManager sets the MCP manager for tool discovery in PrepareActivity.
+func (a *AgentActivities) WithMCPManager(m MCPManagerProvider) *AgentActivities {
+	a.mcpManager = m
 	return a
 }
 
@@ -95,6 +113,14 @@ func (a *AgentActivities) PrepareActivity(ctx context.Context, input PrepareInpu
 		errors = append(errors, fmt.Sprintf("tool: %s missing name or type", name))
 	}
 
+	// MCP tool resolution runs in the prep pipeline
+	mcpOut := a.prepMCP(ctx, PrepMCPInput{
+		ServerConfigs: input.MCPServerConfigs,
+	})
+	for _, err := range mcpOut.Errors {
+		errors = append(errors, fmt.Sprintf("mcp: %s", err))
+	}
+
 	// Run Prep for message assembly
 	req := agentuc.PrepRequest{
 		SystemPrompt: input.SystemPrompt,
@@ -109,9 +135,13 @@ func (a *AgentActivities) PrepareActivity(ctx context.Context, input PrepareInpu
 		return nil, fmt.Errorf("PrepareActivity - Prep: %w", err)
 	}
 
+	// Merge MCP-discovered tools with the prep result tools
+	allTools := prepResult.Tools
+	allTools = append(allTools, mcpOut.Tools...)
+
 	return &PrepareOutput{
 		Messages: prepResult.Messages,
-		Tools:    prepResult.Tools,
+		Tools:    allTools,
 		Billing:  billingRes.out,
 		Limits:   limitsRes.out,
 		ToolDefs: toolsOut,
@@ -160,6 +190,23 @@ func (a *AgentActivities) prepTools(ctx context.Context, input PrepToolsInput) *
 		Tools:    input.Tools,
 		Resolved: len(input.Tools) - len(failed),
 		Failed:   failed,
+	}
+}
+
+// prepMCP resolves MCP server references into tool definitions via JIT connection.
+// Server configs are passed in, connections are established
+// on demand during Prep. Returns empty results without error if no manager configured.
+func (a *AgentActivities) prepMCP(ctx context.Context, input PrepMCPInput) *PrepMCPOutput {
+	if a.mcpManager == nil || len(input.ServerConfigs) == 0 {
+		return &PrepMCPOutput{}
+	}
+
+	// JIT: connect to servers, discover tools on demand
+	tools, errs := a.mcpManager.EnsureConnected(ctx, input.ServerConfigs)
+
+	return &PrepMCPOutput{
+		Tools:  tools,
+		Errors: errs,
 	}
 }
 
@@ -217,12 +264,18 @@ func (a *AgentActivities) InitStreamActivity(ctx context.Context, input InitStre
 	if err != nil {
 		return nil, fmt.Errorf("InitStreamActivity - Prep: %w", err)
 	}
+	// MCP tool resolution for streaming path
+	mcpOut := a.prepMCP(ctx, PrepMCPInput{
+		ServerConfigs: input.MCPServerConfigs,
+	})
+	allTools := prepResult.Tools
+	allTools = append(allTools, mcpOut.Tools...)
 
 	_, _ = a.eventStore.Append(ctx, input.SessionID, input.RunID, entity.NewPrepStageEvent("ready", 100))
 
 	return &InitStreamOutput{
 		Messages: prepResult.Messages,
-		Tools:    prepResult.Tools,
+		Tools:    allTools,
 	}, nil
 }
 

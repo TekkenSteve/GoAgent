@@ -23,6 +23,7 @@ import (
 	"github.com/TekkenSteve/GoAgent/internal/entity"
 	"github.com/TekkenSteve/GoAgent/internal/repo/cached"
 	"github.com/TekkenSteve/GoAgent/internal/repo/compressor"
+	mcpRepo "github.com/TekkenSteve/GoAgent/internal/repo/mcp"
 	"github.com/TekkenSteve/GoAgent/internal/repo/framework"
 	temporalrepo "github.com/TekkenSteve/GoAgent/internal/repo/persistent"
 	pipelinepkg "github.com/TekkenSteve/GoAgent/internal/repo/pipeline"
@@ -54,6 +55,7 @@ func Run(cfg *config.Config) { //nolint: gocyclo,cyclop,funlen,gocritic,nolintli
 	var signalWorkflow restapiv1.SignalWorkflowFn
 	var toolRegistry *toolkit.ToolRegistry
 	var templateUC *templatepkg.UseCase
+	var triggerUC *triggerpkg.UseCase
 
 	fwCfg := agentfwconfig.FromAppConfig(cfg)
 	selector := agentfwops.NewRolloutSelector(agentfwops.RolloutConfig{
@@ -107,7 +109,6 @@ func Run(cfg *config.Config) { //nolint: gocyclo,cyclop,funlen,gocritic,nolintli
 
 		// Build agent components when LLM is configured
 		var activities *orchestration.AgentActivities
-		var triggerUC *triggerpkg.UseCase
 		var triggerScheduler *temporalrepo.TemporalTriggerScheduler
 		if cfg.AgentFW.LLMAPIKey != "" {
 			llmProvider := webapi.New(webapi.Config{
@@ -165,9 +166,19 @@ func Run(cfg *config.Config) { //nolint: gocyclo,cyclop,funlen,gocritic,nolintli
 			triggerScheduler = temporalrepo.NewTemporalTriggerScheduler(runtime.Client, fwCfg.Temporal.TaskQueue)
 			triggerUC = triggerpkg.New(triggerRepo, triggerScheduler, templateRepo)
 
+			// MCP manager — empty, populated on demand during Prep
+			// per-agent MCP server configs flow through ExecuteRequest.MCPServerConfigs
+			// and are JIT-connected by EnsureConnected in PrepareActivity/InitStreamActivity.
+			mcpManager := mcpRepo.NewManager()
+			if toolRegistry != nil {
+				mcpManager.SetRegistry(toolRegistry)
+				l.Info("app - Run - mcp manager created for per-agent JIT tool registration")
+			}
+
 			activities = orchestration.NewAgentActivities(agentUC, eventStore, l).
 				WithTemplateRepo(templateRepo).
-				WithTriggerUC(triggerUC)
+				WithTriggerUC(triggerUC).
+				WithMCPManager(mcpManager)
 			l.Info("app - Run - agent components initialized")
 		} else {
 			l.Warn("app - Run - LLM API key not configured, agent execution will not be available")
@@ -304,7 +315,7 @@ func Run(cfg *config.Config) { //nolint: gocyclo,cyclop,funlen,gocritic,nolintli
 	// HTTP Server
 	httpServer := httpserver.New(l, httpserver.Port(cfg.HTTP.Port), httpserver.Prefork(cfg.HTTP.UsePreforkMode))
 	restapi.NewRouter(httpServer.App, cfg, agentExecutor, historyUC, streamExecutor, l, rdb,
-		eventStore, streamSubscriber, sseGateway, wsHub, cancelWorkflow, signalWorkflow, templateUC)
+		eventStore, streamSubscriber, sseGateway, wsHub, cancelWorkflow, signalWorkflow, templateUC, triggerUC)
 
 	// Start servers
 	rmqServer.Start()

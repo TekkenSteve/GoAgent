@@ -13,13 +13,15 @@ type ExecuteRequest struct {
 	AgentVersionID  string    `json:"agent_version_id" example:"v1"`
 	AgentConfigVer  string    `json:"agent_config_ver" example:"v1"`
 	ToolSchemaVer   string    `json:"tool_schema_ver"  example:"v1"`
+	SystemPrompt    string    `json:"system_prompt"    example:"You are a helpful assistant."`
 	UserMessage     string    `json:"user_message"     example:"Hello, can you help me?"`
 	IsNewThread     bool      `json:"is_new_thread"    example:"false"`
 	BypassAdmission bool      `json:"bypass_admission" example:"false"`
 	IdempotencyKey  string    `json:"idempotency_key"  example:"idem-550e8400-e29b-41d4-a716-446655440000"`
-	EventSchemaVer  string    `json:"event_schema_ver"  example:"v1"`
-	WorkflowVersion int       `json:"workflow_version"  example:"1"`
-	RequestedAt     time.Time `json:"requested_at"      example:"2026-01-01T00:00:00Z"`
+	EventSchemaVer   string             `json:"event_schema_ver"  example:"v1"`
+	WorkflowVersion  int                `json:"workflow_version"  example:"1"`
+	MCPServerConfigs []MCPServerConfig  `json:"mcp_server_configs,omitempty"`
+	RequestedAt      time.Time          `json:"requested_at"      example:"2026-01-01T00:00:00Z"`
 } // @name entity.ExecuteRequest
 
 // RunIdentifiers are propagated across workflow, logs, events, and storage.

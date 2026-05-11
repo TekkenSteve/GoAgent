@@ -16,7 +16,7 @@ func NewRoutes(apiV1Group fiber.Router, t usecase.AgentExecutor, h usecase.Histo
 	eventStore stream.EventStore, subscriber stream.Subscriber, gateway stream.StatelessGateway,
 	wsHub *stream.WebSocketHub,
 	cancelWorkflow CancelWorkflowFn, signalWorkflow SignalWorkflowFn,
-	m usecase.TemplateManager) {
+	m usecase.TemplateManager, eh usecase.TriggerEventHandler) {
 
 	r := &V1{
 		t: t, h: h, s: s, l: l, v: validator.New(validator.WithRequiredStructEnabled()), rdb: rdb,
@@ -46,5 +46,11 @@ func NewRoutes(apiV1Group fiber.Router, t usecase.AgentExecutor, h usecase.Histo
 			tplGroup.Get("/:template_id", tpl.get)
 			tplGroup.Delete("/:template_id", tpl.delete)
 		}
+	}
+
+	// Trigger event webhook routes (optional — requires TriggerEventHandler)
+	if eh != nil {
+		th := &triggerWebhookHandler{eh: eh, t: t, l: l}
+		apiV1Group.Post("/triggers/events", th.handleEvent)
 	}
 }

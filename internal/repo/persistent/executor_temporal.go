@@ -37,9 +37,11 @@ func (r *ExecutorTemporal) StartExecution(ctx context.Context, req entity.Execut
 	workflowID := r.opts.workflowIDPrefix + req.RunID
 
 	input := orchestration.AgentWorkflowInput{
-		RunID:   req.RunID,
-		Message: req.UserMessage,
-		Config:  entity.LLMConfig{Model: req.ModelRef},
+		RunID:            req.RunID,
+		SystemPrompt:     req.SystemPrompt,
+		Message:          req.UserMessage,
+		Config:           entity.LLMConfig{Model: req.ModelRef},
+		MCPServerConfigs: req.MCPServerConfigs,
 	}
 
 	opts := client.StartWorkflowOptions{

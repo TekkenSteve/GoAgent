@@ -40,7 +40,8 @@ func (e *TemporalStreamExecutor) ExecuteStream(ctx context.Context, req entity.S
 		Message:      req.Message,
 		History:      req.History,
 		Tools:        req.Tools,
-		Config:       req.Config,
+		Config:           req.Config,
+			MCPServerConfigs: req.MCPServerConfigs,
 	}
 
 	_, err := e.client.ExecuteWorkflow(ctx, client.StartWorkflowOptions{

@@ -37,6 +37,11 @@ type (
 	ToolDefProvider interface {
 		Definitions() []entity.ToolDef
 	}
+	// TriggerEventHandler processes incoming webhook events for event-type triggers.
+	TriggerEventHandler interface {
+		HandleEvent(ctx context.Context, eventSlug string, payload map[string]string) ([]entity.TriggerFireResult, error)
+	}
+
 	// TemplateManager manages workflow template CRUD and YAML import.
 	TemplateManager interface {
 		Create(ctx context.Context, req entity.CreateWorkflowTemplateRequest) (entity.WorkflowTemplate, error)

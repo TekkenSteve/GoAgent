@@ -32,11 +32,12 @@ const (
 
 // PrepareInput is the input for the prep activity.
 type PrepareInput struct {
-	SystemPrompt string
-	Message      string
-	History      []entity.Message
-	Tools        []entity.ToolDef
-	Config       entity.LLMConfig
+	SystemPrompt     string
+	Message          string
+	History          []entity.Message
+	Tools            []entity.ToolDef
+	Config           entity.LLMConfig
+	MCPServerConfigs []entity.MCPServerConfig
 }
 
 // PrepareOutput is the output of the prep activity.
@@ -103,12 +104,14 @@ type PrepToolsOutput struct {
 
 // PrepMCPInput is the input for MCP tool resolution.
 type PrepMCPInput struct {
-	ServerRefs []string
+	// ServerConfigs is the list of MCP server configurations to connect to.
+	ServerConfigs []entity.MCPServerConfig
 }
 
 // PrepMCPOutput is the output of MCP tool resolution.
 type PrepMCPOutput struct {
-	Tools []entity.ToolDef
+	Tools  []entity.ToolDef
+	Errors []string
 }
 
 // LLMStepInput is the input for a single sync LLM call activity.
@@ -145,13 +148,14 @@ type ToolOutput struct {
 
 // InitStreamInput is the input for the streaming init activity.
 type InitStreamInput struct {
-	SessionID    string
-	RunID        string
-	SystemPrompt string
-	Message      string
-	History      []entity.Message
-	Tools        []entity.ToolDef
-	Config       entity.LLMConfig
+	SessionID        string
+	RunID            string
+	SystemPrompt     string
+	Message          string
+	History          []entity.Message
+	Tools            []entity.ToolDef
+	Config           entity.LLMConfig
+	MCPServerConfigs []entity.MCPServerConfig
 }
 
 // InitStreamOutput is the output of the streaming init activity.
@@ -197,12 +201,13 @@ type WorkflowResult struct {
 
 // AgentWorkflowInput is the input for the step-level AgentWorkflow.
 type AgentWorkflowInput struct {
-	RunID          string
-	SystemPrompt   string
-	Message        string
-	History        []entity.Message
-	Tools          []entity.ToolDef
-	Config         entity.LLMConfig
-	ContinuePolicy ContinueAsNewPolicy
-	Continuation   ContinuationPayload
+	RunID            string
+	SystemPrompt     string
+	Message          string
+	History          []entity.Message
+	Tools            []entity.ToolDef
+	Config           entity.LLMConfig
+	MCPServerConfigs []entity.MCPServerConfig
+	ContinuePolicy   ContinueAsNewPolicy
+	Continuation     ContinuationPayload
 }

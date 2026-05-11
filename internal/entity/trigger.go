@@ -95,6 +95,17 @@ type CreateTriggerRequest struct {
 	IsActive        bool              `json:"is_active"`
 }
 
+// TriggerFireResult is the resolved data returned when an event trigger fires.
+type TriggerFireResult struct {
+	TriggerID    string    `json:"trigger_id"`
+	RunID        string    `json:"run_id"`
+	Name         string    `json:"name"`
+	SystemPrompt string    `json:"-"`
+	Message      string    `json:"-"`
+	ModelRef     string    `json:"-"`
+	FiredAt      time.Time `json:"fired_at"`
+}
+
 // UpdateTriggerRequest is the input for updating a trigger.
 type UpdateTriggerRequest struct {
 	Name            *string            `json:"name,omitempty"`

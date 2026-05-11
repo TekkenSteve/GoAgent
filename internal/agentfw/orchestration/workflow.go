@@ -50,7 +50,8 @@ func AgentWorkflow(ctx workflow.Context, input AgentWorkflowInput) (WorkflowResu
 		Message:      input.Message,
 		History:      input.History,
 		Tools:        input.Tools,
-		Config:       input.Config,
+		Config:           input.Config,
+			MCPServerConfigs: input.MCPServerConfigs,
 	}).Get(ctx, &prepResult); err != nil {
 		return WorkflowResult{
 			RunID:          input.RunID,

@@ -9,6 +9,17 @@ const (
 	TierEnterprise Tier = "enterprise"
 )
 
+// MCPServerConfig defines how to connect to an MCP server for tool discovery.
+// This is the domain-level type used across usecase and controller boundaries.
+type MCPServerConfig struct {
+	Name      string            `json:"name" yaml:"name"`
+	Transport string            `json:"transport" yaml:"transport"` // "stdio" or "sse"
+	Command   string            `json:"command,omitempty" yaml:"command,omitempty"`
+	Args      []string          `json:"args,omitempty" yaml:"args,omitempty"`
+	Env       map[string]string `json:"env,omitempty" yaml:"env,omitempty"`
+	URL       string            `json:"url,omitempty" yaml:"url,omitempty"`
+}
+
 // ToolRequest describes a single tool call request.
 type ToolRequest struct {
 	RunID          string         `json:"run_id"           example:"run-550e8400-e29b-41d4-a716-446655440000"`

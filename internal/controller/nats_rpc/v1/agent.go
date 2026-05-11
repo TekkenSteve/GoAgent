@@ -35,6 +35,7 @@ func (r *V1) execute() server.CallHandler {
 			IdempotencyKey:  req.IdempotencyKey,
 			EventSchemaVer:  req.EventSchemaVer,
 			WorkflowVersion: req.WorkflowVersion,
+				MCPServerConfigs: req.MCPServerConfigs,
 		})
 		if err != nil {
 			r.l.Error(err, "nats_rpc - V1 - execute")

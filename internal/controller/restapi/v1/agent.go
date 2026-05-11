@@ -43,6 +43,7 @@ func (r *V1) execute(ctx *fiber.Ctx) error {
 		IdempotencyKey:  req.IdempotencyKey,
 		EventSchemaVer:  req.EventSchemaVer,
 		WorkflowVersion: req.WorkflowVersion,
+		MCPServerConfigs: req.MCPServerConfigs,
 	})
 	if err != nil {
 		r.l.Error(err, "restapi - v1 - execute")

@@ -86,6 +86,7 @@ type StreamRequest struct {
 	SystemPrompt string
 	Message      string
 	History      []Message
-	Tools        []ToolDef
-	Config       LLMConfig
+	Tools            []ToolDef
+	Config           LLMConfig
+	MCPServerConfigs []MCPServerConfig
 }
