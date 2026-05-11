@@ -37,4 +37,13 @@ type (
 	ToolDefProvider interface {
 		Definitions() []entity.ToolDef
 	}
+	// TemplateManager manages workflow template CRUD and YAML import.
+	TemplateManager interface {
+		Create(ctx context.Context, req entity.CreateWorkflowTemplateRequest) (entity.WorkflowTemplate, error)
+		CreateFromYAML(ctx context.Context, accountID string, yamlData []byte) (entity.WorkflowTemplate, error)
+		Get(ctx context.Context, templateID string) (entity.WorkflowTemplate, error)
+		Update(ctx context.Context, templateID string, req entity.UpdateWorkflowTemplateRequest) (entity.WorkflowTemplate, error)
+		Delete(ctx context.Context, templateID string) error
+		ListByAccount(ctx context.Context, accountID string) ([]entity.WorkflowTemplate, error)
+	}
 )

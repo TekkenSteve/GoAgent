@@ -67,4 +67,30 @@ type (
 		Cancel(ctx context.Context, runID string) error
 		StartOrchestration(ctx context.Context, input entity.OrchestrationInput) (entity.RunStatus, error)
 	}
+	// WorkflowTemplateRepo persists workflow template definitions.
+	WorkflowTemplateRepo interface {
+		Create(ctx context.Context, req entity.CreateWorkflowTemplateRequest) (entity.WorkflowTemplate, error)
+		Get(ctx context.Context, templateID string) (entity.WorkflowTemplate, bool, error)
+		Update(ctx context.Context, templateID string, req entity.UpdateWorkflowTemplateRequest) (entity.WorkflowTemplate, error)
+		Delete(ctx context.Context, templateID string) error
+		ListByAccount(ctx context.Context, accountID string) ([]entity.WorkflowTemplate, error)
+	}
+	// TriggerRepo persists trigger specifications for scheduled/event-based execution.
+	TriggerRepo interface {
+		Create(ctx context.Context, req entity.CreateTriggerRequest) (entity.TriggerSpec, error)
+		Get(ctx context.Context, triggerID string) (entity.TriggerSpec, bool, error)
+		Update(ctx context.Context, triggerID string, req entity.UpdateTriggerRequest) (entity.TriggerSpec, error)
+		Delete(ctx context.Context, triggerID string) error
+		ListByTemplate(ctx context.Context, templateID string) ([]entity.TriggerSpec, error)
+		ListByType(ctx context.Context, triggerType entity.TriggerType) ([]entity.TriggerSpec, error)
+		ListActive(ctx context.Context) ([]entity.TriggerSpec, error)
+		RecordFired(ctx context.Context, triggerID string) error
+		InsertTriggerEvent(ctx context.Context, event entity.TriggerEventLog) error
+	}
+	// TriggerScheduler manages the lifecycle of scheduled trigger executions.
+	// Implementations use Temporal cron workflows or the Schedule API.
+	TriggerScheduler interface {
+		Schedule(ctx context.Context, trigger entity.TriggerSpec) error
+		Unschedule(ctx context.Context, triggerID string) error
+	}
 )

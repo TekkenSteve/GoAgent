@@ -24,6 +24,8 @@ const (
 	ToolExecStreamActivityName  = "agentfw.tool-exec-stream.v1"
 	InitStreamActivityName      = "agentfw.init-stream.v1"
 	FinishStreamActivityName    = "agentfw.finish-stream.v1"
+	TriggerFireWorkflowName     = "agentfw.trigger-fire.v1"
+	FireTriggerActivityName     = "agentfw.fire-trigger.v1"
 )
 
 // ——— Activity input/output types ———

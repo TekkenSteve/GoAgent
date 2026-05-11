@@ -26,6 +26,9 @@ func (r DefaultRegistrar) RegisterWorkflows(rt *TemporalRuntime) {
 	rt.Worker.RegisterWorkflowWithOptions(orchestration.OrchestrationWorkflow, workflow.RegisterOptions{
 		Name: orchestration.OrchestrationWorkflowName,
 	})
+	rt.Worker.RegisterWorkflowWithOptions(orchestration.TriggerFireWorkflow, workflow.RegisterOptions{
+		Name: orchestration.TriggerFireWorkflowName,
+	})
 }
 
 // RegisterActivities registers activity definitions.

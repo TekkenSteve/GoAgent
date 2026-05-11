@@ -26,7 +26,8 @@ import (
 func NewRouter(app *fiber.App, cfg *config.Config, t usecase.AgentExecutor, h usecase.HistoryQuery, s usecase.StreamExecutor, l logger.Interface, rdb *redis.Redis,
 	eventStore stream.EventStore, subscriber stream.Subscriber, gateway stream.StatelessGateway,
 	wsHub *stream.WebSocketHub,
-	cancelWorkflow v1.CancelWorkflowFn, signalWorkflow v1.SignalWorkflowFn) {
+	cancelWorkflow v1.CancelWorkflowFn, signalWorkflow v1.SignalWorkflowFn,
+	m usecase.TemplateManager) {
 
 	// Options
 	app.Use(middleware.Logger(l))
@@ -50,6 +51,6 @@ func NewRouter(app *fiber.App, cfg *config.Config, t usecase.AgentExecutor, h us
 	// Routers
 	apiV1Group := app.Group("/v1")
 	{
-		v1.NewAgentRoutes(apiV1Group, t, h, s, l, rdb, eventStore, subscriber, gateway, wsHub, cancelWorkflow, signalWorkflow)
+		v1.NewRoutes(apiV1Group, t, h, s, l, rdb, eventStore, subscriber, gateway, wsHub, cancelWorkflow, signalWorkflow, m)
 	}
 }

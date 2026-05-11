@@ -9,11 +9,14 @@ import (
 	"github.com/gofiber/fiber/v2"
 )
 
-// NewAgentRoutes registers agent-related REST API endpoints under the /agent group.
-func NewAgentRoutes(apiV1Group fiber.Router, t usecase.AgentExecutor, h usecase.HistoryQuery, s usecase.StreamExecutor, l logger.Interface, rdb *redis.Redis,
+// NewRoutes registers all v1 API routes under the given router group.
+// Matches go-clean-template pattern: single entry point, all usecase interfaces
+// passed as parameters, all route groups registered inside.
+func NewRoutes(apiV1Group fiber.Router, t usecase.AgentExecutor, h usecase.HistoryQuery, s usecase.StreamExecutor, l logger.Interface, rdb *redis.Redis,
 	eventStore stream.EventStore, subscriber stream.Subscriber, gateway stream.StatelessGateway,
 	wsHub *stream.WebSocketHub,
-	cancelWorkflow CancelWorkflowFn, signalWorkflow SignalWorkflowFn) {
+	cancelWorkflow CancelWorkflowFn, signalWorkflow SignalWorkflowFn,
+	m usecase.TemplateManager) {
 
 	r := &V1{
 		t: t, h: h, s: s, l: l, v: validator.New(validator.WithRequiredStructEnabled()), rdb: rdb,
@@ -22,8 +25,8 @@ func NewAgentRoutes(apiV1Group fiber.Router, t usecase.AgentExecutor, h usecase.
 		cancelWorkflow: cancelWorkflow, signalWorkflow: signalWorkflow,
 	}
 
+	// Agent routes
 	agentGroup := apiV1Group.Group("/agent")
-
 	{
 		agentGroup.Post("/execute", r.execute)
 		agentGroup.Get("/status/:run_id", r.status)
@@ -31,5 +34,17 @@ func NewAgentRoutes(apiV1Group fiber.Router, t usecase.AgentExecutor, h usecase.
 		agentGroup.Get("/ws", r.ws)
 		agentGroup.Get("/:run_id/messages", r.listMessages)
 		agentGroup.Get("/:run_id/tools", r.listToolResults)
+	}
+
+	// Template routes (optional — requires TemplateManager)
+	if m != nil {
+		tpl := &templateHandler{m: m, l: l}
+		tplGroup := apiV1Group.Group("/templates")
+		{
+			tplGroup.Post("/import", tpl.importYAML)
+			tplGroup.Get("/", tpl.list)
+			tplGroup.Get("/:template_id", tpl.get)
+			tplGroup.Delete("/:template_id", tpl.delete)
+		}
 	}
 }

@@ -24,40 +24,40 @@ type WebSearchConfig struct {
 
 // WebSearchResult is the structured output for a single search query.
 type WebSearchResult struct {
-	Query   string             `json:"query"`
-	Success bool               `json:"success"`
-	Results []WebSearchHit     `json:"results"`
-	Answer  string             `json:"answer,omitempty"`
-	Images  []WebSearchImage   `json:"images,omitempty"`
-	Error   string             `json:"error,omitempty"`
+	Query   string           `json:"query"`
+	Success bool             `json:"success"`
+	Results []WebSearchHit   `json:"results"`
+	Answer  string           `json:"answer,omitempty"`
+	Images  []WebSearchImage `json:"images,omitempty"`
+	Error   string           `json:"error,omitempty"`
 }
 
 // WebSearchHit is a single search result item.
 type WebSearchHit struct {
-	Title   string `json:"title"`
-	URL     string `json:"url"`
-	Content string `json:"content"`
+	Title   string  `json:"title"`
+	URL     string  `json:"url"`
+	Content string  `json:"content"`
 	Score   float64 `json:"score,omitempty"`
 }
 
 // WebSearchImage is an image result from Tavily.
 type WebSearchImage struct {
-	URL   string `json:"url"`
+	URL    string `json:"url"`
 	Width  int    `json:"width,omitempty"`
 	Height int    `json:"height,omitempty"`
 }
 
 // WebSearchBatchResult wraps multiple query results for batch mode.
 type WebSearchBatchResult struct {
-	BatchMode     bool               `json:"batch_mode"`
-	TotalQueries  int                `json:"total_queries"`
-	ElapsedMs     int64              `json:"elapsed_ms"`
-	Results       []WebSearchResult  `json:"results"`
+	BatchMode    bool              `json:"batch_mode"`
+	TotalQueries int               `json:"total_queries"`
+	ElapsedMs    int64             `json:"elapsed_ms"`
+	Results      []WebSearchResult `json:"results"`
 }
 
 // WebSearch executes web searches through configurable backends.
 // Supports both single queries (string) and batch queries ([]string) via
-// the "query" parameter, matching Suna's web_search_tool pattern.
+// the "query" parameter.
 type WebSearch struct {
 	cfg   WebSearchConfig
 	mu    sync.Mutex
@@ -167,12 +167,12 @@ func (w *WebSearch) executeSingle(ctx context.Context, query string, maxResults 
 	// For single query, return the result directly (not wrapped in batch)
 	// But attach elapsed time via the result structure
 	out := map[string]any{
-		"query":       result.Query,
-		"success":     result.Success,
-		"results":     result.Results,
-		"answer":      result.Answer,
-		"images":      result.Images,
-		"elapsed_ms":  elapsed,
+		"query":      result.Query,
+		"success":    result.Success,
+		"results":    result.Results,
+		"answer":     result.Answer,
+		"images":     result.Images,
+		"elapsed_ms": elapsed,
 	}
 	if result.Error != "" {
 		out["error"] = result.Error
@@ -232,12 +232,12 @@ func (w *WebSearch) search(ctx context.Context, query string, maxResults int) We
 // -- Tavily provider --
 
 type tavilyRequest struct {
-	APIKey       string `json:"api_key"`
-	Query        string `json:"query"`
-	MaxResults   int    `json:"max_results"`
-	IncludeImages bool  `json:"include_images"`
-	IncludeAnswer bool  `json:"include_answer"`
-	SearchDepth  string `json:"search_depth"`
+	APIKey        string `json:"api_key"`
+	Query         string `json:"query"`
+	MaxResults    int    `json:"max_results"`
+	IncludeImages bool   `json:"include_images"`
+	IncludeAnswer bool   `json:"include_answer"`
+	SearchDepth   string `json:"search_depth"`
 }
 
 type tavilyResponse struct {

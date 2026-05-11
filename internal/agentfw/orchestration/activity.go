@@ -8,17 +8,40 @@ import (
 	"github.com/TekkenSteve/GoAgent/internal/agentfw/stream"
 	"github.com/TekkenSteve/GoAgent/internal/entity"
 	agentuc "github.com/TekkenSteve/GoAgent/internal/usecase/agent"
+	triggeruc "github.com/TekkenSteve/GoAgent/internal/usecase/trigger"
+	"github.com/TekkenSteve/GoAgent/pkg/logger"
+	"github.com/google/uuid"
 )
 
 // AgentActivities provides Temporal activity implementations for agent execution.
 type AgentActivities struct {
-	agentUC    *agentuc.UseCase
-	eventStore stream.EventStore
+	agentUC      *agentuc.UseCase
+	triggerUC    *triggeruc.UseCase
+	eventStore   stream.EventStore
+	templateRepo WorkflowTemplateRepoProvider
+	logger       logger.Interface
+}
+
+// WorkflowTemplateRepoProvider is the subset of repo.WorkflowTemplateRepo needed by activities.
+type WorkflowTemplateRepoProvider interface {
+	Get(ctx context.Context, templateID string) (entity.WorkflowTemplate, bool, error)
 }
 
 // NewAgentActivities creates activities wired to the agent usecase.
-func NewAgentActivities(uc *agentuc.UseCase, eventStore stream.EventStore) *AgentActivities {
-	return &AgentActivities{agentUC: uc, eventStore: eventStore}
+func NewAgentActivities(uc *agentuc.UseCase, eventStore stream.EventStore, l logger.Interface) *AgentActivities {
+	return &AgentActivities{agentUC: uc, eventStore: eventStore, logger: l}
+}
+
+// WithTemplateRepo sets the template repo for activities that need it (e.g., FireTriggerActivity).
+func (a *AgentActivities) WithTemplateRepo(repo WorkflowTemplateRepoProvider) *AgentActivities {
+	a.templateRepo = repo
+	return a
+}
+
+// WithTriggerUC sets the trigger usecase for FireTriggerActivity.
+func (a *AgentActivities) WithTriggerUC(uc *triggeruc.UseCase) *AgentActivities {
+	a.triggerUC = uc
+	return a
 }
 
 // ——— Activities (step-level, Temporal-native) ———
@@ -269,6 +292,66 @@ func (a *AgentActivities) ToolExecStreamActivity(ctx context.Context, input Tool
 func (a *AgentActivities) FinishStreamActivity(ctx context.Context, input FinishStreamInput) error {
 	_, err := a.eventStore.Append(ctx, input.SessionID, input.RunID, input.Event)
 	return err
+}
+
+// FireTriggerActivity loads a trigger and its associated template, records the fire
+// time, and returns the data needed for the TriggerFireWorkflow to dispatch a child
+// AgentWorkflow. Returns an error if the trigger or template is not found.
+func (a *AgentActivities) FireTriggerActivity(ctx context.Context, triggerID string) (*FireTriggerInput, error) {
+	if a.triggerUC == nil || a.templateRepo == nil {
+		return nil, fmt.Errorf("FireTriggerActivity - triggerUC/templateRepo not configured")
+	}
+
+	// Validate trigger exists and record fire time via the usecase
+	trigger, err := a.triggerUC.Fire(ctx, triggerID)
+	if err != nil {
+		return nil, fmt.Errorf("FireTriggerActivity - fire: %w", err)
+	}
+
+	template, exists, err := a.templateRepo.Get(ctx, trigger.TemplateID)
+	if err != nil {
+		return nil, fmt.Errorf("FireTriggerActivity - get template: %w", err)
+	}
+	if !exists {
+		return nil, fmt.Errorf("FireTriggerActivity - template not found: %s", trigger.TemplateID)
+	}
+
+	// Resolve {{variable}} placeholders in the agent prompt
+	resolvedPrompt := trigger.ResolvePrompt()
+
+	runID := uuid.New().String()
+
+	systemPrompt := template.SystemPrompt
+	if resolvedPrompt != "" {
+		if systemPrompt != "" {
+			systemPrompt += "\n" + resolvedPrompt
+		} else {
+			systemPrompt = resolvedPrompt
+		}
+	}
+
+	model := template.DefaultModel
+	if model == "" {
+		model = "gpt-4"
+	}
+
+	// Log rich audit trail (best-effort, non-fatal)
+	a.triggerUC.LogTriggerExecution(ctx, triggerID, entity.TriggerEventLog{
+		TriggerID:     triggerID,
+		TemplateID:    trigger.TemplateID,
+		TriggerType:   trigger.TriggerType,
+		Success:       true,
+		AgentPrompt:   resolvedPrompt,
+		ExecVariables: trigger.TemplateVarsVals,
+		FiredAt:       time.Now().UTC(),
+	})
+
+	return &FireTriggerInput{
+		RunID:        runID,
+		SystemPrompt: systemPrompt,
+		Message:      resolvedPrompt,
+		Config:       entity.LLMConfig{Model: model},
+	}, nil
 }
 
 // ——— Internal helpers ———

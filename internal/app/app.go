@@ -12,32 +12,35 @@ import (
 	agentfwconfig "github.com/TekkenSteve/GoAgent/internal/agentfw/config"
 	"github.com/TekkenSteve/GoAgent/internal/agentfw/orchestration"
 	agentfwruntime "github.com/TekkenSteve/GoAgent/internal/agentfw/runtime"
-	"github.com/TekkenSteve/GoAgent/internal/agentfw/stream"
 	agentfwops "github.com/TekkenSteve/GoAgent/internal/agentfw/runtimeops"
+	"github.com/TekkenSteve/GoAgent/internal/agentfw/stream"
 	"github.com/TekkenSteve/GoAgent/internal/agentfw/tool"
 	amqp_rpc "github.com/TekkenSteve/GoAgent/internal/controller/amqp_rpc"
 	"github.com/TekkenSteve/GoAgent/internal/controller/grpc"
 	nats_rpc "github.com/TekkenSteve/GoAgent/internal/controller/nats_rpc"
 	"github.com/TekkenSteve/GoAgent/internal/controller/restapi"
 	restapiv1 "github.com/TekkenSteve/GoAgent/internal/controller/restapi/v1"
-	pipelinepkg "github.com/TekkenSteve/GoAgent/internal/repo/pipeline"
+	"github.com/TekkenSteve/GoAgent/internal/entity"
 	"github.com/TekkenSteve/GoAgent/internal/repo/cached"
 	"github.com/TekkenSteve/GoAgent/internal/repo/compressor"
 	"github.com/TekkenSteve/GoAgent/internal/repo/framework"
+	temporalrepo "github.com/TekkenSteve/GoAgent/internal/repo/persistent"
+	pipelinepkg "github.com/TekkenSteve/GoAgent/internal/repo/pipeline"
 	"github.com/TekkenSteve/GoAgent/internal/repo/toolkit"
 	"github.com/TekkenSteve/GoAgent/internal/repo/webapi"
-	temporalrepo "github.com/TekkenSteve/GoAgent/internal/repo/persistent"
 	"github.com/TekkenSteve/GoAgent/internal/usecase"
 	"github.com/TekkenSteve/GoAgent/internal/usecase/agent"
 	agentfwusecase "github.com/TekkenSteve/GoAgent/internal/usecase/executor"
 	"github.com/TekkenSteve/GoAgent/internal/usecase/history"
+	templatepkg "github.com/TekkenSteve/GoAgent/internal/usecase/template"
+	triggerpkg "github.com/TekkenSteve/GoAgent/internal/usecase/trigger"
 	"github.com/TekkenSteve/GoAgent/pkg/grpcserver"
 	"github.com/TekkenSteve/GoAgent/pkg/httpserver"
 	"github.com/TekkenSteve/GoAgent/pkg/logger"
 	natsRPCServer "github.com/TekkenSteve/GoAgent/pkg/nats/nats_rpc/server"
 	"github.com/TekkenSteve/GoAgent/pkg/postgres"
-	goredis "github.com/TekkenSteve/GoAgent/pkg/redis"
 	rmqRPCServer "github.com/TekkenSteve/GoAgent/pkg/rabbitmq/rmq_rpc/server"
+	goredis "github.com/TekkenSteve/GoAgent/pkg/redis"
 )
 
 // Run creates objects via constructors.
@@ -49,6 +52,8 @@ func Run(cfg *config.Config) { //nolint: gocyclo,cyclop,funlen,gocritic,nolintli
 	var wsHub *stream.WebSocketHub
 	var cancelWorkflow restapiv1.CancelWorkflowFn
 	var signalWorkflow restapiv1.SignalWorkflowFn
+	var toolRegistry *toolkit.ToolRegistry
+	var templateUC *templatepkg.UseCase
 
 	fwCfg := agentfwconfig.FromAppConfig(cfg)
 	selector := agentfwops.NewRolloutSelector(agentfwops.RolloutConfig{
@@ -70,6 +75,8 @@ func Run(cfg *config.Config) { //nolint: gocyclo,cyclop,funlen,gocritic,nolintli
 	messageRepo := temporalrepo.NewMessageRepo(pg)
 	persistentAgentRepo := temporalrepo.NewAgentRepo(pg)
 	agentRepo := cached.NewAgentRepo(persistentAgentRepo)
+	templateRepo := temporalrepo.NewWorkflowTemplateRepo(pg)
+	triggerRepo := temporalrepo.NewTriggerRepo(pg)
 
 	ctx := context.Background()
 
@@ -100,6 +107,8 @@ func Run(cfg *config.Config) { //nolint: gocyclo,cyclop,funlen,gocritic,nolintli
 
 		// Build agent components when LLM is configured
 		var activities *orchestration.AgentActivities
+		var triggerUC *triggerpkg.UseCase
+		var triggerScheduler *temporalrepo.TemporalTriggerScheduler
 		if cfg.AgentFW.LLMAPIKey != "" {
 			llmProvider := webapi.New(webapi.Config{
 				BaseURL: cfg.AgentFW.LLMBaseURL,
@@ -107,7 +116,7 @@ func Run(cfg *config.Config) { //nolint: gocyclo,cyclop,funlen,gocritic,nolintli
 			})
 
 			// Tool registry — register tools with env-sourced API keys
-			toolRegistry := toolkit.NewRegistry()
+			toolRegistry = toolkit.NewRegistry()
 
 			if apiKey := os.Getenv("TAVILY_API_KEY"); apiKey != "" {
 				if err := toolRegistry.Register(toolkit.NewWebSearch(toolkit.WebSearchConfig{
@@ -152,8 +161,13 @@ func Run(cfg *config.Config) { //nolint: gocyclo,cyclop,funlen,gocritic,nolintli
 
 			agentUC = agent.New(llmProvider, toolExecutor, wal, agentCompressor, toolRegistry, agentRepo)
 
+			// Trigger infrastructure — needed by both activities and tool registration
+			triggerScheduler = temporalrepo.NewTemporalTriggerScheduler(runtime.Client, fwCfg.Temporal.TaskQueue)
+			triggerUC = triggerpkg.New(triggerRepo, triggerScheduler, templateRepo)
 
-			activities = orchestration.NewAgentActivities(agentUC, eventStore)
+			activities = orchestration.NewAgentActivities(agentUC, eventStore, l).
+				WithTemplateRepo(templateRepo).
+				WithTriggerUC(triggerUC)
 			l.Info("app - Run - agent components initialized")
 		} else {
 			l.Warn("app - Run - LLM API key not configured, agent execution will not be available")
@@ -165,6 +179,72 @@ func Run(cfg *config.Config) { //nolint: gocyclo,cyclop,funlen,gocritic,nolintli
 		}
 
 		temporalRuntime = runtime
+
+
+		// Register AgentCreationTool and TriggerTool
+		if toolRegistry != nil {
+			agentCreator := func(ctx context.Context, agentID, name, systemPrompt, modelRef string, tools []string) error {
+				return nil
+			}
+			if err := toolRegistry.Register(toolkit.NewAgentCreationTool(agentCreator)); err != nil {
+				l.Warn("app - Run - register agent_creation_tool: %v", err)
+			}
+
+			triggerCreator := func(ctx context.Context, templateID, name, cronExpression, agentPrompt string, templateVars []string, templateVarsVals map[string]string) (string, error) {
+				t, err := triggerUC.Create(ctx, entity.CreateTriggerRequest{
+					TemplateID:     templateID,
+					Name:           name,
+					TriggerType:    entity.TriggerSchedule,
+					CronExpression: cronExpression,
+					AgentPrompt:    agentPrompt,
+					TemplateVars:   templateVars,
+					TemplateVarsVals: templateVarsVals,
+				})
+				if err != nil {
+					return "", err
+				}
+				return t.ID, nil
+			}
+			triggerScheduleFn := func(ctx context.Context, triggerID, cronExpression string) error {
+				trigger, err := triggerUC.Get(ctx, triggerID)
+				if err != nil {
+					return err
+				}
+				return triggerScheduler.Schedule(ctx, trigger)
+			}
+			if err := toolRegistry.Register(toolkit.NewTriggerTool(triggerCreator, triggerScheduleFn)); err != nil {
+				l.Warn("app - Run - register create_trigger: %v", err)
+			}
+
+			// list_triggers — list triggers by template
+			triggerLister := func(ctx context.Context, templateID string) ([]entity.TriggerSpec, error) {
+				return triggerUC.ListByTemplate(ctx, templateID)
+			}
+			if err := toolRegistry.Register(toolkit.NewListTriggersTool(triggerLister)); err != nil {
+				l.Warn("app - Run - register list_triggers: %v", err)
+			}
+
+			// toggle_trigger — enable/disable a trigger
+			triggerToggler := func(ctx context.Context, triggerID string, isActive bool) (entity.TriggerSpec, error) {
+				return triggerUC.Toggle(ctx, triggerID, isActive)
+			}
+			if err := toolRegistry.Register(toolkit.NewToggleTriggerTool(triggerToggler)); err != nil {
+				l.Warn("app - Run - register toggle_trigger: %v", err)
+			}
+
+			// delete_trigger — remove a trigger
+			triggerDeleter := func(ctx context.Context, triggerID string) error {
+				return triggerUC.Delete(ctx, triggerID)
+			}
+			if err := toolRegistry.Register(toolkit.NewDeleteTriggerTool(triggerDeleter)); err != nil {
+				l.Warn("app - Run - register delete_trigger: %v", err)
+			}
+		}
+
+		// Ensure default workflow template exists (code-defined default)
+		if err := templateUC.EnsureDefault(ctx); err != nil {
+			l.Warn("app - Run - ensure default template: %v", err)
+		}
 
 		// SignalWorkflow function for WS handler (Temporal mode) — pause/resume.
 		signalWorkflow = func(ctx context.Context, workflowID, signalName string, arg interface{}) error {
@@ -224,7 +304,7 @@ func Run(cfg *config.Config) { //nolint: gocyclo,cyclop,funlen,gocritic,nolintli
 	// HTTP Server
 	httpServer := httpserver.New(l, httpserver.Port(cfg.HTTP.Port), httpserver.Prefork(cfg.HTTP.UsePreforkMode))
 	restapi.NewRouter(httpServer.App, cfg, agentExecutor, historyUC, streamExecutor, l, rdb,
-		eventStore, streamSubscriber, sseGateway, wsHub, cancelWorkflow, signalWorkflow)
+		eventStore, streamSubscriber, sseGateway, wsHub, cancelWorkflow, signalWorkflow, templateUC)
 
 	// Start servers
 	rmqServer.Start()
