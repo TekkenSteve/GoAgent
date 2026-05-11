@@ -538,3 +538,354 @@ func (m *mockTool) Execute(_ context.Context, req entity.ToolRequest) (entity.To
 	res.ToolName = req.ToolName
 	return res, nil
 }
+
+// -- mockAgentRepo --
+
+type mockAgentRepo struct {
+	getFunc           func(ctx context.Context, agentID string) (entity.AgentRecord, bool, error)
+	createVersionFunc func(ctx context.Context, record entity.AgentVersionRecord) error
+	updateFunc        func(ctx context.Context, agentID string, req entity.UpdateAgentRequest) (entity.AgentRecord, error)
+}
+
+func (m *mockAgentRepo) Create(_ context.Context, _ entity.CreateAgentRequest) (entity.AgentRecord, error) {
+	panic("unexpected call to Create")
+}
+
+func (m *mockAgentRepo) Get(ctx context.Context, agentID string) (entity.AgentRecord, bool, error) {
+	if m.getFunc != nil {
+		return m.getFunc(ctx, agentID)
+	}
+	panic("unexpected call to Get")
+}
+
+func (m *mockAgentRepo) Update(ctx context.Context, agentID string, req entity.UpdateAgentRequest) (entity.AgentRecord, error) {
+	if m.updateFunc != nil {
+		return m.updateFunc(ctx, agentID, req)
+	}
+	panic("unexpected call to Update")
+}
+
+func (m *mockAgentRepo) Delete(_ context.Context, _ string) error {
+	panic("unexpected call to Delete")
+}
+
+func (m *mockAgentRepo) ListByAccount(_ context.Context, _ string) ([]entity.AgentRecord, error) {
+	panic("unexpected call to ListByAccount")
+}
+
+func (m *mockAgentRepo) CreateVersion(ctx context.Context, record entity.AgentVersionRecord) error {
+	if m.createVersionFunc != nil {
+		return m.createVersionFunc(ctx, record)
+	}
+	panic("unexpected call to CreateVersion")
+}
+
+func (m *mockAgentRepo) GetVersion(_ context.Context, _ string) (entity.AgentVersionRecord, bool, error) {
+	panic("unexpected call to GetVersion")
+}
+
+func (m *mockAgentRepo) ListVersions(_ context.Context, _ string) ([]entity.AgentVersionRecord, error) {
+	panic("unexpected call to ListVersions")
+}
+
+// -- UpdateAgent tests (auto-versioning) --
+
+func TestUpdateAgent_AutoVersioning(t *testing.T) {
+	t.Parallel()
+
+	existing := entity.AgentRecord{
+		AgentID:      "agent-1",
+		AccountID:    "account-1",
+		Name:         "Original",
+		SystemPrompt: "Original prompt",
+		ModelRef:     "gpt-4",
+		Config:       entity.LLMConfig{Model: "gpt-4", Temperature: 0.7},
+	}
+
+	t.Run("only name change does not create version", func(t *testing.T) {
+		t.Parallel()
+		var versionCreated bool
+		mock := &mockAgentRepo{
+			getFunc: func(_ context.Context, agentID string) (entity.AgentRecord, bool, error) {
+				return existing, true, nil
+			},
+			createVersionFunc: func(_ context.Context, _ entity.AgentVersionRecord) error {
+				versionCreated = true
+				return nil
+			},
+			updateFunc: func(_ context.Context, agentID string, req entity.UpdateAgentRequest) (entity.AgentRecord, error) {
+				if req.CurrentVersion != nil {
+					t.Error("expected no version bump for non-config change")
+				}
+				updated := existing
+				updated.Name = *req.Name
+				return updated, nil
+			},
+		}
+		uc := agent.New(nil, nil, nil, nil, nil, mock)
+		newName := "Updated Name"
+		_, err := uc.UpdateAgent(context.Background(), "agent-1", entity.UpdateAgentRequest{Name: &newName})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if versionCreated {
+			t.Error("version should not be created when only name changes")
+		}
+	})
+
+	t.Run("system prompt change creates version with new value", func(t *testing.T) {
+		t.Parallel()
+		var (
+			versionCreated bool
+			versionRecord  entity.AgentVersionRecord
+		)
+		mock := &mockAgentRepo{
+			getFunc: func(_ context.Context, _ string) (entity.AgentRecord, bool, error) {
+				return existing, true, nil
+			},
+			createVersionFunc: func(_ context.Context, r entity.AgentVersionRecord) error {
+				versionCreated = true
+				versionRecord = r
+				return nil
+			},
+			updateFunc: func(_ context.Context, agentID string, req entity.UpdateAgentRequest) (entity.AgentRecord, error) {
+				if req.CurrentVersion == nil {
+					t.Error("expected CurrentVersion to be set when config changed")
+				}
+				updated := existing
+				updated.SystemPrompt = *req.SystemPrompt
+				updated.CurrentVersion = *req.CurrentVersion
+				return updated, nil
+			},
+		}
+		uc := agent.New(nil, nil, nil, nil, nil, mock)
+		newPrompt := "New system prompt"
+		_, err := uc.UpdateAgent(context.Background(), "agent-1", entity.UpdateAgentRequest{SystemPrompt: &newPrompt})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !versionCreated {
+			t.Fatal("version should be created when system prompt changes")
+		}
+		if versionRecord.AgentID != "agent-1" {
+			t.Errorf("expected agent-1, got %s", versionRecord.AgentID)
+		}
+		if versionRecord.SystemPrompt != "New system prompt" {
+			t.Errorf("expected new prompt in version, got %s", versionRecord.SystemPrompt)
+		}
+		if versionRecord.ModelRef != "gpt-4" {
+			t.Errorf("expected unchanged model_ref in version, got %s", versionRecord.ModelRef)
+		}
+		if versionRecord.ChangeDescription != "auto-saved on config update" {
+			t.Errorf("expected auto-save description, got %s", versionRecord.ChangeDescription)
+		}
+	})
+
+	t.Run("model ref change creates version", func(t *testing.T) {
+		t.Parallel()
+		var versionCreated bool
+		mock := &mockAgentRepo{
+			getFunc: func(_ context.Context, _ string) (entity.AgentRecord, bool, error) {
+				return existing, true, nil
+			},
+			createVersionFunc: func(_ context.Context, r entity.AgentVersionRecord) error {
+				versionCreated = true
+				if r.ModelRef != "gpt-4o" {
+					t.Errorf("expected new model_ref gpt-4o, got %s", r.ModelRef)
+				}
+				return nil
+			},
+			updateFunc: func(_ context.Context, _ string, _ entity.UpdateAgentRequest) (entity.AgentRecord, error) {
+				return existing, nil
+			},
+		}
+		uc := agent.New(nil, nil, nil, nil, nil, mock)
+		newModel := "gpt-4o"
+		_, err := uc.UpdateAgent(context.Background(), "agent-1", entity.UpdateAgentRequest{ModelRef: &newModel})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !versionCreated {
+			t.Error("version should be created when model_ref changes")
+		}
+	})
+
+	t.Run("config change creates version", func(t *testing.T) {
+		t.Parallel()
+		var versionCreated bool
+		mock := &mockAgentRepo{
+			getFunc: func(_ context.Context, _ string) (entity.AgentRecord, bool, error) {
+				return existing, true, nil
+			},
+			createVersionFunc: func(_ context.Context, r entity.AgentVersionRecord) error {
+				versionCreated = true
+				return nil
+			},
+			updateFunc: func(_ context.Context, _ string, _ entity.UpdateAgentRequest) (entity.AgentRecord, error) {
+				return existing, nil
+			},
+		}
+		uc := agent.New(nil, nil, nil, nil, nil, mock)
+		newConfig := entity.LLMConfig{Model: "gpt-4", Temperature: 0.9}
+		_, err := uc.UpdateAgent(context.Background(), "agent-1", entity.UpdateAgentRequest{Config: &newConfig})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !versionCreated {
+			t.Error("version should be created when config changes")
+		}
+	})
+
+	t.Run("same config values set does create version", func(t *testing.T) {
+		t.Parallel()
+		var versionCreated bool
+		mock := &mockAgentRepo{
+			getFunc: func(_ context.Context, _ string) (entity.AgentRecord, bool, error) {
+				return existing, true, nil
+			},
+			createVersionFunc: func(_ context.Context, _ entity.AgentVersionRecord) error {
+				versionCreated = true
+				return nil
+			},
+			updateFunc: func(_ context.Context, _ string, _ entity.UpdateAgentRequest) (entity.AgentRecord, error) {
+				return existing, nil
+			},
+		}
+		uc := agent.New(nil, nil, nil, nil, nil, mock)
+		// Same value but non-nil pointer — considered a change
+		samePrompt := "Original prompt"
+		_, err := uc.UpdateAgent(context.Background(), "agent-1", entity.UpdateAgentRequest{SystemPrompt: &samePrompt})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if versionCreated {
+			t.Error("version should NOT be created when value is unchanged")
+		}
+	})
+
+	t.Run("multiple fields changed creates version with combined snapshot", func(t *testing.T) {
+		t.Parallel()
+		var versionRecord entity.AgentVersionRecord
+		mock := &mockAgentRepo{
+			getFunc: func(_ context.Context, _ string) (entity.AgentRecord, bool, error) {
+				return existing, true, nil
+			},
+			createVersionFunc: func(_ context.Context, r entity.AgentVersionRecord) error {
+				versionRecord = r
+				return nil
+			},
+			updateFunc: func(_ context.Context, _ string, _ entity.UpdateAgentRequest) (entity.AgentRecord, error) {
+				return existing, nil
+			},
+		}
+		uc := agent.New(nil, nil, nil, nil, nil, mock)
+		newPrompt := "New prompt"
+		newModel := "gpt-5"
+		_, err := uc.UpdateAgent(context.Background(), "agent-1", entity.UpdateAgentRequest{
+			SystemPrompt: &newPrompt,
+			ModelRef:     &newModel,
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if versionRecord.SystemPrompt != "New prompt" {
+			t.Errorf("expected new prompt in version, got %s", versionRecord.SystemPrompt)
+		}
+		if versionRecord.ModelRef != "gpt-5" {
+			t.Errorf("expected new model_ref in version, got %s", versionRecord.ModelRef)
+		}
+	})
+}
+
+func TestUpdateAgent_Errors(t *testing.T) {
+	t.Parallel()
+
+	t.Run("agent repo is nil", func(t *testing.T) {
+		t.Parallel()
+		uc := agent.New(nil, nil, nil, nil, nil, nil)
+		_, err := uc.UpdateAgent(context.Background(), "agent-1", entity.UpdateAgentRequest{})
+		if err == nil {
+			t.Fatal("expected error when agent repo is nil")
+		}
+	})
+
+	t.Run("agent not found", func(t *testing.T) {
+		t.Parallel()
+		mock := &mockAgentRepo{
+			getFunc: func(_ context.Context, _ string) (entity.AgentRecord, bool, error) {
+				return entity.AgentRecord{}, false, nil
+			},
+		}
+		uc := agent.New(nil, nil, nil, nil, nil, mock)
+		_, err := uc.UpdateAgent(context.Background(), "missing", entity.UpdateAgentRequest{})
+		if err == nil {
+			t.Fatal("expected error when agent not found")
+		}
+	})
+
+	t.Run("create version fails", func(t *testing.T) {
+		t.Parallel()
+		mock := &mockAgentRepo{
+			getFunc: func(_ context.Context, _ string) (entity.AgentRecord, bool, error) {
+				return entity.AgentRecord{
+					AgentID:      "agent-1",
+					SystemPrompt: "old",
+					ModelRef:     "gpt-4",
+				}, true, nil
+			},
+			createVersionFunc: func(_ context.Context, _ entity.AgentVersionRecord) error {
+				return errors.New("db error")
+			},
+		}
+		uc := agent.New(nil, nil, nil, nil, nil, mock)
+		newPrompt := "new"
+		_, err := uc.UpdateAgent(context.Background(), "agent-1", entity.UpdateAgentRequest{SystemPrompt: &newPrompt})
+		if err == nil {
+			t.Fatal("expected error when CreateVersion fails")
+		}
+	})
+
+	t.Run("get agent fails", func(t *testing.T) {
+		t.Parallel()
+		mock := &mockAgentRepo{
+			getFunc: func(_ context.Context, _ string) (entity.AgentRecord, bool, error) {
+				return entity.AgentRecord{}, false, errors.New("connection error")
+			},
+		}
+		uc := agent.New(nil, nil, nil, nil, nil, mock)
+		_, err := uc.UpdateAgent(context.Background(), "agent-1", entity.UpdateAgentRequest{})
+		if err == nil {
+			t.Fatal("expected error when Get fails")
+		}
+	})
+
+	t.Run("update fails after version created", func(t *testing.T) {
+		t.Parallel()
+		var versionCreated bool
+		mock := &mockAgentRepo{
+			getFunc: func(_ context.Context, _ string) (entity.AgentRecord, bool, error) {
+				return entity.AgentRecord{
+					AgentID:      "agent-1",
+					SystemPrompt: "old",
+					ModelRef:     "gpt-4",
+				}, true, nil
+			},
+			createVersionFunc: func(_ context.Context, _ entity.AgentVersionRecord) error {
+				versionCreated = true
+				return nil
+			},
+			updateFunc: func(_ context.Context, _ string, _ entity.UpdateAgentRequest) (entity.AgentRecord, error) {
+				return entity.AgentRecord{}, errors.New("update failed")
+			},
+		}
+		uc := agent.New(nil, nil, nil, nil, nil, mock)
+		newPrompt := "new"
+		_, err := uc.UpdateAgent(context.Background(), "agent-1", entity.UpdateAgentRequest{SystemPrompt: &newPrompt})
+		if err == nil {
+			t.Fatal("expected error when Update fails")
+		}
+		if !versionCreated {
+			t.Error("version should have been created before the failed update")
+		}
+	})
+}
