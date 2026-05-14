@@ -6,6 +6,13 @@ x-db-environment: &x-db-environment
   POSTGRES_PASSWORD: "myAwEsOm3pa55@w0rd"
   POSTGRES_USER: "user"
 
+x-temporal-db-environment: &x-temporal-db-environment
+  DB: "postgres12"
+  DB_PORT: "5432"
+  POSTGRES_USER: "user"
+  POSTGRES_PWD: "myAwEsOm3pa55@w0rd"
+  POSTGRES_SEEDS: "db"
+
 x-rabbitmq-variables: &x-rabbitmq-variables
   RABBITMQ_DEFAULT_USER: "guest"
   RABBITMQ_DEFAULT_PASS: "guest"
@@ -106,12 +113,8 @@ services:
       db:
         condition: service_started
     environment:
-      - DB=postgres12
-      - DB_PORT=5432
-      - POSTGRES_USER=user
-      - POSTGRES_PWD=myAwEsOm3pa55@w0rd
-      - POSTGRES_SEEDS=db
-      - SQL_PASSWORD=myAwEsOm3pa55@w0rd
+      <<: *x-temporal-db-environment
+      SQL_PASSWORD: "myAwEsOm3pa55@w0rd"
     volumes:
       - ./scripts/temporal/setup-postgres.sh:/scripts/setup.sh:ro
     entrypoint: ["/bin/sh"]
@@ -131,13 +134,9 @@ services:
       temporal-admin-tools:
         condition: service_completed_successfully
     environment:
-      - DB=postgres12
-      - DB_PORT=5432
-      - POSTGRES_USER=user
-      - POSTGRES_PWD=myAwEsOm3pa55@w0rd
-      - POSTGRES_SEEDS=db
-      - BIND_ON_IP=0.0.0.0
-      - DYNAMIC_CONFIG_FILE_PATH=config/dynamicconfig/development-sql.yaml
+      <<: *x-temporal-db-environment
+      BIND_ON_IP: "0.0.0.0"
+      DYNAMIC_CONFIG_FILE_PATH: "config/dynamicconfig/development-sql.yaml"
     volumes:
     - ./temporal/dynamicconfig:/etc/temporal/config/dynamicconfig
     healthcheck:
