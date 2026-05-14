@@ -53,9 +53,10 @@ func AgentWorkflow(ctx workflow.Context, input AgentWorkflowInput) (WorkflowResu
 		Config:       input.Config,
 		MCPServerConfigs: input.MCPServerConfigs,
 	}).Get(ctx, &prepResult); err != nil {
+		status.LifecycleState = "failed"
 		return WorkflowResult{
 			RunID:          input.RunID,
-			LifecycleState: "failed",
+			LifecycleState: status.LifecycleState,
 			Step:           status.Step,
 			CompletedAt:    workflow.Now(ctx),
 		}, err
@@ -65,9 +66,10 @@ func AgentWorkflow(ctx workflow.Context, input AgentWorkflowInput) (WorkflowResu
 	tools := prepResult.Tools
 
 	if !prepResult.CanProceed() {
+		status.LifecycleState = "failed"
 		return WorkflowResult{
 			RunID:          input.RunID,
-			LifecycleState: "failed",
+			LifecycleState: status.LifecycleState,
 			Step:           status.Step,
 			CompletedAt:    workflow.Now(ctx),
 		}, fmt.Errorf("agent workflow - prep checks failed: billing=%v limits=%v errors=%v",
@@ -83,9 +85,10 @@ func AgentWorkflow(ctx workflow.Context, input AgentWorkflowInput) (WorkflowResu
 	// Agent loop
 	for round := 0; round < maxToolRounds; round++ {
 		if cancelled, _ := checkStreamSignal(signalCh, ctx); cancelled {
+			status.LifecycleState = "cancelled"
 			return WorkflowResult{
 				RunID:          status.RunID,
-				LifecycleState: "cancelled",
+				LifecycleState: status.LifecycleState,
 				Step:           status.Step,
 				CompletedAt:    workflow.Now(ctx),
 			}, nil
@@ -104,9 +107,10 @@ func AgentWorkflow(ctx workflow.Context, input AgentWorkflowInput) (WorkflowResu
 			Tools:    tools,
 			Config:   input.Config,
 		}).Get(ctx, &llmResult); err != nil {
+			status.LifecycleState = "failed"
 			return WorkflowResult{
 				RunID:          status.RunID,
-				LifecycleState: "failed",
+				LifecycleState: status.LifecycleState,
 				Step:           status.Step,
 				CompletedAt:    workflow.Now(ctx),
 			}, fmt.Errorf("agent workflow - llm round %d: %w", round, err)
@@ -123,9 +127,10 @@ func AgentWorkflow(ctx workflow.Context, input AgentWorkflowInput) (WorkflowResu
 		status.UpdatedAt = workflow.Now(ctx)
 
 		if len(llmResult.ToolCalls) == 0 {
+			status.LifecycleState = "completed"
 			return WorkflowResult{
 				RunID:          status.RunID,
-				LifecycleState: "completed",
+				LifecycleState: status.LifecycleState,
 				Step:           status.Step,
 				CompletedAt:    workflow.Now(ctx),
 			}, nil
@@ -134,9 +139,10 @@ func AgentWorkflow(ctx workflow.Context, input AgentWorkflowInput) (WorkflowResu
 		// Execute each tool call
 		for _, tc := range llmResult.ToolCalls {
 			if cancelled, _ := checkStreamSignal(signalCh, ctx); cancelled {
+				status.LifecycleState = "cancelled"
 				return WorkflowResult{
 					RunID:          status.RunID,
-					LifecycleState: "cancelled",
+					LifecycleState: status.LifecycleState,
 					Step:           status.Step,
 					CompletedAt:    workflow.Now(ctx),
 				}, nil
@@ -149,7 +155,13 @@ func AgentWorkflow(ctx workflow.Context, input AgentWorkflowInput) (WorkflowResu
 				ToolName:   tc.Function.Name,
 				Args:       parseArgsJSON(tc.Function.Arguments),
 			}).Get(ctx, &toolResult); err != nil {
-				return WorkflowResult{}, fmt.Errorf("agent workflow - tool exec %s: %w", tc.Function.Name, err)
+				status.LifecycleState = "failed"
+				return WorkflowResult{
+					RunID:          status.RunID,
+					LifecycleState: status.LifecycleState,
+					Step:           status.Step,
+					CompletedAt:    workflow.Now(ctx),
+				}, fmt.Errorf("agent workflow - tool exec %s: %w", tc.Function.Name, err)
 			}
 
 			toolMsg := entity.Message{
@@ -183,9 +195,10 @@ func AgentWorkflow(ctx workflow.Context, input AgentWorkflowInput) (WorkflowResu
 		}
 	}
 
+	status.LifecycleState = "completed"
 	return WorkflowResult{
 		RunID:          status.RunID,
-		LifecycleState: "completed",
+		LifecycleState: status.LifecycleState,
 		Step:           status.Step,
 		CompletedAt:    workflow.Now(ctx),
 	}, nil

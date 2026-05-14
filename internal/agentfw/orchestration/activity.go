@@ -70,6 +70,9 @@ func (a *AgentActivities) WithMCPManager(m MCPManagerProvider) *AgentActivities 
 // billing/limits checks, and tool definition validation. It returns a composite
 // PrepareOutput with all check results and a CanProceed() gate for the workflow.
 func (a *AgentActivities) PrepareActivity(ctx context.Context, input PrepareInput) (*PrepareOutput, error) {
+	fmt.Printf("PrepareActivity: started, mcpManager=%v\n", a.mcpManager != nil)
+	a.logger.Info("PrepareActivity: started, mcpManager=%v serverConfigs=%d", a.mcpManager != nil, len(input.MCPServerConfigs))
+
 	// Run prep checks concurrently
 	type billingResult struct {
 		out *PrepBillingOutput
@@ -103,6 +106,7 @@ func (a *AgentActivities) PrepareActivity(ctx context.Context, input PrepareInpu
 	// Wait for concurrent checks
 	billingRes := <-billingCh
 	limitsRes := <-limitsCh
+	fmt.Printf("PrepareActivity: pre-checks done, billing.err=%v limits.err=%v\n", billingRes.err, limitsRes.err)
 
 	var errors []string
 	if billingRes.err != nil {
@@ -136,10 +140,13 @@ func (a *AgentActivities) PrepareActivity(ctx context.Context, input PrepareInpu
 	if err != nil {
 		return nil, fmt.Errorf("PrepareActivity - Prep: %w", err)
 	}
+	fmt.Printf("PrepareActivity: Prep done, messages=%d\n", len(prepResult.Messages))
 
 	// Merge MCP-discovered tools with the prep result tools
 	allTools := prepResult.Tools
 	allTools = append(allTools, mcpOut.Tools...)
+
+	a.logger.Info("PrepareActivity: completed, errors=%v", errors)
 
 	return &PrepareOutput{
 		Messages: prepResult.Messages,
@@ -207,10 +214,13 @@ func (a *AgentActivities) prepMCP(ctx context.Context, input PrepMCPInput) *Prep
 
 // LLMStepActivity performs a single sync LLM call and returns the result.
 func (a *AgentActivities) LLMStepActivity(ctx context.Context, input LLMStepInput) (*LLMStepOutput, error) {
+	fmt.Printf("LLMStepActivity: started, model=%s messages=%d tools=%d\n", input.Config.Model, len(input.Messages), len(input.Tools))
 	result, err := a.agentUC.LLMStep(ctx, input.RunID, input.Messages, input.Tools, input.Config)
 	if err != nil {
 		return nil, fmt.Errorf("LLMStepActivity - LLMStep: %w", err)
 	}
+
+	fmt.Printf("LLMStepActivity: completed, finish_reason=%s tool_calls=%d\n", result.FinishReason, len(result.ToolCalls))
 
 	return &LLMStepOutput{
 		Content:      result.AssistantMsg.Content,

@@ -27,6 +27,10 @@ func (r *V1) execute(ctx *fiber.Ctx) error {
 		r.l.Error(err, "restapi - v1 - execute")
 		return errorResponse(ctx, http.StatusBadRequest, "invalid request body")
 	}
+	if err := r.v.Struct(&req); err != nil {
+		r.l.Error(err, "restapi - v1 - execute - validation")
+		return errorResponse(ctx, http.StatusBadRequest, err.Error())
+	}
 
 	status, err := r.t.Execute(ctx.UserContext(), entity.ExecuteRequest{
 		RunID:          req.RunID,

@@ -2,6 +2,7 @@ package runtime
 
 import (
 	"github.com/TekkenSteve/GoAgent/internal/agentfw/orchestration"
+	"go.temporal.io/sdk/activity"
 	"go.temporal.io/sdk/workflow"
 )
 
@@ -33,7 +34,34 @@ func (r DefaultRegistrar) RegisterWorkflows(rt *TemporalRuntime) {
 
 // RegisterActivities registers activity definitions.
 func (r DefaultRegistrar) RegisterActivities(rt *TemporalRuntime) {
-	if r.activities != nil {
-		rt.Worker.RegisterActivity(r.activities)
+	if r.activities == nil {
+		return
 	}
+	// Register each activity individually with the name the workflow uses
+	// (RegisterActivity without options would use the reflection-based function name,
+	// which won't match the workflow's activity type name).
+	rt.Worker.RegisterActivityWithOptions(r.activities.PrepareActivity, activity.RegisterOptions{
+		Name: orchestration.PrepareActivityName,
+	})
+	rt.Worker.RegisterActivityWithOptions(r.activities.LLMStepActivity, activity.RegisterOptions{
+		Name: orchestration.LLMStepActivityName,
+	})
+	rt.Worker.RegisterActivityWithOptions(r.activities.ToolExecActivity, activity.RegisterOptions{
+		Name: orchestration.ToolExecActivityName,
+	})
+	rt.Worker.RegisterActivityWithOptions(r.activities.InitStreamActivity, activity.RegisterOptions{
+		Name: orchestration.InitStreamActivityName,
+	})
+	rt.Worker.RegisterActivityWithOptions(r.activities.LLMStreamActivity, activity.RegisterOptions{
+		Name: orchestration.LLMStreamActivityName,
+	})
+	rt.Worker.RegisterActivityWithOptions(r.activities.ToolExecStreamActivity, activity.RegisterOptions{
+		Name: orchestration.ToolExecStreamActivityName,
+	})
+	rt.Worker.RegisterActivityWithOptions(r.activities.FinishStreamActivity, activity.RegisterOptions{
+		Name: orchestration.FinishStreamActivityName,
+	})
+	rt.Worker.RegisterActivityWithOptions(r.activities.FireTriggerActivity, activity.RegisterOptions{
+		Name: orchestration.FireTriggerActivityName,
+	})
 }

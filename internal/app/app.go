@@ -79,6 +79,7 @@ func Run(cfg *config.Config) { //nolint: gocyclo,cyclop,funlen,gocritic,nolintli
 	agentRepo := cached.NewAgentRepo(persistentAgentRepo)
 	templateRepo := temporalrepo.NewWorkflowTemplateRepo(pg)
 	triggerRepo := temporalrepo.NewTriggerRepo(pg)
+	templateUC = templatepkg.New(templateRepo)
 
 	ctx := context.Background()
 

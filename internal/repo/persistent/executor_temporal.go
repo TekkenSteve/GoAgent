@@ -70,12 +70,20 @@ func (r *ExecutorTemporal) GetStatus(ctx context.Context, runID string) (entity.
 		return entity.RunStatus{}, fmt.Errorf("ExecutorTemporal - GetStatus - r.client.QueryWorkflow: %w", err)
 	}
 
-	var status entity.RunStatus
-	if err := resp.Get(&status); err != nil {
+	// Deserialize into orchestration.RunStatus first (no JSON tags → matches Temporal's
+	// serialized field names exactly), then convert to the API-facing entity type.
+	var orchStatus orchestration.RunStatus
+	if err := resp.Get(&orchStatus); err != nil {
 		return entity.RunStatus{}, fmt.Errorf("ExecutorTemporal - GetStatus - resp.Get: %w", err)
 	}
 
-	return status, nil
+	return entity.RunStatus{
+		RunID:          orchStatus.RunID,
+		LifecycleState: orchStatus.LifecycleState,
+		Step:           orchStatus.Step,
+		Reason:         orchStatus.Reason,
+		UpdatedAt:      orchStatus.UpdatedAt,
+	}, nil
 }
 
 func (r *ExecutorTemporal) StartOrchestration(ctx context.Context, input entity.OrchestrationInput) (entity.RunStatus, error) {

@@ -9,7 +9,7 @@ import (
 
 // V1 -.
 type V1 struct {
-	v1.TranslationServer
+	v1.UnimplementedTranslationServer
 
 	t usecase.AgentExecutor
 	l logger.Interface
