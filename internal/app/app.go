@@ -25,6 +25,7 @@ import (
 	"github.com/TekkenSteve/GoAgent/internal/repo/compressor"
 	mcpRepo "github.com/TekkenSteve/GoAgent/internal/repo/mcp"
 	"github.com/TekkenSteve/GoAgent/internal/repo/framework"
+
 	temporalrepo "github.com/TekkenSteve/GoAgent/internal/repo/persistent"
 	pipelinepkg "github.com/TekkenSteve/GoAgent/internal/repo/pipeline"
 	"github.com/TekkenSteve/GoAgent/internal/repo/toolkit"
@@ -34,6 +35,7 @@ import (
 	agentfwusecase "github.com/TekkenSteve/GoAgent/internal/usecase/executor"
 	"github.com/TekkenSteve/GoAgent/internal/usecase/history"
 	templatepkg "github.com/TekkenSteve/GoAgent/internal/usecase/template"
+	billingpkg "github.com/TekkenSteve/GoAgent/internal/usecase/billing"
 	triggerpkg "github.com/TekkenSteve/GoAgent/internal/usecase/trigger"
 	"github.com/TekkenSteve/GoAgent/pkg/grpcserver"
 	"github.com/TekkenSteve/GoAgent/pkg/httpserver"
@@ -111,11 +113,38 @@ func Run(cfg *config.Config) { //nolint: gocyclo,cyclop,funlen,gocritic,nolintli
 		// Build agent components when LLM is configured
 		var activities *orchestration.AgentActivities
 		var triggerScheduler *temporalrepo.TemporalTriggerScheduler
-		if cfg.AgentFW.LLMAPIKey != "" {
-			llmProvider := webapi.New(webapi.Config{
-				BaseURL: cfg.AgentFW.LLMBaseURL,
-				APIKey:  cfg.AgentFW.LLMAPIKey,
+		llmResult, err := webapi.LoadLLMProviders(cfg.AgentFW.LLMConfigPath)
+		if err != nil {
+			l.Fatal(fmt.Errorf("app - Run - LoadLLMProviders: %w", err))
+		}
+		if llmResult != nil && len(llmResult.Providers) > 0 {
+			llmProvider, err := webapi.NewBifrost(webapi.BifrostConfig{
+				Providers:       llmResult.Providers,
+				Scenarios:       llmResult.Scenarios,
+				DefaultScenario: llmResult.DefaultScenario,
 			})
+			if err != nil {
+				l.Fatal(fmt.Errorf("app - Run - webapi.NewBifrost: %w", err))
+			}
+			defer llmProvider.Close()
+
+			// LLM config watcher — hot-reload on file changes.
+			if llmConfigPath := cfg.AgentFW.LLMConfigPath; llmConfigPath != "" {
+				if err := webapi.WatchLLMConfig(llmConfigPath, func(updated *webapi.LLMConfigFile) {
+					llmProvider.ReloadConfig(updated)
+					l.Info("app - Run - LLM config reloaded from %s", llmConfigPath)
+				}); err != nil {
+					l.Warn("app - Run - LLM config watcher: %v", err)
+				} else {
+					l.Info("app - Run - LLM config watcher started for %s", llmConfigPath)
+				}
+			}
+
+			// Billing — credit management and cost calculation.
+			// Cost is provided by Bifrost SDK in LLM response usage.
+			billingRepo := temporalrepo.NewBillingRepo(pg)
+			billingUC := billingpkg.New(billingRepo, nil, billingRepo)
+
 
 			// Tool registry — register tools with env-sourced API keys
 			toolRegistry = toolkit.NewRegistry()
@@ -179,7 +208,8 @@ func Run(cfg *config.Config) { //nolint: gocyclo,cyclop,funlen,gocritic,nolintli
 			activities = orchestration.NewAgentActivities(agentUC, eventStore, l).
 				WithTemplateRepo(templateRepo).
 				WithTriggerUC(triggerUC).
-				WithMCPManager(mcpManager)
+				WithMCPManager(mcpManager).
+				WithBilling(billingUC)
 			l.Info("app - Run - agent components initialized")
 		} else {
 			l.Warn("app - Run - LLM API key not configured, agent execution will not be available")

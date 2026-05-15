@@ -33,6 +33,7 @@ type Message struct {
 
 // LLMConfig is the configuration for an LLM invocation.
 type LLMConfig struct {
+	Provider    string  `json:"provider,omitempty"`        // target provider name; empty = use default
 	Model       string  `json:"model"`
 	MaxTokens   int     `json:"max_tokens"`
 	Temperature float64 `json:"temperature"`
@@ -73,16 +74,20 @@ const (
 
 // Usage contains token usage statistics.
 type Usage struct {
-	PromptTokens     int `json:"prompt_tokens"`
-	CompletionTokens int `json:"completion_tokens"`
-	TotalTokens      int `json:"total_tokens"`
+	PromptTokens     int    `json:"prompt_tokens"`
+	CompletionTokens int    `json:"completion_tokens"`
+	TotalTokens      int    `json:"total_tokens"`
+	Cost             Money  `json:"cost,omitempty"`
 } // @name entity.Usage
 
 // LLMRequest is a request to an LLM provider.
+// Scenario specifies the usage scenario for model selection when a ScenarioRouter
+// is configured; empty means use the default provider/model.
 type LLMRequest struct {
 	Messages []Message `json:"messages"`
 	Tools    []ToolDef `json:"tools,omitempty"`
 	Config   LLMConfig `json:"config"`
+	Scenario string    `json:"scenario,omitempty"`
 } // @name entity.LLMRequest
 
 // LLMResponse is the response from an LLM provider.

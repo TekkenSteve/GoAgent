@@ -95,13 +95,8 @@ type (
 		ContinueAsNewWallClockSeconds    int   `env:"AGENTFW_CONTINUE_AS_NEW_WALL_CLOCK_THRESHOLD_SECONDS" envDefault:"3000"`
 		ContinueAsNewMaxContinuations    int32 `env:"AGENTFW_CONTINUE_AS_NEW_MAX_CONTINUATIONS" envDefault:"1000"`
 
-		// LLM configuration for agent execution.
-		LLMProvider  string  `env:"AGENTFW_LLM_PROVIDER" envDefault:"openai"`
-		LLMModel     string  `env:"AGENTFW_LLM_MODEL" envDefault:"gpt-4.1-mini"`
-		LLMBaseURL   string  `env:"AGENTFW_LLM_BASE_URL" envDefault:"https://api.openai.com/v1"`
-		LLMAPIKey    string  `env:"AGENTFW_LLM_API_KEY" envDefault:""`
-		LLMMaxTokens int     `env:"AGENTFW_LLM_MAX_TOKENS" envDefault:"4096"`
-		LLMTemp      float64 `env:"AGENTFW_LLM_TEMPERATURE" envDefault:"0"`
+		// LLM configuration — providers and scenarios in YAML (AGENTFW_LLM_CONFIG_PATH).
+		LLMConfigPath string `env:"AGENTFW_LLM_CONFIG_PATH" envDefault:""`
 	}
 
 	// Metrics -.

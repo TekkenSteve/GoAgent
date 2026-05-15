@@ -1,0 +1,16 @@
+# LLM provider configuration for integration tests.
+# Mock LLM at http://mock-llm:8080/v1 serves an OpenAI-compatible endpoint.
+providers:
+  - name: openai
+    api_key: test-key
+    # Note: omit /v1 suffix; Bifrost SDK OpenAI provider appends /v1/chat/completions automatically
+    base_url: "http://mock-llm:8080"
+
+scenarios:
+  default:
+    description: "Default scenario for integration tests"
+    candidates:
+      - provider: openai
+        model: gpt-4.1-mini
+        temperature: 0
+        max_tokens: 4096

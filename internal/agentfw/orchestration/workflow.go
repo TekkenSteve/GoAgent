@@ -46,11 +46,12 @@ func AgentWorkflow(ctx workflow.Context, input AgentWorkflowInput) (WorkflowResu
 	// Init phase: Prepare
 	var prepResult PrepareOutput
 	if err := workflow.ExecuteActivity(ctx, PrepareActivityName, PrepareInput{
-		SystemPrompt: input.SystemPrompt,
-		Message:      input.Message,
-		History:      input.History,
-		Tools:        input.Tools,
-		Config:       input.Config,
+		AccountID:        input.AccountID,
+		SystemPrompt:     input.SystemPrompt,
+		Message:          input.Message,
+		History:          input.History,
+		Tools:            input.Tools,
+		Config:           input.Config,
 		MCPServerConfigs: input.MCPServerConfigs,
 	}).Get(ctx, &prepResult); err != nil {
 		status.LifecycleState = "failed"
@@ -68,12 +69,12 @@ func AgentWorkflow(ctx workflow.Context, input AgentWorkflowInput) (WorkflowResu
 	if !prepResult.CanProceed() {
 		status.LifecycleState = "failed"
 		return WorkflowResult{
-			RunID:          input.RunID,
-			LifecycleState: status.LifecycleState,
-			Step:           status.Step,
-			CompletedAt:    workflow.Now(ctx),
-		}, fmt.Errorf("agent workflow - prep checks failed: billing=%v limits=%v errors=%v",
-			prepResult.Billing, prepResult.Limits, prepResult.Errors)
+				RunID:          input.RunID,
+				LifecycleState: status.LifecycleState,
+				Step:           status.Step,
+				CompletedAt:    workflow.Now(ctx),
+			}, fmt.Errorf("agent workflow - prep checks failed: billing=%v limits=%v errors=%v",
+				prepResult.Billing, prepResult.Limits, prepResult.Errors)
 	}
 
 	// Track base time for Continue-As-New wall-clock check
@@ -102,10 +103,11 @@ func AgentWorkflow(ctx workflow.Context, input AgentWorkflowInput) (WorkflowResu
 		// Single sync LLM call
 		var llmResult LLMStepOutput
 		if err := workflow.ExecuteActivity(ctx, LLMStepActivityName, LLMStepInput{
-			RunID:    input.RunID,
-			Messages: messages,
-			Tools:    tools,
-			Config:   input.Config,
+			AccountID: input.AccountID,
+			RunID:     input.RunID,
+			Messages:  messages,
+			Tools:     tools,
+			Config:    input.Config,
 		}).Get(ctx, &llmResult); err != nil {
 			status.LifecycleState = "failed"
 			return WorkflowResult{

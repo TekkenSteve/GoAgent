@@ -8,6 +8,7 @@ import (
 	"github.com/TekkenSteve/GoAgent/internal/agentfw/stream"
 	"github.com/TekkenSteve/GoAgent/internal/entity"
 	agentuc "github.com/TekkenSteve/GoAgent/internal/usecase/agent"
+	billinguc "github.com/TekkenSteve/GoAgent/internal/usecase/billing"
 	triggeruc "github.com/TekkenSteve/GoAgent/internal/usecase/trigger"
 	"github.com/TekkenSteve/GoAgent/pkg/logger"
 	"github.com/google/uuid"
@@ -16,6 +17,7 @@ import (
 // AgentActivities provides Temporal activity implementations for agent execution.
 type AgentActivities struct {
 	agentUC      *agentuc.UseCase
+	billingUC    *billinguc.UseCase
 	triggerUC    *triggeruc.UseCase
 	eventStore   stream.EventStore
 	templateRepo WorkflowTemplateRepoProvider
@@ -63,6 +65,12 @@ func (a *AgentActivities) WithMCPManager(m MCPManagerProvider) *AgentActivities 
 	return a
 }
 
+// WithBilling sets the billing usecase for credit checks and usage deduction.
+func (a *AgentActivities) WithBilling(uc *billinguc.UseCase) *AgentActivities {
+	a.billingUC = uc
+	return a
+}
+
 
 // ——— Activities (step-level, Temporal-native) ———
 
@@ -88,7 +96,8 @@ func (a *AgentActivities) PrepareActivity(ctx context.Context, input PrepareInpu
 
 	go func() {
 		billing, err := a.prepBilling(ctx, PrepBillingInput{
-			ModelRef: input.Config.Model,
+			AccountID:	input.AccountID,
+				ModelRef: input.Config.Model,
 		})
 		billingCh <- billingResult{billing, err}
 	}()
@@ -159,11 +168,32 @@ func (a *AgentActivities) PrepareActivity(ctx context.Context, input PrepareInpu
 }
 
 // prepBilling validates account billing/quota.
-// Currently a pass-through; will integrate with billing service when available.
+// Checks the account balance; rejects if balance is zero or negative.
 func (a *AgentActivities) prepBilling(ctx context.Context, input PrepBillingInput) (*PrepBillingOutput, error) {
+	if a.billingUC == nil || input.AccountID == "" {
+		return &PrepBillingOutput{
+			Approved:  true,
+			Remaining: 0,
+		}, nil
+	}
+
+	acct, err := a.billingUC.GetBalance(ctx, input.AccountID)
+	if err != nil {
+		return nil, fmt.Errorf("prepBilling - GetBalance: %w", err)
+	}
+
+	if acct.Balance <= 0 {
+		return &PrepBillingOutput{
+			Approved:  false,
+			Remaining: 0,
+			Currency:  acct.Currency,
+		}, nil
+	}
+
 	return &PrepBillingOutput{
 		Approved:  true,
-		Remaining: 1000,
+		Remaining: int(acct.Balance),
+		Currency:  acct.Currency,
 	}, nil
 }
 
@@ -213,6 +243,7 @@ func (a *AgentActivities) prepMCP(ctx context.Context, input PrepMCPInput) *Prep
 }
 
 // LLMStepActivity performs a single sync LLM call and returns the result.
+// Deducts usage cost from account balance after a successful LLM call.
 func (a *AgentActivities) LLMStepActivity(ctx context.Context, input LLMStepInput) (*LLMStepOutput, error) {
 	fmt.Printf("LLMStepActivity: started, model=%s messages=%d tools=%d\n", input.Config.Model, len(input.Messages), len(input.Tools))
 	result, err := a.agentUC.LLMStep(ctx, input.RunID, input.Messages, input.Tools, input.Config)
@@ -221,6 +252,13 @@ func (a *AgentActivities) LLMStepActivity(ctx context.Context, input LLMStepInpu
 	}
 
 	fmt.Printf("LLMStepActivity: completed, finish_reason=%s tool_calls=%d\n", result.FinishReason, len(result.ToolCalls))
+
+	// Deduct usage cost after successful LLM call
+	if a.billingUC != nil && input.AccountID != "" && result.Usage.TotalTokens > 0 {
+		if _, _, err := a.billingUC.DeductUsage(ctx, input.AccountID, input.Config.Model, result.Usage); err != nil {
+			a.logger.Warn("LLMStepActivity - DeductUsage: %v (non-fatal)", err)
+		}
+	}
 
 	return &LLMStepOutput{
 		Content:      result.AssistantMsg.Content,
@@ -286,6 +324,7 @@ func (a *AgentActivities) InitStreamActivity(ctx context.Context, input InitStre
 
 // LLMStreamActivity performs a single streaming LLM call, writing delta events
 // to the EventStore. Heartbeat carries the last-written sequence for retry recovery.
+// Deducts usage cost from account balance after a successful LLM call.
 func (a *AgentActivities) LLMStreamActivity(ctx context.Context, input LLMStreamInput) (*LLMStreamOutput, error) {
 	writer := &eventStoreWriter{
 		store:     a.eventStore,
@@ -296,6 +335,13 @@ func (a *AgentActivities) LLMStreamActivity(ctx context.Context, input LLMStream
 	result, err := a.agentUC.LLMStreamCall(ctx, input.RunID, input.Messages, input.Tools, input.Config, writer)
 	if err != nil {
 		return nil, fmt.Errorf("LLMStreamActivity - LLMStreamCall: %w", err)
+	}
+
+	// Deduct usage cost after successful LLM call
+	if a.billingUC != nil && input.AccountID != "" && result.Usage.TotalTokens > 0 {
+		if _, _, err := a.billingUC.DeductUsage(ctx, input.AccountID, input.Config.Model, result.Usage); err != nil {
+			a.logger.Warn("LLMStreamActivity - DeductUsage: %v (non-fatal)", err)
+		}
 	}
 
 	return &LLMStreamOutput{

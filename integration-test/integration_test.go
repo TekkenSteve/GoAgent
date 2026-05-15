@@ -9,6 +9,8 @@ import (
 	"os"
 	"testing"
 	"time"
+
+	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 const (
@@ -74,6 +76,48 @@ func healthCheck(attempts int) error {
 	return errHealthCheck
 }
 
+// seedTestAccount ensures the test account has a non-zero credit balance.
+// Called before tests run so that the billing prep-check passes.
+func seedTestAccount() {
+	pgURL := os.Getenv("PG_URL")
+	if pgURL == "" {
+		log.Fatalf("Integration tests: PG_URL not set")
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	pool, err := pgxpool.New(ctx, pgURL)
+	if err != nil {
+		log.Fatalf("Integration tests: pgxpool.New: %v", err)
+	}
+	defer pool.Close()
+
+	// Wait for the credit_accounts table to exist (migrations may still be running)
+	for i := 0; i < 30; i++ {
+		var exists bool
+		err := pool.QueryRow(ctx,
+			"SELECT EXISTS (SELECT FROM information_schema.tables WHERE table_name = 'credit_accounts')",
+		).Scan(&exists)
+		if err == nil && exists {
+			break
+		}
+		time.Sleep(time.Second)
+	}
+
+	// Upsert the test account with a $100 balance
+	_, err = pool.Exec(ctx, `
+		INSERT INTO credit_accounts (account_id, balance, currency)
+		VALUES ('e2e-test-account', 100, 'USD')
+		ON CONFLICT (account_id)
+		DO UPDATE SET balance = 100, version = credit_accounts.version + 1, updated_at = NOW()
+	`)
+	if err != nil {
+		log.Fatalf("Integration tests: seed credit_account: %v", err)
+	}
+	log.Printf("Integration tests: seeded e2e-test-account with $100")
+}
+
 func TestMain(m *testing.M) {
 	err := healthCheck(attempts)
 	if err != nil {
@@ -81,6 +125,8 @@ func TestMain(m *testing.M) {
 	}
 
 	log.Printf("Integration tests: httpURL %s is available", httpURL)
+
+	seedTestAccount()
 
 	code := m.Run()
 	os.Exit(code)

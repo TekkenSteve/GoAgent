@@ -38,6 +38,7 @@ func (r *ExecutorTemporal) StartExecution(ctx context.Context, req entity.Execut
 
 	input := orchestration.AgentWorkflowInput{
 		RunID:            req.RunID,
+		AccountID:        req.AccountID,
 		SystemPrompt:     req.SystemPrompt,
 		Message:          req.UserMessage,
 		Config:           entity.LLMConfig{Model: req.ModelRef},

@@ -1,0 +1,72 @@
+# LLM Provider and Scenario configuration.
+# Path is controlled by the AGENTFW_LLM_CONFIG_PATH environment variable.
+# When unset, the legacy single-provider env vars (AGENTFW_LLM_API_KEY, etc.) are used.
+
+# Provider credentials — API keys and optional base URLs.
+providers:
+  - name: openai
+    api_key: sk-...
+    # base_url: "https://api.openai.com/v1"   # optional, SDK default
+
+  - name: anthropic
+    api_key: sk-ant-...
+
+  - name: deepseek
+    api_key: sk-ds-...
+
+# Scenarios map usage intent → optimal model + provider + parameters.
+# The first candidate with a configured API key is used as primary;
+# remaining candidates become automatic fallbacks via Bifrost SDK.
+#
+# Callers pass scenario name in their request. When empty, the
+# first provider with a key is used directly (backward compatible).
+scenarios:
+  # "default" is used when a request has no explicit scenario.
+  # It tries providers in order until one has a configured key.
+  default:
+    description: "General-purpose chat, good availability"
+    candidates:
+      - provider: openai
+        model: gpt-4.1-mini
+        temperature: 0
+        max_tokens: 4096
+      - provider: anthropic
+        model: claude-sonnet-4-20250514
+        temperature: 0
+
+  # Simple/high-throughput tasks — cheapest adequate model first.
+  simple_chat:
+    description: "Simple conversation, prioritize throughput and cost"
+    candidates:
+      - provider: deepseek
+        model: deepseek-chat
+        temperature: 0.7
+        max_tokens: 2048
+      - provider: openai
+        model: gpt-4.1-mini
+        temperature: 0.7
+        max_tokens: 2048
+
+  # Complex reasoning, code generation — strongest model preferred.
+  complex_reasoning:
+    description: "Complex reasoning, code generation, math"
+    candidates:
+      - provider: openai
+        model: o3
+        temperature: 0
+        max_tokens: 8192
+      - provider: anthropic
+        model: claude-sonnet-4-20250514
+        temperature: 0
+        max_tokens: 8192
+
+  # Heavy tool/function calling — models with strong tool-use support.
+  tool_calling:
+    description: "Heavy tool/function calling"
+    candidates:
+      - provider: openai
+        model: gpt-4.1-mini
+        temperature: 0
+      - provider: anthropic
+        model: claude-sonnet-4-20250514
+        temperature: 0

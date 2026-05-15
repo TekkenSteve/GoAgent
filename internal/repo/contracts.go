@@ -93,4 +93,19 @@ type (
 		Schedule(ctx context.Context, trigger entity.TriggerSpec) error
 		Unschedule(ctx context.Context, triggerID string) error
 	}
+	// CreditManager manages account credit balances and transactions.
+	CreditManager interface {
+		GetBalance(ctx context.Context, accountID string) (entity.CreditAccount, error)
+		Deduct(ctx context.Context, accountID string, amount entity.Money, description string) (entity.CreditTransaction, error)
+		AddCredits(ctx context.Context, accountID string, amount entity.Money, description string) (entity.CreditTransaction, error)
+		GetHistory(ctx context.Context, accountID string, limit, offset int) ([]entity.CreditTransaction, error)
+	}
+	// CostCalculator calculates the monetary cost of LLM usage from model and token counts.
+	CostCalculator interface {
+		Calculate(ctx context.Context, modelID string, usage entity.Usage) (entity.Money, error)
+	}
+	// UsageRecordRepo persists usage records for audit and billing history.
+	UsageRecordRepo interface {
+		CreateUsageRecord(ctx context.Context, record entity.UsageRecord) error
+	}
 )

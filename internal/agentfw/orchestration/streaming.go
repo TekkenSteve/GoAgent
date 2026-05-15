@@ -27,9 +27,9 @@ func StreamAgentWorkflow(ctx workflow.Context, input InitStreamInput) error {
 		StartToCloseTimeout: 10 * time.Minute,
 		HeartbeatTimeout:    30 * time.Second,
 		RetryPolicy: &temporal.RetryPolicy{
-			InitialInterval:    time.Second,
-			MaximumInterval:    time.Minute,
-			MaximumAttempts:    3,
+			InitialInterval: time.Second,
+			MaximumInterval: time.Minute,
+			MaximumAttempts: 3,
 		},
 	}
 	ctx = workflow.WithActivityOptions(ctx, ao)
@@ -56,6 +56,7 @@ func StreamAgentWorkflow(ctx workflow.Context, input InitStreamInput) error {
 		// Streaming LLM call — writes delta events to EventStore
 		var llmResult LLMStreamOutput
 		if err := workflow.ExecuteActivity(ctx, LLMStreamActivityName, LLMStreamInput{
+			AccountID: input.AccountID,
 			SessionID: input.SessionID,
 			RunID:     input.RunID,
 			Messages:  messages,

@@ -34,14 +34,15 @@ func (e *TemporalStreamExecutor) ExecuteStream(ctx context.Context, req entity.S
 	workflowID := "agentfw-stream-" + req.RunID
 
 	input := orchestration.InitStreamInput{
-		SessionID:    req.RunID,
-		RunID:        req.RunID,
-		SystemPrompt: req.SystemPrompt,
-		Message:      req.Message,
-		History:      req.History,
-		Tools:        req.Tools,
+		SessionID:        req.RunID,
+		AccountID:        req.AccountID,
+		RunID:            req.RunID,
+		SystemPrompt:     req.SystemPrompt,
+		Message:          req.Message,
+		History:          req.History,
+		Tools:            req.Tools,
 		Config:           req.Config,
-			MCPServerConfigs: req.MCPServerConfigs,
+		MCPServerConfigs: req.MCPServerConfigs,
 	}
 
 	_, err := e.client.ExecuteWorkflow(ctx, client.StartWorkflowOptions{

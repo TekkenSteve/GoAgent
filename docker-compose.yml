@@ -171,7 +171,8 @@ services:
       app_network:
         aliases:
           - temporal-create-namespace.lvh.me
-  #   container_name: temporal-ui
+          
+  #  container_name: temporal-ui
   #   depends_on:
   #     temporal:
   #       condition: service_healthy
@@ -185,6 +186,7 @@ services:
   #         - temporal-ui.lvh.me
   #   ports:
   #     - "8083:8083"
+
   app:
     container_name: app
     platform: linux/amd64

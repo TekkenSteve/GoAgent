@@ -70,7 +70,6 @@ type ToolCallDelta struct {
 }
 
 // LLMStreamChunk is a single chunk in an LLM streaming response.
-// TODO(phase2): 迁移到 repo/webapi/types.go
 type LLMStreamChunk struct {
 	Content        string
 	Reasoning      string
@@ -82,10 +81,11 @@ type LLMStreamChunk struct {
 
 // StreamRequest is the request parameters executed by the streaming Agent.
 type StreamRequest struct {
-	RunID        string
-	SystemPrompt string
-	Message      string
-	History      []Message
+	RunID            string
+	AccountID        string
+	SystemPrompt     string
+	Message          string
+	History          []Message
 	Tools            []ToolDef
 	Config           LLMConfig
 	MCPServerConfigs []MCPServerConfig

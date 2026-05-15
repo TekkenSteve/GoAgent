@@ -1,37 +1,39 @@
 package orchestration
 
 import (
-	"github.com/TekkenSteve/GoAgent/internal/entity"
 	"time"
+
+	"github.com/TekkenSteve/GoAgent/internal/entity"
 )
 
 // ——— Workflow type names ———
 
 const (
-	AgentWorkflowName   = "agentfw.agent-workflow.v1"
-	StreamWorkflowName  = "agentfw.stream-workflow.v1"
-	AgentCommandSignal  = "agent-command"
-	QueryRunStatus      = "agentfw.query.run-status"
+	AgentWorkflowName  = "agentfw.agent-workflow.v1"
+	StreamWorkflowName = "agentfw.stream-workflow.v1"
+	AgentCommandSignal = "agent-command"
+	QueryRunStatus     = "agentfw.query.run-status"
 )
 
 // ——— Activity names ———
 
 const (
-	PrepareActivityName         = "agentfw.prepare.v1"
-	LLMStepActivityName         = "agentfw.llm-step.v1"
-	LLMStreamActivityName       = "agentfw.llm-stream.v1"
-	ToolExecActivityName        = "agentfw.tool-exec.v1"
-	ToolExecStreamActivityName  = "agentfw.tool-exec-stream.v1"
-	InitStreamActivityName      = "agentfw.init-stream.v1"
-	FinishStreamActivityName    = "agentfw.finish-stream.v1"
-	TriggerFireWorkflowName     = "agentfw.trigger-fire.v1"
-	FireTriggerActivityName     = "agentfw.fire-trigger.v1"
+	PrepareActivityName        = "agentfw.prepare.v1"
+	LLMStepActivityName        = "agentfw.llm-step.v1"
+	LLMStreamActivityName      = "agentfw.llm-stream.v1"
+	ToolExecActivityName       = "agentfw.tool-exec.v1"
+	ToolExecStreamActivityName = "agentfw.tool-exec-stream.v1"
+	InitStreamActivityName     = "agentfw.init-stream.v1"
+	FinishStreamActivityName   = "agentfw.finish-stream.v1"
+	TriggerFireWorkflowName    = "agentfw.trigger-fire.v1"
+	FireTriggerActivityName    = "agentfw.fire-trigger.v1"
 )
 
 // ——— Activity input/output types ———
 
 // PrepareInput is the input for the prep activity.
 type PrepareInput struct {
+	AccountID        string
 	SystemPrompt     string
 	Message          string
 	History          []entity.Message
@@ -71,9 +73,9 @@ type PrepBillingInput struct {
 
 // PrepBillingOutput is the output of billing validation.
 type PrepBillingOutput struct {
-	Approved   bool
-	Remaining  int
-	Currency   string
+	Approved  bool
+	Remaining int
+	Currency  string
 }
 
 // PrepLimitsInput is the input for rate/context limit validation.
@@ -85,10 +87,10 @@ type PrepLimitsInput struct {
 
 // PrepLimitsOutput is the output of limit validation.
 type PrepLimitsOutput struct {
-	Approved       bool
+	Approved        bool
 	ConcurrentLimit int
-	RunningCount   int
-	ErrorCode      string
+	RunningCount    int
+	ErrorCode       string
 }
 
 // PrepToolsInput is the input for tool definition validation.
@@ -98,9 +100,9 @@ type PrepToolsInput struct {
 
 // PrepToolsOutput is the output of tool validation.
 type PrepToolsOutput struct {
-	Tools      []entity.ToolDef
-	Resolved   int
-	Failed     []string
+	Tools    []entity.ToolDef
+	Resolved int
+	Failed   []string
 }
 
 // PrepMCPInput is the input for MCP tool resolution.
@@ -115,13 +117,13 @@ type PrepMCPOutput struct {
 	Errors []string
 }
 
-
 // LLMStepInput is the input for a single sync LLM call activity.
 type LLMStepInput struct {
-	RunID    string
-	Messages []entity.Message
-	Tools    []entity.ToolDef
-	Config   entity.LLMConfig
+	AccountID string
+	RunID     string
+	Messages  []entity.Message
+	Tools     []entity.ToolDef
+	Config    entity.LLMConfig
 }
 
 // LLMStepOutput is the output of a single LLM call activity.
@@ -150,6 +152,7 @@ type ToolOutput struct {
 
 // InitStreamInput is the input for the streaming init activity.
 type InitStreamInput struct {
+	AccountID        string
 	SessionID        string
 	RunID            string
 	SystemPrompt     string
@@ -168,6 +171,7 @@ type InitStreamOutput struct {
 
 // LLMStreamInput is the input for a single streaming LLM call activity.
 type LLMStreamInput struct {
+	AccountID string
 	SessionID string
 	RunID     string
 	Messages  []entity.Message
@@ -203,6 +207,7 @@ type WorkflowResult struct {
 
 // AgentWorkflowInput is the input for the step-level AgentWorkflow.
 type AgentWorkflowInput struct {
+	AccountID        string
 	RunID            string
 	SystemPrompt     string
 	Message          string
