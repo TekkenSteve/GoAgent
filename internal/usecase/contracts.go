@@ -21,6 +21,7 @@ type (
 	// OrchestrationExecutor starts and manages orchestration workflows.
 	OrchestrationExecutor interface {
 		ExecuteOrchestration(ctx context.Context, input entity.OrchestrationInput) (entity.RunStatus, error)
+		GetOrchestrationStatus(ctx context.Context, runID string) (entity.RunStatus, error)
 	}
 	// StreamEventWriter is the destination for streaming events.
 	// Implementations write to Redis Stream, channel, etc.

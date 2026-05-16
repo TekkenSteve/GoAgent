@@ -4,6 +4,8 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/TekkenSteve/GoAgent/internal/agentfw/agent"
+	"github.com/TekkenSteve/GoAgent/internal/agentfw/team"
 	"github.com/TekkenSteve/GoAgent/internal/entity"
 	"github.com/TekkenSteve/GoAgent/internal/repo"
 )
@@ -29,7 +31,21 @@ func (uc *UseCase) Execute(ctx context.Context, req entity.ExecuteRequest) (enti
 }
 
 // ExecuteOrchestration starts an OrchestrationWorkflow from a TeamSpec or step queue.
+// If TeamSpec is provided (with no pre-expanded Steps), it expands the team hierarchy
+// into a flat step queue before starting the workflow.
 func (uc *UseCase) ExecuteOrchestration(ctx context.Context, input entity.OrchestrationInput) (entity.RunStatus, error) {
+	// TeamSpec must be expanded into Steps before the workflow starts
+	// (the OrchestrationWorkflow rejects raw TeamSpec).
+	if input.TeamSpec != nil && len(input.Steps) == 0 {
+		registry := agent.NewRegistry()
+		expanded, err := team.Expand(input.TeamSpec, registry)
+		if err != nil {
+			return entity.RunStatus{}, fmt.Errorf("UseCase - ExecuteOrchestration - team.Expand: %w", err)
+		}
+		input.Steps = expanded
+		input.TeamSpec = nil
+	}
+
 	status, err := uc.temporal.StartOrchestration(ctx, input)
 	if err != nil {
 		return entity.RunStatus{}, fmt.Errorf("UseCase - ExecuteOrchestration - uc.temporal.StartOrchestration: %w", err)
@@ -44,6 +60,15 @@ func (uc *UseCase) GetStatus(ctx context.Context, runID string) (entity.RunStatu
 		return entity.RunStatus{}, fmt.Errorf("UseCase - GetStatus - uc.temporal.GetStatus: %w", err)
 	}
 
+	return status, nil
+}
+
+// GetOrchestrationStatus queries the status of an OrchestrationWorkflow.
+func (uc *UseCase) GetOrchestrationStatus(ctx context.Context, runID string) (entity.RunStatus, error) {
+	status, err := uc.temporal.GetOrchestrationStatus(ctx, runID)
+	if err != nil {
+		return entity.RunStatus{}, fmt.Errorf("UseCase - GetOrchestrationStatus - uc.temporal.GetOrchestrationStatus: %w", err)
+	}
 	return status, nil
 }
 

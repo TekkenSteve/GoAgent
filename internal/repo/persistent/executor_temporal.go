@@ -108,6 +108,27 @@ func (r *ExecutorTemporal) StartOrchestration(ctx context.Context, input entity.
 	}, nil
 }
 
+func (r *ExecutorTemporal) GetOrchestrationStatus(ctx context.Context, runID string) (entity.RunStatus, error) {
+	workflowID := "orch-" + r.opts.workflowIDPrefix + runID
+
+	resp, err := r.client.QueryWorkflow(ctx, workflowID, "", "query-run-status")
+	if err != nil {
+		return entity.RunStatus{}, fmt.Errorf("ExecutorTemporal - GetOrchestrationStatus - r.client.QueryWorkflow: %w", err)
+	}
+
+	var orchStatus orchestration.OrchestrationStatus
+	if err := resp.Get(&orchStatus); err != nil {
+		return entity.RunStatus{}, fmt.Errorf("ExecutorTemporal - GetOrchestrationStatus - resp.Get: %w", err)
+	}
+
+	return entity.RunStatus{
+		RunID:          orchStatus.RunID,
+		LifecycleState: orchStatus.State,
+		Step:           orchStatus.Round,
+		UpdatedAt:      time.Now(),
+	}, nil
+}
+
 func (r *ExecutorTemporal) Pause(ctx context.Context, runID string) error {
 	workflowID := r.opts.workflowIDPrefix + runID
 

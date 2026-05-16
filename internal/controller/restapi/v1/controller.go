@@ -21,6 +21,7 @@ type SignalWorkflowFn func(ctx context.Context, workflowID, signalName string, a
 // V1 -.
 type V1 struct {
 	t   usecase.AgentExecutor
+	o   usecase.OrchestrationExecutor
 	h   usecase.HistoryQuery
 	s   usecase.StreamExecutor
 	l   logger.Interface

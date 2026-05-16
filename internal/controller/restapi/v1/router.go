@@ -12,14 +12,14 @@ import (
 // NewRoutes registers all v1 API routes under the given router group.
 // Matches go-clean-template pattern: single entry point, all usecase interfaces
 // passed as parameters, all route groups registered inside.
-func NewRoutes(apiV1Group fiber.Router, t usecase.AgentExecutor, h usecase.HistoryQuery, s usecase.StreamExecutor, l logger.Interface, rdb *redis.Redis,
+func NewRoutes(apiV1Group fiber.Router, t usecase.AgentExecutor, o usecase.OrchestrationExecutor, h usecase.HistoryQuery, s usecase.StreamExecutor, l logger.Interface, rdb *redis.Redis,
 	eventStore stream.EventStore, subscriber stream.Subscriber, gateway stream.StatelessGateway,
 	wsHub *stream.WebSocketHub,
 	cancelWorkflow CancelWorkflowFn, signalWorkflow SignalWorkflowFn,
 	m usecase.TemplateManager, eh usecase.TriggerEventHandler) {
 
 	r := &V1{
-		t: t, h: h, s: s, l: l, v: validator.New(validator.WithRequiredStructEnabled()), rdb: rdb,
+		t: t, o: o, h: h, s: s, l: l, v: validator.New(validator.WithRequiredStructEnabled()), rdb: rdb,
 		eventStore: eventStore, subscriber: subscriber, gateway: gateway,
 		wsHub: wsHub,
 		cancelWorkflow: cancelWorkflow, signalWorkflow: signalWorkflow,
@@ -52,5 +52,11 @@ func NewRoutes(apiV1Group fiber.Router, t usecase.AgentExecutor, h usecase.Histo
 	if eh != nil {
 		th := &triggerWebhookHandler{eh: eh, t: t, l: l}
 		apiV1Group.Post("/triggers/events", th.handleEvent)
+	}
+
+	// Orchestration route (optional — requires OrchestrationExecutor)
+	if o != nil {
+		apiV1Group.Post("/orchestration/execute", r.orchestrate)
+		apiV1Group.Get("/orchestration/status/:run_id", r.orchestrationStatus)
 	}
 }

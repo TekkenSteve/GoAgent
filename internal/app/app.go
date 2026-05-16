@@ -303,9 +303,12 @@ func Run(cfg *config.Config) { //nolint: gocyclo,cyclop,funlen,gocritic,nolintli
 
 	// Use-Case
 	var agentExecutor usecase.AgentExecutor
+	var orchExecutor usecase.OrchestrationExecutor
 	if temporalRuntime != nil {
 		temporalRepo := temporalrepo.NewExecutorTemporal(temporalRuntime.Client, fwCfg.Temporal)
-		agentExecutor = agentfwusecase.New(temporalRepo)
+		exec := agentfwusecase.New(temporalRepo)
+		agentExecutor = exec
+		orchExecutor = exec
 	} else {
 		l.Warn("app - Run - agent executor is nil, agent endpoints will be unavailable")
 	}
@@ -345,7 +348,7 @@ func Run(cfg *config.Config) { //nolint: gocyclo,cyclop,funlen,gocritic,nolintli
 
 	// HTTP Server
 	httpServer := httpserver.New(l, httpserver.Port(cfg.HTTP.Port), httpserver.Prefork(cfg.HTTP.UsePreforkMode))
-	restapi.NewRouter(httpServer.App, cfg, agentExecutor, historyUC, streamExecutor, l, rdb,
+	restapi.NewRouter(httpServer.App, cfg, agentExecutor, orchExecutor, historyUC, streamExecutor, l, rdb,
 		eventStore, streamSubscriber, sseGateway, wsHub, cancelWorkflow, signalWorkflow, templateUC, triggerUC)
 
 	// Start servers

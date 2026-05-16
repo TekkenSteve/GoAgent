@@ -23,7 +23,7 @@ import (
 // @version     1.0
 // @host        localhost:8080
 // @BasePath    /v1
-func NewRouter(app *fiber.App, cfg *config.Config, t usecase.AgentExecutor, h usecase.HistoryQuery, s usecase.StreamExecutor, l logger.Interface, rdb *redis.Redis,
+func NewRouter(app *fiber.App, cfg *config.Config, t usecase.AgentExecutor, o usecase.OrchestrationExecutor, h usecase.HistoryQuery, s usecase.StreamExecutor, l logger.Interface, rdb *redis.Redis,
 	eventStore stream.EventStore, subscriber stream.Subscriber, gateway stream.StatelessGateway,
 	wsHub *stream.WebSocketHub,
 	cancelWorkflow v1.CancelWorkflowFn, signalWorkflow v1.SignalWorkflowFn,
@@ -51,6 +51,6 @@ func NewRouter(app *fiber.App, cfg *config.Config, t usecase.AgentExecutor, h us
 	// Routers
 	apiV1Group := app.Group("/v1")
 	{
-		v1.NewRoutes(apiV1Group, t, h, s, l, rdb, eventStore, subscriber, gateway, wsHub, cancelWorkflow, signalWorkflow, m, eh)
+		v1.NewRoutes(apiV1Group, t, o, h, s, l, rdb, eventStore, subscriber, gateway, wsHub, cancelWorkflow, signalWorkflow, m, eh)
 	}
 }

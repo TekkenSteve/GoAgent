@@ -66,6 +66,7 @@ type (
 		Resume(ctx context.Context, runID string) error
 		Cancel(ctx context.Context, runID string) error
 		StartOrchestration(ctx context.Context, input entity.OrchestrationInput) (entity.RunStatus, error)
+		GetOrchestrationStatus(ctx context.Context, runID string) (entity.RunStatus, error)
 	}
 	// WorkflowTemplateRepo persists workflow template definitions.
 	WorkflowTemplateRepo interface {
