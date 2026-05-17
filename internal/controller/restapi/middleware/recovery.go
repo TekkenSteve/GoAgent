@@ -3,7 +3,6 @@ package middleware
 import (
 	"fmt"
 	"runtime/debug"
-	"strings"
 
 	"github.com/TekkenSteve/GoAgent/pkg/logger"
 	"github.com/gofiber/fiber/v2"
@@ -11,17 +10,8 @@ import (
 )
 
 func buildPanicMessage(ctx *fiber.Ctx, err any) string {
-	var result strings.Builder
-
-	result.WriteString(ctx.IP())
-	result.WriteString(" - ")
-	result.WriteString(ctx.Method())
-	result.WriteString(" ")
-	result.WriteString(ctx.OriginalURL())
-	result.WriteString(" PANIC DETECTED: ")
-	result.WriteString(fmt.Sprintf("%v\n%s\n", err, debug.Stack())) //nolint: staticcheck,gocritic // it's okay for panic
-
-	return result.String()
+	return fmt.Sprintf("%s - %s %s PANIC DETECTED: %v\n%s\n",
+		ctx.IP(), ctx.Method(), ctx.OriginalURL(), err, debug.Stack())
 }
 
 func logPanic(l logger.Interface) func(c *fiber.Ctx, err any) {

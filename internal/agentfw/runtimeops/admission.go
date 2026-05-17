@@ -1,12 +1,13 @@
 package runtimeops
 
 import (
-	"fmt"
+	"errors"
+	"maps"
 	"sync"
 )
 
 // ErrAdmissionLimitExceeded is returned when account run limits are reached.
-var ErrAdmissionLimitExceeded = fmt.Errorf("admission limit exceeded")
+var ErrAdmissionLimitExceeded = errors.New("admission limit exceeded")
 
 // AdmissionController manages concurrent run slots by account.
 type AdmissionController struct {
@@ -18,9 +19,8 @@ type AdmissionController struct {
 // NewAdmissionController creates a slot controller with per-account limits.
 func NewAdmissionController(limits map[string]int) *AdmissionController {
 	limitsCopy := make(map[string]int, len(limits))
-	for k, v := range limits {
-		limitsCopy[k] = v
-	}
+	maps.Copy(limitsCopy, limits)
+
 	return &AdmissionController{
 		limits: limitsCopy,
 		active: map[string]int{},
@@ -46,6 +46,7 @@ func (c *AdmissionController) Acquire(accountID string, bypass bool) error {
 	}
 
 	c.active[accountID]++
+
 	return nil
 }
 
@@ -57,6 +58,7 @@ func (c *AdmissionController) Release(accountID string) {
 	if c.active[accountID] <= 0 {
 		return
 	}
+
 	c.active[accountID]--
 }
 
@@ -64,5 +66,6 @@ func (c *AdmissionController) Release(accountID string) {
 func (c *AdmissionController) Active(accountID string) int {
 	c.mu.Lock()
 	defer c.mu.Unlock()
+
 	return c.active[accountID]
 }

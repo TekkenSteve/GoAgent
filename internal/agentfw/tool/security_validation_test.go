@@ -23,57 +23,64 @@ type recordAuditSink struct {
 	records []AuditRecord
 }
 
+//nolint:gocritic // test file, intentional
 func (s *recordAuditSink) Write(_ context.Context, record AuditRecord) error {
 	s.records = append(s.records, record)
+
 	return nil
 }
 
 type nopValidator struct{}
 
-func (nopValidator) Validate(_ context.Context, _ ToolRequest) error { return nil }
+func (nopValidator) Validate(_ context.Context, _ *Request) error { return nil }
 
 type staticRawExecutor struct{}
 
-func (staticRawExecutor) Execute(_ context.Context, _ ToolRequest) (RawResult, error) {
+func (staticRawExecutor) Execute(_ context.Context, _ *Request) (RawResult, error) {
 	return RawResult{Payload: map[string]any{
-		"password":  "p@ss",
-		"token":     "secret-token",
+		"password":   "p@ss",
+		"token":      "secret-token",
 		"safe_field": "ok",
 	}}, nil
 }
 
 type staticPersister struct{ saved map[string]any }
 
-func (p *staticPersister) Persist(_ context.Context, _ ToolRequest, normalized map[string]any) (string, error) {
+func (p *staticPersister) Persist(_ context.Context, _ *Request, normalized map[string]any) (string, error) {
 	p.saved = normalized
+
 	return "ref-1", nil
 }
 
 type allowAllAuth struct{}
 
-func (allowAllAuth) Authorize(_ context.Context, _ ToolRequest) error { return nil }
+func (allowAllAuth) Authorize(_ context.Context, _ *Request) error { return nil }
 
 func TestSecuritySuiteIsolationBoundaryRouting(t *testing.T) {
+	t.Parallel()
+
 	policy := SideEffectIsolationPolicy{}
-	require.Equal(t, ExecutionIsolationShared, policy.Resolve(ToolRequest{ToolName: "search", SideEffecting: false}))
-	require.Equal(t, ExecutionIsolationIsolated, policy.Resolve(ToolRequest{ToolName: "payments.charge", SideEffecting: true}))
+	require.Equal(t, ExecutionIsolationShared, policy.Resolve(&Request{ToolName: "search", SideEffecting: false}))
+	require.Equal(t, ExecutionIsolationIsolated, policy.Resolve(&Request{ToolName: "payments.charge", SideEffecting: true}))
 }
 
 func TestSecuritySuiteSecretRedactionBeforePersistence(t *testing.T) {
+	t.Parallel()
+
 	persister := &staticPersister{}
 	pipeline := Pipeline{
 		Validator:  nopValidator{},
 		Authorizer: allowAllAuth{},
 		Executor:   staticRawExecutor{},
 		Persister:  persister,
-		Policies: staticPolicyProvider{policy: ToolPolicy{
+		Policies: staticPolicyProvider{policy: Policy{
 			Timeout:     time.Second,
 			MaxAttempts: 1,
 		}},
 		Redactor: DefaultSecretRedactor{},
 	}
 
-	result, err := pipeline.Execute(context.Background(), ToolRequest{
+	result, err := pipeline.Execute(context.Background(), &Request{
 		RunID:      "run-sec",
 		ToolCallID: "call-1",
 		ToolName:   "dangerous",
@@ -86,10 +93,12 @@ func TestSecuritySuiteSecretRedactionBeforePersistence(t *testing.T) {
 }
 
 func TestSecuritySuitePolicyBypassRegressionDeniedByDefault(t *testing.T) {
+	t.Parallel()
+
 	audit := &recordAuditSink{}
 	authorizer := TierAuthorizer{Policy: nil, Audit: audit}
 
-	err := authorizer.Authorize(context.Background(), ToolRequest{Tier: TierEnterprise, ToolName: "admin-tool"})
+	err := authorizer.Authorize(context.Background(), &Request{Tier: TierEnterprise, ToolName: "admin-tool"})
 	require.Error(t, err)
 	require.ErrorIs(t, err, ErrAuthorization)
 	require.Len(t, audit.records, 1)
@@ -97,13 +106,15 @@ func TestSecuritySuitePolicyBypassRegressionDeniedByDefault(t *testing.T) {
 }
 
 func TestSecuritySuitePolicyBypassRegressionExplicitAllowOnly(t *testing.T) {
+	t.Parallel()
+
 	audit := &recordAuditSink{}
 	authorizer := TierAuthorizer{Policy: allowPolicy{}, Audit: audit}
 
-	err := authorizer.Authorize(context.Background(), ToolRequest{Tier: TierEnterprise, ToolName: "admin-tool"})
+	err := authorizer.Authorize(context.Background(), &Request{Tier: TierEnterprise, ToolName: "admin-tool"})
 	require.NoError(t, err)
 
-	err = authorizer.Authorize(context.Background(), ToolRequest{Tier: TierPro, ToolName: "admin-tool"})
+	err = authorizer.Authorize(context.Background(), &Request{Tier: TierPro, ToolName: "admin-tool"})
 	require.Error(t, err)
 	require.ErrorIs(t, err, ErrAuthorization)
 	require.Len(t, audit.records, 2)
@@ -112,8 +123,10 @@ func TestSecuritySuitePolicyBypassRegressionExplicitAllowOnly(t *testing.T) {
 }
 
 func TestSecuritySuiteAuthorizationErrorDoesNotGetMasked(t *testing.T) {
+	t.Parallel()
+
 	authorizer := TierAuthorizer{Policy: denyAllPolicy{}}
-	err := authorizer.Authorize(context.Background(), ToolRequest{Tier: TierFree, ToolName: "payments"})
+	err := authorizer.Authorize(context.Background(), &Request{Tier: TierFree, ToolName: "payments"})
 	require.Error(t, err)
 	require.True(t, errors.Is(err, ErrAuthorization))
 }

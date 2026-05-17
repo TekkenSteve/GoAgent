@@ -8,6 +8,8 @@ import (
 )
 
 func TestInMemoryRepositoryWarmColdBoundaries(t *testing.T) {
+	t.Parallel()
+
 	repo := NewInMemoryRepository()
 	ctx := context.Background()
 

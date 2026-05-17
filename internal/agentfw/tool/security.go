@@ -14,17 +14,18 @@ const (
 
 // IsolationPolicy resolves execution isolation boundary for a request.
 type IsolationPolicy interface {
-	Resolve(req ToolRequest) ExecutionIsolation
+	Resolve(req *Request) ExecutionIsolation
 }
 
 // SideEffectIsolationPolicy routes side-effecting tools to isolated execution boundaries.
 type SideEffectIsolationPolicy struct{}
 
 // Resolve returns isolated boundary for side-effecting tools, shared otherwise.
-func (SideEffectIsolationPolicy) Resolve(req ToolRequest) ExecutionIsolation {
+func (SideEffectIsolationPolicy) Resolve(req *Request) ExecutionIsolation {
 	if req.SideEffecting {
 		return ExecutionIsolationIsolated
 	}
+
 	return ExecutionIsolationShared
 }
 
@@ -43,6 +44,7 @@ func (DefaultSecretRedactor) Redact(input map[string]any) map[string]any {
 
 func isSensitiveKey(k string) bool {
 	lk := strings.ToLower(k)
+
 	return strings.Contains(lk, "secret") ||
 		strings.Contains(lk, "token") ||
 		strings.Contains(lk, "password") ||
@@ -56,8 +58,10 @@ func redactMap(input map[string]any) map[string]any {
 	for k, v := range input {
 		if isSensitiveKey(k) {
 			out[k] = "[REDACTED]"
+
 			continue
 		}
+
 		switch val := v.(type) {
 		case map[string]any:
 			out[k] = redactMap(val)
@@ -67,6 +71,7 @@ func redactMap(input map[string]any) map[string]any {
 			out[k] = v
 		}
 	}
+
 	return out
 }
 
@@ -82,5 +87,6 @@ func redactSlice(input []any) []any {
 			out[i] = v
 		}
 	}
+
 	return out
 }

@@ -28,6 +28,7 @@ func NewInMemoryRepository() *InMemoryRepository {
 
 func (r *InMemoryRepository) nextRef(prefix string) string {
 	r.seq++
+
 	return fmt.Sprintf("%s-%d", prefix, r.seq)
 }
 
@@ -38,6 +39,7 @@ func (r *InMemoryRepository) PersistMessage(_ context.Context, record MessageRec
 
 	ref := r.nextRef("msg")
 	r.messages[ref] = record
+
 	return ref, nil
 }
 
@@ -48,6 +50,7 @@ func (r *InMemoryRepository) PersistToolResult(_ context.Context, record ToolRes
 
 	ref := r.nextRef("tool")
 	r.toolResults[ref] = record
+
 	return ref, nil
 }
 
@@ -57,6 +60,7 @@ func (r *InMemoryRepository) GetMessage(_ context.Context, ref string) (MessageR
 	defer r.mu.RUnlock()
 
 	record, ok := r.messages[ref]
+
 	return record, ok, nil
 }
 
@@ -66,6 +70,7 @@ func (r *InMemoryRepository) GetToolResult(_ context.Context, ref string) (ToolR
 	defer r.mu.RUnlock()
 
 	record, ok := r.toolResults[ref]
+
 	return record, ok, nil
 }
 
@@ -76,6 +81,7 @@ func (r *InMemoryRepository) PersistArchive(_ context.Context, record ArchiveRec
 
 	ref := r.nextRef("archive")
 	r.archives[ref] = record
+
 	return ref, nil
 }
 
@@ -85,5 +91,6 @@ func (r *InMemoryRepository) GetArchive(_ context.Context, ref string) (ArchiveR
 	defer r.mu.RUnlock()
 
 	record, ok := r.archives[ref]
+
 	return record, ok, nil
 }

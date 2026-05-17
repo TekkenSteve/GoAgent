@@ -41,5 +41,6 @@ func (r *TemporalRuntime) Close() {
 	if r == nil || r.Client == nil {
 		return
 	}
+
 	r.Client.Close()
 }

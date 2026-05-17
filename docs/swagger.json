@@ -1,17 +1,17 @@
 {
     "swagger": "2.0",
     "info": {
-        "description": "Using a translation service as an example",
-        "title": "Go Clean Template API",
+        "description": "Agent Framework API",
+        "title": "GoAgent API",
         "contact": {},
         "version": "1.0"
     },
     "host": "localhost:8080",
     "basePath": "/v1",
     "paths": {
-        "/translation/do-translate": {
+        "/agent/execute": {
             "post": {
-                "description": "Translate a text",
+                "description": "Start a new agent workflow run",
                 "consumes": [
                     "application/json"
                 ],
@@ -19,18 +19,18 @@
                     "application/json"
                 ],
                 "tags": [
-                    "translation"
+                    "agent"
                 ],
-                "summary": "Translate",
-                "operationId": "do-translate",
+                "summary": "Execute agent run",
+                "operationId": "execute",
                 "parameters": [
                     {
-                        "description": "Set up translation",
+                        "description": "Agent execution request",
                         "name": "request",
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/request.Translate"
+                            "$ref": "#/definitions/request.Execute"
                         }
                     }
                 ],
@@ -38,7 +38,7 @@
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/entity.Translation"
+                            "$ref": "#/definitions/response.RunStatus"
                         }
                     },
                     "400": {
@@ -56,9 +56,9 @@
                 }
             }
         },
-        "/translation/history": {
+        "/agent/status/{run_id}": {
             "get": {
-                "description": "Show all translation history",
+                "description": "Get the current status of an agent run",
                 "consumes": [
                     "application/json"
                 ],
@@ -66,15 +66,107 @@
                     "application/json"
                 ],
                 "tags": [
-                    "translation"
+                    "agent"
                 ],
-                "summary": "Show history",
-                "operationId": "history",
+                "summary": "Get run status",
+                "operationId": "status",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Run ID",
+                        "name": "run_id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
                 "responses": {
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/entity.TranslationHistory"
+                            "$ref": "#/definitions/response.RunStatus"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/response.Error"
+                        }
+                    }
+                }
+            }
+        },
+        "/orchestration/execute": {
+            "post": {
+                "description": "Start a multi-step orchestration workflow from a TeamSpec or step queue",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "orchestration"
+                ],
+                "summary": "Execute orchestration workflow",
+                "operationId": "orchestrate",
+                "parameters": [
+                    {
+                        "description": "Orchestration request",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/request.Orchestrate"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/response.RunStatus"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/response.Error"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/response.Error"
+                        }
+                    }
+                }
+            }
+        },
+        "/orchestration/status/{run_id}": {
+            "get": {
+                "description": "Query the current status of an orchestration workflow",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "orchestration"
+                ],
+                "summary": "Get orchestration workflow status",
+                "operationId": "orchestration-status",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Run ID",
+                        "name": "run_id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/response.RunStatus"
                         }
                     },
                     "500": {
@@ -88,57 +180,457 @@
         }
     },
     "definitions": {
-        "entity.Translation": {
+        "entity.AgentSpec": {
             "type": "object",
             "properties": {
-                "destination": {
-                    "type": "string",
-                    "example": "en"
+                "config": {
+                    "$ref": "#/definitions/entity.LLMConfig"
                 },
-                "original": {
-                    "type": "string",
-                    "example": "текст для перевода"
+                "id": {
+                    "type": "string"
                 },
-                "source": {
-                    "type": "string",
-                    "example": "auto"
+                "model_ref": {
+                    "type": "string"
                 },
-                "translation": {
-                    "type": "string",
-                    "example": "text for translation"
+                "name": {
+                    "type": "string"
+                },
+                "system_prompt": {
+                    "type": "string"
+                },
+                "tools": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/entity.ToolBinding"
+                    }
+                },
+                "version": {
+                    "type": "string"
                 }
             }
         },
-        "entity.TranslationHistory": {
+        "entity.ContinuePolicy": {
             "type": "object",
             "properties": {
-                "history": {
+                "max_depth": {
+                    "description": "max step queue length",
+                    "type": "integer"
+                },
+                "max_rounds": {
+                    "description": "max workflow loop iterations",
+                    "type": "integer"
+                }
+            }
+        },
+        "entity.LLMConfig": {
+            "type": "object",
+            "properties": {
+                "max_tokens": {
+                    "type": "integer"
+                },
+                "model": {
+                    "type": "string"
+                },
+                "provider": {
+                    "description": "target provider name; empty = use default",
+                    "type": "string"
+                },
+                "temperature": {
+                    "type": "number"
+                }
+            }
+        },
+        "entity.MCPServerConfig": {
+            "type": "object",
+            "properties": {
+                "args": {
                     "type": "array",
                     "items": {
-                        "$ref": "#/definitions/entity.Translation"
+                        "type": "string"
+                    }
+                },
+                "command": {
+                    "type": "string"
+                },
+                "env": {
+                    "type": "object",
+                    "additionalProperties": {
+                        "type": "string"
+                    }
+                },
+                "name": {
+                    "type": "string"
+                },
+                "transport": {
+                    "description": "\"stdio\" or \"sse\"",
+                    "type": "string"
+                },
+                "url": {
+                    "type": "string"
+                }
+            }
+        },
+        "entity.Step": {
+            "type": "object",
+            "properties": {
+                "agent_id": {
+                    "description": "StepAgent",
+                    "type": "string"
+                },
+                "depends_on": {
+                    "description": "step IDs this depends on",
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "error": {
+                    "description": "failure reason",
+                    "type": "string"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "input": {
+                    "type": "object",
+                    "additionalProperties": {}
+                },
+                "name": {
+                    "type": "string"
+                },
+                "on_result": {
+                    "description": "dynamic queue mutation",
+                    "allOf": [
+                        {
+                            "$ref": "#/definitions/entity.StepMutation"
+                        }
+                    ]
+                },
+                "result": {
+                    "description": "populated after execution",
+                    "type": "object",
+                    "additionalProperties": {}
+                },
+                "status": {
+                    "$ref": "#/definitions/entity.StepStatus"
+                },
+                "tool": {
+                    "description": "StepTool",
+                    "type": "string"
+                },
+                "type": {
+                    "$ref": "#/definitions/entity.StepType"
+                },
+                "wait_for": {
+                    "description": "StepWait config",
+                    "allOf": [
+                        {
+                            "$ref": "#/definitions/entity.WaitCondition"
+                        }
+                    ]
+                }
+            }
+        },
+        "entity.StepMutation": {
+            "type": "object",
+            "properties": {
+                "append_after": {
+                    "description": "insert after this step ID",
+                    "type": "string"
+                },
+                "delete_steps": {
+                    "description": "delete these step IDs",
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "insert_steps": {
+                    "description": "steps to insert",
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/entity.Step"
+                    }
+                },
+                "modify_step": {
+                    "description": "replace this step ID",
+                    "type": "string"
+                }
+            }
+        },
+        "entity.StepStatus": {
+            "type": "string",
+            "enum": [
+                "pending",
+                "running",
+                "completed",
+                "failed",
+                "waiting",
+                "blocked"
+            ],
+            "x-enum-comments": {
+                "StepBlocked": "blocked on dependency",
+                "StepWaiting": "blocked on signal/timer"
+            },
+            "x-enum-descriptions": [
+                "",
+                "",
+                "",
+                "",
+                "blocked on signal/timer",
+                "blocked on dependency"
+            ],
+            "x-enum-varnames": [
+                "StepPending",
+                "StepRunning",
+                "StepCompleted",
+                "StepFailed",
+                "StepWaiting",
+                "StepBlocked"
+            ]
+        },
+        "entity.StepTemplate": {
+            "type": "object",
+            "properties": {
+                "agent_ref": {
+                    "description": "TeamSpec.Agents[i].ID",
+                    "type": "string"
+                },
+                "depends_on": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "id": {
+                    "type": "string"
+                },
+                "input": {
+                    "type": "object",
+                    "additionalProperties": {}
+                },
+                "on_result": {
+                    "$ref": "#/definitions/entity.StepMutation"
+                },
+                "tool": {
+                    "type": "string"
+                },
+                "type": {
+                    "$ref": "#/definitions/entity.StepType"
+                },
+                "wait_for": {
+                    "$ref": "#/definitions/entity.WaitCondition"
+                }
+            }
+        },
+        "entity.StepType": {
+            "type": "string",
+            "enum": [
+                "agent",
+                "tool",
+                "wait",
+                "split",
+                "join",
+                "eval"
+            ],
+            "x-enum-comments": {
+                "StepAgent": "Start child AgentWorkflow and wait",
+                "StepEval": "Conditional branch based on prior result",
+                "StepJoin": "Fan-in from parallel sub-steps",
+                "StepSplit": "Fan-out into parallel sub-steps",
+                "StepTool": "Execute tool directly",
+                "StepWait": "Wait for Temporal Signal or Timer"
+            },
+            "x-enum-descriptions": [
+                "Start child AgentWorkflow and wait",
+                "Execute tool directly",
+                "Wait for Temporal Signal or Timer",
+                "Fan-out into parallel sub-steps",
+                "Fan-in from parallel sub-steps",
+                "Conditional branch based on prior result"
+            ],
+            "x-enum-varnames": [
+                "StepAgent",
+                "StepTool",
+                "StepWait",
+                "StepSplit",
+                "StepJoin",
+                "StepEval"
+            ]
+        },
+        "entity.TeamSpec": {
+            "type": "object",
+            "properties": {
+                "agents": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/entity.AgentSpec"
+                    }
+                },
+                "id": {
+                    "type": "string"
+                },
+                "name": {
+                    "type": "string"
+                },
+                "steps": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/entity.StepTemplate"
+                    }
+                },
+                "sub_teams": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/entity.TeamSpec"
                     }
                 }
             }
         },
-        "request.Translate": {
+        "entity.ToolBinding": {
+            "type": "object",
+            "properties": {
+                "description": {
+                    "description": "override default",
+                    "type": "string"
+                },
+                "name": {
+                    "type": "string"
+                },
+                "required": {
+                    "description": "fail if unavailable",
+                    "type": "boolean"
+                }
+            }
+        },
+        "entity.WaitCondition": {
+            "type": "object",
+            "properties": {
+                "on_timeout": {
+                    "description": "\"timeout\" | \"skip\" | \"fail\"",
+                    "type": "string"
+                },
+                "signal_name": {
+                    "description": "Temporal Signal to wait for",
+                    "type": "string"
+                },
+                "timeout": {
+                    "description": "max wait duration",
+                    "allOf": [
+                        {
+                            "$ref": "#/definitions/time.Duration"
+                        }
+                    ]
+                }
+            }
+        },
+        "request.Execute": {
             "type": "object",
             "required": [
-                "destination",
-                "original",
-                "source"
+                "account_id",
+                "run_id",
+                "user_message"
             ],
             "properties": {
-                "destination": {
+                "account_id": {
                     "type": "string",
-                    "example": "en"
+                    "example": "acct-550e8400-e29b-41d4-a716-446655440000"
                 },
-                "original": {
+                "agent_id": {
                     "type": "string",
-                    "example": "текст для перевода"
+                    "example": "agent-550e8400-e29b-41d4-a716-446655440000"
                 },
-                "source": {
+                "agent_version_id": {
                     "type": "string",
-                    "example": "auto"
+                    "example": "v1"
+                },
+                "bypass_admission": {
+                    "type": "boolean",
+                    "example": false
+                },
+                "event_schema_ver": {
+                    "type": "string",
+                    "example": "v1"
+                },
+                "idempotency_key": {
+                    "type": "string",
+                    "example": "idem-550e8400-e29b-41d4-a716-446655440000"
+                },
+                "is_new_thread": {
+                    "type": "boolean",
+                    "example": false
+                },
+                "mcp_server_configs": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/entity.MCPServerConfig"
+                    }
+                },
+                "model_ref": {
+                    "type": "string",
+                    "example": "gpt-4.1-mini"
+                },
+                "project_id": {
+                    "type": "string",
+                    "example": "proj-550e8400-e29b-41d4-a716-446655440000"
+                },
+                "run_id": {
+                    "type": "string",
+                    "example": "run-550e8400-e29b-41d4-a716-446655440000"
+                },
+                "thread_id": {
+                    "type": "string",
+                    "example": "thread-550e8400-e29b-41d4-a716-446655440000"
+                },
+                "tool_schema_ver": {
+                    "type": "string",
+                    "example": "v1"
+                },
+                "user_message": {
+                    "type": "string",
+                    "example": "Hello, can you help me?"
+                },
+                "workflow_version": {
+                    "type": "integer",
+                    "example": 1
+                }
+            }
+        },
+        "request.Orchestrate": {
+            "type": "object",
+            "required": [
+                "account_id",
+                "run_id"
+            ],
+            "properties": {
+                "account_id": {
+                    "type": "string",
+                    "example": "acct-001"
+                },
+                "continue_policy": {
+                    "$ref": "#/definitions/entity.ContinuePolicy"
+                },
+                "max_depth": {
+                    "type": "integer"
+                },
+                "message": {
+                    "type": "string"
+                },
+                "run_id": {
+                    "type": "string",
+                    "example": "run-550e8400-e29b-41d4-a716-446655440000"
+                },
+                "steps": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/entity.Step"
+                    }
+                },
+                "system_prompt": {
+                    "type": "string"
+                },
+                "team_spec": {
+                    "$ref": "#/definitions/entity.TeamSpec"
                 }
             }
         },
@@ -150,6 +642,62 @@
                     "example": "message"
                 }
             }
+        },
+        "response.RunStatus": {
+            "type": "object",
+            "properties": {
+                "lifecycle_state": {
+                    "type": "string"
+                },
+                "reason": {
+                    "type": "string"
+                },
+                "run_id": {
+                    "type": "string"
+                },
+                "step": {
+                    "type": "integer"
+                },
+                "updated_at": {
+                    "type": "integer"
+                }
+            }
+        },
+        "time.Duration": {
+            "type": "integer",
+            "format": "int64",
+            "enum": [
+                -9223372036854775808,
+                9223372036854775807,
+                1,
+                1000,
+                1000000,
+                1000000000,
+                60000000000,
+                3600000000000,
+                1,
+                1000,
+                1000000,
+                1000000000,
+                60000000000,
+                3600000000000
+            ],
+            "x-enum-varnames": [
+                "minDuration",
+                "maxDuration",
+                "Nanosecond",
+                "Microsecond",
+                "Millisecond",
+                "Second",
+                "Minute",
+                "Hour",
+                "Nanosecond",
+                "Microsecond",
+                "Millisecond",
+                "Second",
+                "Minute",
+                "Hour"
+            ]
         }
     }
 }

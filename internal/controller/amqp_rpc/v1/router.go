@@ -7,11 +7,12 @@ import (
 	"github.com/go-playground/validator/v10"
 )
 
-// NewTranslationRoutes -.
-func NewTranslationRoutes(routes map[string]server.CallHandler, t usecase.Translation, l logger.Interface) {
+// NewAgentRoutes -.
+func NewAgentRoutes(routes map[string]server.CallHandler, t usecase.AgentExecutor, l logger.Interface) {
 	r := &V1{t: t, l: l, v: validator.New(validator.WithRequiredStructEnabled())}
 
 	{
-		routes["v1.getHistory"] = r.getHistory()
+		routes["v1.execute"] = r.execute()
+		routes["v1.getStatus"] = r.getStatus()
 	}
 }

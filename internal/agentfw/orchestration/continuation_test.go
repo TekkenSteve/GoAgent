@@ -8,6 +8,8 @@ import (
 )
 
 func TestEvaluateContinueAsNew(t *testing.T) {
+	t.Parallel()
+
 	policy := ContinueAsNewPolicy{
 		HistoryLengthThreshold: 10,
 		StateSizeThresholdByte: 1024,
@@ -64,42 +66,4 @@ func TestEvaluateContinueAsNew(t *testing.T) {
 		ContinuationCnt: 2,
 	})
 	require.False(t, decision.ShouldContinue)
-}
-
-func TestBuildAndValidateContinuationPayload(t *testing.T) {
-	now := time.Now().UTC().Truncate(time.Second)
-	input := WorkflowInput{
-		Request: ExecuteRequest{
-			RunID:       "run-1",
-			ThreadID:    "thread-1",
-			RequestedAt: now.Add(-10 * time.Second),
-		},
-		Continuation: ContinuationPayload{
-			ContinuationCount:  1,
-			InitialRequestedAt: now.Add(-30 * time.Second),
-		},
-	}
-	status := RunStatus{
-		RunID: "run-1",
-		Step:  42,
-	}
-
-	payload, err := BuildContinuationPayload(input, status, "wf-123", now)
-	require.NoError(t, err)
-	require.Equal(t, "run-1", payload.RunID)
-	require.Equal(t, "thread-1", payload.ThreadID)
-	require.Equal(t, int32(2), payload.ContinuationCount)
-	require.Equal(t, "wf-123", payload.PreviousWorkflowID)
-	require.Equal(t, int32(42), payload.CarriedStep)
-	require.Equal(t, now.Add(-30*time.Second), payload.InitialRequestedAt)
-	require.NoError(t, ValidateContinuationPayload(payload))
-}
-
-func TestValidateContinuationPayloadFail(t *testing.T) {
-	err := ValidateContinuationPayload(ContinuationPayload{
-		RunID:             "",
-		CarriedStep:       -1,
-		ContinuationCount: -1,
-	})
-	require.Error(t, err)
 }

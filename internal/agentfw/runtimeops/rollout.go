@@ -6,6 +6,8 @@ import (
 	"strings"
 )
 
+const rolloutPercentMax = 100
+
 // RolloutMode defines which execution path is active.
 type RolloutMode string
 
@@ -50,9 +52,11 @@ func NewRolloutSelector(cfg RolloutConfig) RolloutSelector {
 	if cfg.Percent < 0 {
 		cfg.Percent = 0
 	}
-	if cfg.Percent > 100 {
-		cfg.Percent = 100
+
+	if cfg.Percent > rolloutPercentMax {
+		cfg.Percent = rolloutPercentMax
 	}
+
 	if strings.TrimSpace(cfg.HashSalt) == "" {
 		cfg.HashSalt = "agentfw-v1"
 	}
@@ -63,15 +67,17 @@ func NewRolloutSelector(cfg RolloutConfig) RolloutSelector {
 		if accountID == "" {
 			continue
 		}
+
 		set[accountID] = struct{}{}
 	}
 
 	cfg.Mode = mode
+
 	return RolloutSelector{cfg: cfg, allowSet: set}
 }
 
 // Decide selects whether the Temporal or legacy path should handle a run.
-func (s RolloutSelector) Decide(accountID, runID string) RolloutDecision {
+func (s *RolloutSelector) Decide(accountID, runID string) RolloutDecision {
 	if s.cfg.RollbackForceLegacy {
 		return RolloutDecision{Reason: "rollback_force_legacy"}
 	}
@@ -87,10 +93,12 @@ func (s RolloutSelector) Decide(accountID, runID string) RolloutDecision {
 		if _, ok := s.allowSet[accountID]; ok {
 			return RolloutDecision{UseTemporal: true, Reason: "canary_allowlist"}
 		}
+
 		bucket := stableBucket(s.cfg.HashSalt, accountID, runID)
 		if bucket < s.cfg.Percent {
 			return RolloutDecision{UseTemporal: true, Reason: "canary_percent"}
 		}
+
 		return RolloutDecision{Reason: "canary_percent_legacy"}
 	default:
 		return RolloutDecision{Reason: "rollout_disabled"}
@@ -99,6 +107,7 @@ func (s RolloutSelector) Decide(accountID, runID string) RolloutDecision {
 
 func stableBucket(hashSalt, accountID, runID string) int {
 	h := fnv.New32a()
-	_, _ = h.Write([]byte(fmt.Sprintf("%s:%s:%s", hashSalt, accountID, runID)))
-	return int(h.Sum32() % 100)
+	_, _ = h.Write(fmt.Appendf(nil, "%s:%s:%s", hashSalt, accountID, runID))
+
+	return int(h.Sum32() % rolloutPercentMax)
 }

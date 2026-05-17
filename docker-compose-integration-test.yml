@@ -1,7 +1,47 @@
-version: "3.9"
-
-
 services:
+  mock-llm:
+    container_name: mock-llm
+    platform: linux/amd64
+    build:
+      context: ./integration-test/mock-llm
+      dockerfile: Dockerfile
+    ports:
+      - "8082:8080"
+    networks:
+      app_network:
+        aliases:
+          - mock-llm.lvh.me
+
+  app:
+    restart: always
+    environment:
+      REDIS_URL: "redis://redis:6379"
+      AGENTFW_ENABLED: "true"
+      AGENTFW_TEMPORAL_ADDRESS: "temporal:7233"
+      AGENTFW_ROLLOUT_MODE: "enabled"
+      AGENTFW_LLM_CONFIG_PATH: "/config/llm.yaml"
+    volumes:
+      - "./integration-test/mock-llm/llm-config.yaml:/config/llm.yaml"
+    depends_on:
+      db:
+        condition: service_started
+      rabbitmq:
+        condition: service_started
+      redis:
+        condition: service_started
+      nats:
+        condition: service_started
+      temporal:
+        condition: service_healthy
+      temporal-create-namespace:
+        condition: service_completed_successfully
+      mock-llm:
+        condition: service_started
+    networks:
+      app_network:
+        aliases:
+          - app.lvh.me
+
   integration-test:
     container_name: integration-test
     platform: linux/amd64
@@ -9,8 +49,15 @@ services:
     build:
       context: .
       dockerfile: integration-test/Dockerfile
+    environment:
+      PG_URL: "postgres://user:myAwEsOm3pa55@w0rd@db:5432/db"
     depends_on:
-      - app
+      app:
+        condition: service_started
+      redis:
+        condition: service_started
+      mock-llm:
+        condition: service_started
     networks:
       app_network:
         aliases:

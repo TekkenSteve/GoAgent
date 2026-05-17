@@ -9,16 +9,23 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+var (
+	errTestStreamDown = errors.New("stream down")
+	errTestRetry      = errors.New("retry")
+)
+
 type stubPublisher struct {
 	fail   bool
 	events []StreamEvent
 }
 
-func (p *stubPublisher) Publish(_ context.Context, event StreamEvent) error {
+func (p *stubPublisher) Publish(_ context.Context, event *StreamEvent) error {
 	if p.fail {
-		return errors.New("stream down")
+		return errTestStreamDown
 	}
-	p.events = append(p.events, event)
+
+	p.events = append(p.events, *event)
+
 	return nil
 }
 
@@ -27,11 +34,12 @@ type flakyBillingSink struct {
 	calls     int
 }
 
-func (s *flakyBillingSink) Deliver(_ context.Context, _ UsageRecord) error {
+func (s *flakyBillingSink) Deliver(_ context.Context, _ *UsageRecord) error {
 	s.calls++
 	if s.calls <= s.failFirst {
-		return errors.New("retry")
+		return errTestRetry
 	}
+
 	return nil
 }
 
@@ -41,16 +49,19 @@ type memAuditSink struct {
 
 func (s *memAuditSink) Write(_ context.Context, event SecurityAuditEvent) error {
 	s.events = append(s.events, event)
+
 	return nil
 }
 
 func TestSequencerAndEventSchemaVersion(t *testing.T) {
+	t.Parallel()
+
 	seq := NewSequencer()
 	require.Equal(t, int64(1), seq.Next("run-1"))
 	require.Equal(t, int64(2), seq.Next("run-1"))
 
 	pub := &stubPublisher{}
-	event := StreamEvent{
+	event := &StreamEvent{
 		EventSchemaVersion: "v1",
 		RunID:              "run-1",
 		Sequence:           seq.Next("run-1"),
@@ -58,7 +69,7 @@ func TestSequencerAndEventSchemaVersion(t *testing.T) {
 		Type:               EventTypeStatus,
 	}
 	require.NoError(t, pub.Publish(context.Background(), event))
-	require.Equal(t, "v1", pub.events[0].EventSchemaVersion)
+	require.Equal(t, "v1", event.EventSchemaVersion)
 
 	ok, err := IsNMinusOneCompatible("v2", "v1")
 	require.NoError(t, err)
@@ -70,6 +81,8 @@ func TestSequencerAndEventSchemaVersion(t *testing.T) {
 }
 
 func TestFailOpenPublisher(t *testing.T) {
+	t.Parallel()
+
 	inner := &stubPublisher{fail: true}
 	called := false
 	pub := FailOpenPublisher{
@@ -78,11 +91,13 @@ func TestFailOpenPublisher(t *testing.T) {
 			called = err != nil
 		},
 	}
-	require.NoError(t, pub.Publish(context.Background(), StreamEvent{RunID: "run-2"}))
+	require.NoError(t, pub.Publish(context.Background(), &StreamEvent{RunID: "run-2"}))
 	require.True(t, called)
 }
 
 func TestAdmissionAcquireRelease(t *testing.T) {
+	t.Parallel()
+
 	ctrl := NewAdmissionController(map[string]int{"acc-1": 1})
 	require.NoError(t, ctrl.Acquire("acc-1", false))
 	require.ErrorIs(t, ctrl.Acquire("acc-1", false), ErrAdmissionLimitExceeded)
@@ -91,18 +106,22 @@ func TestAdmissionAcquireRelease(t *testing.T) {
 }
 
 func TestUsageEmitterRetry(t *testing.T) {
+	t.Parallel()
+
 	sink := &flakyBillingSink{failFirst: 1}
 	emitter := UsageEmitter{
 		Sink:        sink,
 		MaxAttempts: 3,
 		Backoff:     time.Millisecond,
 	}
-	err := emitter.Emit(context.Background(), UsageRecord{RunID: "run-3", ModelID: "gpt"})
+	err := emitter.Emit(context.Background(), &UsageRecord{RunID: "run-3", ModelID: "gpt"})
 	require.NoError(t, err)
 	require.Equal(t, 2, sink.calls)
 }
 
 func TestObservabilityAndCorrelation(t *testing.T) {
+	t.Parallel()
+
 	rec := NewMetricsRecorder()
 	rec.Inc("run_started")
 	rec.Observe("step_latency", 20*time.Millisecond)
@@ -113,12 +132,16 @@ func TestObservabilityAndCorrelation(t *testing.T) {
 }
 
 func TestErrorPolicyTaxonomy(t *testing.T) {
+	t.Parallel()
+
 	require.True(t, PolicyForCategory(ProviderError).Retryable)
 	require.False(t, PolicyForCategory(UserError).Retryable)
 	require.False(t, PolicyForCategory(DeterminismError).Billable)
 }
 
 func TestSecurityAuditRedaction(t *testing.T) {
+	t.Parallel()
+
 	sink := &memAuditSink{}
 	auditor := SecurityAuditor{
 		Redactor: DefaultRedactionPolicy{},
@@ -140,6 +163,8 @@ func TestSecurityAuditRedaction(t *testing.T) {
 }
 
 func TestRunIdentityPropagation(t *testing.T) {
+	t.Parallel()
+
 	id := RunIdentity{
 		RunID:          "run-5",
 		WorkflowID:     "wf-5",

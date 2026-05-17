@@ -7,6 +7,8 @@ import (
 )
 
 func TestRolloutSelectorDisabled(t *testing.T) {
+	t.Parallel()
+
 	selector := NewRolloutSelector(RolloutConfig{Mode: RolloutDisabled})
 	decision := selector.Decide("acc-1", "run-1")
 	require.False(t, decision.UseTemporal)
@@ -14,6 +16,8 @@ func TestRolloutSelectorDisabled(t *testing.T) {
 }
 
 func TestRolloutSelectorEnabled(t *testing.T) {
+	t.Parallel()
+
 	selector := NewRolloutSelector(RolloutConfig{Mode: RolloutEnabled})
 	decision := selector.Decide("acc-1", "run-1")
 	require.True(t, decision.UseTemporal)
@@ -22,6 +26,8 @@ func TestRolloutSelectorEnabled(t *testing.T) {
 }
 
 func TestRolloutSelectorShadow(t *testing.T) {
+	t.Parallel()
+
 	selector := NewRolloutSelector(RolloutConfig{Mode: RolloutShadow})
 	decision := selector.Decide("acc-1", "run-1")
 	require.True(t, decision.UseTemporal)
@@ -30,6 +36,8 @@ func TestRolloutSelectorShadow(t *testing.T) {
 }
 
 func TestRolloutSelectorCanaryAllowlist(t *testing.T) {
+	t.Parallel()
+
 	selector := NewRolloutSelector(RolloutConfig{
 		Mode:              RolloutCanary,
 		Percent:           0,
@@ -42,6 +50,8 @@ func TestRolloutSelectorCanaryAllowlist(t *testing.T) {
 }
 
 func TestRolloutSelectorCanaryDeterministic(t *testing.T) {
+	t.Parallel()
+
 	selector := NewRolloutSelector(RolloutConfig{
 		Mode:     RolloutCanary,
 		Percent:  35,
@@ -54,6 +64,8 @@ func TestRolloutSelectorCanaryDeterministic(t *testing.T) {
 }
 
 func TestRolloutSelectorRollbackForceLegacy(t *testing.T) {
+	t.Parallel()
+
 	selector := NewRolloutSelector(RolloutConfig{
 		Mode:                RolloutEnabled,
 		RollbackForceLegacy: true,
@@ -64,6 +76,8 @@ func TestRolloutSelectorRollbackForceLegacy(t *testing.T) {
 }
 
 func TestRolloutSelectorNormalizesInvalidInput(t *testing.T) {
+	t.Parallel()
+
 	selector := NewRolloutSelector(RolloutConfig{
 		Mode:    "bad-mode",
 		Percent: 200,

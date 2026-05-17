@@ -1,7 +1,6 @@
 package orchestration
 
 import (
-	"fmt"
 	"time"
 )
 
@@ -40,76 +39,31 @@ type ContinuationPayload struct {
 	InitialRequestedAt time.Time
 }
 
+func thresholdExceeded(threshold, value int) bool {
+	return threshold > 0 && value >= threshold
+}
+
 // EvaluateContinueAsNew evaluates continuation policy from deterministic inputs.
 func EvaluateContinueAsNew(policy ContinueAsNewPolicy, snapshot ContinueAsNewSnapshot) ContinueAsNewDecision {
-	if policy.MaxContinuations > 0 && snapshot.ContinuationCnt >= policy.MaxContinuations {
+	if thresholdExceeded(int(policy.MaxContinuations), int(snapshot.ContinuationCnt)) {
 		return ContinueAsNewDecision{}
 	}
 
-	if policy.HistoryLengthThreshold > 0 && snapshot.HistoryLength >= policy.HistoryLengthThreshold {
+	if thresholdExceeded(policy.HistoryLengthThreshold, snapshot.HistoryLength) {
 		return ContinueAsNewDecision{ShouldContinue: true, Reason: "history_length_threshold"}
 	}
 
-	if policy.StateSizeThresholdByte > 0 && snapshot.StateSizeBytes >= policy.StateSizeThresholdByte {
+	if thresholdExceeded(policy.StateSizeThresholdByte, snapshot.StateSizeBytes) {
 		return ContinueAsNewDecision{ShouldContinue: true, Reason: "state_size_threshold"}
 	}
 
-	if policy.StepThreshold > 0 && snapshot.Step >= policy.StepThreshold {
+	if thresholdExceeded(int(policy.StepThreshold), int(snapshot.Step)) {
 		return ContinueAsNewDecision{ShouldContinue: true, Reason: "step_threshold"}
 	}
 
-	if policy.WallClockThreshold > 0 && snapshot.Elapsed >= policy.WallClockThreshold {
+	if thresholdExceeded(int(policy.WallClockThreshold), int(snapshot.Elapsed)) {
 		return ContinueAsNewDecision{ShouldContinue: true, Reason: "wall_clock_threshold"}
 	}
 
 	return ContinueAsNewDecision{}
-}
-
-// ValidateContinuationPayload validates required continuity fields.
-func ValidateContinuationPayload(payload ContinuationPayload) error {
-	if payload.RunID == "" {
-		return fmt.Errorf("continuation payload: run_id is required")
-	}
-	if payload.CarriedStep < 0 {
-		return fmt.Errorf("continuation payload: carried_step must be >= 0")
-	}
-	if payload.ContinuationCount < 0 {
-		return fmt.Errorf("continuation payload: continuation_count must be >= 0")
-	}
-	return nil
-}
-
-// BuildContinuationPayload creates carry-over payload for Continue-As-New handoff.
-func BuildContinuationPayload(
-	current WorkflowInput,
-	status RunStatus,
-	workflowID string,
-	now time.Time,
-) (ContinuationPayload, error) {
-	prevCount := int32(0)
-	initialRequestedAt := current.Request.RequestedAt
-	if !current.Continuation.InitialRequestedAt.IsZero() {
-		initialRequestedAt = current.Continuation.InitialRequestedAt
-	}
-	if initialRequestedAt.IsZero() {
-		initialRequestedAt = now
-	}
-	if current.Continuation.ContinuationCount > 0 {
-		prevCount = current.Continuation.ContinuationCount
-	}
-
-	payload := ContinuationPayload{
-		RunID:              status.RunID,
-		ThreadID:           current.Request.ThreadID,
-		ContinuationCount:  prevCount + 1,
-		PreviousWorkflowID: workflowID,
-		CarriedStep:        status.Step,
-		CarriedAt:          now,
-		InitialRequestedAt: initialRequestedAt,
-	}
-
-	if err := ValidateContinuationPayload(payload); err != nil {
-		return ContinuationPayload{}, err
-	}
-	return payload, nil
 }

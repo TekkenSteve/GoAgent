@@ -14,59 +14,448 @@ import (
 	reflect "reflect"
 
 	entity "github.com/TekkenSteve/GoAgent/internal/entity"
+	usecase "github.com/TekkenSteve/GoAgent/internal/usecase"
 	gomock "go.uber.org/mock/gomock"
 )
 
-// MockTranslation is a mock of Translation interface.
-type MockTranslation struct {
+// MockAgentExecutor is a mock of AgentExecutor interface.
+type MockAgentExecutor struct {
 	ctrl     *gomock.Controller
-	recorder *MockTranslationMockRecorder
+	recorder *MockAgentExecutorMockRecorder
 	isgomock struct{}
 }
 
-// MockTranslationMockRecorder is the mock recorder for MockTranslation.
-type MockTranslationMockRecorder struct {
-	mock *MockTranslation
+// MockAgentExecutorMockRecorder is the mock recorder for MockAgentExecutor.
+type MockAgentExecutorMockRecorder struct {
+	mock *MockAgentExecutor
 }
 
-// NewMockTranslation creates a new mock instance.
-func NewMockTranslation(ctrl *gomock.Controller) *MockTranslation {
-	mock := &MockTranslation{ctrl: ctrl}
-	mock.recorder = &MockTranslationMockRecorder{mock}
+// NewMockAgentExecutor creates a new mock instance.
+func NewMockAgentExecutor(ctrl *gomock.Controller) *MockAgentExecutor {
+	mock := &MockAgentExecutor{ctrl: ctrl}
+	mock.recorder = &MockAgentExecutorMockRecorder{mock}
 	return mock
 }
 
 // EXPECT returns an object that allows the caller to indicate expected use.
-func (m *MockTranslation) EXPECT() *MockTranslationMockRecorder {
+func (m *MockAgentExecutor) EXPECT() *MockAgentExecutorMockRecorder {
 	return m.recorder
 }
 
-// History mocks base method.
-func (m *MockTranslation) History(arg0 context.Context) (entity.TranslationHistory, error) {
+// Control mocks base method.
+func (m *MockAgentExecutor) Control(ctx context.Context, runID string, op entity.ControlOperation) error {
 	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "History", arg0)
-	ret0, _ := ret[0].(entity.TranslationHistory)
+	ret := m.ctrl.Call(m, "Control", ctx, runID, op)
+	ret0, _ := ret[0].(error)
+	return ret0
+}
+
+// Control indicates an expected call of Control.
+func (mr *MockAgentExecutorMockRecorder) Control(ctx, runID, op any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Control", reflect.TypeOf((*MockAgentExecutor)(nil).Control), ctx, runID, op)
+}
+
+// Execute mocks base method.
+func (m *MockAgentExecutor) Execute(ctx context.Context, req *entity.ExecuteRequest) (entity.RunStatus, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "Execute", ctx, req)
+	ret0, _ := ret[0].(entity.RunStatus)
 	ret1, _ := ret[1].(error)
 	return ret0, ret1
 }
 
-// History indicates an expected call of History.
-func (mr *MockTranslationMockRecorder) History(arg0 any) *gomock.Call {
+// Execute indicates an expected call of Execute.
+func (mr *MockAgentExecutorMockRecorder) Execute(ctx, req any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "History", reflect.TypeOf((*MockTranslation)(nil).History), arg0)
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Execute", reflect.TypeOf((*MockAgentExecutor)(nil).Execute), ctx, req)
 }
 
-// Translate mocks base method.
-func (m *MockTranslation) Translate(arg0 context.Context, arg1 entity.Translation) (entity.Translation, error) {
+// GetStatus mocks base method.
+func (m *MockAgentExecutor) GetStatus(ctx context.Context, runID string) (entity.RunStatus, error) {
 	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "Translate", arg0, arg1)
-	ret0, _ := ret[0].(entity.Translation)
+	ret := m.ctrl.Call(m, "GetStatus", ctx, runID)
+	ret0, _ := ret[0].(entity.RunStatus)
 	ret1, _ := ret[1].(error)
 	return ret0, ret1
 }
 
-// Translate indicates an expected call of Translate.
-func (mr *MockTranslationMockRecorder) Translate(arg0, arg1 any) *gomock.Call {
+// GetStatus indicates an expected call of GetStatus.
+func (mr *MockAgentExecutorMockRecorder) GetStatus(ctx, runID any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Translate", reflect.TypeOf((*MockTranslation)(nil).Translate), arg0, arg1)
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetStatus", reflect.TypeOf((*MockAgentExecutor)(nil).GetStatus), ctx, runID)
+}
+
+// MockHistoryQuery is a mock of HistoryQuery interface.
+type MockHistoryQuery struct {
+	ctrl     *gomock.Controller
+	recorder *MockHistoryQueryMockRecorder
+	isgomock struct{}
+}
+
+// MockHistoryQueryMockRecorder is the mock recorder for MockHistoryQuery.
+type MockHistoryQueryMockRecorder struct {
+	mock *MockHistoryQuery
+}
+
+// NewMockHistoryQuery creates a new mock instance.
+func NewMockHistoryQuery(ctrl *gomock.Controller) *MockHistoryQuery {
+	mock := &MockHistoryQuery{ctrl: ctrl}
+	mock.recorder = &MockHistoryQueryMockRecorder{mock}
+	return mock
+}
+
+// EXPECT returns an object that allows the caller to indicate expected use.
+func (m *MockHistoryQuery) EXPECT() *MockHistoryQueryMockRecorder {
+	return m.recorder
+}
+
+// ListMessages mocks base method.
+func (m *MockHistoryQuery) ListMessages(ctx context.Context, runID string, limit, offset uint64) ([]entity.MessageRecord, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "ListMessages", ctx, runID, limit, offset)
+	ret0, _ := ret[0].([]entity.MessageRecord)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// ListMessages indicates an expected call of ListMessages.
+func (mr *MockHistoryQueryMockRecorder) ListMessages(ctx, runID, limit, offset any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ListMessages", reflect.TypeOf((*MockHistoryQuery)(nil).ListMessages), ctx, runID, limit, offset)
+}
+
+// ListToolResults mocks base method.
+func (m *MockHistoryQuery) ListToolResults(ctx context.Context, runID string, limit, offset uint64) ([]entity.ToolResultRecord, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "ListToolResults", ctx, runID, limit, offset)
+	ret0, _ := ret[0].([]entity.ToolResultRecord)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// ListToolResults indicates an expected call of ListToolResults.
+func (mr *MockHistoryQueryMockRecorder) ListToolResults(ctx, runID, limit, offset any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ListToolResults", reflect.TypeOf((*MockHistoryQuery)(nil).ListToolResults), ctx, runID, limit, offset)
+}
+
+// MockOrchestrationExecutor is a mock of OrchestrationExecutor interface.
+type MockOrchestrationExecutor struct {
+	ctrl     *gomock.Controller
+	recorder *MockOrchestrationExecutorMockRecorder
+	isgomock struct{}
+}
+
+// MockOrchestrationExecutorMockRecorder is the mock recorder for MockOrchestrationExecutor.
+type MockOrchestrationExecutorMockRecorder struct {
+	mock *MockOrchestrationExecutor
+}
+
+// NewMockOrchestrationExecutor creates a new mock instance.
+func NewMockOrchestrationExecutor(ctrl *gomock.Controller) *MockOrchestrationExecutor {
+	mock := &MockOrchestrationExecutor{ctrl: ctrl}
+	mock.recorder = &MockOrchestrationExecutorMockRecorder{mock}
+	return mock
+}
+
+// EXPECT returns an object that allows the caller to indicate expected use.
+func (m *MockOrchestrationExecutor) EXPECT() *MockOrchestrationExecutorMockRecorder {
+	return m.recorder
+}
+
+// ExecuteOrchestration mocks base method.
+func (m *MockOrchestrationExecutor) ExecuteOrchestration(ctx context.Context, input *entity.OrchestrationInput) (entity.RunStatus, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "ExecuteOrchestration", ctx, input)
+	ret0, _ := ret[0].(entity.RunStatus)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// ExecuteOrchestration indicates an expected call of ExecuteOrchestration.
+func (mr *MockOrchestrationExecutorMockRecorder) ExecuteOrchestration(ctx, input any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ExecuteOrchestration", reflect.TypeOf((*MockOrchestrationExecutor)(nil).ExecuteOrchestration), ctx, input)
+}
+
+// GetOrchestrationStatus mocks base method.
+func (m *MockOrchestrationExecutor) GetOrchestrationStatus(ctx context.Context, runID string) (entity.RunStatus, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "GetOrchestrationStatus", ctx, runID)
+	ret0, _ := ret[0].(entity.RunStatus)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// GetOrchestrationStatus indicates an expected call of GetOrchestrationStatus.
+func (mr *MockOrchestrationExecutorMockRecorder) GetOrchestrationStatus(ctx, runID any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetOrchestrationStatus", reflect.TypeOf((*MockOrchestrationExecutor)(nil).GetOrchestrationStatus), ctx, runID)
+}
+
+// MockStreamEventWriter is a mock of StreamEventWriter interface.
+type MockStreamEventWriter struct {
+	ctrl     *gomock.Controller
+	recorder *MockStreamEventWriterMockRecorder
+	isgomock struct{}
+}
+
+// MockStreamEventWriterMockRecorder is the mock recorder for MockStreamEventWriter.
+type MockStreamEventWriterMockRecorder struct {
+	mock *MockStreamEventWriter
+}
+
+// NewMockStreamEventWriter creates a new mock instance.
+func NewMockStreamEventWriter(ctrl *gomock.Controller) *MockStreamEventWriter {
+	mock := &MockStreamEventWriter{ctrl: ctrl}
+	mock.recorder = &MockStreamEventWriterMockRecorder{mock}
+	return mock
+}
+
+// EXPECT returns an object that allows the caller to indicate expected use.
+func (m *MockStreamEventWriter) EXPECT() *MockStreamEventWriterMockRecorder {
+	return m.recorder
+}
+
+// WriteEvent mocks base method.
+func (m *MockStreamEventWriter) WriteEvent(ctx context.Context, event entity.StreamEvent) error {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "WriteEvent", ctx, event)
+	ret0, _ := ret[0].(error)
+	return ret0
+}
+
+// WriteEvent indicates an expected call of WriteEvent.
+func (mr *MockStreamEventWriterMockRecorder) WriteEvent(ctx, event any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "WriteEvent", reflect.TypeOf((*MockStreamEventWriter)(nil).WriteEvent), ctx, event)
+}
+
+// MockStreamExecutor is a mock of StreamExecutor interface.
+type MockStreamExecutor struct {
+	ctrl     *gomock.Controller
+	recorder *MockStreamExecutorMockRecorder
+	isgomock struct{}
+}
+
+// MockStreamExecutorMockRecorder is the mock recorder for MockStreamExecutor.
+type MockStreamExecutorMockRecorder struct {
+	mock *MockStreamExecutor
+}
+
+// NewMockStreamExecutor creates a new mock instance.
+func NewMockStreamExecutor(ctrl *gomock.Controller) *MockStreamExecutor {
+	mock := &MockStreamExecutor{ctrl: ctrl}
+	mock.recorder = &MockStreamExecutorMockRecorder{mock}
+	return mock
+}
+
+// EXPECT returns an object that allows the caller to indicate expected use.
+func (m *MockStreamExecutor) EXPECT() *MockStreamExecutorMockRecorder {
+	return m.recorder
+}
+
+// ExecuteStream mocks base method.
+func (m *MockStreamExecutor) ExecuteStream(ctx context.Context, req *entity.StreamRequest, writer usecase.StreamEventWriter) error {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "ExecuteStream", ctx, req, writer)
+	ret0, _ := ret[0].(error)
+	return ret0
+}
+
+// ExecuteStream indicates an expected call of ExecuteStream.
+func (mr *MockStreamExecutorMockRecorder) ExecuteStream(ctx, req, writer any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ExecuteStream", reflect.TypeOf((*MockStreamExecutor)(nil).ExecuteStream), ctx, req, writer)
+}
+
+// MockToolDefProvider is a mock of ToolDefProvider interface.
+type MockToolDefProvider struct {
+	ctrl     *gomock.Controller
+	recorder *MockToolDefProviderMockRecorder
+	isgomock struct{}
+}
+
+// MockToolDefProviderMockRecorder is the mock recorder for MockToolDefProvider.
+type MockToolDefProviderMockRecorder struct {
+	mock *MockToolDefProvider
+}
+
+// NewMockToolDefProvider creates a new mock instance.
+func NewMockToolDefProvider(ctrl *gomock.Controller) *MockToolDefProvider {
+	mock := &MockToolDefProvider{ctrl: ctrl}
+	mock.recorder = &MockToolDefProviderMockRecorder{mock}
+	return mock
+}
+
+// EXPECT returns an object that allows the caller to indicate expected use.
+func (m *MockToolDefProvider) EXPECT() *MockToolDefProviderMockRecorder {
+	return m.recorder
+}
+
+// Definitions mocks base method.
+func (m *MockToolDefProvider) Definitions() []entity.ToolDef {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "Definitions")
+	ret0, _ := ret[0].([]entity.ToolDef)
+	return ret0
+}
+
+// Definitions indicates an expected call of Definitions.
+func (mr *MockToolDefProviderMockRecorder) Definitions() *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Definitions", reflect.TypeOf((*MockToolDefProvider)(nil).Definitions))
+}
+
+// MockTriggerEventHandler is a mock of TriggerEventHandler interface.
+type MockTriggerEventHandler struct {
+	ctrl     *gomock.Controller
+	recorder *MockTriggerEventHandlerMockRecorder
+	isgomock struct{}
+}
+
+// MockTriggerEventHandlerMockRecorder is the mock recorder for MockTriggerEventHandler.
+type MockTriggerEventHandlerMockRecorder struct {
+	mock *MockTriggerEventHandler
+}
+
+// NewMockTriggerEventHandler creates a new mock instance.
+func NewMockTriggerEventHandler(ctrl *gomock.Controller) *MockTriggerEventHandler {
+	mock := &MockTriggerEventHandler{ctrl: ctrl}
+	mock.recorder = &MockTriggerEventHandlerMockRecorder{mock}
+	return mock
+}
+
+// EXPECT returns an object that allows the caller to indicate expected use.
+func (m *MockTriggerEventHandler) EXPECT() *MockTriggerEventHandlerMockRecorder {
+	return m.recorder
+}
+
+// HandleEvent mocks base method.
+func (m *MockTriggerEventHandler) HandleEvent(ctx context.Context, eventSlug string, payload map[string]string) ([]entity.TriggerFireResult, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "HandleEvent", ctx, eventSlug, payload)
+	ret0, _ := ret[0].([]entity.TriggerFireResult)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// HandleEvent indicates an expected call of HandleEvent.
+func (mr *MockTriggerEventHandlerMockRecorder) HandleEvent(ctx, eventSlug, payload any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "HandleEvent", reflect.TypeOf((*MockTriggerEventHandler)(nil).HandleEvent), ctx, eventSlug, payload)
+}
+
+// MockTemplateManager is a mock of TemplateManager interface.
+type MockTemplateManager struct {
+	ctrl     *gomock.Controller
+	recorder *MockTemplateManagerMockRecorder
+	isgomock struct{}
+}
+
+// MockTemplateManagerMockRecorder is the mock recorder for MockTemplateManager.
+type MockTemplateManagerMockRecorder struct {
+	mock *MockTemplateManager
+}
+
+// NewMockTemplateManager creates a new mock instance.
+func NewMockTemplateManager(ctrl *gomock.Controller) *MockTemplateManager {
+	mock := &MockTemplateManager{ctrl: ctrl}
+	mock.recorder = &MockTemplateManagerMockRecorder{mock}
+	return mock
+}
+
+// EXPECT returns an object that allows the caller to indicate expected use.
+func (m *MockTemplateManager) EXPECT() *MockTemplateManagerMockRecorder {
+	return m.recorder
+}
+
+// Create mocks base method.
+func (m *MockTemplateManager) Create(ctx context.Context, req *entity.CreateWorkflowTemplateRequest) (entity.WorkflowTemplate, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "Create", ctx, req)
+	ret0, _ := ret[0].(entity.WorkflowTemplate)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// Create indicates an expected call of Create.
+func (mr *MockTemplateManagerMockRecorder) Create(ctx, req any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Create", reflect.TypeOf((*MockTemplateManager)(nil).Create), ctx, req)
+}
+
+// CreateFromYAML mocks base method.
+func (m *MockTemplateManager) CreateFromYAML(ctx context.Context, accountID string, yamlData []byte) (entity.WorkflowTemplate, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "CreateFromYAML", ctx, accountID, yamlData)
+	ret0, _ := ret[0].(entity.WorkflowTemplate)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// CreateFromYAML indicates an expected call of CreateFromYAML.
+func (mr *MockTemplateManagerMockRecorder) CreateFromYAML(ctx, accountID, yamlData any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "CreateFromYAML", reflect.TypeOf((*MockTemplateManager)(nil).CreateFromYAML), ctx, accountID, yamlData)
+}
+
+// Delete mocks base method.
+func (m *MockTemplateManager) Delete(ctx context.Context, templateID string) error {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "Delete", ctx, templateID)
+	ret0, _ := ret[0].(error)
+	return ret0
+}
+
+// Delete indicates an expected call of Delete.
+func (mr *MockTemplateManagerMockRecorder) Delete(ctx, templateID any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Delete", reflect.TypeOf((*MockTemplateManager)(nil).Delete), ctx, templateID)
+}
+
+// Get mocks base method.
+func (m *MockTemplateManager) Get(ctx context.Context, templateID string) (entity.WorkflowTemplate, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "Get", ctx, templateID)
+	ret0, _ := ret[0].(entity.WorkflowTemplate)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// Get indicates an expected call of Get.
+func (mr *MockTemplateManagerMockRecorder) Get(ctx, templateID any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Get", reflect.TypeOf((*MockTemplateManager)(nil).Get), ctx, templateID)
+}
+
+// ListByAccount mocks base method.
+func (m *MockTemplateManager) ListByAccount(ctx context.Context, accountID string) ([]entity.WorkflowTemplate, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "ListByAccount", ctx, accountID)
+	ret0, _ := ret[0].([]entity.WorkflowTemplate)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// ListByAccount indicates an expected call of ListByAccount.
+func (mr *MockTemplateManagerMockRecorder) ListByAccount(ctx, accountID any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ListByAccount", reflect.TypeOf((*MockTemplateManager)(nil).ListByAccount), ctx, accountID)
+}
+
+// Update mocks base method.
+func (m *MockTemplateManager) Update(ctx context.Context, templateID string, req entity.UpdateWorkflowTemplateRequest) (entity.WorkflowTemplate, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "Update", ctx, templateID, req)
+	ret0, _ := ret[0].(entity.WorkflowTemplate)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// Update indicates an expected call of Update.
+func (mr *MockTemplateManagerMockRecorder) Update(ctx, templateID, req any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Update", reflect.TypeOf((*MockTemplateManager)(nil).Update), ctx, templateID, req)
 }

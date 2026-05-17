@@ -21,7 +21,7 @@ const (
 	LifecycleResumed   LifecycleState = "resumed"
 	LifecycleCompleted LifecycleState = "completed"
 	LifecycleFailed    LifecycleState = "failed"
-	LifecycleCancelled LifecycleState = "cancelled"
+	LifecycleCancelled LifecycleState = "canceled"
 )
 
 // WorkflowHotState is the minimal deterministic state kept in workflow history.

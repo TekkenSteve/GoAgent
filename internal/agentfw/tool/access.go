@@ -33,8 +33,9 @@ type TierAuthorizer struct {
 }
 
 // Authorize checks whether a tool can execute for a given tier.
-func (a TierAuthorizer) Authorize(ctx context.Context, req ToolRequest) error {
+func (a TierAuthorizer) Authorize(ctx context.Context, req *Request) error {
 	allowed := a.Policy != nil && a.Policy.IsAllowed(req.Tier, req.ToolName)
+
 	reason := "allowed"
 	if !allowed {
 		reason = fmt.Sprintf("tier %q is not allowed to execute tool %q", req.Tier, req.ToolName)
@@ -57,6 +58,7 @@ func (a TierAuthorizer) Authorize(ctx context.Context, req ToolRequest) error {
 	if !allowed {
 		return fmt.Errorf("%w: %s", ErrAuthorization, reason)
 	}
+
 	return nil
 }
 
@@ -71,6 +73,8 @@ func (p StaticTierPolicy) IsAllowed(tier Tier, toolName string) bool {
 	if !ok {
 		return false
 	}
+
 	_, ok = tools[toolName]
+
 	return ok
 }

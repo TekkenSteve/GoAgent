@@ -16,6 +16,7 @@ type (
 		GRPC    GRPC
 		RMQ     RMQ
 		NATS    NATS
+		Redis   Redis
 		AgentFW AgentFW
 		Metrics Metrics
 		Swagger Swagger
@@ -62,6 +63,11 @@ type (
 		URL            string `env:"NATS_URL,required"`
 	}
 
+	// Redis -.
+	Redis struct {
+		URL string `env:"REDIS_URL,required"`
+	}
+
 	// AgentFW -.
 	AgentFW struct {
 		Enabled bool `env:"AGENTFW_ENABLED" envDefault:"false"`
@@ -88,6 +94,9 @@ type (
 		ContinueAsNewStateSizeThreshold  int   `env:"AGENTFW_CONTINUE_AS_NEW_STATE_SIZE_THRESHOLD_BYTES" envDefault:"524288"`
 		ContinueAsNewWallClockSeconds    int   `env:"AGENTFW_CONTINUE_AS_NEW_WALL_CLOCK_THRESHOLD_SECONDS" envDefault:"3000"`
 		ContinueAsNewMaxContinuations    int32 `env:"AGENTFW_CONTINUE_AS_NEW_MAX_CONTINUATIONS" envDefault:"1000"`
+
+		// LLM configuration — providers and scenarios in YAML (AGENTFW_LLM_CONFIG_PATH).
+		LLMConfigPath string `env:"AGENTFW_LLM_CONFIG_PATH" envDefault:""`
 	}
 
 	// Metrics -.

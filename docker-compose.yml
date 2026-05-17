@@ -1,6 +1,3 @@
-version: "3.9"
-
-
 x-db-environment: &x-db-environment
   POSTGRES_SSL_MODE: "disable"
   POSTGRES_HOST: "db"
@@ -8,6 +5,13 @@ x-db-environment: &x-db-environment
   POSTGRES_DB: "db"
   POSTGRES_PASSWORD: "myAwEsOm3pa55@w0rd"
   POSTGRES_USER: "user"
+
+x-temporal-db-environment: &x-temporal-db-environment
+  DB: "postgres12"
+  DB_PORT: "5432"
+  POSTGRES_USER: "user"
+  POSTGRES_PWD: "myAwEsOm3pa55@w0rd"
+  POSTGRES_SEEDS: "db"
 
 x-rabbitmq-variables: &x-rabbitmq-variables
   RABBITMQ_DEFAULT_USER: "guest"
@@ -48,13 +52,29 @@ services:
     environment:
       <<: *x-db-environment
     volumes:
-      - db_data:/var/lib/postgresql/data
+      - db_data:/var/lib/postgresql/18/data
     ports:
       - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U user -d db"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+      start_period: 30s
     networks:
       app_network:
         aliases:
           - db.lvh.me
+
+  redis:
+    container_name: redis
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    networks:
+      app_network:
+        aliases:
+          - redis.lvh.me
 
   rabbitmq:
     container_name: rabbitmq
@@ -84,6 +104,88 @@ services:
       app_network:
         aliases:
           - nats.lvh.me
+
+  temporal-admin-tools:
+    container_name: temporal-admin-tools
+    image: temporalio/admin-tools:1.29.6
+    restart: on-failure:6
+    depends_on:
+      db:
+        condition: service_started
+    environment:
+      <<: *x-temporal-db-environment
+      SQL_PASSWORD: "myAwEsOm3pa55@w0rd"
+    volumes:
+      - ./scripts/temporal/setup-postgres.sh:/scripts/setup.sh:ro
+    entrypoint: ["/bin/sh"]
+    command: /scripts/setup.sh
+    networks:
+      app_network:
+        aliases:
+          - temporal-setup.lvh.me
+
+  temporal:
+    container_name: temporal
+    image: temporalio/server:1.29.6.1
+    restart: always
+    depends_on:
+      db:
+        condition: service_started
+      temporal-admin-tools:
+        condition: service_completed_successfully
+    environment:
+      <<: *x-temporal-db-environment
+      BIND_ON_IP: "0.0.0.0"
+      DYNAMIC_CONFIG_FILE_PATH: "config/dynamicconfig/development-sql.yaml"
+    volumes:
+    - ./temporal/dynamicconfig:/etc/temporal/config/dynamicconfig
+    healthcheck:
+      test: ["CMD", "nc", "-z", "localhost", "7233"]
+      interval: 5s
+      timeout: 3s
+      retries: 30
+      start_period: 30s
+    ports:
+      - "7233:7233"
+      - "8233:8233"
+    networks:
+      app_network:
+        aliases:
+          - temporal.lvh.me
+
+  temporal-create-namespace:
+    container_name: temporal-create-namespace
+    image: temporalio/admin-tools:1.29.6
+    restart: on-failure:5
+    depends_on:
+      temporal:
+        condition: service_healthy
+    environment:
+      - TEMPORAL_ADDRESS=temporal:7233
+      - DEFAULT_NAMESPACE=default
+    volumes:
+      - ./scripts/temporal/create-namespace.sh:/scripts/create-namespace.sh:ro
+    entrypoint: ["/bin/sh"]
+    command: /scripts/create-namespace.sh
+    networks:
+      app_network:
+        aliases:
+          - temporal-create-namespace.lvh.me
+          
+  #  container_name: temporal-ui
+  #   depends_on:
+  #     temporal:
+  #       condition: service_healthy
+  #   environment:
+  #     - TEMPORAL_ADDRESS=temporal:7233
+  #     - TEMPORAL_CORS_ORIGINS=http://localhost:3000
+  #   image: temporalio/ui::2.49.1
+  #   networks:
+  #     app_network:
+  #       aliases:
+  #         - temporal-ui.lvh.me
+  #   ports:
+  #     - "8083:8083"
 
   app:
     container_name: app
@@ -115,6 +217,7 @@ services:
   nginx:
     container_name: nginx
     image: nginx:1.29.7-alpine
+    restart: on-failure:5
     volumes:
       - ./nginx/nginx.conf:/etc/nginx/nginx.conf
     ports:

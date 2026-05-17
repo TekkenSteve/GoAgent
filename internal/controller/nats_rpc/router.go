@@ -1,4 +1,4 @@
-package v1
+package nats_rpc
 
 import (
 	v1 "github.com/TekkenSteve/GoAgent/internal/controller/nats_rpc/v1"
@@ -8,11 +8,11 @@ import (
 )
 
 // NewRouter -.
-func NewRouter(t usecase.Translation, l logger.Interface) map[string]server.CallHandler {
+func NewRouter(t usecase.AgentExecutor, l logger.Interface) map[string]server.CallHandler {
 	routes := make(map[string]server.CallHandler)
 
 	{
-		v1.NewTranslationRoutes(routes, t, l)
+		v1.NewAgentRoutes(routes, t, l)
 	}
 
 	return routes

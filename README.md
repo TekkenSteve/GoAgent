@@ -1,19 +1,24 @@
-# Agent Framework
+# GoAgent
 
-基于 Clean Architecture 原则构建的 Go 微服务框架，集成了 Agent 运行时和编排能力。
+A Go microservices framework built on Clean Architecture principles, integrating an Agent runtime and Temporal-based orchestration engine.
 
-## 特性
+## Features
 
-- 遵循 Clean Architecture 设计原则
-- 支持多种服务器类型（REST API、gRPC、AMQP RPC、NATS RPC）
-- 内置 Agent 框架和运行时
-- 完整的可观测性支持（日志、指标、追踪）
-- 数据库迁移管理
-- 依赖注入设计
+- **Agent Framework** — ReAct loop agent runtime with LLM integration, tool execution, and MCP server support
+- **Orchestration Engine** — Temporal-based workflow orchestration with multi-step, parallel, conditional, and dynamic execution patterns
+- **Multi-Agent Teams** — Hierarchical team composition with recursive sub-team expansion
+- **Human-in-the-Loop** — Workflow pause/resume/cancel and signal-based waiting steps
+- **Streaming** — Server-Sent Events (SSE) and WebSocket support for real-time agent output
+- **Account & Billing** — Credit-based usage tracking with plan assignment
+- **Clean Architecture** — Dependency inversion, interface-based isolation, testability
+- **Multiple Server Types** — REST API, gRPC, AMQP RPC, NATS RPC
+- **Observability** — Structured logging (zerolog), Prometheus metrics, OpenTelemetry tracing
+- **Database Migrations** — golang-migrate for PostgreSQL schema management
 
-## 技术栈
+## Technology Stack
 
 [![Web Framework](https://img.shields.io/badge/Fiber-Web%20Framework-blue)](https://github.com/gofiber/fiber)
+[![Workflow Engine](https://img.shields.io/badge/Temporal-Workflow%20Engine-blue)](https://temporal.io/)
 [![API Documentation](https://img.shields.io/badge/Swagger-API%20Documentation-blue)](https://github.com/swaggo/swag)
 [![Validation](https://img.shields.io/badge/Validator-Data%20Integrity-blue)](https://github.com/go-playground/validator)
 [![JSON Handling](https://img.shields.io/badge/Go--JSON-Fast%20Serialization-blue)](https://github.com/goccy/go-json)
@@ -22,114 +27,179 @@
 [![Logging](https://img.shields.io/badge/ZeroLog-Structured%20Logging-blue)](https://github.com/rs/zerolog)
 [![Metrics](https://img.shields.io/badge/Prometheus-Metrics%20Integration-blue)](https://github.com/ansrivas/fiberprometheus)
 [![Testing](https://img.shields.io/badge/Testify-Testing%20Framework-blue)](https://github.com/stretchr/testify)
-[![Mocking](https://img.shields.io/badge/Mock-Mocking%20Library-blue)](https://go.uber.org/mock)
 
-## 快速开始
+## Quick Start
 
-### 本地开发
+### Prerequisites
+
+- Go 1.26+
+- Docker & Docker Compose
+- Temporal Server (via Docker)
+
+### Local Development
 
 ```sh
-# 启动依赖服务 (Postgres, RabbitMQ, NATS)
+# Start dependency services (Postgres, RabbitMQ, NATS, Temporal)
 make compose-up
 
-# 运行应用（包含数据库迁移）
+# Run the application (includes database migration)
 make run
 ```
 
-### 集成测试
+### Integration Tests
 
 ```sh
-# 启动完整测试环境
+# Start full test environment with mock LLM
 make compose-up-integration-test
 ```
 
-### 完整 Docker 栈
+### Full Docker Stack
 
 ```sh
-make compose-up-all 
+make compose-up-all
 ```
 
-### 服务端点
+## Service Endpoints
 
-- REST API:
-  - http://127.0.0.1:8080/healthz - 健康检查
-  - http://127.0.0.1:8080/metrics - Prometheus 指标
-  - http://127.0.0.1:8080/swagger - API 文档
-- gRPC:
-  - `tcp://127.0.0.1:8081`
-- AMQP RPC:
-  - URL: `amqp://guest:guest@127.0.0.1:5672/`
-- NATS RPC:
-  - URL: `nats://guest:guest@127.0.0.1:4222/`
-- PostgreSQL:
-  - `postgres://user:myAwEsOm3pa55@w0rd@127.0.0.1:5432/db`
+- **REST API**:
+  - `http://127.0.0.1:8080/healthz` — Health check
+  - `http://127.0.0.1:8080/metrics` — Prometheus metrics
+  - `http://127.0.0.1:8080/swagger` — API documentation
+- **Agent API** (v1):
+  - `POST /v1/agent/execute` — Execute a single agent run (ReAct loop)
+  - `GET /v1/agent/status/{run_id}` — Poll agent run status
+  - `GET /v1/agent/{run_id}/messages` — List conversation messages
+  - `GET /v1/agent/{run_id}/tools` — List tool execution results
+  - `GET /v1/agent/stream` — SSE stream of agent output
+  - `GET /v1/agent/ws` — WebSocket for real-time agent communication
+- **Orchestration API**:
+  - `POST /v1/orchestration/execute` — Start multi-step orchestration workflow
+  - `GET /v1/orchestration/status/{run_id}` — Poll orchestration status
+- **Templates API**:
+  - `POST /v1/templates/import` — Import workflow template from YAML
+  - `GET /v1/templates/` — List templates
+  - `GET /v1/templates/{template_id}` — Get template details
+  - `DELETE /v1/templates/{template_id}` — Delete template
+- **Triggers API**:
+  - `POST /v1/triggers/events` — Fire trigger event webhook
+- **gRPC**: `tcp://127.0.0.1:8081`
+- **AMQP RPC**: `amqp://guest:guest@127.0.0.1:5672/`
+- **NATS RPC**: `nats://guest:guest@127.0.0.1:4222/`
+- **PostgreSQL**: `postgres://user:myAwEsOm3pa55@w0rd@127.0.0.1:5432/db`
 
-## 项目结构
+## Project Structure
 
-### 核心目录
+### Core Directories
 
-- `cmd/app/` - 应用入口点
-- `config/` - 配置管理（基于环境变量）
-- `internal/` - 私有应用代码
-  - `app/` - 应用初始化和依赖注入
-  - `controller/` - 服务器处理层（REST、gRPC、RPC）
-  - `usecase/` - 业务逻辑层
-  - `entity/` - 业务实体
-  - `repo/` - 数据访问层
-  - `agentfw/` - Agent 框架实现
-- `pkg/` - 可复用的公共包
-- `docs/` - API 文档和 Proto 文件
-- `integration-test/` - 集成测试
+- `cmd/app/` — Application entry point
+- `config/` — Configuration management (environment variable based)
+- `internal/` — Private application code
+  - `app/` — Application initialization and dependency injection
+  - `controller/` — Server handling layer (REST, gRPC, RPC)
+  - `usecase/` — Business logic layer
+  - `entity/` — Business entities (Step, AgentSpec, TeamSpec, etc.)
+  - `repo/` — Data access layer (Temporal, PostgreSQL)
+  - `agentfw/` — Agent framework (runtime, team composition, streaming)
+- `pkg/` — Reusable public packages
+- `docs/` — API documentation and Proto files
+- `examples/` — Runnable pattern examples (client SDK)
+- `integration-test/` — Integration tests
+- `scripts/` — Workflow determinism checks, load/security suites
+- `migrations/` — PostgreSQL migration files
 
-### 配置管理
+### Configuration Management
 
-遵循 [12-Factor App](https://12factor.net/) 原则，所有配置通过环境变量管理。
+Follows the [12-Factor App](https://12factor.net/) principles. All configuration is managed through environment variables.
 
-配置文件：[config/config.go](config/config.go)  
-示例配置：[.env.example](.env.example)
+Configuration file: [config/config.go](config/config.go)  
+Example configuration: [.env.example](.env.example)
 
-## 架构设计
+## Agent Framework
 
-### Clean Architecture 原则
+### Architecture
 
-本项目遵循 Robert Martin (Uncle Bob) 的 Clean Architecture 原则：
+The agent framework consists of:
 
-1. **依赖倒置**：依赖方向从外层指向内层
-2. **业务逻辑独立**：核心业务逻辑不依赖外部框架和工具
-3. **可测试性**：通过接口隔离，便于单元测试
-4. **关注点分离**：清晰的层次划分
+1. **Agent Runtime** — ReAct loop: `think → act → observe → repeat`, with LLM provider abstraction
+2. **Tool System** — Tool definitions with JSON Schema, executor abstraction, MCP server integration
+3. **Team System** — Hierarchical team composition with recursive expansion into flat step queues
+4. **Orchestration Engine** — Temporal workflow that executes steps with dependency resolution, parallel fan-out, dynamic mutation, and human-in-the-loop signals
 
-### 分层架构
+### Step Types
+
+| Type | Purpose |
+|------|---------|
+| `agent` | Execute an agent with a prompt |
+| `tool` | Execute a tool directly |
+| `wait` | Wait for a Temporal signal (HITL) or timeout |
+| `split` | Fan-out into parallel sub-steps |
+| `join` | Fan-in to gather parallel results |
+| `eval` | Conditional evaluation with dynamic step mutation |
+
+### Orchestration Patterns
+
+The `examples/` directory contains runnable demonstrations of common agent patterns:
+
+| Pattern | File | Key Concepts |
+|---------|------|-------------|
+| [ReAct](examples/react/) | Single agent + tool loop | `ExecuteRequest`, polling |
+| [Pipeline](examples/pipeline/) | Sequential processing stages | `depends_on` chain |
+| [DAG](examples/dag/) | Directed acyclic graph | Multi-dependency resolution |
+| [Research](examples/research/) | Parallel exploration + synthesis | `split`/`join`, `wait` (HITL) |
+| [Supervisor-Worker](examples/supervisor-worker/) | Decompose + parallel workers | `split`/`join`, supervisor agent |
+| [Router](examples/router/) | Conditional branching | `eval` + `OnResult` mutation |
+| [Reflexion](examples/reflexion/) | Self-critique quality loop | `eval` + dynamic refinement |
+| [Plan-and-Execute](examples/plan-and-execute/) | Plan → parallel execute → evaluate | `split`/`join` + `eval` mutation |
+| [Exploratory](examples/exploratory/) | Self-modifying step queue | `eval` + `append_after` mutation |
+| [ToT / LATS](examples/tot-lats/) | Multiple reasoning paths | Parallel exploration + best-path eval |
+| [Scientific](examples/scientific/) | Hypothesis → HITL → experiment | `wait` signal, timeout handling |
+| [Team](examples/team/) | Multi-agent hierarchy | `TeamSpec` + `SubTeams` |
+| [Hierarchical](examples/hierarchical/) | Executive → departments | Nested `TeamSpec` with expansion |
+
+Each example uses the [examples/client](examples/client/) SDK to interact with the REST API.
+
+## Architecture Design
+
+### Clean Architecture Principles
+
+This project follows Robert Martin (Uncle Bob)'s Clean Architecture principles:
+
+1. **Dependency Inversion**: Dependencies flow from outer layers to inner layers
+2. **Independent Business Logic**: Core business logic does not depend on external frameworks and tools
+3. **Testability**: Interface isolation enables easy unit testing
+4. **Separation of Concerns**: Clear layer separation
+
+### Layered Architecture
 
 ```
 ┌─────────────────────────────────────┐
-│   Controller (HTTP/gRPC/RPC)        │  外层：接口适配
+│   Controller (HTTP/gRPC/RPC)        │  Outer Layer: Interface Adapters
 ├─────────────────────────────────────┤
-│   Use Case (Business Logic)         │  内层：业务逻辑
+│   Use Case (Business Logic)         │  Inner Layer: Business Logic
 ├─────────────────────────────────────┤
-│   Repository / WebAPI               │  外层：数据访问
+│   Repository / WebAPI               │  Outer Layer: Data Access
 ├─────────────────────────────────────┤
-│   Database / External Services      │  外层：基础设施
+│   Database / External Services      │  Outer Layer: Infrastructure
 └─────────────────────────────────────┘
 ```
 
-**内层（业务逻辑）**：
-- 只使用 Go 标准库
-- 不依赖外层实现
-- 通过接口与外层交互
+**Inner Layer (Business Logic)**:
+- Uses only Go standard library
+- Does not depend on outer layer implementations
+- Interacts with outer layers through interfaces
 
-**外层（基础设施）**：
-- 实现内层定义的接口
-- 处理具体的技术实现
-- 组件间通过业务逻辑层通信
+**Outer Layer (Infrastructure)**:
+- Implements interfaces defined by the inner layer
+- Handles specific technical implementations
+- Components communicate through the business logic layer
 
-### 依赖注入
+### Dependency Injection
 
-通过构造函数注入依赖，保持业务逻辑的独立性和可测试性：
+Dependencies are injected through constructors, maintaining the independence and testability of business logic:
 
 ```go
 type UseCase struct {
-    repo Repository  // 接口依赖
+    repo Repository  // Interface dependency
 }
 
 func New(r Repository) *UseCase {
@@ -137,60 +207,69 @@ func New(r Repository) *UseCase {
 }
 ```
 
-这种设计使得：
-- 业务逻辑可独立测试
-- 实现可轻松替换
-- 便于生成 Mock 对象
+### API Versioning
 
-### API 版本管理
-
-支持简单的版本管理策略，通过目录结构区分版本：
+Supports a simple versioning strategy, with versions distinguished by directory structure:
 
 - REST API: `internal/controller/restapi/v1`, `v2`...
 - gRPC: `internal/controller/grpc/v1`, `v2`...
 - RPC: `internal/controller/amqp_rpc/v1`, `v2`...
 
-## 开发指南
+## Development Guide
 
-### 数据库迁移
+### Database Migrations
 
 ```sh
-# 运行迁移
+# Run migrations
 go run -tags migrate ./cmd/app
 
-# 或使用 make
+# Or use make
 make run
 ```
 
-### 生成代码
+### Code Generation
 
 ```sh
-# 生成 Swagger 文档
-make swag
+# Generate Swagger documentation
+make swag-v1
 
-# 生成 gRPC 代码
-make proto
+# Generate gRPC code
+make proto-v1
 
-# 生成 Mock
+# Generate Mocks
 make mock
 ```
 
-### 代码检查
+### Code Quality
 
 ```sh
-# 运行 linter
-make lint
+# Run linter
+make linter-golangci
 
-# 格式化代码
-make fmt
+# Format code
+make format
+
+# Run unit tests
+make test
 ```
 
-## 参考资料
+## CI Checks (run locally before push)
 
-- [Clean Architecture](https://blog.cleancoder.com/uncle-bob/2012/08/13/the-clean-architecture.html) - Robert Martin
+```sh
+make linter-golangci    # golangci-lint
+make linter-hadolint    # Dockerfile lint
+make linter-dotenv       # .env lint
+make check-workflow-determinism  # Temporal workflow determinism
+make test               # Unit tests
+```
+
+## References
+
+- [Clean Architecture](https://blog.cleancoder.com/uncle-bob/2012/08/13/the-clean-architecture.html) — Robert Martin
 - [The Twelve-Factor App](https://12factor.net/)
+- [Temporal Workflow Platform](https://temporal.io/)
 - [Go Project Layout](https://github.com/golang-standards/project-layout)
 
 ## License
 
-MIT License - 详见 [LICENSE](LICENSE) 文件
+MIT License — See [LICENSE](LICENSE) file for details
