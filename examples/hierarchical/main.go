@@ -34,49 +34,12 @@ import (
 	"github.com/TekkenSteve/GoAgent/examples/client"
 )
 
-func main() {
-	baseURL := os.Getenv("BASE_URL")
-	if baseURL == "" {
-		baseURL = "http://localhost:8080"
-	}
-	accountID := os.Getenv("ACCOUNT_ID")
-	if accountID == "" {
-		accountID = "e2e-test-account"
-	}
-	runID := fmt.Sprintf("hierarchical-demo-%d", time.Now().UnixMilli())
+const (
+	pollInterval = 2 * time.Second
+	pollTimeout  = 4 * time.Minute
+)
 
-	c := client.New(baseURL, accountID)
-	ctx := context.Background()
-
-	fmt.Printf("=== Hierarchical Team Pattern ===\nRun ID: %s\n\n", runID)
-	fmt.Println("Team hierarchy:")
-	fmt.Println("  Executive Team")
-	fmt.Println("    ├── Product Management (product-manager)")
-	fmt.Println("    ├── Engineering (architect, developer, reviewer)")
-	fmt.Println("    └── Marketing (marketing-lead)")
-	fmt.Println()
-
-	status, err := c.ExecuteOrchestration(ctx, client.OrchestrationRequest{
-		RunID:    runID,
-		TeamSpec: hierarchicalTeamSpec,
-	})
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
-		os.Exit(1)
-	}
-
-	fmt.Printf("Initial status: lifecycle_state=%s step=%d\n\n", status.LifecycleState, status.Step)
-	fmt.Println("Polling for completion...")
-
-	status, err = c.WaitForOrchestrationCompletion(ctx, runID, 2*time.Second, 4*time.Minute)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
-		os.Exit(1)
-	}
-
-	fmt.Printf("\nFinal status: lifecycle_state=%s step=%d\n", status.LifecycleState, status.Step)
-}
-
+//nolint:gochecknoglobals // config data — long spec map, not complex logic
 var hierarchicalTeamSpec = map[string]any{
 	"id":   "exec-team",
 	"name": "Executive Team",
@@ -153,4 +116,49 @@ var hierarchicalTeamSpec = map[string]any{
 			"depends_on": []string{"product-plan", "eng-spec", "marketing-plan"},
 		},
 	},
+}
+
+func main() {
+	baseURL := os.Getenv("BASE_URL")
+	if baseURL == "" {
+		baseURL = "http://localhost:8080"
+	}
+
+	accountID := os.Getenv("ACCOUNT_ID")
+	if accountID == "" {
+		accountID = "e2e-test-account"
+	}
+
+	runID := fmt.Sprintf("hierarchical-demo-%d", time.Now().UnixMilli())
+
+	c := client.New(baseURL, accountID)
+	ctx := context.Background()
+
+	fmt.Fprintf(os.Stdout, "=== Hierarchical Team Pattern ===\nRun ID: %s\n\n", runID)
+	fmt.Fprintln(os.Stdout, "Team hierarchy:")
+	fmt.Fprintln(os.Stdout, "  Executive Team")
+	fmt.Fprintln(os.Stdout, "    ├── Product Management (product-manager)")
+	fmt.Fprintln(os.Stdout, "    ├── Engineering (architect, developer, reviewer)")
+	fmt.Fprintln(os.Stdout, "    └── Marketing (marketing-lead)")
+	fmt.Fprintln(os.Stdout)
+
+	status, err := c.ExecuteOrchestration(ctx, client.OrchestrationRequest{
+		RunID:    runID,
+		TeamSpec: hierarchicalTeamSpec,
+	})
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+		os.Exit(1)
+	}
+
+	fmt.Fprintf(os.Stdout, "Initial status: lifecycle_state=%s step=%d\n\n", status.LifecycleState, status.Step)
+	fmt.Fprintln(os.Stdout, "Polling for completion...")
+
+	status, err = c.WaitForOrchestrationCompletion(ctx, runID, pollInterval, pollTimeout)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+		os.Exit(1)
+	}
+
+	fmt.Fprintf(os.Stdout, "\nFinal status: lifecycle_state=%s step=%d\n", status.LifecycleState, status.Step)
 }

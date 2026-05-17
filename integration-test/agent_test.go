@@ -32,7 +32,7 @@ func executeAgentRun(t *testing.T, runID, accountID string) runStatus {
 	ctx, cancel := context.WithTimeout(t.Context(), requestTimeout)
 	defer cancel()
 
-	resp, err := doWebRequestWithTimeout(ctx, http.MethodPost, basePathV1+"/agent/execute", bytes.NewBufferString(body))
+	resp, err := doWebRequestWithTimeout(ctx, http.MethodPost, basePathV1()+"/agent/execute", bytes.NewBufferString(body))
 	if err != nil {
 		t.Fatalf("executeAgentRun: request failed: %v", err)
 	}
@@ -54,7 +54,7 @@ func executeAgentRun(t *testing.T, runID, accountID string) runStatus {
 func waitForRunCompletion(t *testing.T, runID string) runStatus {
 	t.Helper()
 
-	url := basePathV1 + "/agent/status/" + runID
+	url := basePathV1() + "/agent/status/" + runID
 
 	for range 30 {
 		ctx, cancel := context.WithTimeout(t.Context(), requestTimeout)
@@ -150,7 +150,7 @@ func testExecuteAgentRequest(t *testing.T, runID, accountID, message string, exp
 	ctx, cancel := context.WithTimeout(t.Context(), requestTimeout)
 	defer cancel()
 
-	resp, err := doWebRequestWithTimeout(ctx, http.MethodPost, basePathV1+"/agent/execute", bytes.NewBufferString(body))
+	resp, err := doWebRequestWithTimeout(ctx, http.MethodPost, basePathV1()+"/agent/execute", bytes.NewBufferString(body))
 	if err != nil {
 		t.Fatalf("Failed to send request: %v", err)
 	}
@@ -204,7 +204,7 @@ func TestHTTPAgentMessagesV1(t *testing.T) {
 	executeAgentRun(t, runID, "e2e-test-account")
 	waitForRunCompletion(t, runID)
 
-	url := basePathV1 + "/agent/" + runID + "/messages"
+	url := basePathV1() + "/agent/" + runID + "/messages"
 
 	ctx, cancel := context.WithTimeout(t.Context(), requestTimeout)
 	defer cancel()

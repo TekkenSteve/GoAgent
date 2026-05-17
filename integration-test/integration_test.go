@@ -16,22 +16,50 @@ import (
 
 const (
 	// Base settings
-	host     = "app"
 	attempts = 60
 
 	// Attempts connection
-	httpURL        = "http://" + host + ":8080"
-	healthPath     = httpURL + "/healthz"
 	requestTimeout = 5 * time.Second
-
-	// HTTP REST
-	basePathV1 = httpURL + "/v1"
 )
 
-var (
-	errHealthCheck = fmt.Errorf("url %s is not available", healthPath)
-	errPGURLNotSet = errors.New("PG_URL not set")
-)
+// host returns the integration test target host.
+// Override via INTEGRATION_TEST_HOST env var (e.g. "localhost" when running from host).
+func host() string {
+	if h := os.Getenv("INTEGRATION_TEST_HOST"); h != "" {
+		return h
+	}
+
+	return "app"
+}
+
+func httpURL() string {
+	return "http://" + host() + ":8080"
+}
+
+func healthPath() string {
+	return httpURL() + "/healthz"
+}
+
+func basePathV1() string {
+	return httpURL() + "/v1"
+}
+
+func errHealthCheck() error {
+	//nolint:err113 // dynamic message required to include host URL
+	return fmt.Errorf("url %s is not available", healthPath())
+}
+
+// getPGURL returns the PostgreSQL connection string.
+// Checks INTEGRATION_TEST_PG_URL first, then falls back to PG_URL.
+func getPGURL() string {
+	if u := os.Getenv("INTEGRATION_TEST_PG_URL"); u != "" {
+		return u
+	}
+
+	return os.Getenv("PG_URL")
+}
+
+var errPGURLNotSet = errors.New("PG_URL not set")
 
 func doWebRequestWithTimeout(ctx context.Context, method, url string, body io.Reader) (*http.Response, error) {
 	req, err := http.NewRequestWithContext(ctx, method, url, body)
@@ -61,15 +89,15 @@ func getHealthCheck(url string) (int, error) {
 
 func healthCheck(attempts int) error {
 	for attempts > 0 {
-		statusCode, err := getHealthCheck(healthPath)
+		statusCode, err := getHealthCheck(healthPath())
 		if err == nil && statusCode == http.StatusOK {
 			return nil
 		}
 
 		if err != nil {
-			log.Printf("Integration tests: url %s is not available: %v, attempts left: %d", healthPath, err, attempts)
+			log.Printf("Integration tests: url %s is not available: %v, attempts left: %d", healthPath(), err, attempts)
 		} else {
-			log.Printf("Integration tests: url %s is not available, attempts left: %d", healthPath, attempts)
+			log.Printf("Integration tests: url %s is not available, attempts left: %d", healthPath(), attempts)
 		}
 
 		time.Sleep(time.Second)
@@ -77,13 +105,13 @@ func healthCheck(attempts int) error {
 		attempts--
 	}
 
-	return errHealthCheck
+	return errHealthCheck()
 }
 
 // seedTestAccount ensures the test account has a non-zero credit balance.
 // Called before tests run so that the billing prep-check passes.
 func seedTestAccount() error {
-	pgURL := os.Getenv("PG_URL")
+	pgURL := getPGURL()
 	if pgURL == "" {
 		return errPGURLNotSet
 	}
@@ -131,10 +159,10 @@ func seedTestAccount() error {
 func TestMain(m *testing.M) {
 	err := healthCheck(attempts)
 	if err != nil {
-		log.Fatalf("Integration tests: httpURL %s is not available: %s", httpURL, err)
+		log.Fatalf("Integration tests: httpURL %s is not available: %s", httpURL(), err)
 	}
 
-	log.Printf("Integration tests: httpURL %s is available", httpURL)
+	log.Printf("Integration tests: httpURL %s is available", httpURL())
 
 	if err := seedTestAccount(); err != nil {
 		log.Fatalf("Integration tests: seed account: %v", err)

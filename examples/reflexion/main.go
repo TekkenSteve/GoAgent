@@ -26,24 +26,31 @@ import (
 	"github.com/TekkenSteve/GoAgent/examples/client"
 )
 
+const (
+	pollInterval = 2 * time.Second
+	pollTimeout  = 4 * time.Minute
+)
+
 func main() {
 	baseURL := os.Getenv("BASE_URL")
 	if baseURL == "" {
 		baseURL = "http://localhost:8080"
 	}
+
 	accountID := os.Getenv("ACCOUNT_ID")
 	if accountID == "" {
 		accountID = "e2e-test-account"
 	}
+
 	runID := fmt.Sprintf("reflexion-demo-%d", time.Now().UnixMilli())
 
 	c := client.New(baseURL, accountID)
 	ctx := context.Background()
 
-	fmt.Printf("=== Reflexion Pattern ===\nRun ID: %s\n\n", runID)
-	fmt.Println("Flow: generate → evaluate → [refine if needed] → conclude")
-	fmt.Println("The eval step checks quality; OnResult appends a refine step on failure.")
-	fmt.Println()
+	fmt.Fprintf(os.Stdout, "=== Reflexion Pattern ===\nRun ID: %s\n\n", runID)
+	fmt.Fprintln(os.Stdout, "Flow: generate → evaluate → [refine if needed] → conclude")
+	fmt.Fprintln(os.Stdout, "The eval step checks quality; OnResult appends a refine step on failure.")
+	fmt.Fprintln(os.Stdout)
 
 	status, err := c.ExecuteOrchestration(ctx, client.OrchestrationRequest{
 		RunID: runID,
@@ -54,16 +61,16 @@ func main() {
 		os.Exit(1)
 	}
 
-	fmt.Printf("Initial status: lifecycle_state=%s step=%d\n\n", status.LifecycleState, status.Step)
-	fmt.Println("Polling for completion...")
+	fmt.Fprintf(os.Stdout, "Initial status: lifecycle_state=%s step=%d\n\n", status.LifecycleState, status.Step)
+	fmt.Fprintln(os.Stdout, "Polling for completion...")
 
-	status, err = c.WaitForOrchestrationCompletion(ctx, runID, 2*time.Second, 4*time.Minute)
+	status, err = c.WaitForOrchestrationCompletion(ctx, runID, pollInterval, pollTimeout)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 		os.Exit(1)
 	}
 
-	fmt.Printf("\nFinal status: lifecycle_state=%s step=%d\n", status.LifecycleState, status.Step)
+	fmt.Fprintf(os.Stdout, "\nFinal status: lifecycle_state=%s step=%d\n", status.LifecycleState, status.Step)
 }
 
 func reflexionSteps() []map[string]any {

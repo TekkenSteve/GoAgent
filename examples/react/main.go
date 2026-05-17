@@ -22,21 +22,28 @@ import (
 	"github.com/TekkenSteve/GoAgent/examples/client"
 )
 
+const (
+	pollInterval = 2 * time.Second
+	pollTimeout  = 4 * time.Minute
+)
+
 func main() {
 	baseURL := os.Getenv("BASE_URL")
 	if baseURL == "" {
 		baseURL = "http://localhost:8080"
 	}
+
 	accountID := os.Getenv("ACCOUNT_ID")
 	if accountID == "" {
 		accountID = "e2e-test-account"
 	}
+
 	runID := fmt.Sprintf("react-demo-%d", time.Now().UnixMilli())
 
 	c := client.New(baseURL, accountID)
 	ctx := context.Background()
 
-	fmt.Printf("=== ReAct Pattern ===\nRun ID: %s\n\n", runID)
+	fmt.Fprintf(os.Stdout, "=== ReAct Pattern ===\nRun ID: %s\n\n", runID)
 
 	status, err := c.ExecuteAgent(ctx, client.ExecuteRequest{
 		RunID:       runID,
@@ -47,24 +54,27 @@ func main() {
 		os.Exit(1)
 	}
 
-	fmt.Printf("Initial status: lifecycle_state=%s step=%d\n\n", status.LifecycleState, status.Step)
-	fmt.Println("Polling for completion...")
+	fmt.Fprintf(os.Stdout, "Initial status: lifecycle_state=%s step=%d\n\n", status.LifecycleState, status.Step)
+	fmt.Fprintln(os.Stdout, "Polling for completion...")
 
-	status, err = c.WaitForCompletion(ctx, runID, 2*time.Second, 4*time.Minute)
+	status, err = c.WaitForCompletion(ctx, runID, pollInterval, pollTimeout)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 		os.Exit(1)
 	}
 
-	fmt.Printf("\nFinal status: lifecycle_state=%s step=%d\n", status.LifecycleState, status.Step)
+	fmt.Fprintf(os.Stdout, "\nFinal status: lifecycle_state=%s step=%d\n", status.LifecycleState, status.Step)
 
 	messages, err := c.ListMessages(ctx, runID)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Warning: ListMessages: %v\n", err)
+
 		return
 	}
-	fmt.Printf("Messages: %d\n", len(messages))
+
+	fmt.Fprintf(os.Stdout, "Messages: %d\n", len(messages))
+
 	for i, m := range messages {
-		fmt.Printf("  [%d] %s\n", i, m)
+		fmt.Fprintf(os.Stdout, "  [%d] %s\n", i, m)
 	}
 }

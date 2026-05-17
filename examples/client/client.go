@@ -13,6 +13,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -20,6 +21,16 @@ import (
 	"strings"
 	"time"
 )
+
+const (
+	LifecycleStateCompleted = "completed"
+	LifecycleStateFailed    = "failed"
+	LifecycleStateCanceled  = "canceled"
+)
+
+var ErrWaitTimeout = errors.New("wait timeout")
+
+const defaultHTTPTimeout = 30 * time.Second
 
 // Client is a lightweight HTTP client for the GoAgent REST API.
 // Stateless — safe for concurrent use.
@@ -35,7 +46,7 @@ func New(baseURL, accountID string) *Client {
 	return &Client{
 		baseURL:   strings.TrimRight(baseURL, "/"),
 		accountID: accountID,
-		http:      &http.Client{Timeout: 30 * time.Second},
+		http:      &http.Client{Timeout: defaultHTTPTimeout},
 	}
 }
 
@@ -43,11 +54,13 @@ func New(baseURL, accountID string) *Client {
 // path is a URL path like "/v1/agent/execute".
 func (c *Client) Do(ctx context.Context, method, path string, body, result any) error {
 	var bodyReader io.Reader
+
 	if body != nil {
 		data, err := json.Marshal(body)
 		if err != nil {
 			return fmt.Errorf("marshal request: %w", err)
 		}
+
 		bodyReader = bytes.NewReader(data)
 	}
 
@@ -55,6 +68,7 @@ func (c *Client) Do(ctx context.Context, method, path string, body, result any) 
 	if err != nil {
 		return fmt.Errorf("create request: %w", err)
 	}
+
 	req.Header.Set("Content-Type", "application/json")
 
 	resp, err := c.http.Do(req)
@@ -64,7 +78,11 @@ func (c *Client) Do(ctx context.Context, method, path string, body, result any) 
 	defer resp.Body.Close()
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		respBody, _ := io.ReadAll(resp.Body)
+		respBody, readErr := io.ReadAll(resp.Body)
+		if readErr != nil {
+			return &APIError{Code: resp.StatusCode, Body: fmt.Sprintf("failed to read body: %v", readErr)}
+		}
+
 		return &APIError{Code: resp.StatusCode, Body: string(respBody)}
 	}
 
@@ -73,6 +91,7 @@ func (c *Client) Do(ctx context.Context, method, path string, body, result any) 
 			return fmt.Errorf("decode response: %w", err)
 		}
 	}
+
 	return nil
 }
 
@@ -86,28 +105,27 @@ func (e *APIError) Error() string {
 	return fmt.Sprintf("API error %d: %s", e.Code, e.Body)
 }
 
-// WaitForOrchestrationCompletion polls GET /v1/orchestration/status/{runID} until a
-// terminal state (completed, failed, cancelled) is reached.
-func (c *Client) WaitForOrchestrationCompletion(ctx context.Context, runID string, interval, timeout time.Duration) (*RunStatus, error) {
+func (c *Client) pollStatus(ctx context.Context, runID, pathPrefix, desc string, interval, timeout time.Duration) (*RunStatus, error) {
 	deadline := time.Now().Add(timeout)
 
 	for {
 		var status RunStatus
-		err := c.Do(ctx, http.MethodGet, "/v1/orchestration/status/"+runID, nil, &status)
+
+		err := c.Do(ctx, http.MethodGet, pathPrefix+runID, nil, &status)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "  poll error: %v\n", err)
 		} else {
-			fmt.Printf("  lifecycle_state=%s step=%d\n", status.LifecycleState, status.Step)
+			fmt.Fprintf(os.Stdout, "  lifecycle_state=%s step=%d\n", status.LifecycleState, status.Step)
 
-			if status.LifecycleState == "completed" ||
-				status.LifecycleState == "failed" ||
-				status.LifecycleState == "cancelled" {
+			if status.LifecycleState == LifecycleStateCompleted ||
+				status.LifecycleState == LifecycleStateFailed ||
+				status.LifecycleState == LifecycleStateCanceled {
 				return &status, nil
 			}
 		}
 
 		if time.Now().After(deadline) {
-			return nil, fmt.Errorf("timeout waiting for orchestration run %s after %v", runID, timeout)
+			return nil, fmt.Errorf("%w: %s %s after %v", ErrWaitTimeout, desc, runID, timeout)
 		}
 
 		select {
@@ -118,35 +136,14 @@ func (c *Client) WaitForOrchestrationCompletion(ctx context.Context, runID strin
 	}
 }
 
+// WaitForOrchestrationCompletion polls GET /v1/orchestration/status/{runID} until a
+// terminal state (completed, failed, canceled) is reached.
+func (c *Client) WaitForOrchestrationCompletion(ctx context.Context, runID string, interval, timeout time.Duration) (*RunStatus, error) {
+	return c.pollStatus(ctx, runID, "/v1/orchestration/status/", "orchestration run", interval, timeout)
+}
+
 // WaitForCompletion polls GET /v1/agent/status/{runID} until a terminal state
-// (completed, failed, cancelled) is reached, then returns the final status.
+// (completed, failed, canceled) is reached, then returns the final status.
 func (c *Client) WaitForCompletion(ctx context.Context, runID string, interval, timeout time.Duration) (*RunStatus, error) {
-	deadline := time.Now().Add(timeout)
-
-	for {
-		var status RunStatus
-		err := c.Do(ctx, http.MethodGet, "/v1/agent/status/"+runID, nil, &status)
-		if err != nil {
-			// Transient error — keep polling.
-			fmt.Fprintf(os.Stderr, "  poll error: %v\n", err)
-		} else {
-			fmt.Printf("  lifecycle_state=%s step=%d\n", status.LifecycleState, status.Step)
-
-			if status.LifecycleState == "completed" ||
-				status.LifecycleState == "failed" ||
-				status.LifecycleState == "cancelled" {
-				return &status, nil
-			}
-		}
-
-		if time.Now().After(deadline) {
-			return nil, fmt.Errorf("timeout waiting for run %s after %v", runID, timeout)
-		}
-
-		select {
-		case <-ctx.Done():
-			return nil, ctx.Err()
-		case <-time.After(interval):
-		}
-	}
+	return c.pollStatus(ctx, runID, "/v1/agent/status/", "run", interval, timeout)
 }

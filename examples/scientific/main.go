@@ -25,24 +25,32 @@ import (
 	"github.com/TekkenSteve/GoAgent/examples/client"
 )
 
+const (
+	pollInterval       = 2 * time.Second
+	pollTimeout        = 4 * time.Minute
+	reviewTimeoutNanos = 604800000000000
+)
+
 func main() {
 	baseURL := os.Getenv("BASE_URL")
 	if baseURL == "" {
 		baseURL = "http://localhost:8080"
 	}
+
 	accountID := os.Getenv("ACCOUNT_ID")
 	if accountID == "" {
 		accountID = "e2e-test-account"
 	}
+
 	runID := fmt.Sprintf("scientific-demo-%d", time.Now().UnixMilli())
 
 	c := client.New(baseURL, accountID)
 	ctx := context.Background()
 
-	fmt.Printf("=== Scientific Method Pattern ===\nRun ID: %s\n\n", runID)
-	fmt.Println("Flow: hypothesis → design → review(HITL) → experiment → analyze → conclude")
-	fmt.Println("The 'review' step blocks until 'expert-approval' signal or 7-day timeout.")
-	fmt.Println()
+	fmt.Fprintf(os.Stdout, "=== Scientific Method Pattern ===\nRun ID: %s\n\n", runID)
+	fmt.Fprintln(os.Stdout, "Flow: hypothesis → design → review(HITL) → experiment → analyze → conclude")
+	fmt.Fprintln(os.Stdout, "The 'review' step blocks until 'expert-approval' signal or 7-day timeout.")
+	fmt.Fprintln(os.Stdout)
 
 	status, err := c.ExecuteOrchestration(ctx, client.OrchestrationRequest{
 		RunID: runID,
@@ -53,18 +61,18 @@ func main() {
 		os.Exit(1)
 	}
 
-	fmt.Printf("Initial status: lifecycle_state=%s step=%d\n\n", status.LifecycleState, status.Step)
-	fmt.Println("Polling for completion...")
-	fmt.Println("(The 'review' step blocks until 'expert-approval' signal arrives)")
-	fmt.Println("Send it via: tctl workflow signal --name expert-approval --run_id", runID)
+	fmt.Fprintf(os.Stdout, "Initial status: lifecycle_state=%s step=%d\n\n", status.LifecycleState, status.Step)
+	fmt.Fprintln(os.Stdout, "Polling for completion...")
+	fmt.Fprintln(os.Stdout, "(The 'review' step blocks until 'expert-approval' signal arrives)")
+	fmt.Fprintln(os.Stdout, "Send it via: tctl workflow signal --name expert-approval --run_id", runID)
 
-	status, err = c.WaitForOrchestrationCompletion(ctx, runID, 2*time.Second, 4*time.Minute)
+	status, err = c.WaitForOrchestrationCompletion(ctx, runID, pollInterval, pollTimeout)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 		os.Exit(1)
 	}
 
-	fmt.Printf("\nFinal status: lifecycle_state=%s step=%d\n", status.LifecycleState, status.Step)
+	fmt.Fprintf(os.Stdout, "\nFinal status: lifecycle_state=%s step=%d\n", status.LifecycleState, status.Step)
 }
 
 func scientificSteps() []map[string]any {
@@ -83,7 +91,7 @@ func scientificSteps() []map[string]any {
 			"wait_for": map[string]any{
 				"signal_name": "expert-approval",
 				// 604800000000000 = 7 days in nanoseconds
-				"timeout":    604800000000000,
+				"timeout":    reviewTimeoutNanos,
 				"on_timeout": "fail",
 			},
 			"depends_on": []string{"design"},

@@ -27,25 +27,33 @@ import (
 	"github.com/TekkenSteve/GoAgent/examples/client"
 )
 
+const (
+	pollInterval    = 2 * time.Second
+	pollTimeout     = 4 * time.Minute
+	maxSearchResult = 3
+)
+
 func main() {
 	baseURL := os.Getenv("BASE_URL")
 	if baseURL == "" {
 		baseURL = "http://localhost:8080"
 	}
+
 	accountID := os.Getenv("ACCOUNT_ID")
 	if accountID == "" {
 		accountID = "e2e-test-account"
 	}
+
 	runID := fmt.Sprintf("exploratory-demo-%d", time.Now().UnixMilli())
 
 	c := client.New(baseURL, accountID)
 	ctx := context.Background()
 
-	fmt.Printf("=== Exploratory Pattern ===\nRun ID: %s\n\n", runID)
-	fmt.Println("Key feature: self-modifying step queue")
-	fmt.Println("  When 'evaluate' determines more exploration is needed,")
-	fmt.Println("  its OnResult injects additional steps after itself.")
-	fmt.Println()
+	fmt.Fprintf(os.Stdout, "=== Exploratory Pattern ===\nRun ID: %s\n\n", runID)
+	fmt.Fprintln(os.Stdout, "Key feature: self-modifying step queue")
+	fmt.Fprintln(os.Stdout, "  When 'evaluate' determines more exploration is needed,")
+	fmt.Fprintln(os.Stdout, "  its OnResult injects additional steps after itself.")
+	fmt.Fprintln(os.Stdout)
 
 	status, err := c.ExecuteOrchestration(ctx, client.OrchestrationRequest{
 		RunID: runID,
@@ -56,16 +64,16 @@ func main() {
 		os.Exit(1)
 	}
 
-	fmt.Printf("Initial status: lifecycle_state=%s step=%d\n\n", status.LifecycleState, status.Step)
-	fmt.Println("Polling for completion...")
+	fmt.Fprintf(os.Stdout, "Initial status: lifecycle_state=%s step=%d\n\n", status.LifecycleState, status.Step)
+	fmt.Fprintln(os.Stdout, "Polling for completion...")
 
-	status, err = c.WaitForOrchestrationCompletion(ctx, runID, 2*time.Second, 4*time.Minute)
+	status, err = c.WaitForOrchestrationCompletion(ctx, runID, pollInterval, pollTimeout)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 		os.Exit(1)
 	}
 
-	fmt.Printf("\nFinal status: lifecycle_state=%s step=%d\n", status.LifecycleState, status.Step)
+	fmt.Fprintf(os.Stdout, "\nFinal status: lifecycle_state=%s step=%d\n", status.LifecycleState, status.Step)
 }
 
 func exploratorySteps() []map[string]any {
@@ -80,15 +88,15 @@ func exploratorySteps() []map[string]any {
 				"children": []map[string]any{
 					{
 						"id": "explore-automation", "type": "tool", "tool": "web_search",
-						"input": map[string]any{"query": "AI code automation tools 2026", "max_results": 3},
+						"input": map[string]any{"query": "AI code automation tools 2026", "max_results": maxSearchResult},
 					},
 					{
 						"id": "explore-jobs", "type": "tool", "tool": "web_search",
-						"input": map[string]any{"query": "AI impact developer jobs 2026", "max_results": 3},
+						"input": map[string]any{"query": "AI impact developer jobs 2026", "max_results": maxSearchResult},
 					},
 					{
 						"id": "explore-quality", "type": "tool", "tool": "web_search",
-						"input": map[string]any{"query": "AI code quality 2026", "max_results": 3},
+						"input": map[string]any{"query": "AI code quality 2026", "max_results": maxSearchResult},
 					},
 				},
 			},
@@ -105,7 +113,7 @@ func exploratorySteps() []map[string]any {
 				"insert_steps": []map[string]any{
 					{
 						"id": "explore-future", "type": "tool", "tool": "web_search",
-						"input": map[string]any{"query": "AI future predictions software engineering", "max_results": 3},
+						"input": map[string]any{"query": "AI future predictions software engineering", "max_results": maxSearchResult},
 					},
 				},
 			},
