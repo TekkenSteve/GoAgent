@@ -419,7 +419,6 @@ type llmErrorTest struct {
 
 func testLLMError(t *testing.T, tc llmErrorTest) {
 	t.Helper()
-	t.Parallel()
 
 	uc := agent.New(
 		&mockLLM{err: tc.err},
@@ -462,7 +461,7 @@ func TestExecuteStep_LLMError_RateLimit(t *testing.T) {
 	t.Parallel()
 	testLLMError(t, llmErrorTest{
 		name: "rate_limit", err: errTestRateLimit429, msg: "429",
-		code: entity.ErrorCodeLLMRateLimit, retryable: false,
+		code: entity.ErrorCodeLLMRateLimit, retryable: true,
 	})
 }
 

@@ -22,7 +22,6 @@ func newJWTManager(t *testing.T) *jwt.Manager {
 
 func testAuthSkip(t *testing.T, path string) {
 	t.Helper()
-	t.Parallel()
 
 	app := fiber.New()
 	jwtMgr := newJWTManager(t)
