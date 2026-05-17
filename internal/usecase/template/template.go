@@ -2,11 +2,18 @@ package template
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	"github.com/TekkenSteve/GoAgent/internal/entity"
 	"github.com/TekkenSteve/GoAgent/internal/repo"
 	"github.com/TekkenSteve/GoAgent/internal/usecase/loader"
+)
+
+var (
+	ErrTemplateNameRequired    = errors.New("template name is required")
+	ErrTemplateAccountRequired = errors.New("template account_id is required")
+	ErrTemplateNotFound        = errors.New("template not found")
 )
 
 // UseCase handles workflow template management and orchestration input preparation.
@@ -20,9 +27,8 @@ func New(templateRepo repo.WorkflowTemplateRepo) *UseCase {
 }
 
 // DefaultTemplate returns the hardcoded default single-agent workflow definition.
-// A code-defined default that is created on first startup and can be overridden via the API.
-func DefaultTemplate() entity.CreateWorkflowTemplateRequest {
-	return entity.CreateWorkflowTemplateRequest{
+func DefaultTemplate() *entity.CreateWorkflowTemplateRequest {
+	return &entity.CreateWorkflowTemplateRequest{
 		AccountID:    "bootstrap",
 		Name:         "default-agent",
 		Description:  "Default single-agent workflow created by the system",
@@ -60,24 +66,31 @@ func (uc *UseCase) EnsureDefault(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("TemplateUseCase - EnsureDefault - list: %w", err)
 	}
+
 	if len(templates) > 0 {
 		return nil
 	}
-	_, err = uc.Create(ctx, DefaultTemplate())
+
+	tpl := DefaultTemplate()
+
+	_, err = uc.Create(ctx, tpl)
 	if err != nil {
 		return fmt.Errorf("TemplateUseCase - EnsureDefault - create: %w", err)
 	}
+
 	return nil
 }
 
 // Create inserts a new workflow template.
-func (uc *UseCase) Create(ctx context.Context, req entity.CreateWorkflowTemplateRequest) (entity.WorkflowTemplate, error) {
+func (uc *UseCase) Create(ctx context.Context, req *entity.CreateWorkflowTemplateRequest) (entity.WorkflowTemplate, error) {
 	if req.Name == "" {
-		return entity.WorkflowTemplate{}, fmt.Errorf("TemplateUseCase - Create - name is required")
+		return entity.WorkflowTemplate{}, fmt.Errorf("TemplateUseCase - Create - %w", ErrTemplateNameRequired)
 	}
+
 	if req.AccountID == "" {
-		return entity.WorkflowTemplate{}, fmt.Errorf("TemplateUseCase - Create - account_id is required")
+		return entity.WorkflowTemplate{}, fmt.Errorf("TemplateUseCase - Create - %w", ErrTemplateAccountRequired)
 	}
+
 	return uc.templateRepo.Create(ctx, req)
 }
 
@@ -88,7 +101,8 @@ func (uc *UseCase) CreateFromYAML(ctx context.Context, accountID string, yamlDat
 	if err != nil {
 		return entity.WorkflowTemplate{}, fmt.Errorf("TemplateUseCase - CreateFromYAML - parse: %w", err)
 	}
-	return uc.Create(ctx, entity.CreateWorkflowTemplateRequest{
+
+	return uc.Create(ctx, &entity.CreateWorkflowTemplateRequest{
 		AccountID: accountID,
 		Name:      teamSpec.Name,
 		TeamSpec:  *teamSpec,
@@ -101,9 +115,11 @@ func (uc *UseCase) Get(ctx context.Context, templateID string) (entity.WorkflowT
 	if err != nil {
 		return entity.WorkflowTemplate{}, fmt.Errorf("TemplateUseCase - Get - repo: %w", err)
 	}
+
 	if !exists {
-		return entity.WorkflowTemplate{}, fmt.Errorf("TemplateUseCase - Get - not found: %s", templateID)
+		return entity.WorkflowTemplate{}, fmt.Errorf("TemplateUseCase - Get - %w: %s", ErrTemplateNotFound, templateID)
 	}
+
 	return record, nil
 }
 
@@ -125,7 +141,7 @@ func (uc *UseCase) ListByAccount(ctx context.Context, accountID string) ([]entit
 // ToOrchestrationInput converts a workflow template into an OrchestrationInput.
 // It expands the TeamSpec into []Step via the caller (e.g., team.Expand)
 // and wraps it in an OrchestrationInput ready for execution.
-func (uc *UseCase) ToOrchestrationInput(tpl entity.WorkflowTemplate, message string) entity.OrchestrationInput {
+func (uc *UseCase) ToOrchestrationInput(tpl *entity.WorkflowTemplate, message string) entity.OrchestrationInput {
 	return entity.OrchestrationInput{
 		RunID:        tpl.ID,
 		TeamSpec:     &tpl.TeamSpec,

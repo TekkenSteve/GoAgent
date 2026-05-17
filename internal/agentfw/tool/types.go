@@ -15,8 +15,8 @@ const (
 	TierEnterprise Tier = "enterprise"
 )
 
-// ToolRequest describes a single tool call request.
-type ToolRequest struct {
+// Request describes a single tool call request.
+type Request struct {
 	RunID          string
 	ToolCallID     string
 	ToolName       string
@@ -55,8 +55,8 @@ type Result struct {
 	ExecutionIsolation ExecutionIsolation
 }
 
-// ToolPolicy defines per-tool timeout/retry/idempotency rules.
-type ToolPolicy struct {
+// Policy defines per-tool timeout/retry/idempotency rules.
+type Policy struct {
 	Timeout          time.Duration
 	MaxAttempts      int
 	RetryBackoff     time.Duration
@@ -65,32 +65,32 @@ type ToolPolicy struct {
 
 // Validator validates request payload before authorization/execution.
 type Validator interface {
-	Validate(ctx context.Context, req ToolRequest) error
+	Validate(ctx context.Context, req *Request) error
 }
 
 // Authorizer checks request authorization before execution.
 type Authorizer interface {
-	Authorize(ctx context.Context, req ToolRequest) error
+	Authorize(ctx context.Context, req *Request) error
 }
 
 // Executor performs the tool call.
 type Executor interface {
-	Execute(ctx context.Context, req ToolRequest) (RawResult, error)
+	Execute(ctx context.Context, req *Request) (RawResult, error)
 }
 
 // Normalizer converts raw executor payload into standard output.
 type Normalizer interface {
-	Normalize(ctx context.Context, req ToolRequest, raw RawResult) (map[string]any, error)
+	Normalize(ctx context.Context, req *Request, raw RawResult) (map[string]any, error)
 }
 
 // Persister stores normalized output and returns a reference id.
 type Persister interface {
-	Persist(ctx context.Context, req ToolRequest, normalized map[string]any) (string, error)
+	Persist(ctx context.Context, req *Request, normalized map[string]any) (string, error)
 }
 
 // PolicyProvider returns per-tool policy.
 type PolicyProvider interface {
-	GetPolicy(toolName string) ToolPolicy
+	GetPolicy(toolName string) Policy
 }
 
 // IdempotencyStore records and resolves idempotency results.

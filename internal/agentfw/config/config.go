@@ -2,6 +2,18 @@ package config
 
 import "time"
 
+const (
+	defaultMaxConcurrentWorkflowTaskPollers = 2
+	defaultMaxConcurrentActivityTaskPollers = 2
+	defaultMaxConcurrentActivityExecution   = 100
+	defaultMaxSteps                         = 100
+	defaultContinueAsNewStepThreshold       = 80
+	defaultContinueAsNewHistoryThreshold    = 10000
+	defaultContinueAsNewStateSizeThreshold  = 512 * 1024 // 512 KiB
+	defaultContinueAsNewWallClockThreshold  = 50 * time.Minute
+	defaultContinueAsNewMaxContinuations    = 1000
+)
+
 // Config contains runtime settings for the agent framework.
 type Config struct {
 	Enabled bool
@@ -59,9 +71,9 @@ func Default() Config {
 			Namespace: "default",
 			TaskQueue: "agent-framework",
 
-			MaxConcurrentWorkflowTaskPollers: 2,
-			MaxConcurrentActivityTaskPollers: 2,
-			MaxConcurrentActivityExecution:   100,
+			MaxConcurrentWorkflowTaskPollers: defaultMaxConcurrentWorkflowTaskPollers,
+			MaxConcurrentActivityTaskPollers: defaultMaxConcurrentActivityTaskPollers,
+			MaxConcurrentActivityExecution:   defaultMaxConcurrentActivityExecution,
 		},
 		Rollout: Rollout{
 			Mode:                "disabled",
@@ -78,13 +90,13 @@ func Default() Config {
 			ToolSchemaVer:   "v1",
 			AgentConfigVer:  "v1",
 
-			MaxSteps:                            100,
+			MaxSteps:                            defaultMaxSteps,
 			MaxWallClockDuration:                time.Hour,
-			ContinueAsNewStepThreshold:          80,
-			ContinueAsNewHistoryThreshold:       10000,
-			ContinueAsNewStateSizeThresholdByte: 512 * 1024,
-			ContinueAsNewWallClockThreshold:     50 * time.Minute,
-			ContinueAsNewMaxContinuations:       1000,
+			ContinueAsNewStepThreshold:          defaultContinueAsNewStepThreshold,
+			ContinueAsNewHistoryThreshold:       defaultContinueAsNewHistoryThreshold,
+			ContinueAsNewStateSizeThresholdByte: defaultContinueAsNewStateSizeThreshold,
+			ContinueAsNewWallClockThreshold:     defaultContinueAsNewWallClockThreshold,
+			ContinueAsNewMaxContinuations:       defaultContinueAsNewMaxContinuations,
 		},
 	}
 }

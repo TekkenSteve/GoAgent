@@ -12,7 +12,17 @@ const (
 	AgentWorkflowName  = "agentfw.agent-workflow.v1"
 	StreamWorkflowName = "agentfw.stream-workflow.v1"
 	AgentCommandSignal = "agent-command"
+	AgentCmdCancel     = "cancel"
+	AgentCmdPause      = "pause"
+	AgentCmdResume     = "resume"
 	QueryRunStatus     = "agentfw.query.run-status"
+)
+
+// Lifecycle state constants.
+const (
+	LifecycleStateFailed    = "failed"
+	LifecycleStateCanceled  = "canceled"
+	LifecycleStateCompleted = "completed"
 )
 
 // ——— Activity names ———
@@ -59,9 +69,11 @@ func (r *PrepareOutput) CanProceed() bool {
 	if r.Billing != nil && !r.Billing.Approved {
 		return false
 	}
+
 	if r.Limits != nil && !r.Limits.Approved {
 		return false
 	}
+
 	return len(r.Errors) == 0
 }
 

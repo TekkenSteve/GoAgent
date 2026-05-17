@@ -19,7 +19,7 @@ type UsageRecord struct {
 
 // BillingSink delivers usage records to billing backend.
 type BillingSink interface {
-	Deliver(ctx context.Context, record UsageRecord) error
+	Deliver(ctx context.Context, record *UsageRecord) error
 }
 
 // UsageEmitter retries billing delivery with bounded backoff.
@@ -30,7 +30,7 @@ type UsageEmitter struct {
 }
 
 // Emit delivers usage record with at-least-once retries.
-func (e UsageEmitter) Emit(ctx context.Context, record UsageRecord) error {
+func (e UsageEmitter) Emit(ctx context.Context, record *UsageRecord) error {
 	attempts := e.MaxAttempts
 	if attempts <= 0 {
 		attempts = 1
@@ -41,9 +41,11 @@ func (e UsageEmitter) Emit(ctx context.Context, record UsageRecord) error {
 		if err == nil {
 			return nil
 		}
+
 		if i == attempts-1 {
 			return err
 		}
+
 		if e.Backoff > 0 {
 			select {
 			case <-time.After(e.Backoff):
@@ -52,5 +54,6 @@ func (e UsageEmitter) Emit(ctx context.Context, record UsageRecord) error {
 			}
 		}
 	}
+
 	return nil
 }

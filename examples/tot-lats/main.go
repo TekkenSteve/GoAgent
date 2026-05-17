@@ -47,45 +47,7 @@ func main() {
 
 	status, err := c.ExecuteOrchestration(ctx, client.OrchestrationRequest{
 		RunID: runID,
-		Steps: []map[string]any{
-			{
-				"id": "explore", "type": "split",
-				"input": map[string]any{
-					"children": []map[string]any{
-						{
-							"id": "reasoning-optimistic", "type": "agent", "agent_id": "thinker",
-							"input": map[string]any{"message": "Solve this problem with an optimistic approach: 'How should a startup decide whether to build or buy their core technology?' Assume rapid iteration."},
-						},
-						{
-							"id": "reasoning-pessimistic", "type": "agent", "agent_id": "thinker",
-							"input": map[string]any{"message": "Solve this problem with a conservative approach: 'How should a startup decide whether to build or buy their core technology?' Focus on risk mitigation."},
-						},
-						{
-							"id": "reasoning-hybrid", "type": "agent", "agent_id": "thinker",
-							"input": map[string]any{"message": "Solve this problem with a balanced approach: 'How should a startup decide whether to build or buy their core technology?' Consider both speed and risk."},
-						},
-					},
-				},
-			},
-			{
-				"id": "gather", "type": "join",
-				"input": map[string]any{"_join_group": "explore"},
-			},
-			{
-				"id": "evaluate-best", "type": "eval",
-				"input": map[string]any{"condition": "select_best_reasoning"},
-				"on_result": map[string]any{
-					"append_after": "evaluate-best",
-					"insert_steps": []map[string]any{
-						{
-							"id": "synthesize-final", "type": "agent", "agent_id": "thinker",
-							"input":      map[string]any{"message": "Synthesize the best reasoning path into a final recommendation with actionable steps"},
-							"depends_on": []string{"evaluate-best"},
-						},
-					},
-				},
-			},
-		},
+		Steps: totLatsSteps(),
 	})
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
@@ -102,4 +64,46 @@ func main() {
 	}
 
 	fmt.Printf("\nFinal status: lifecycle_state=%s step=%d\n", status.LifecycleState, status.Step)
+}
+
+func totLatsSteps() []map[string]any {
+	return []map[string]any{
+		{
+			"id": "explore", "type": "split",
+			"input": map[string]any{
+				"children": []map[string]any{
+					{
+						"id": "reasoning-optimistic", "type": "agent", "agent_id": "thinker",
+						"input": map[string]any{"message": "Solve this problem with an optimistic approach: 'How should a startup decide whether to build or buy their core technology?' Assume rapid iteration."},
+					},
+					{
+						"id": "reasoning-pessimistic", "type": "agent", "agent_id": "thinker",
+						"input": map[string]any{"message": "Solve this problem with a conservative approach: 'How should a startup decide whether to build or buy their core technology?' Focus on risk mitigation."},
+					},
+					{
+						"id": "reasoning-hybrid", "type": "agent", "agent_id": "thinker",
+						"input": map[string]any{"message": "Solve this problem with a balanced approach: 'How should a startup decide whether to build or buy their core technology?' Consider both speed and risk."},
+					},
+				},
+			},
+		},
+		{
+			"id": "gather", "type": "join",
+			"input": map[string]any{"_join_group": "explore"},
+		},
+		{
+			"id": "evaluate-best", "type": "eval",
+			"input": map[string]any{"condition": "select_best_reasoning"},
+			"on_result": map[string]any{
+				"append_after": "evaluate-best",
+				"insert_steps": []map[string]any{
+					{
+						"id": "synthesize-final", "type": "agent", "agent_id": "thinker",
+						"input":      map[string]any{"message": "Synthesize the best reasoning path into a final recommendation with actionable steps"},
+						"depends_on": []string{"evaluate-best"},
+					},
+				},
+			},
+		},
+	}
 }

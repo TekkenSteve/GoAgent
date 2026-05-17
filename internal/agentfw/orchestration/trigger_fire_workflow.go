@@ -18,16 +18,21 @@ type FireTriggerInput struct {
 	Config       entity.LLMConfig
 }
 
+const (
+	triggerMaxRetries          = 3
+	defaultStartToCloseTimeout = 30 * time.Second
+)
+
 // TriggerFireWorkflow is a Temporal cron-scheduled workflow that fires
 // when a trigger's cron expression matches. It loads the trigger + template
 // from the DB via an activity, then dispatches a child AgentWorkflow.
 func TriggerFireWorkflow(ctx workflow.Context, triggerID string) error {
 	ao := workflow.ActivityOptions{
-		StartToCloseTimeout: 30 * time.Second,
+		StartToCloseTimeout: defaultStartToCloseTimeout,
 		RetryPolicy: &temporal.RetryPolicy{
-			InitialInterval:    time.Second,
-			MaximumInterval:    time.Minute,
-			MaximumAttempts:    3,
+			InitialInterval: time.Second,
+			MaximumInterval: time.Minute,
+			MaximumAttempts: triggerMaxRetries,
 		},
 	}
 	ctx = workflow.WithActivityOptions(ctx, ao)
@@ -43,7 +48,7 @@ func TriggerFireWorkflow(ctx workflow.Context, triggerID string) error {
 		WorkflowID: childID,
 	})
 
-	return workflow.ExecuteChildWorkflow(childCtx, AgentWorkflowName, AgentWorkflowInput{
+	return workflow.ExecuteChildWorkflow(childCtx, AgentWorkflowName, &AgentWorkflowInput{
 		RunID:        input.RunID,
 		SystemPrompt: input.SystemPrompt,
 		Message:      input.Message,

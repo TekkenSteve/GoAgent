@@ -8,6 +8,8 @@ import (
 )
 
 func TestEvaluateContinueAsNew(t *testing.T) {
+	t.Parallel()
+
 	policy := ContinueAsNewPolicy{
 		HistoryLengthThreshold: 10,
 		StateSizeThresholdByte: 1024,
@@ -65,4 +67,3 @@ func TestEvaluateContinueAsNew(t *testing.T) {
 	})
 	require.False(t, decision.ShouldContinue)
 }
-

@@ -49,53 +49,7 @@ func main() {
 
 	status, err := c.ExecuteOrchestration(ctx, client.OrchestrationRequest{
 		RunID: runID,
-		Steps: []map[string]any{
-			{
-				"id": "plan", "type": "agent", "agent_id": "planner",
-				"input": map[string]any{"message": "Create an exploration plan for: 'Impact of AI on software development'"},
-			},
-			{
-				"id": "explore", "type": "split",
-				"input": map[string]any{
-					"children": []map[string]any{
-						{
-							"id": "explore-automation", "type": "tool", "tool": "web_search",
-							"input": map[string]any{"query": "AI code automation tools 2026", "max_results": 3},
-						},
-						{
-							"id": "explore-jobs", "type": "tool", "tool": "web_search",
-							"input": map[string]any{"query": "AI impact developer jobs 2026", "max_results": 3},
-						},
-						{
-							"id": "explore-quality", "type": "tool", "tool": "web_search",
-							"input": map[string]any{"query": "AI code quality 2026", "max_results": 3},
-						},
-					},
-				},
-			},
-			{
-				"id": "gather", "type": "join",
-				"input": map[string]any{"_join_group": "explore"},
-			},
-			{
-				"id": "evaluate", "type": "eval",
-				"input": map[string]any{"condition": "enough_information"},
-				"on_result": map[string]any{
-					"append_after": "evaluate",
-					"insert_steps": []map[string]any{
-						{
-							"id": "explore-future", "type": "tool", "tool": "web_search",
-							"input": map[string]any{"query": "AI future predictions software engineering", "max_results": 3},
-						},
-					},
-				},
-			},
-			{
-				"id": "conclude", "type": "agent", "agent_id": "planner",
-				"input":      map[string]any{"message": "Summarize all exploration findings"},
-				"depends_on": []string{"evaluate"},
-			},
-		},
+		Steps: exploratorySteps(),
 	})
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
@@ -112,4 +66,54 @@ func main() {
 	}
 
 	fmt.Printf("\nFinal status: lifecycle_state=%s step=%d\n", status.LifecycleState, status.Step)
+}
+
+func exploratorySteps() []map[string]any {
+	return []map[string]any{
+		{
+			"id": "plan", "type": "agent", "agent_id": "planner",
+			"input": map[string]any{"message": "Create an exploration plan for: 'Impact of AI on software development'"},
+		},
+		{
+			"id": "explore", "type": "split",
+			"input": map[string]any{
+				"children": []map[string]any{
+					{
+						"id": "explore-automation", "type": "tool", "tool": "web_search",
+						"input": map[string]any{"query": "AI code automation tools 2026", "max_results": 3},
+					},
+					{
+						"id": "explore-jobs", "type": "tool", "tool": "web_search",
+						"input": map[string]any{"query": "AI impact developer jobs 2026", "max_results": 3},
+					},
+					{
+						"id": "explore-quality", "type": "tool", "tool": "web_search",
+						"input": map[string]any{"query": "AI code quality 2026", "max_results": 3},
+					},
+				},
+			},
+		},
+		{
+			"id": "gather", "type": "join",
+			"input": map[string]any{"_join_group": "explore"},
+		},
+		{
+			"id": "evaluate", "type": "eval",
+			"input": map[string]any{"condition": "enough_information"},
+			"on_result": map[string]any{
+				"append_after": "evaluate",
+				"insert_steps": []map[string]any{
+					{
+						"id": "explore-future", "type": "tool", "tool": "web_search",
+						"input": map[string]any{"query": "AI future predictions software engineering", "max_results": 3},
+					},
+				},
+			},
+		},
+		{
+			"id": "conclude", "type": "agent", "agent_id": "planner",
+			"input":      map[string]any{"message": "Summarize all exploration findings"},
+			"depends_on": []string{"evaluate"},
+		},
+	}
 }

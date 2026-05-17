@@ -35,16 +35,18 @@ func (a SecurityAuditor) Emit(ctx context.Context, event SecurityAuditEvent) err
 	if a.Redactor != nil {
 		event.Payload = a.Redactor.Redact(event.Payload)
 	}
+
 	if a.Sink == nil {
 		return nil
 	}
+
 	return a.Sink.Write(ctx, event)
 }
 
 // DefaultRedactionPolicy masks known sensitive fields.
 type DefaultRedactionPolicy struct{}
 
-var sensitiveKeys = map[string]struct{}{
+var sensitiveKeys = map[string]struct{}{ //nolint:gochecknoglobals // lookup set for sensitive field redaction
 	"token": {}, "secret": {}, "password": {}, "api_key": {}, "authorization": {},
 }
 
@@ -57,6 +59,7 @@ func redactMap(payload map[string]any) map[string]any {
 	if payload == nil {
 		return nil
 	}
+
 	out := make(map[string]any, len(payload))
 	for k, v := range payload {
 		if _, sensitive := sensitiveKeys[strings.ToLower(k)]; sensitive {
@@ -67,5 +70,6 @@ func redactMap(payload map[string]any) map[string]any {
 			out[k] = v
 		}
 	}
+
 	return out
 }

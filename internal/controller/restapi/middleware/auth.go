@@ -7,6 +7,8 @@ import (
 	"github.com/gofiber/fiber/v2"
 )
 
+const bearerPartsCount = 2
+
 // Auth returns a Fiber middleware that validates JWT tokens.
 func Auth(jwtManager *jwt.Manager) func(*fiber.Ctx) error {
 	skipAuthPaths := map[string]bool{
@@ -28,7 +30,7 @@ func Auth(jwtManager *jwt.Manager) func(*fiber.Ctx) error {
 		}
 
 		// Extract token from "Bearer <token>"
-		parts := strings.SplitN(authHeader, " ", 2)
+		parts := strings.SplitN(authHeader, " ", bearerPartsCount)
 		if len(parts) != 2 || !strings.EqualFold(parts[0], "bearer") {
 			return ctx.Status(fiber.StatusUnauthorized).JSON(fiber.Map{
 				"error": "invalid authorization format",

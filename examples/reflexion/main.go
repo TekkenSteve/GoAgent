@@ -47,31 +47,7 @@ func main() {
 
 	status, err := c.ExecuteOrchestration(ctx, client.OrchestrationRequest{
 		RunID: runID,
-		Steps: []map[string]any{
-			{
-				"id": "generate", "type": "agent", "agent_id": "writer",
-				"input": map[string]any{"message": "Write a technical explanation of how distributed consensus works (Raft algorithm)"},
-			},
-			{
-				"id": "evaluate", "type": "eval",
-				"input": map[string]any{"condition": "quality_check"},
-				"on_result": map[string]any{
-					"append_after": "evaluate",
-					"insert_steps": []map[string]any{
-						{
-							"id": "refine", "type": "agent", "agent_id": "writer",
-							"input":      map[string]any{"message": "The previous output needs improvement. Make it more detailed, add examples, and clarify the leader election process."},
-							"depends_on": []string{"evaluate"},
-						},
-					},
-				},
-			},
-			{
-				"id": "conclude", "type": "agent", "agent_id": "writer",
-				"input":      map[string]any{"message": "Format the final version as a well-structured markdown document"},
-				"depends_on": []string{"evaluate"},
-			},
-		},
+		Steps: reflexionSteps(),
 	})
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
@@ -88,4 +64,32 @@ func main() {
 	}
 
 	fmt.Printf("\nFinal status: lifecycle_state=%s step=%d\n", status.LifecycleState, status.Step)
+}
+
+func reflexionSteps() []map[string]any {
+	return []map[string]any{
+		{
+			"id": "generate", "type": "agent", "agent_id": "writer",
+			"input": map[string]any{"message": "Write a technical explanation of how distributed consensus works (Raft algorithm)"},
+		},
+		{
+			"id": "evaluate", "type": "eval",
+			"input": map[string]any{"condition": "quality_check"},
+			"on_result": map[string]any{
+				"append_after": "evaluate",
+				"insert_steps": []map[string]any{
+					{
+						"id": "refine", "type": "agent", "agent_id": "writer",
+						"input":      map[string]any{"message": "The previous output needs improvement. Make it more detailed, add examples, and clarify the leader election process."},
+						"depends_on": []string{"evaluate"},
+					},
+				},
+			},
+		},
+		{
+			"id": "conclude", "type": "agent", "agent_id": "writer",
+			"input":      map[string]any{"message": "Format the final version as a well-structured markdown document"},
+			"depends_on": []string{"evaluate"},
+		},
+	}
 }

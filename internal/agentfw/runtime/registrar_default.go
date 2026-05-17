@@ -24,7 +24,7 @@ func (r DefaultRegistrar) RegisterWorkflows(rt *TemporalRuntime) {
 	rt.Worker.RegisterWorkflowWithOptions(orchestration.StreamAgentWorkflow, workflow.RegisterOptions{
 		Name: orchestration.StreamWorkflowName,
 	})
-	rt.Worker.RegisterWorkflowWithOptions(orchestration.OrchestrationWorkflow, workflow.RegisterOptions{
+	rt.Worker.RegisterWorkflowWithOptions(orchestration.Workflow, workflow.RegisterOptions{
 		Name: orchestration.OrchestrationWorkflowName,
 	})
 	rt.Worker.RegisterWorkflowWithOptions(orchestration.TriggerFireWorkflow, workflow.RegisterOptions{

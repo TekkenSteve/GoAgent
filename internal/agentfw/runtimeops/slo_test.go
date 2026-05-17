@@ -7,6 +7,8 @@ import (
 )
 
 func TestEvaluateSLOPassesWhenWithinThresholds(t *testing.T) {
+	t.Parallel()
+
 	thresholds := DefaultV1SLOThresholds()
 	snapshot := SLOSnapshot{
 		AdmissionLatencyP95Ms:    150,
@@ -21,6 +23,8 @@ func TestEvaluateSLOPassesWhenWithinThresholds(t *testing.T) {
 }
 
 func TestEvaluateSLOReturnsAllViolations(t *testing.T) {
+	t.Parallel()
+
 	thresholds := DefaultV1SLOThresholds()
 	snapshot := SLOSnapshot{
 		AdmissionLatencyP95Ms:    250,

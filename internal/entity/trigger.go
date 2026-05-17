@@ -19,22 +19,22 @@ const (
 
 // TriggerSpec persists a trigger that schedules or event-fires a workflow.
 type TriggerSpec struct {
-	ID              string            `json:"id"`
-	TemplateID      string            `json:"template_id"`
-	AccountID       string            `json:"account_id"`
-	Name            string            `json:"name"`
-	Description     string            `json:"description,omitempty"`
-	TriggerType     TriggerType       `json:"trigger_type"`
-	CronExpression  string            `json:"cron_expression,omitempty"`
-	EventSlug       string            `json:"event_slug,omitempty"`
-	AgentPrompt     string            `json:"agent_prompt"`
-	Config          map[string]any    `json:"config,omitempty"`
-	TemplateVars    []string          `json:"template_vars,omitempty"`
+	ID               string            `json:"id"`
+	TemplateID       string            `json:"template_id"`
+	AccountID        string            `json:"account_id"`
+	Name             string            `json:"name"`
+	Description      string            `json:"description,omitempty"`
+	TriggerType      TriggerType       `json:"trigger_type"`
+	CronExpression   string            `json:"cron_expression,omitempty"`
+	EventSlug        string            `json:"event_slug,omitempty"`
+	AgentPrompt      string            `json:"agent_prompt"`
+	Config           map[string]any    `json:"config,omitempty"`
+	TemplateVars     []string          `json:"template_vars,omitempty"`
 	TemplateVarsVals map[string]string `json:"template_vars_vals,omitempty"`
-	IsActive        bool              `json:"is_active"`
-	LastFiredAt     *time.Time        `json:"last_fired_at,omitempty"`
-	CreatedAt       time.Time         `json:"created_at"`
-	UpdatedAt       time.Time         `json:"updated_at"`
+	IsActive         bool              `json:"is_active"`
+	LastFiredAt      *time.Time        `json:"last_fired_at,omitempty"`
+	CreatedAt        time.Time         `json:"created_at"`
+	UpdatedAt        time.Time         `json:"updated_at"`
 }
 
 // ExtractTemplateVars extracts unique {{variable}} names from a text string.
@@ -42,6 +42,7 @@ type TriggerSpec struct {
 func ExtractTemplateVars(text string) []string {
 	matches := templateVarPattern.FindAllStringSubmatch(text, -1)
 	seen := make(map[string]struct{}, len(matches))
+
 	vars := make([]string, 0, len(matches))
 	for _, m := range matches {
 		name := m[1]
@@ -50,6 +51,7 @@ func ExtractTemplateVars(text string) []string {
 			vars = append(vars, name)
 		}
 	}
+
 	return vars
 }
 
@@ -61,6 +63,7 @@ func (s *TriggerSpec) ResolvePrompt() string {
 	for k, v := range s.TemplateVarsVals {
 		prompt = strings.ReplaceAll(prompt, "{{"+k+"}}", v)
 	}
+
 	return prompt
 }
 
@@ -81,18 +84,18 @@ type TriggerEventLog struct {
 
 // CreateTriggerRequest is the input for creating a new trigger.
 type CreateTriggerRequest struct {
-	TemplateID      string            `json:"template_id"`
-	AccountID       string            `json:"account_id"`
-	Name            string            `json:"name"`
-	Description     string            `json:"description,omitempty"`
-	TriggerType     TriggerType       `json:"trigger_type"`
-	CronExpression  string            `json:"cron_expression,omitempty"`
-	EventSlug       string            `json:"event_slug,omitempty"`
-	AgentPrompt     string            `json:"agent_prompt"`
-	Config          map[string]any    `json:"config,omitempty"`
-	TemplateVars    []string          `json:"template_vars,omitempty"`
+	TemplateID       string            `json:"template_id"`
+	AccountID        string            `json:"account_id"`
+	Name             string            `json:"name"`
+	Description      string            `json:"description,omitempty"`
+	TriggerType      TriggerType       `json:"trigger_type"`
+	CronExpression   string            `json:"cron_expression,omitempty"`
+	EventSlug        string            `json:"event_slug,omitempty"`
+	AgentPrompt      string            `json:"agent_prompt"`
+	Config           map[string]any    `json:"config,omitempty"`
+	TemplateVars     []string          `json:"template_vars,omitempty"`
 	TemplateVarsVals map[string]string `json:"template_vars_vals,omitempty"`
-	IsActive        bool              `json:"is_active"`
+	IsActive         bool              `json:"is_active"`
 }
 
 // TriggerFireResult is the resolved data returned when an event trigger fires.
@@ -108,13 +111,13 @@ type TriggerFireResult struct {
 
 // UpdateTriggerRequest is the input for updating a trigger.
 type UpdateTriggerRequest struct {
-	Name            *string            `json:"name,omitempty"`
-	Description     *string            `json:"description,omitempty"`
-	CronExpression  *string            `json:"cron_expression,omitempty"`
-	EventSlug       *string            `json:"event_slug,omitempty"`
-	AgentPrompt     *string            `json:"agent_prompt,omitempty"`
-	Config          *map[string]any    `json:"config,omitempty"`
-	TemplateVars    *[]string          `json:"template_vars,omitempty"`
+	Name             *string            `json:"name,omitempty"`
+	Description      *string            `json:"description,omitempty"`
+	CronExpression   *string            `json:"cron_expression,omitempty"`
+	EventSlug        *string            `json:"event_slug,omitempty"`
+	AgentPrompt      *string            `json:"agent_prompt,omitempty"`
+	Config           *map[string]any    `json:"config,omitempty"`
+	TemplateVars     *[]string          `json:"template_vars,omitempty"`
 	TemplateVarsVals *map[string]string `json:"template_vars_vals,omitempty"`
-	IsActive        *bool              `json:"is_active,omitempty"`
+	IsActive         *bool              `json:"is_active,omitempty"`
 }

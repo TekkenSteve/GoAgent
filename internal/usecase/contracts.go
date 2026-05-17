@@ -9,7 +9,7 @@ import (
 type (
 	// AgentExecutor is the business interface for agent workflow execution.
 	AgentExecutor interface {
-		Execute(ctx context.Context, req entity.ExecuteRequest) (entity.RunStatus, error)
+		Execute(ctx context.Context, req *entity.ExecuteRequest) (entity.RunStatus, error)
 		GetStatus(ctx context.Context, runID string) (entity.RunStatus, error)
 		Control(ctx context.Context, runID string, op entity.ControlOperation) error
 	}
@@ -20,7 +20,7 @@ type (
 	}
 	// OrchestrationExecutor starts and manages orchestration workflows.
 	OrchestrationExecutor interface {
-		ExecuteOrchestration(ctx context.Context, input entity.OrchestrationInput) (entity.RunStatus, error)
+		ExecuteOrchestration(ctx context.Context, input *entity.OrchestrationInput) (entity.RunStatus, error)
 		GetOrchestrationStatus(ctx context.Context, runID string) (entity.RunStatus, error)
 	}
 	// StreamEventWriter is the destination for streaming events.
@@ -30,7 +30,7 @@ type (
 	}
 	// StreamExecutor executes agent steps with streaming output.
 	StreamExecutor interface {
-		ExecuteStream(ctx context.Context, req entity.StreamRequest, writer StreamEventWriter) error
+		ExecuteStream(ctx context.Context, req *entity.StreamRequest, writer StreamEventWriter) error
 	}
 	// ToolDefProvider supplies LLM function calling definitions for available tools.
 	// The agent usecase calls this to auto-populate tool definitions when none are
@@ -45,7 +45,7 @@ type (
 
 	// TemplateManager manages workflow template CRUD and YAML import.
 	TemplateManager interface {
-		Create(ctx context.Context, req entity.CreateWorkflowTemplateRequest) (entity.WorkflowTemplate, error)
+		Create(ctx context.Context, req *entity.CreateWorkflowTemplateRequest) (entity.WorkflowTemplate, error)
 		CreateFromYAML(ctx context.Context, accountID string, yamlData []byte) (entity.WorkflowTemplate, error)
 		Get(ctx context.Context, templateID string) (entity.WorkflowTemplate, error)
 		Update(ctx context.Context, templateID string, req entity.UpdateWorkflowTemplateRequest) (entity.WorkflowTemplate, error)

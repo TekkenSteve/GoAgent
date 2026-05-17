@@ -11,12 +11,10 @@ import (
 const (
 	// wsWriteWait is the maximum time to wait for a write to complete.
 	wsWriteWait = 10 * time.Second
-	// wsPongWait is the maximum time to wait for a pong from the client.
-	wsPongWait = 60 * time.Second
 )
 
 // wsClient represents a single WebSocket connection associated with a session.
-// Writes are serialised via writeMu to satisfy the websocket.Conn contract
+// Writes are serialized via writeMu to satisfy the websocket.Conn contract
 // (at most one concurrent writer).
 type wsClient struct {
 	conn    *websocket.Conn
@@ -31,9 +29,11 @@ func newWSClient(conn *websocket.Conn) *wsClient {
 func (c *wsClient) writeMessage(messageType int, data []byte) error {
 	c.writeMu.Lock()
 	defer c.writeMu.Unlock()
+
 	if err := c.conn.SetWriteDeadline(time.Now().Add(wsWriteWait)); err != nil {
 		return err
 	}
+
 	return c.conn.WriteMessage(messageType, data)
 }
 
@@ -61,6 +61,7 @@ func (h *WebSocketHub) Add(sessionID string, conn *websocket.Conn) func() {
 	if h.sessions[sessionID] == nil {
 		h.sessions[sessionID] = make(map[*wsClient]struct{})
 	}
+
 	h.sessions[sessionID][client] = struct{}{}
 	h.mu.Unlock()
 
@@ -75,6 +76,7 @@ func (h *WebSocketHub) Broadcast(sessionID string, event entity.StreamEvent) {
 	if err != nil {
 		return
 	}
+
 	h.BroadcastBytes(sessionID, websocket.TextMessage, data)
 }
 
@@ -85,7 +87,9 @@ func (h *WebSocketHub) BroadcastBytes(sessionID string, messageType int, data []
 	h.mu.RUnlock()
 
 	for cl := range clients {
-		_ = cl.writeMessage(messageType, data)
+		if err := cl.writeMessage(messageType, data); err != nil {
+			_ = err
+		}
 	}
 }
 
@@ -93,6 +97,7 @@ func (h *WebSocketHub) BroadcastBytes(sessionID string, messageType int, data []
 func (h *WebSocketHub) ClientCount(sessionID string) int {
 	h.mu.RLock()
 	defer h.mu.RUnlock()
+
 	return len(h.sessions[sessionID])
 }
 
@@ -101,11 +106,14 @@ func (h *WebSocketHub) ClientCount(sessionID string) int {
 func (h *WebSocketHub) remove(sessionID string, client *wsClient) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
+
 	clients := h.sessions[sessionID]
 	if clients == nil {
 		return
 	}
+
 	delete(clients, client)
+
 	if len(clients) == 0 {
 		delete(h.sessions, sessionID)
 	}

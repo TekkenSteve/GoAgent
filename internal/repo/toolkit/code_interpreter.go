@@ -2,8 +2,21 @@ package toolkit
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
+)
+
+// defaultCodeInterpreterTimeout is the default timeout for code execution.
+const defaultCodeInterpreterTimeout = 30 * time.Second
+
+// defaultCodeInterpreterTimeoutSec is the default timeout in seconds for the Meta parameter.
+const defaultCodeInterpreterTimeoutSec = 30
+
+// Package-level sentinel errors for the code interpreter.
+var (
+	ErrCodeRequired             = errors.New("code is required")
+	ErrRemoteCodeNotImplemented = errors.New("remote code execution not yet implemented")
 )
 
 // CodeInterpreterConfig configures the code_interpreter tool.
@@ -24,8 +37,9 @@ type CodeInterpreter struct {
 // NewCodeInterpreter creates a code interpreter tool.
 func NewCodeInterpreter(cfg CodeInterpreterConfig) *CodeInterpreter {
 	if cfg.DefaultTimeout <= 0 {
-		cfg.DefaultTimeout = 30 * time.Second
+		cfg.DefaultTimeout = defaultCodeInterpreterTimeout
 	}
+
 	return &CodeInterpreter{cfg: cfg}
 }
 
@@ -44,7 +58,7 @@ func (c *CodeInterpreter) Meta() ToolMeta {
 				"timeout": map[string]any{
 					"type":        "integer",
 					"description": "Execution timeout in seconds (max 120)",
-					"default":     30,
+					"default":     defaultCodeInterpreterTimeoutSec,
 				},
 			},
 			"required": []any{"code"},
@@ -54,12 +68,17 @@ func (c *CodeInterpreter) Meta() ToolMeta {
 
 // Execute implements tool.Tool.
 func (c *CodeInterpreter) Execute(ctx context.Context, args map[string]any) (any, error) {
-	code, _ := args["code"].(string)
-	if code == "" {
-		return nil, fmt.Errorf("code is required")
+	code, ok := args["code"].(string)
+	if !ok {
+		code = ""
 	}
 
-	timeout := 30
+	if code == "" {
+		return nil, fmt.Errorf("%w", ErrCodeRequired)
+	}
+
+	timeout := defaultCodeInterpreterTimeoutSec
+
 	if t, ok := args["timeout"].(float64); ok {
 		if n := int(t); n > 0 && n <= 120 {
 			timeout = n
@@ -69,19 +88,20 @@ func (c *CodeInterpreter) Execute(ctx context.Context, args map[string]any) (any
 	if c.cfg.Endpoint != "" {
 		return c.executeRemote(ctx, code, timeout)
 	}
+
 	return c.executeLocal(ctx, code, timeout)
 }
 
-func (c *CodeInterpreter) executeRemote(ctx context.Context, code string, timeoutSec int) (any, error) {
-	// TODO: implement remote sandbox execution (e.g., Pyodide, gVisor, Firecracker)
-	return nil, fmt.Errorf("remote code execution not yet implemented")
+func (c *CodeInterpreter) executeRemote(_ context.Context, _ string, _ int) (any, error) {
+	// Remote sandbox execution (e.g., Pyodide, gVisor, Firecracker) is not yet implemented.
+	return nil, fmt.Errorf("%w", ErrRemoteCodeNotImplemented)
 }
 
-func (c *CodeInterpreter) executeLocal(ctx context.Context, code string, timeoutSec int) (any, error) {
+func (c *CodeInterpreter) executeLocal(_ context.Context, _ string, _ int) (any, error) {
 	return map[string]any{
-		"stdout":   "",
-		"stderr":   "Code interpreter is not configured with a sandbox endpoint.",
+		"stdout":    "",
+		"stderr":    "Code interpreter is not configured with a sandbox endpoint.",
 		"exit_code": 1,
-		"result":   "execution unavailable",
+		"result":    "execution unavailable",
 	}, nil
 }

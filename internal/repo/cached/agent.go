@@ -2,11 +2,17 @@ package cached
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sync"
 
 	"github.com/TekkenSteve/GoAgent/internal/entity"
 	"github.com/TekkenSteve/GoAgent/internal/repo"
+)
+
+var (
+	ErrAgentNotFound        = errors.New("agent not found")
+	ErrUnexpectedCacheEntry = errors.New("cache: unexpected entry type")
 )
 
 type agentCacheEntry struct {
@@ -29,33 +35,43 @@ func NewAgentRepo(inner repo.AgentRepo) *AgentRepo {
 // Get returns the agent record for the given ID, using cache when available.
 func (r *AgentRepo) Get(ctx context.Context, agentID string) (entity.AgentRecord, bool, error) {
 	if v, ok := r.cache.Load(agentID); ok {
-		entry := v.(agentCacheEntry)
+		entry, ok := v.(agentCacheEntry)
+		if !ok {
+			return entity.AgentRecord{}, false, ErrUnexpectedCacheEntry
+		}
+
 		if entry.err != nil {
 			return entity.AgentRecord{}, false, entry.err
 		}
+
 		return entry.record, true, nil
 	}
 
 	record, exists, err := r.inner.Get(ctx, agentID)
 	if err != nil {
 		r.cache.Store(agentID, agentCacheEntry{err: err})
+
 		return entity.AgentRecord{}, false, fmt.Errorf("AgentRepo - Get: %w", err)
 	}
+
 	if !exists {
-		r.cache.Store(agentID, agentCacheEntry{err: fmt.Errorf("agent not found: %s", agentID)})
+		r.cache.Store(agentID, agentCacheEntry{err: fmt.Errorf("%w: %s", ErrAgentNotFound, agentID)})
+
 		return entity.AgentRecord{}, false, nil
 	}
 
 	r.cache.Store(agentID, agentCacheEntry{record: record})
+
 	return record, true, nil
 }
 
 // Create delegates to the inner repo and invalidates the cache for the new agent.
-func (r *AgentRepo) Create(ctx context.Context, req entity.CreateAgentRequest) (entity.AgentRecord, error) {
+func (r *AgentRepo) Create(ctx context.Context, req *entity.CreateAgentRequest) (entity.AgentRecord, error) {
 	record, err := r.inner.Create(ctx, req)
 	if err == nil {
 		r.cache.Delete(record.AgentID)
 	}
+
 	return record, err
 }
 
@@ -65,6 +81,7 @@ func (r *AgentRepo) Update(ctx context.Context, agentID string, req entity.Updat
 	if err == nil {
 		r.cache.Delete(agentID)
 	}
+
 	return record, err
 }
 
@@ -74,6 +91,7 @@ func (r *AgentRepo) Delete(ctx context.Context, agentID string) error {
 	if err == nil {
 		r.cache.Delete(agentID)
 	}
+
 	return err
 }
 
@@ -83,7 +101,7 @@ func (r *AgentRepo) ListByAccount(ctx context.Context, accountID string) ([]enti
 }
 
 // CreateVersion delegates to the inner repo.
-func (r *AgentRepo) CreateVersion(ctx context.Context, record entity.AgentVersionRecord) error {
+func (r *AgentRepo) CreateVersion(ctx context.Context, record *entity.AgentVersionRecord) error {
 	return r.inner.CreateVersion(ctx, record)
 }
 

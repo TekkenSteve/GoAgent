@@ -2,6 +2,7 @@ package integration_test
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"log"
@@ -27,7 +28,10 @@ const (
 	basePathV1 = httpURL + "/v1"
 )
 
-var errHealthCheck = fmt.Errorf("url %s is not available", healthPath)
+var (
+	errHealthCheck = fmt.Errorf("url %s is not available", healthPath)
+	errPGURLNotSet = errors.New("PG_URL not set")
+)
 
 func doWebRequestWithTimeout(ctx context.Context, method, url string, body io.Reader) (*http.Response, error) {
 	req, err := http.NewRequestWithContext(ctx, method, url, body)
@@ -78,10 +82,10 @@ func healthCheck(attempts int) error {
 
 // seedTestAccount ensures the test account has a non-zero credit balance.
 // Called before tests run so that the billing prep-check passes.
-func seedTestAccount() {
+func seedTestAccount() error {
 	pgURL := os.Getenv("PG_URL")
 	if pgURL == "" {
-		log.Fatalf("Integration tests: PG_URL not set")
+		return errPGURLNotSet
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
@@ -89,19 +93,22 @@ func seedTestAccount() {
 
 	pool, err := pgxpool.New(ctx, pgURL)
 	if err != nil {
-		log.Fatalf("Integration tests: pgxpool.New: %v", err)
+		return fmt.Errorf("pgxpool.New: %w", err)
 	}
 	defer pool.Close()
 
 	// Wait for the credit_accounts table to exist (migrations may still be running)
-	for i := 0; i < 30; i++ {
+	for range 30 {
 		var exists bool
-		err := pool.QueryRow(ctx,
+
+		err := pool.QueryRow(
+			ctx,
 			"SELECT EXISTS (SELECT FROM information_schema.tables WHERE table_name = 'credit_accounts')",
 		).Scan(&exists)
 		if err == nil && exists {
 			break
 		}
+
 		time.Sleep(time.Second)
 	}
 
@@ -113,9 +120,12 @@ func seedTestAccount() {
 		DO UPDATE SET balance = 100, version = credit_accounts.version + 1, updated_at = NOW()
 	`)
 	if err != nil {
-		log.Fatalf("Integration tests: seed credit_account: %v", err)
+		return fmt.Errorf("seed credit_account: %w", err)
 	}
+
 	log.Printf("Integration tests: seeded e2e-test-account with $100")
+
+	return nil
 }
 
 func TestMain(m *testing.M) {
@@ -126,9 +136,10 @@ func TestMain(m *testing.M) {
 
 	log.Printf("Integration tests: httpURL %s is available", httpURL)
 
-	seedTestAccount()
+	if err := seedTestAccount(); err != nil {
+		log.Fatalf("Integration tests: seed account: %v", err)
+	}
 
 	code := m.Run()
 	os.Exit(code)
 }
-

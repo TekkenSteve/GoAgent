@@ -2,6 +2,7 @@ package executor
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	"github.com/TekkenSteve/GoAgent/internal/agentfw/agent"
@@ -9,6 +10,8 @@ import (
 	"github.com/TekkenSteve/GoAgent/internal/entity"
 	"github.com/TekkenSteve/GoAgent/internal/repo"
 )
+
+var ErrUnknownOperation = errors.New("unknown operation")
 
 // UseCase -.
 type UseCase struct {
@@ -21,7 +24,7 @@ func New(r repo.ExecutorRepo) *UseCase {
 }
 
 // Execute -.
-func (uc *UseCase) Execute(ctx context.Context, req entity.ExecuteRequest) (entity.RunStatus, error) {
+func (uc *UseCase) Execute(ctx context.Context, req *entity.ExecuteRequest) (entity.RunStatus, error) {
 	status, err := uc.temporal.StartExecution(ctx, req)
 	if err != nil {
 		return entity.RunStatus{}, fmt.Errorf("UseCase - Execute - uc.temporal.StartExecution: %w", err)
@@ -33,15 +36,17 @@ func (uc *UseCase) Execute(ctx context.Context, req entity.ExecuteRequest) (enti
 // ExecuteOrchestration starts an OrchestrationWorkflow from a TeamSpec or step queue.
 // If TeamSpec is provided (with no pre-expanded Steps), it expands the team hierarchy
 // into a flat step queue before starting the workflow.
-func (uc *UseCase) ExecuteOrchestration(ctx context.Context, input entity.OrchestrationInput) (entity.RunStatus, error) {
+func (uc *UseCase) ExecuteOrchestration(ctx context.Context, input *entity.OrchestrationInput) (entity.RunStatus, error) {
 	// TeamSpec must be expanded into Steps before the workflow starts
 	// (the OrchestrationWorkflow rejects raw TeamSpec).
 	if input.TeamSpec != nil && len(input.Steps) == 0 {
 		registry := agent.NewRegistry()
+
 		expanded, err := team.Expand(input.TeamSpec, registry)
 		if err != nil {
 			return entity.RunStatus{}, fmt.Errorf("UseCase - ExecuteOrchestration - team.Expand: %w", err)
 		}
+
 		input.Steps = expanded
 		input.TeamSpec = nil
 	}
@@ -50,6 +55,7 @@ func (uc *UseCase) ExecuteOrchestration(ctx context.Context, input entity.Orches
 	if err != nil {
 		return entity.RunStatus{}, fmt.Errorf("UseCase - ExecuteOrchestration - uc.temporal.StartOrchestration: %w", err)
 	}
+
 	return status, nil
 }
 
@@ -69,6 +75,7 @@ func (uc *UseCase) GetOrchestrationStatus(ctx context.Context, runID string) (en
 	if err != nil {
 		return entity.RunStatus{}, fmt.Errorf("UseCase - GetOrchestrationStatus - uc.temporal.GetOrchestrationStatus: %w", err)
 	}
+
 	return status, nil
 }
 
@@ -84,7 +91,7 @@ func (uc *UseCase) Control(ctx context.Context, runID string, op entity.ControlO
 	case entity.ControlCancel:
 		err = uc.temporal.Cancel(ctx, runID)
 	default:
-		return fmt.Errorf("UseCase - Control - unknown operation: %s", op)
+		return fmt.Errorf("UseCase - Control - %w: %s", ErrUnknownOperation, op)
 	}
 
 	if err != nil {

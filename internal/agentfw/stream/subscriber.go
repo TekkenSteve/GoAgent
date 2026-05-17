@@ -35,6 +35,8 @@ func (s *Subscription) Close() {
 	}
 }
 
+const subscriberChannelBufferSize = 256
+
 // RedisSubscriber implements Subscriber using redis.StreamHub for fan-out.
 //
 // It maintains one pump goroutine per stream via StreamHub, so multiple
@@ -64,9 +66,11 @@ func (s *RedisSubscriber) Subscribe(_ context.Context, sessionID string, afterSe
 	hubSub := s.hub.Subscribe(streamKey, lastID)
 
 	// Translate XStreamEntry → StoredEvent via UnmarshalEvent
-	ch := make(chan StoredEvent, 256)
+	ch := make(chan StoredEvent, subscriberChannelBufferSize)
+
 	go func() {
 		defer close(ch)
+
 		for entry := range hubSub.C {
 			data, ok := entry.Values["data"]
 			if !ok || data == "" {
@@ -97,15 +101,19 @@ func (s *RedisSubscriber) Subscribe(_ context.Context, sessionID string, afterSe
 	}, nil
 }
 
+const entryIDParts = 2
+
 func parseSequenceFromHubID(entryID string) int64 {
 	// Entry ID format: "<sequence>-0"
-	parts := strings.SplitN(entryID, "-", 2)
-	if len(parts) < 1 {
+	parts := strings.SplitN(entryID, "-", entryIDParts)
+	if len(parts) == 0 {
 		return 0
 	}
+
 	seq, err := strconv.ParseInt(parts[0], 10, 64)
 	if err != nil {
 		return 0
 	}
+
 	return seq
 }

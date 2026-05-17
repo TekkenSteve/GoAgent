@@ -8,6 +8,8 @@ import (
 )
 
 func TestWorkflowHotStateLayerTags(t *testing.T) {
+	t.Parallel()
+
 	tp := reflect.TypeFor[WorkflowHotState]()
 
 	expected := map[string]string{
@@ -36,6 +38,8 @@ func TestWorkflowHotStateLayerTags(t *testing.T) {
 }
 
 func TestWarmAndColdRefsLayerTags(t *testing.T) {
+	t.Parallel()
+
 	warm := reflect.TypeFor[WarmRefs]()
 	for field := range warm.Fields() {
 		require.Equal(t, "warm", field.Tag.Get("layer"))

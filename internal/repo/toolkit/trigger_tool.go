@@ -2,9 +2,19 @@ package toolkit
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	"github.com/TekkenSteve/GoAgent/internal/entity"
+)
+
+var (
+	ErrTriggerToolNameRequired        = errors.New("trigger_tool: name is required")
+	ErrTriggerToolCronRequired        = errors.New("trigger_tool: cron_expression is required")
+	ErrTriggerToolTemplateIDRequired  = errors.New("trigger_tool: template_id is required")
+	ErrListTriggersTemplateIDRequired = errors.New("list_triggers_tool: template_id is required")
+	ErrToggleTriggerIDRequired        = errors.New("toggle_trigger_tool: trigger_id is required")
+	ErrDeleteTriggerIDRequired        = errors.New("delete_trigger_tool: trigger_id is required")
 )
 
 // ——— Callback types (wired by app.go) ———
@@ -82,33 +92,27 @@ func (t *TriggerTool) Meta() ToolMeta {
 
 // Execute creates a scheduled trigger.
 func (t *TriggerTool) Execute(ctx context.Context, args map[string]any) (any, error) {
-	name, _ := args["name"].(string)
-	cronExpr, _ := args["cron_expression"].(string)
-	agentPrompt, _ := args["agent_prompt"].(string)
-	templateID, _ := args["template_id"].(string)
+	name := getStringArg(args, "name")
+	cronExpr := getStringArg(args, "cron_expression")
+	agentPrompt := getStringArg(args, "agent_prompt")
+	templateID := getStringArg(args, "template_id")
 
 	if name == "" {
-		return nil, fmt.Errorf("trigger_tool: name is required")
+		return nil, ErrTriggerToolNameRequired
 	}
+
 	if cronExpr == "" {
-		return nil, fmt.Errorf("trigger_tool: cron_expression is required")
+		return nil, ErrTriggerToolCronRequired
 	}
+
 	if templateID == "" {
-		return nil, fmt.Errorf("trigger_tool: template_id is required")
+		return nil, ErrTriggerToolTemplateIDRequired
 	}
 
 	// Extract {{variable}} patterns from the prompt
 	templateVars := entity.ExtractTemplateVars(agentPrompt)
 
-	// Extract variable values if provided
-	templateVarsVals := make(map[string]string)
-	if rawVals, ok := args["variable_values"].(map[string]any); ok {
-		for k, v := range rawVals {
-			if strVal, ok := v.(string); ok {
-				templateVarsVals[k] = strVal
-			}
-		}
-	}
+	templateVarsVals := extractTemplateVarValues(args)
 
 	triggerID, err := t.creator(ctx, templateID, name, cronExpr, agentPrompt, templateVars, templateVarsVals)
 	if err != nil {
@@ -129,11 +133,27 @@ func (t *TriggerTool) Execute(ctx context.Context, args map[string]any) (any, er
 	if len(templateVars) > 0 {
 		result["template_variables"] = templateVars
 	}
+
 	if len(templateVarsVals) > 0 {
 		result["variable_values"] = templateVarsVals
 	}
 
 	return result, nil
+}
+
+// extractTemplateVarValues extracts variable_values from args into a string map.
+func extractTemplateVarValues(args map[string]any) map[string]string {
+	result := make(map[string]string)
+
+	if rawVals, ok := args["variable_values"].(map[string]any); ok {
+		for k, v := range rawVals {
+			if strVal, ok := v.(string); ok {
+				result[k] = strVal
+			}
+		}
+	}
+
+	return result
 }
 
 // ——— list_triggers tool ———
@@ -172,9 +192,13 @@ func (t *ListTriggersTool) Meta() ToolMeta {
 
 // Execute lists triggers for the given template.
 func (t *ListTriggersTool) Execute(ctx context.Context, args map[string]any) (any, error) {
-	templateID, _ := args["template_id"].(string)
+	templateID, ok := args["template_id"].(string)
+	if !ok {
+		templateID = ""
+	}
+
 	if templateID == "" {
-		return nil, fmt.Errorf("list_triggers_tool: template_id is required")
+		return nil, ErrListTriggersTemplateIDRequired
 	}
 
 	triggers, err := t.lister(ctx, templateID)
@@ -183,17 +207,19 @@ func (t *ListTriggersTool) Execute(ctx context.Context, args map[string]any) (an
 	}
 
 	type triggerView struct {
-		ID             string `json:"id"`
-		Name           string `json:"name"`
-		Schedule       string `json:"schedule"`
-		Prompt         string `json:"prompt"`
-		IsActive       bool   `json:"is_active"`
-		LastFiredAt    string `json:"last_fired_at,omitempty"`
-		TemplateVars   []string `json:"template_variables,omitempty"`
+		ID           string   `json:"id"`
+		Name         string   `json:"name"`
+		Schedule     string   `json:"schedule"`
+		Prompt       string   `json:"prompt"`
+		IsActive     bool     `json:"is_active"`
+		LastFiredAt  string   `json:"last_fired_at,omitempty"`
+		TemplateVars []string `json:"template_variables,omitempty"`
 	}
 
 	items := make([]triggerView, 0, len(triggers))
-	for _, tr := range triggers {
+	for i := range triggers {
+		tr := triggers[i]
+
 		view := triggerView{
 			ID:           tr.ID,
 			Name:         tr.Name,
@@ -205,6 +231,7 @@ func (t *ListTriggersTool) Execute(ctx context.Context, args map[string]any) (an
 		if tr.LastFiredAt != nil {
 			view.LastFiredAt = tr.LastFiredAt.Format(timeRfc3339)
 		}
+
 		items = append(items, view)
 	}
 
@@ -254,11 +281,18 @@ func (t *ToggleTriggerTool) Meta() ToolMeta {
 
 // Execute toggles the trigger's active state.
 func (t *ToggleTriggerTool) Execute(ctx context.Context, args map[string]any) (any, error) {
-	triggerID, _ := args["trigger_id"].(string)
-	isActive, _ := args["is_active"].(bool)
+	triggerID, ok := args["trigger_id"].(string)
+	if !ok {
+		return nil, ErrToggleTriggerIDRequired
+	}
+
+	isActive, ok := args["is_active"].(bool)
+	if !ok {
+		isActive = false
+	}
 
 	if triggerID == "" {
-		return nil, fmt.Errorf("toggle_trigger_tool: trigger_id is required")
+		return nil, ErrToggleTriggerIDRequired
 	}
 
 	updated, err := t.toggle(ctx, triggerID, isActive)
@@ -270,6 +304,7 @@ func (t *ToggleTriggerTool) Execute(ctx context.Context, args map[string]any) (a
 	if !isActive {
 		status = "disabled"
 	}
+
 	return map[string]any{
 		"trigger_id": updated.ID,
 		"name":       updated.Name,
@@ -282,7 +317,7 @@ func (t *ToggleTriggerTool) Execute(ctx context.Context, args map[string]any) (a
 
 // DeleteTriggerTool removes a trigger.
 type DeleteTriggerTool struct {
-	meta   ToolMeta
+	meta    ToolMeta
 	deleter TriggerDeleterFn
 }
 
@@ -314,9 +349,9 @@ func (t *DeleteTriggerTool) Meta() ToolMeta {
 
 // Execute deletes the trigger.
 func (t *DeleteTriggerTool) Execute(ctx context.Context, args map[string]any) (any, error) {
-	triggerID, _ := args["trigger_id"].(string)
-	if triggerID == "" {
-		return nil, fmt.Errorf("delete_trigger_tool: trigger_id is required")
+	triggerID, ok := args["trigger_id"].(string)
+	if !ok || triggerID == "" {
+		return nil, ErrDeleteTriggerIDRequired
 	}
 
 	if err := t.deleter(ctx, triggerID); err != nil {
@@ -331,3 +366,13 @@ func (t *DeleteTriggerTool) Execute(ctx context.Context, args map[string]any) (a
 
 // timeRfc3339 is a convenience constant.
 const timeRfc3339 = "2006-01-02T15:04:05Z07:00"
+
+// getStringArg safely extracts a string from a map or returns empty string.
+func getStringArg(args map[string]any, key string) string {
+	v, ok := args[key].(string)
+	if !ok {
+		return ""
+	}
+
+	return v
+}

@@ -27,7 +27,7 @@ func NewTemporalTriggerScheduler(c client.Client, taskQueue string) *TemporalTri
 }
 
 // Schedule creates a Temporal cron workflow for the given trigger.
-func (s *TemporalTriggerScheduler) Schedule(ctx context.Context, trigger entity.TriggerSpec) error {
+func (s *TemporalTriggerScheduler) Schedule(ctx context.Context, trigger *entity.TriggerSpec) error {
 	workflowID := triggerWorkflowID(trigger.ID)
 
 	opts := client.StartWorkflowOptions{
@@ -40,6 +40,7 @@ func (s *TemporalTriggerScheduler) Schedule(ctx context.Context, trigger entity.
 	if err != nil {
 		return fmt.Errorf("TemporalTriggerScheduler - Schedule - execute: %w", err)
 	}
+
 	return nil
 }
 
@@ -53,8 +54,10 @@ func (s *TemporalTriggerScheduler) Unschedule(ctx context.Context, triggerID str
 		if strings.Contains(err.Error(), "not found") || strings.Contains(err.Error(), "NotFound") {
 			return nil
 		}
+
 		return fmt.Errorf("TemporalTriggerScheduler - Unschedule - terminate: %w", err)
 	}
+
 	return nil
 }
 

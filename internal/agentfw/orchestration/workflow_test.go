@@ -14,16 +14,17 @@ import (
 
 // ——— mock activities ———
 
-func mockPrepareActivity(_ context.Context, input PrepareInput) (*PrepareOutput, error) {
+func mockPrepareActivity(_ context.Context, input *PrepareInput) (*PrepareOutput, error) {
 	msgs := append([]entity.Message{}, input.History...)
 	msgs = append(msgs, entity.Message{Role: entity.RoleUser, Content: input.Message})
+
 	return &PrepareOutput{
 		Messages: msgs,
 		Tools:    input.Tools,
 	}, nil
 }
 
-func mockLLMStepActivity(_ context.Context, input LLMStepInput) (*LLMStepOutput, error) {
+func mockLLMStepActivity(_ context.Context, input *LLMStepInput) (*LLMStepOutput, error) {
 	return &LLMStepOutput{
 		Content:      "LLM response for " + input.RunID,
 		Usage:        entity.Usage{PromptTokens: 10, CompletionTokens: 5, TotalTokens: 15},
@@ -37,7 +38,7 @@ type mockLLMStepWithTool struct {
 	callCount int
 }
 
-func (m *mockLLMStepWithTool) fn(ctx context.Context, input LLMStepInput) (*LLMStepOutput, error) {
+func (m *mockLLMStepWithTool) fn(_ context.Context, _ *LLMStepInput) (*LLMStepOutput, error) {
 	m.callCount++
 	if m.callCount == 1 {
 		return &LLMStepOutput{
@@ -49,6 +50,7 @@ func (m *mockLLMStepWithTool) fn(ctx context.Context, input LLMStepInput) (*LLMS
 			FinishReason: "tool_calls",
 		}, nil
 	}
+
 	return &LLMStepOutput{
 		Content:      "Tool result received",
 		Usage:        entity.Usage{PromptTokens: 20, CompletionTokens: 10, TotalTokens: 30},
@@ -56,7 +58,7 @@ func (m *mockLLMStepWithTool) fn(ctx context.Context, input LLMStepInput) (*LLMS
 	}, nil
 }
 
-func mockToolExecActivity(_ context.Context, input ToolInput) (*ToolOutput, error) {
+func mockToolExecActivity(_ context.Context, _ ToolInput) (*ToolOutput, error) {
 	return &ToolOutput{
 		Output:     `{"result": "mock_output"}`,
 		ExitCode:   0,
@@ -69,6 +71,7 @@ func mockToolExecActivity(_ context.Context, input ToolInput) (*ToolOutput, erro
 
 func newWorkflowTestEnv() *testsuite.TestWorkflowEnvironment {
 	var suite testsuite.WorkflowTestSuite
+
 	env := suite.NewTestWorkflowEnvironment()
 	env.RegisterWorkflowWithOptions(AgentWorkflow, workflow.RegisterOptions{
 		Name: AgentWorkflowName,
@@ -82,15 +85,18 @@ func newWorkflowTestEnv() *testsuite.TestWorkflowEnvironment {
 	env.RegisterActivityWithOptions(mockToolExecActivity, activity.RegisterOptions{
 		Name: ToolExecActivityName,
 	})
+
 	return env
 }
 
 // ——— tests ———
 
 func TestAgentWorkflowV2_TextOnly(t *testing.T) {
+	t.Parallel()
+
 	env := newWorkflowTestEnv()
 
-	env.ExecuteWorkflow(AgentWorkflow, AgentWorkflowInput{
+	env.ExecuteWorkflow(AgentWorkflow, &AgentWorkflowInput{
 		RunID:   "run-v2-text",
 		Message: "Hello",
 	})
@@ -106,7 +112,10 @@ func TestAgentWorkflowV2_TextOnly(t *testing.T) {
 }
 
 func TestAgentWorkflowV2_ToolRound(t *testing.T) {
+	t.Parallel()
+
 	var suite testsuite.WorkflowTestSuite
+
 	env := suite.NewTestWorkflowEnvironment()
 	env.RegisterWorkflowWithOptions(AgentWorkflow, workflow.RegisterOptions{
 		Name: AgentWorkflowName,
@@ -123,7 +132,7 @@ func TestAgentWorkflowV2_ToolRound(t *testing.T) {
 		Name: ToolExecActivityName,
 	})
 
-	env.ExecuteWorkflow(AgentWorkflow, AgentWorkflowInput{
+	env.ExecuteWorkflow(AgentWorkflow, &AgentWorkflowInput{
 		RunID:   "run-v2-tool",
 		Message: "Use a tool",
 	})
@@ -138,15 +147,17 @@ func TestAgentWorkflowV2_ToolRound(t *testing.T) {
 }
 
 func TestAgentWorkflowV2_Cancel(t *testing.T) {
+	t.Parallel()
+
 	env := newWorkflowTestEnv()
 
 	env.RegisterDelayedCallback(func() {
 		env.SignalWorkflow(AgentCommandSignal, "cancel")
 	}, 0)
 
-	env.ExecuteWorkflow(AgentWorkflow, AgentWorkflowInput{
+	env.ExecuteWorkflow(AgentWorkflow, &AgentWorkflowInput{
 		RunID:   "run-v2-cancel",
-		Message: "Will be cancelled",
+		Message: "Will be canceled",
 	})
 
 	require.True(t, env.IsWorkflowCompleted())
@@ -154,10 +165,12 @@ func TestAgentWorkflowV2_Cancel(t *testing.T) {
 
 	var result WorkflowResult
 	require.NoError(t, env.GetWorkflowResult(&result))
-	require.Equal(t, "cancelled", result.LifecycleState)
+	require.Equal(t, "canceled", result.LifecycleState)
 }
 
 func TestAgentWorkflowV2_PauseResume(t *testing.T) {
+	t.Parallel()
+
 	env := newWorkflowTestEnv()
 
 	env.RegisterDelayedCallback(func() {
@@ -167,7 +180,7 @@ func TestAgentWorkflowV2_PauseResume(t *testing.T) {
 		env.SignalWorkflow(AgentCommandSignal, "resume")
 	}, time.Second)
 
-	env.ExecuteWorkflow(AgentWorkflow, AgentWorkflowInput{
+	env.ExecuteWorkflow(AgentWorkflow, &AgentWorkflowInput{
 		RunID:   "run-v2-pause",
 		Message: "Will be paused",
 	})
@@ -181,7 +194,10 @@ func TestAgentWorkflowV2_PauseResume(t *testing.T) {
 }
 
 func TestAgentWorkflowV2_QueryStatus(t *testing.T) {
+	t.Parallel()
+
 	var suite testsuite.WorkflowTestSuite
+
 	env := suite.NewTestWorkflowEnvironment()
 	env.RegisterWorkflowWithOptions(AgentWorkflow, workflow.RegisterOptions{
 		Name: AgentWorkflowName,
@@ -200,7 +216,7 @@ func TestAgentWorkflowV2_QueryStatus(t *testing.T) {
 		env.SignalWorkflow(AgentCommandSignal, "cancel")
 	}, 0)
 
-	env.ExecuteWorkflow(AgentWorkflow, AgentWorkflowInput{
+	env.ExecuteWorkflow(AgentWorkflow, &AgentWorkflowInput{
 		RunID:   "run-v2-query",
 		Message: "Query test",
 	})
@@ -210,5 +226,5 @@ func TestAgentWorkflowV2_QueryStatus(t *testing.T) {
 
 	var result WorkflowResult
 	require.NoError(t, env.GetWorkflowResult(&result))
-	require.Equal(t, "cancelled", result.LifecycleState)
+	require.Equal(t, "canceled", result.LifecycleState)
 }

@@ -7,11 +7,13 @@ import (
 	"fmt"
 
 	sq "github.com/Masterminds/squirrel"
-	"github.com/jackc/pgx/v5"
-
 	"github.com/TekkenSteve/GoAgent/internal/entity"
 	"github.com/TekkenSteve/GoAgent/pkg/postgres"
+	"github.com/jackc/pgx/v5"
 )
+
+// Sentinel errors.
+var ErrTemplateNotFound = errors.New("template not found")
 
 // WorkflowTemplateRepo implements repo.WorkflowTemplateRepo with Postgres.
 type WorkflowTemplateRepo struct {
@@ -24,7 +26,7 @@ func NewWorkflowTemplateRepo(pg *postgres.Postgres) *WorkflowTemplateRepo {
 }
 
 // Create inserts a new workflow template.
-func (r *WorkflowTemplateRepo) Create(ctx context.Context, req entity.CreateWorkflowTemplateRequest) (entity.WorkflowTemplate, error) {
+func (r *WorkflowTemplateRepo) Create(ctx context.Context, req *entity.CreateWorkflowTemplateRequest) (entity.WorkflowTemplate, error) {
 	teamSpecJSON, err := json.Marshal(req.TeamSpec)
 	if err != nil {
 		return entity.WorkflowTemplate{}, fmt.Errorf("WorkflowTemplateRepo - Create - marshal team_spec: %w", err)
@@ -42,9 +44,12 @@ func (r *WorkflowTemplateRepo) Create(ctx context.Context, req entity.CreateWork
 		return entity.WorkflowTemplate{}, fmt.Errorf("WorkflowTemplateRepo - Create - builder: %w", err)
 	}
 
-	var record entity.WorkflowTemplate
-	var teamSpecStr string
-	var tagsStr []string
+	var (
+		record      entity.WorkflowTemplate
+		teamSpecStr string
+		tagsStr     []string
+	)
+
 	err = r.Pool.QueryRow(ctx, sql, args...).Scan(
 		&record.ID, &record.AccountID, &record.Name, &record.Description,
 		&teamSpecStr, &record.SystemPrompt, &record.DefaultModel, &tagsStr,
@@ -53,9 +58,11 @@ func (r *WorkflowTemplateRepo) Create(ctx context.Context, req entity.CreateWork
 	if err != nil {
 		return entity.WorkflowTemplate{}, fmt.Errorf("WorkflowTemplateRepo - Create - query: %w", err)
 	}
+
 	if err := json.Unmarshal([]byte(teamSpecStr), &record.TeamSpec); err != nil {
 		return entity.WorkflowTemplate{}, fmt.Errorf("WorkflowTemplateRepo - Create - unmarshal team_spec: %w", err)
 	}
+
 	record.Tags = tagsStr
 
 	return record, nil
@@ -72,9 +79,12 @@ func (r *WorkflowTemplateRepo) Get(ctx context.Context, templateID string) (enti
 		return entity.WorkflowTemplate{}, false, fmt.Errorf("WorkflowTemplateRepo - Get - builder: %w", err)
 	}
 
-	var record entity.WorkflowTemplate
-	var teamSpecStr string
-	var tagsStr []string
+	var (
+		record      entity.WorkflowTemplate
+		teamSpecStr string
+		tagsStr     []string
+	)
+
 	err = r.Pool.QueryRow(ctx, sql, args...).Scan(
 		&record.ID, &record.AccountID, &record.Name, &record.Description,
 		&teamSpecStr, &record.SystemPrompt, &record.DefaultModel, &tagsStr,
@@ -84,11 +94,14 @@ func (r *WorkflowTemplateRepo) Get(ctx context.Context, templateID string) (enti
 		if errors.Is(err, pgx.ErrNoRows) {
 			return entity.WorkflowTemplate{}, false, nil
 		}
+
 		return entity.WorkflowTemplate{}, false, fmt.Errorf("WorkflowTemplateRepo - Get - query: %w", err)
 	}
+
 	if err := json.Unmarshal([]byte(teamSpecStr), &record.TeamSpec); err != nil {
 		return entity.WorkflowTemplate{}, false, fmt.Errorf("WorkflowTemplateRepo - Get - unmarshal team_spec: %w", err)
 	}
+
 	record.Tags = tagsStr
 
 	return record, true, nil
@@ -96,32 +109,9 @@ func (r *WorkflowTemplateRepo) Get(ctx context.Context, templateID string) (enti
 
 // Update updates an existing workflow template.
 func (r *WorkflowTemplateRepo) Update(ctx context.Context, templateID string, req entity.UpdateWorkflowTemplateRequest) (entity.WorkflowTemplate, error) {
-	builder := r.Builder.Update("workflow_templates").Where(sq.Eq{"id": templateID})
-
-	if req.Name != nil {
-		builder = builder.Set("name", *req.Name)
-	}
-	if req.Description != nil {
-		builder = builder.Set("description", *req.Description)
-	}
-	if req.TeamSpec != nil {
-		teamSpecJSON, err := json.Marshal(req.TeamSpec)
-		if err != nil {
-			return entity.WorkflowTemplate{}, fmt.Errorf("WorkflowTemplateRepo - Update - marshal team_spec: %w", err)
-		}
-		builder = builder.Set("team_spec", string(teamSpecJSON))
-	}
-	if req.SystemPrompt != nil {
-		builder = builder.Set("system_prompt", *req.SystemPrompt)
-	}
-	if req.DefaultModel != nil {
-		builder = builder.Set("default_model", *req.DefaultModel)
-	}
-	if req.Tags != nil {
-		builder = builder.Set("tags", *req.Tags)
-	}
-	if req.IsEnabled != nil {
-		builder = builder.Set("is_enabled", *req.IsEnabled)
+	builder, err := buildTemplateUpdateQuery(r.Builder, templateID, req)
+	if err != nil {
+		return entity.WorkflowTemplate{}, err
 	}
 
 	builder = builder.Set("updated_at", sq.Expr("NOW()"))
@@ -132,9 +122,12 @@ func (r *WorkflowTemplateRepo) Update(ctx context.Context, templateID string, re
 		return entity.WorkflowTemplate{}, fmt.Errorf("WorkflowTemplateRepo - Update - builder: %w", err)
 	}
 
-	var record entity.WorkflowTemplate
-	var teamSpecStr string
-	var tagsStr []string
+	var (
+		record      entity.WorkflowTemplate
+		teamSpecStr string
+		tagsStr     []string
+	)
+
 	err = r.Pool.QueryRow(ctx, sql, args...).Scan(
 		&record.ID, &record.AccountID, &record.Name, &record.Description,
 		&teamSpecStr, &record.SystemPrompt, &record.DefaultModel, &tagsStr,
@@ -142,16 +135,59 @@ func (r *WorkflowTemplateRepo) Update(ctx context.Context, templateID string, re
 	)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
-			return entity.WorkflowTemplate{}, fmt.Errorf("WorkflowTemplateRepo - Update - not found: %s", templateID)
+			return entity.WorkflowTemplate{}, fmt.Errorf("WorkflowTemplateRepo - Update - %w: %s", ErrTemplateNotFound, templateID)
 		}
+
 		return entity.WorkflowTemplate{}, fmt.Errorf("WorkflowTemplateRepo - Update - query: %w", err)
 	}
+
 	if err := json.Unmarshal([]byte(teamSpecStr), &record.TeamSpec); err != nil {
 		return entity.WorkflowTemplate{}, fmt.Errorf("WorkflowTemplateRepo - Update - unmarshal team_spec: %w", err)
 	}
+
 	record.Tags = tagsStr
 
 	return record, nil
+}
+
+// buildTemplateUpdateQuery builds the update builder with non-nil fields from req.
+func buildTemplateUpdateQuery(b sq.StatementBuilderType, templateID string, req entity.UpdateWorkflowTemplateRequest) (sq.UpdateBuilder, error) {
+	builder := b.Update("workflow_templates").Where(sq.Eq{"id": templateID})
+
+	if req.Name != nil {
+		builder = builder.Set("name", *req.Name)
+	}
+
+	if req.Description != nil {
+		builder = builder.Set("description", *req.Description)
+	}
+
+	if req.TeamSpec != nil {
+		teamSpecJSON, err := json.Marshal(req.TeamSpec)
+		if err != nil {
+			return builder, fmt.Errorf("WorkflowTemplateRepo - Update - marshal team_spec: %w", err)
+		}
+
+		builder = builder.Set("team_spec", string(teamSpecJSON))
+	}
+
+	if req.SystemPrompt != nil {
+		builder = builder.Set("system_prompt", *req.SystemPrompt)
+	}
+
+	if req.DefaultModel != nil {
+		builder = builder.Set("default_model", *req.DefaultModel)
+	}
+
+	if req.Tags != nil {
+		builder = builder.Set("tags", *req.Tags)
+	}
+
+	if req.IsEnabled != nil {
+		builder = builder.Set("is_enabled", *req.IsEnabled)
+	}
+
+	return builder, nil
 }
 
 // Delete removes a workflow template by ID.
@@ -165,6 +201,7 @@ func (r *WorkflowTemplateRepo) Delete(ctx context.Context, templateID string) er
 	if err != nil {
 		return fmt.Errorf("WorkflowTemplateRepo - Delete - exec: %w", err)
 	}
+
 	return nil
 }
 
@@ -187,10 +224,14 @@ func (r *WorkflowTemplateRepo) ListByAccount(ctx context.Context, accountID stri
 	defer rows.Close()
 
 	var records []entity.WorkflowTemplate
+
 	for rows.Next() {
-		var record entity.WorkflowTemplate
-		var teamSpecStr string
-		var tagsStr []string
+		var (
+			record      entity.WorkflowTemplate
+			teamSpecStr string
+			tagsStr     []string
+		)
+
 		if err := rows.Scan(
 			&record.ID, &record.AccountID, &record.Name, &record.Description,
 			&teamSpecStr, &record.SystemPrompt, &record.DefaultModel, &tagsStr,
@@ -198,9 +239,11 @@ func (r *WorkflowTemplateRepo) ListByAccount(ctx context.Context, accountID stri
 		); err != nil {
 			return nil, fmt.Errorf("WorkflowTemplateRepo - ListByAccount - scan: %w", err)
 		}
+
 		if err := json.Unmarshal([]byte(teamSpecStr), &record.TeamSpec); err != nil {
 			return nil, fmt.Errorf("WorkflowTemplateRepo - ListByAccount - unmarshal team_spec: %w", err)
 		}
+
 		record.Tags = tagsStr
 		records = append(records, record)
 	}
@@ -213,5 +256,6 @@ func ensureSlice(s []string) []string {
 	if s == nil {
 		return []string{}
 	}
+
 	return s
 }

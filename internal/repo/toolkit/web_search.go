@@ -4,11 +4,28 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"sync"
 	"time"
 )
+
+// Package-level sentinel errors for web search.
+var (
+	ErrQueryRequired     = errors.New("query is required")
+	ErrNoValidQueries    = errors.New("at least one valid search query is required")
+	ErrInvalidQueryType  = errors.New("query must be a string or array of strings")
+	ErrRateLimitExceeded = errors.New("rate limit exceeded")
+)
+
+const defaultProvider = "tavily"
+
+// defaultHTTPTimeout is the HTTP client timeout for web search requests.
+const defaultHTTPTimeout = 30 * time.Second
+
+// defaultSearchResults is the default number of search results per query.
+const defaultSearchResults = 5
 
 // WebSearchConfig configures the web_search tool.
 type WebSearchConfig struct {
@@ -68,14 +85,16 @@ type WebSearch struct {
 // NewWebSearch creates a web search tool.
 func NewWebSearch(cfg WebSearchConfig) *WebSearch {
 	if cfg.Provider == "" {
-		cfg.Provider = "tavily"
+		cfg.Provider = defaultProvider
 	}
+
 	if cfg.BaseURL == "" {
 		cfg.BaseURL = "https://api.tavily.com"
 	}
+
 	return &WebSearch{
 		cfg:  cfg,
-		http: &http.Client{Timeout: 30 * time.Second},
+		http: &http.Client{Timeout: defaultHTTPTimeout},
 	}
 }
 
@@ -114,7 +133,7 @@ Use the current year in search queries when searching for recent information.`,
 				"max_results": map[string]any{
 					"type":        "integer",
 					"description": "Number of search results to return per query (1-50). Default: 5.",
-					"default":     5,
+					"default":     defaultSearchResults,
 				},
 			},
 			"required": []any{"query"},
@@ -124,39 +143,57 @@ Use the current year in search queries when searching for recent information.`,
 
 // Execute implements tool.Tool.
 func (w *WebSearch) Execute(ctx context.Context, args map[string]any) (any, error) {
-	maxResults := 5
-	if mr, ok := args["max_results"].(float64); ok {
-		if n := int(mr); n > 0 && n <= 50 {
-			maxResults = n
-		}
-	}
+	maxResults := parseMaxResults(args)
 
-	// Support both single string and []any batch
 	switch q := args["query"].(type) {
 	case string:
 		if q == "" {
-			return nil, fmt.Errorf("query is required")
+			return nil, fmt.Errorf("%w", ErrQueryRequired)
 		}
+
 		if err := w.rateLimit(ctx); err != nil {
 			return nil, err
 		}
+
 		return w.executeSingle(ctx, q, maxResults)
 
 	case []any:
-		queries := make([]string, 0, len(q))
-		for _, v := range q {
-			if s, ok := v.(string); ok && s != "" {
-				queries = append(queries, s)
-			}
-		}
+		queries := extractQueries(q)
 		if len(queries) == 0 {
-			return nil, fmt.Errorf("at least one valid search query is required")
+			return nil, fmt.Errorf("%w", ErrNoValidQueries)
 		}
+
 		return w.executeBatch(ctx, queries, maxResults)
 
 	default:
-		return nil, fmt.Errorf("query must be a string or array of strings")
+		return nil, fmt.Errorf("%w", ErrInvalidQueryType)
 	}
+}
+
+// parseMaxResults safely extracts and clamps the max_results argument.
+func parseMaxResults(args map[string]any) int {
+	mr, ok := args["max_results"].(float64)
+	if !ok {
+		return defaultSearchResults
+	}
+
+	if n := int(mr); n > 0 && n <= 50 {
+		return n
+	}
+
+	return defaultSearchResults
+}
+
+// extractQueries extracts non-empty string queries from a []any batch.
+func extractQueries(q []any) []string {
+	queries := make([]string, 0, len(q))
+	for _, v := range q {
+		if s, ok := v.(string); ok && s != "" {
+			queries = append(queries, s)
+		}
+	}
+
+	return queries
 }
 
 func (w *WebSearch) executeSingle(ctx context.Context, query string, maxResults int) (any, error) {
@@ -177,6 +214,7 @@ func (w *WebSearch) executeSingle(ctx context.Context, query string, maxResults 
 	if result.Error != "" {
 		out["error"] = result.Error
 	}
+
 	return out, nil
 }
 
@@ -189,12 +227,15 @@ func (w *WebSearch) executeBatch(ctx context.Context, queries []string, maxResul
 	}
 
 	ch := make(chan searchOut, len(queries))
+
 	var wg sync.WaitGroup
 
 	for i, q := range queries {
 		wg.Add(1)
+
 		go func(idx int, query string) {
 			defer wg.Done()
+
 			r := w.search(ctx, query, maxResults)
 			ch <- searchOut{result: r, index: idx}
 		}(i, q)
@@ -218,7 +259,7 @@ func (w *WebSearch) executeBatch(ctx context.Context, queries []string, maxResul
 
 func (w *WebSearch) search(ctx context.Context, query string, maxResults int) WebSearchResult {
 	switch w.cfg.Provider {
-	case "tavily":
+	case defaultProvider:
 		return w.searchTavily(ctx, query, maxResults)
 	case "google":
 		return w.searchGoogle(ctx, query, maxResults)
@@ -230,15 +271,6 @@ func (w *WebSearch) search(ctx context.Context, query string, maxResults int) We
 }
 
 // -- Tavily provider --
-
-type tavilyRequest struct {
-	APIKey        string `json:"api_key"`
-	Query         string `json:"query"`
-	MaxResults    int    `json:"max_results"`
-	IncludeImages bool   `json:"include_images"`
-	IncludeAnswer bool   `json:"include_answer"`
-	SearchDepth   string `json:"search_depth"`
-}
 
 type tavilyResponse struct {
 	Results []tavilyResult `json:"results"`
@@ -266,20 +298,23 @@ func (w *WebSearch) searchTavily(ctx context.Context, query string, maxResults i
 		}
 	}
 
-	body := tavilyRequest{
-		APIKey:        w.cfg.APIKey,
-		Query:         query,
-		MaxResults:    maxResults,
-		IncludeImages: true,
-		IncludeAnswer: true,
-		SearchDepth:   "advanced",
+	data, err := json.Marshal(map[string]any{
+		"api_key":        w.cfg.APIKey,
+		"query":          query,
+		"max_results":    maxResults,
+		"include_images": true,
+		"include_answer": true,
+		"search_depth":   "advanced",
+	})
+	if err != nil {
+		return WebSearchResult{Query: query, Success: false, Error: fmt.Sprintf("marshal search request: %v", err)}
 	}
 
-	data, _ := json.Marshal(body)
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, w.cfg.BaseURL+"/search", bytes.NewReader(data))
 	if err != nil {
 		return WebSearchResult{Query: query, Success: false, Error: err.Error()}
 	}
+
 	req.Header.Set("Content-Type", "application/json")
 
 	resp, err := w.http.Do(req)
@@ -295,12 +330,7 @@ func (w *WebSearch) searchTavily(ctx context.Context, query string, maxResults i
 
 	hits := make([]WebSearchHit, 0, len(tavilyResp.Results))
 	for _, r := range tavilyResp.Results {
-		hits = append(hits, WebSearchHit{
-			Title:   r.Title,
-			URL:     r.URL,
-			Content: r.Content,
-			Score:   r.Score,
-		})
+		hits = append(hits, WebSearchHit(r))
 	}
 
 	images := make([]WebSearchImage, 0, len(tavilyResp.Images))
@@ -309,6 +339,7 @@ func (w *WebSearch) searchTavily(ctx context.Context, query string, maxResults i
 	}
 
 	success := len(hits) > 0 || tavilyResp.Answer != ""
+
 	return WebSearchResult{
 		Query:   query,
 		Success: success,
@@ -320,7 +351,7 @@ func (w *WebSearch) searchTavily(ctx context.Context, query string, maxResults i
 
 // -- Mock provider (fallback when no API key) --
 
-func (w *WebSearch) searchMock(ctx context.Context, query string, maxResults int) WebSearchResult {
+func (w *WebSearch) searchMock(_ context.Context, query string, _ int) WebSearchResult {
 	return WebSearchResult{
 		Query:   query,
 		Success: false,
@@ -331,7 +362,7 @@ func (w *WebSearch) searchMock(ctx context.Context, query string, maxResults int
 
 // -- Placeholder providers (for future multi-backend support) --
 
-func (w *WebSearch) searchGoogle(ctx context.Context, query string, maxResults int) WebSearchResult {
+func (w *WebSearch) searchGoogle(_ context.Context, query string, _ int) WebSearchResult {
 	return WebSearchResult{
 		Query:   query,
 		Success: false,
@@ -339,7 +370,7 @@ func (w *WebSearch) searchGoogle(ctx context.Context, query string, maxResults i
 	}
 }
 
-func (w *WebSearch) searchBing(ctx context.Context, query string, maxResults int) WebSearchResult {
+func (w *WebSearch) searchBing(_ context.Context, query string, _ int) WebSearchResult {
 	return WebSearchResult{
 		Query:   query,
 		Success: false,
@@ -349,10 +380,11 @@ func (w *WebSearch) searchBing(ctx context.Context, query string, maxResults int
 
 // -- Rate limiting --
 
-func (w *WebSearch) rateLimit(ctx context.Context) error {
+func (w *WebSearch) rateLimit(_ context.Context) error {
 	if w.cfg.RatePerMinute <= 0 {
 		return nil
 	}
+
 	w.mu.Lock()
 	defer w.mu.Unlock()
 
@@ -360,17 +392,21 @@ func (w *WebSearch) rateLimit(ctx context.Context) error {
 	window := now.Add(-1 * time.Minute)
 
 	j := 0
+
 	for _, t := range w.slots {
 		if t.After(window) {
 			w.slots[j] = t
 			j++
 		}
 	}
+
 	w.slots = w.slots[:j]
 
 	if len(w.slots) >= w.cfg.RatePerMinute {
-		return fmt.Errorf("rate limit exceeded: max %d requests per minute", w.cfg.RatePerMinute)
+		return fmt.Errorf("%w: max %d requests per minute", ErrRateLimitExceeded, w.cfg.RatePerMinute)
 	}
+
 	w.slots = append(w.slots, now)
+
 	return nil
 }

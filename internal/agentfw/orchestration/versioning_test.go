@@ -7,6 +7,8 @@ import (
 )
 
 func TestValidateVersionPins(t *testing.T) {
+	t.Parallel()
+
 	compat := VersionCompatibility{
 		WorkflowVersions: []int{1, 2},
 		ToolSchemas:      []string{"v1", "v2"},

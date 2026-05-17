@@ -1,6 +1,6 @@
 // examples/supervisor-worker/main.go
 //
-// Supervisor-Worker Pattern
+// # Supervisor-Worker Pattern
 //
 // A supervisor agent decomposes a task and delegates sub-tasks to
 // worker agents running in parallel via Split/Join.
@@ -46,40 +46,7 @@ func main() {
 
 	status, err := c.ExecuteOrchestration(ctx, client.OrchestrationRequest{
 		RunID: runID,
-		Steps: []map[string]any{
-			{
-				"id": "decompose", "type": "agent", "agent_id": "supervisor",
-				"input": map[string]any{"message": "Decompose the task 'Build a web application' into 3 parallel work items: frontend, backend, and database design"},
-			},
-			{
-				"id": "execute", "type": "split",
-				"input": map[string]any{
-					"children": []map[string]any{
-						{
-							"id": "worker-frontend", "type": "agent", "agent_id": "worker",
-							"input": map[string]any{"message": "Design the frontend architecture: React components, state management, and routing"},
-						},
-						{
-							"id": "worker-backend", "type": "agent", "agent_id": "worker",
-							"input": map[string]any{"message": "Design the backend architecture: API endpoints, database models, and authentication"},
-						},
-						{
-							"id": "worker-database", "type": "agent", "agent_id": "worker",
-							"input": map[string]any{"message": "Design the database schema: tables, indexes, and migration strategy"},
-						},
-					},
-				},
-			},
-			{
-				"id": "gather", "type": "join",
-				"input": map[string]any{"_join_group": "execute"},
-			},
-			{
-				"id": "synthesize", "type": "agent", "agent_id": "supervisor",
-				"input":      map[string]any{"message": "Synthesize the worker outputs into a cohesive architecture plan"},
-				"depends_on": []string{"gather"},
-			},
-		},
+		Steps: supervisorWorkerSteps(),
 	})
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
@@ -96,4 +63,41 @@ func main() {
 	}
 
 	fmt.Printf("\nFinal status: lifecycle_state=%s step=%d\n", status.LifecycleState, status.Step)
+}
+
+func supervisorWorkerSteps() []map[string]any {
+	return []map[string]any{
+		{
+			"id": "decompose", "type": "agent", "agent_id": "supervisor",
+			"input": map[string]any{"message": "Decompose the task 'Build a web application' into 3 parallel work items: frontend, backend, and database design"},
+		},
+		{
+			"id": "execute", "type": "split",
+			"input": map[string]any{
+				"children": []map[string]any{
+					{
+						"id": "worker-frontend", "type": "agent", "agent_id": "worker",
+						"input": map[string]any{"message": "Design the frontend architecture: React components, state management, and routing"},
+					},
+					{
+						"id": "worker-backend", "type": "agent", "agent_id": "worker",
+						"input": map[string]any{"message": "Design the backend architecture: API endpoints, database models, and authentication"},
+					},
+					{
+						"id": "worker-database", "type": "agent", "agent_id": "worker",
+						"input": map[string]any{"message": "Design the database schema: tables, indexes, and migration strategy"},
+					},
+				},
+			},
+		},
+		{
+			"id": "gather", "type": "join",
+			"input": map[string]any{"_join_group": "execute"},
+		},
+		{
+			"id": "synthesize", "type": "agent", "agent_id": "supervisor",
+			"input":      map[string]any{"message": "Synthesize the worker outputs into a cohesive architecture plan"},
+			"depends_on": []string{"gather"},
+		},
+	}
 }

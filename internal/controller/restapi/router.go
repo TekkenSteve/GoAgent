@@ -3,7 +3,6 @@ package restapi
 import (
 	"net/http"
 
-	"github.com/ansrivas/fiberprometheus/v2"
 	"github.com/TekkenSteve/GoAgent/config"
 	_ "github.com/TekkenSteve/GoAgent/docs" // Swagger docs.
 	"github.com/TekkenSteve/GoAgent/internal/agentfw/stream"
@@ -12,6 +11,7 @@ import (
 	"github.com/TekkenSteve/GoAgent/internal/usecase"
 	"github.com/TekkenSteve/GoAgent/pkg/logger"
 	"github.com/TekkenSteve/GoAgent/pkg/redis"
+	"github.com/ansrivas/fiberprometheus/v2"
 	"github.com/gofiber/fiber/v2"
 	"github.com/gofiber/swagger"
 )
@@ -27,8 +27,8 @@ func NewRouter(app *fiber.App, cfg *config.Config, t usecase.AgentExecutor, o us
 	eventStore stream.EventStore, subscriber stream.Subscriber, gateway stream.StatelessGateway,
 	wsHub *stream.WebSocketHub,
 	cancelWorkflow v1.CancelWorkflowFn, signalWorkflow v1.SignalWorkflowFn,
-	m usecase.TemplateManager, eh usecase.TriggerEventHandler) {
-
+	m usecase.TemplateManager, eh usecase.TriggerEventHandler,
+) {
 	// Options
 	app.Use(middleware.Logger(l))
 	app.Use(middleware.Recovery(l))

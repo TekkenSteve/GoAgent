@@ -3,6 +3,7 @@ package pipeline
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"math/rand"
 	"sync"
@@ -10,6 +11,9 @@ import (
 
 	goredis "github.com/redis/go-redis/v9"
 )
+
+// ErrDLQEntryNotFound is returned when a DLQ entry is not found.
+var ErrDLQEntryNotFound = errors.New("DLQ entry not found")
 
 const (
 	dlqQueueKey   = "dlq:failed_writes"
@@ -52,12 +56,13 @@ func NewDeadLetterQueue(client goredis.Cmdable) *DeadLetterQueue {
 func (q *DeadLetterQueue) OnEntry(handler DLQHandler) {
 	q.mu.Lock()
 	defer q.mu.Unlock()
+
 	q.handlers = append(q.handlers, handler)
 }
 
 // Send adds a failed entry to the DLQ.
-func (q *DeadLetterQueue) Send(ctx context.Context, entry DLQEntry) error {
-	entry.FailedAt = float64(time.Now().UnixNano()) / 1e9
+func (q *DeadLetterQueue) Send(ctx context.Context, entry *DLQEntry) error {
+	entry.FailedAt = float64(time.Now().UnixNano()) / nanosPerSecond
 
 	payload, err := json.Marshal(entry)
 	if err != nil {
@@ -82,7 +87,7 @@ func (q *DeadLetterQueue) Send(ctx context.Context, entry DLQEntry) error {
 	q.mu.RUnlock()
 
 	for _, h := range handlers {
-		h(entry)
+		h(*entry)
 	}
 
 	return nil
@@ -101,10 +106,12 @@ func (q *DeadLetterQueue) GetEntries(ctx context.Context, count int, runID strin
 		if !ok {
 			continue
 		}
+
 		var entry DLQEntry
 		if err := json.Unmarshal([]byte(payload), &entry); err != nil {
 			continue
 		}
+
 		if runID == "" || entry.RunID == runID {
 			entries = append(entries, entry)
 			if count > 0 && len(entries) >= count {
@@ -128,10 +135,12 @@ func (q *DeadLetterQueue) RetryEntry(ctx context.Context, entryID string, wal *W
 		if !ok {
 			continue
 		}
+
 		var entry DLQEntry
 		if err := json.Unmarshal([]byte(payload), &entry); err != nil {
 			continue
 		}
+
 		if entry.EntryID != entryID {
 			continue
 		}
@@ -141,10 +150,11 @@ func (q *DeadLetterQueue) RetryEntry(ctx context.Context, entryID string, wal *W
 		}
 
 		q.client.XDel(ctx, dlqQueueKey, msg.ID)
+
 		return nil
 	}
 
-	return fmt.Errorf("DLQ - RetryEntry - entry %s not found", entryID)
+	return fmt.Errorf("%w: entry %s", ErrDLQEntryNotFound, entryID)
 }
 
 // DeleteEntry removes an entry from the DLQ.
@@ -159,10 +169,12 @@ func (q *DeadLetterQueue) DeleteEntry(ctx context.Context, entryID string) error
 		if !ok {
 			continue
 		}
+
 		var entry DLQEntry
 		if err := json.Unmarshal([]byte(payload), &entry); err != nil {
 			continue
 		}
+
 		if entry.EntryID == entryID {
 			return q.client.XDel(ctx, dlqQueueKey, msg.ID).Err()
 		}
@@ -181,9 +193,11 @@ func (q *DeadLetterQueue) Purge(ctx context.Context) error {
 	return q.client.Del(ctx, dlqQueueKey).Err()
 }
 
+const sampleSizeMultiplier = 2
+
 // CollectEntries returns a random sample of DLQ entries for observability.
 func (q *DeadLetterQueue) CollectEntries(ctx context.Context, sampleSize int) ([]DLQEntry, error) {
-	entries, err := q.GetEntries(ctx, sampleSize*2, "")
+	entries, err := q.GetEntries(ctx, sampleSize*sampleSizeMultiplier, "")
 	if err != nil {
 		return nil, err
 	}

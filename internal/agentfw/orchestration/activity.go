@@ -2,6 +2,7 @@ package orchestration
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
 
@@ -12,6 +13,11 @@ import (
 	triggeruc "github.com/TekkenSteve/GoAgent/internal/usecase/trigger"
 	"github.com/TekkenSteve/GoAgent/pkg/logger"
 	"github.com/google/uuid"
+)
+
+const (
+	defaultConcurrentLimit = 10
+	prepCompletePercent    = 100
 )
 
 // AgentActivities provides Temporal activity implementations for agent execution.
@@ -41,7 +47,6 @@ type MCPManagerProvider interface {
 	EnsureConnected(ctx context.Context, configs []entity.MCPServerConfig) ([]entity.ToolDef, []string)
 }
 
-
 // NewAgentActivities creates activities wired to the agent usecase.
 func NewAgentActivities(uc *agentuc.UseCase, eventStore stream.EventStore, l logger.Interface) *AgentActivities {
 	return &AgentActivities{agentUC: uc, eventStore: eventStore, logger: l}
@@ -50,54 +55,109 @@ func NewAgentActivities(uc *agentuc.UseCase, eventStore stream.EventStore, l log
 // WithTemplateRepo sets the template repo for activities that need it (e.g., FireTriggerActivity).
 func (a *AgentActivities) WithTemplateRepo(repo WorkflowTemplateRepoProvider) *AgentActivities {
 	a.templateRepo = repo
+
 	return a
 }
 
 // WithTriggerUC sets the trigger usecase for FireTriggerActivity.
 func (a *AgentActivities) WithTriggerUC(uc *triggeruc.UseCase) *AgentActivities {
 	a.triggerUC = uc
+
 	return a
 }
 
 // WithMCPManager sets the MCP manager for tool discovery in PrepareActivity.
 func (a *AgentActivities) WithMCPManager(m MCPManagerProvider) *AgentActivities {
 	a.mcpManager = m
+
 	return a
 }
 
 // WithBilling sets the billing usecase for credit checks and usage deduction.
 func (a *AgentActivities) WithBilling(uc *billinguc.UseCase) *AgentActivities {
 	a.billingUC = uc
+
 	return a
 }
 
-
 // ——— Activities (step-level, Temporal-native) ———
+type billingResult struct {
+	out *PrepBillingOutput
+	err error
+}
+
+type limitsResult struct {
+	out *PrepLimitsOutput
+	err error
+}
 
 // PrepareActivity runs the full prep pipeline: tool validation, message assembly,
 // billing/limits checks, and tool definition validation. It returns a composite
 // PrepareOutput with all check results and a CanProceed() gate for the workflow.
-func (a *AgentActivities) PrepareActivity(ctx context.Context, input PrepareInput) (*PrepareOutput, error) {
-	fmt.Printf("PrepareActivity: started, mcpManager=%v\n", a.mcpManager != nil)
+func (a *AgentActivities) PrepareActivity(ctx context.Context, input *PrepareInput) (*PrepareOutput, error) {
 	a.logger.Info("PrepareActivity: started, mcpManager=%v serverConfigs=%d", a.mcpManager != nil, len(input.MCPServerConfigs))
 
-	// Run prep checks concurrently
-	type billingResult struct {
-		out *PrepBillingOutput
-		err error
-	}
-	type limitsResult struct {
-		out *PrepLimitsOutput
-		err error
+	billingRes, limitsRes, toolsOut, mcpOut := a.runPrepChecks(ctx, input)
+	a.logger.Info("PrepareActivity: pre-checks done, billing.err=%v limits.err=%v", billingRes.err, limitsRes.err)
+
+	var errs []string
+	if billingRes.err != nil {
+		errs = append(errs, fmt.Sprintf("billing: %v", billingRes.err))
 	}
 
+	if limitsRes.err != nil {
+		errs = append(errs, fmt.Sprintf("limits: %v", limitsRes.err))
+	}
+
+	for _, name := range toolsOut.Failed {
+		errs = append(errs, fmt.Sprintf("tool: %s missing name or type", name))
+	}
+
+	for _, err := range mcpOut.Errors {
+		errs = append(errs, fmt.Sprintf("mcp: %s", err))
+	}
+
+	// Run Prep for message assembly
+	req := agentuc.PrepRequest{
+		SystemPrompt: input.SystemPrompt,
+		UserMessage:  input.Message,
+		History:      input.History,
+		Tools:        input.Tools,
+		Config:       input.Config,
+	}
+
+	prepResult, err := a.agentUC.Prep(ctx, &req)
+	if err != nil {
+		return nil, fmt.Errorf("PrepareActivity - Prep: %w", err)
+	}
+
+	a.logger.Info("PrepareActivity: Prep done, messages=%d", len(prepResult.Messages))
+
+	// Merge MCP-discovered tools with the prep result tools
+	allTools := prepResult.Tools
+	allTools = append(allTools, mcpOut.Tools...)
+
+	a.logger.Info("PrepareActivity: completed, errors=%v", errs)
+
+	return &PrepareOutput{
+		Messages: prepResult.Messages,
+		Tools:    allTools,
+		Billing:  billingRes.out,
+		Limits:   limitsRes.out,
+		ToolDefs: toolsOut,
+		Errors:   errs,
+	}, nil
+}
+
+// runPrepChecks runs the concurrent billing/limits checks and inline tools/MCP validation.
+func (a *AgentActivities) runPrepChecks(ctx context.Context, input *PrepareInput) (billingRes billingResult, limitsRes limitsResult, toolsOut *PrepToolsOutput, mcpOut *PrepMCPOutput) {
 	billingCh := make(chan billingResult, 1)
 	limitsCh := make(chan limitsResult, 1)
 
 	go func() {
 		billing, err := a.prepBilling(ctx, PrepBillingInput{
-			AccountID:	input.AccountID,
-				ModelRef: input.Config.Model,
+			AccountID: input.AccountID,
+			ModelRef:  input.Config.Model,
 		})
 		billingCh <- billingResult{billing, err}
 	}()
@@ -110,61 +170,18 @@ func (a *AgentActivities) PrepareActivity(ctx context.Context, input PrepareInpu
 	}()
 
 	// Tool validation runs inline
-	toolsOut := a.prepTools(ctx, PrepToolsInput{Tools: input.Tools})
+	toolsOut = a.prepTools(ctx, PrepToolsInput{Tools: input.Tools})
 
 	// Wait for concurrent checks
-	billingRes := <-billingCh
-	limitsRes := <-limitsCh
-	fmt.Printf("PrepareActivity: pre-checks done, billing.err=%v limits.err=%v\n", billingRes.err, limitsRes.err)
-
-	var errors []string
-	if billingRes.err != nil {
-		errors = append(errors, fmt.Sprintf("billing: %v", billingRes.err))
-	}
-	if limitsRes.err != nil {
-		errors = append(errors, fmt.Sprintf("limits: %v", limitsRes.err))
-	}
-	for _, name := range toolsOut.Failed {
-		errors = append(errors, fmt.Sprintf("tool: %s missing name or type", name))
-	}
+	billingRes = <-billingCh
+	limitsRes = <-limitsCh
 
 	// MCP tool resolution runs in the prep pipeline
-	mcpOut := a.prepMCP(ctx, PrepMCPInput{
+	mcpOut = a.prepMCP(ctx, PrepMCPInput{
 		ServerConfigs: input.MCPServerConfigs,
 	})
-	for _, err := range mcpOut.Errors {
-		errors = append(errors, fmt.Sprintf("mcp: %s", err))
-	}
 
-	// Run Prep for message assembly
-	req := agentuc.PrepRequest{
-		SystemPrompt: input.SystemPrompt,
-		UserMessage:  input.Message,
-		History:      input.History,
-		Tools:        input.Tools,
-		Config:       input.Config,
-	}
-
-	prepResult, err := a.agentUC.Prep(ctx, req)
-	if err != nil {
-		return nil, fmt.Errorf("PrepareActivity - Prep: %w", err)
-	}
-	fmt.Printf("PrepareActivity: Prep done, messages=%d\n", len(prepResult.Messages))
-
-	// Merge MCP-discovered tools with the prep result tools
-	allTools := prepResult.Tools
-	allTools = append(allTools, mcpOut.Tools...)
-
-	a.logger.Info("PrepareActivity: completed, errors=%v", errors)
-
-	return &PrepareOutput{
-		Messages: prepResult.Messages,
-		Tools:    allTools,
-		Billing:  billingRes.out,
-		Limits:   limitsRes.out,
-		ToolDefs: toolsOut,
-		Errors:   errors,
-	}, nil
+	return billingRes, limitsRes, toolsOut, mcpOut
 }
 
 // prepBilling validates account billing/quota.
@@ -198,26 +215,31 @@ func (a *AgentActivities) prepBilling(ctx context.Context, input PrepBillingInpu
 }
 
 // prepLimits validates concurrent run limits (pass-through: no counter configured).
-func (a *AgentActivities) prepLimits(ctx context.Context, input PrepLimitsInput) (*PrepLimitsOutput, error) {
+func (a *AgentActivities) prepLimits(_ context.Context, _ PrepLimitsInput) (*PrepLimitsOutput, error) { //nolint:unparam // always returns nil error, caller expects interface shape
 	return &PrepLimitsOutput{
 		Approved:        true,
-		ConcurrentLimit: 10,
+		ConcurrentLimit: defaultConcurrentLimit,
 	}, nil
 }
 
 // prepTools validates tool definitions and resolves any tool references.
-func (a *AgentActivities) prepTools(ctx context.Context, input PrepToolsInput) *PrepToolsOutput {
+func (a *AgentActivities) prepTools(_ context.Context, input PrepToolsInput) *PrepToolsOutput {
 	var failed []string
+
 	for _, tool := range input.Tools {
 		if tool.Function.Name == "" {
 			failed = append(failed, "<unnamed>")
+
 			continue
 		}
+
 		if tool.Type == "" {
 			failed = append(failed, tool.Function.Name)
+
 			continue
 		}
 	}
+
 	return &PrepToolsOutput{
 		Tools:    input.Tools,
 		Resolved: len(input.Tools) - len(failed),
@@ -244,14 +266,15 @@ func (a *AgentActivities) prepMCP(ctx context.Context, input PrepMCPInput) *Prep
 
 // LLMStepActivity performs a single sync LLM call and returns the result.
 // Deducts usage cost from account balance after a successful LLM call.
-func (a *AgentActivities) LLMStepActivity(ctx context.Context, input LLMStepInput) (*LLMStepOutput, error) {
-	fmt.Printf("LLMStepActivity: started, model=%s messages=%d tools=%d\n", input.Config.Model, len(input.Messages), len(input.Tools))
+func (a *AgentActivities) LLMStepActivity(ctx context.Context, input *LLMStepInput) (*LLMStepOutput, error) {
+	a.logger.Info("LLMStepActivity: started, model=%s messages=%d tools=%d", input.Config.Model, len(input.Messages), len(input.Tools))
+
 	result, err := a.agentUC.LLMStep(ctx, input.RunID, input.Messages, input.Tools, input.Config)
 	if err != nil {
 		return nil, fmt.Errorf("LLMStepActivity - LLMStep: %w", err)
 	}
 
-	fmt.Printf("LLMStepActivity: completed, finish_reason=%s tool_calls=%d\n", result.FinishReason, len(result.ToolCalls))
+	a.logger.Info("LLMStepActivity: completed, finish_reason=%s tool_calls=%d", result.FinishReason, len(result.ToolCalls))
 
 	// Deduct usage cost after successful LLM call
 	if a.billingUC != nil && input.AccountID != "" && result.Usage.TotalTokens > 0 {
@@ -292,12 +315,17 @@ func (a *AgentActivities) ToolExecActivity(ctx context.Context, input ToolInput)
 
 // InitStreamActivity writes stream init events to the EventStore and runs Prep.
 // Combines AgentRunStart + PrepStage → Prep → PrepStage ready in one activity.
-func (a *AgentActivities) InitStreamActivity(ctx context.Context, input InitStreamInput) (*InitStreamOutput, error) {
+func (a *AgentActivities) InitStreamActivity(ctx context.Context, input *InitStreamInput) (*InitStreamOutput, error) {
 	// Write start and prep-stage events to EventStore
-	_, _ = a.eventStore.Append(ctx, input.SessionID, input.RunID, entity.NewAgentRunStartEvent(input.Message))
-	_, _ = a.eventStore.Append(ctx, input.SessionID, input.RunID, entity.NewPrepStageEvent("initializing", 0))
+	if _, err := a.eventStore.Append(ctx, input.SessionID, input.RunID, entity.NewAgentRunStartEvent(input.Message)); err != nil {
+		a.logger.Warn("InitStreamActivity - append start event: %v", err)
+	}
 
-	prepResult, err := a.agentUC.Prep(ctx, agentuc.PrepRequest{
+	if _, err := a.eventStore.Append(ctx, input.SessionID, input.RunID, entity.NewPrepStageEvent("initializing", 0)); err != nil {
+		a.logger.Warn("InitStreamActivity - append prep event: %v", err)
+	}
+
+	prepResult, err := a.agentUC.Prep(ctx, &agentuc.PrepRequest{
 		SystemPrompt: input.SystemPrompt,
 		UserMessage:  input.Message,
 		History:      input.History,
@@ -314,7 +342,9 @@ func (a *AgentActivities) InitStreamActivity(ctx context.Context, input InitStre
 	allTools := prepResult.Tools
 	allTools = append(allTools, mcpOut.Tools...)
 
-	_, _ = a.eventStore.Append(ctx, input.SessionID, input.RunID, entity.NewPrepStageEvent("ready", 100))
+	if _, err := a.eventStore.Append(ctx, input.SessionID, input.RunID, entity.NewPrepStageEvent("ready", prepCompletePercent)); err != nil {
+		a.logger.Warn("InitStreamActivity - append ready event: %v", err)
+	}
 
 	return &InitStreamOutput{
 		Messages: prepResult.Messages,
@@ -325,7 +355,7 @@ func (a *AgentActivities) InitStreamActivity(ctx context.Context, input InitStre
 // LLMStreamActivity performs a single streaming LLM call, writing delta events
 // to the EventStore. Heartbeat carries the last-written sequence for retry recovery.
 // Deducts usage cost from account balance after a successful LLM call.
-func (a *AgentActivities) LLMStreamActivity(ctx context.Context, input LLMStreamInput) (*LLMStreamOutput, error) {
+func (a *AgentActivities) LLMStreamActivity(ctx context.Context, input *LLMStreamInput) (*LLMStreamOutput, error) {
 	writer := &eventStoreWriter{
 		store:     a.eventStore,
 		sessionID: input.SessionID,
@@ -356,7 +386,9 @@ func (a *AgentActivities) ToolExecStreamActivity(ctx context.Context, input Tool
 	sessionID, runID := input.RunID, input.RunID
 
 	// Write ToolExecStart
-	_, _ = a.eventStore.Append(ctx, sessionID, runID, entity.NewToolExecStartEvent(input.ToolCallID, input.ToolName))
+	if _, err := a.eventStore.Append(ctx, sessionID, runID, entity.NewToolExecStartEvent(input.ToolCallID, input.ToolName)); err != nil {
+		a.logger.Warn("ToolExecStreamActivity - append start event: %v", err)
+	}
 
 	execStart := time.Now()
 	result, err := a.agentUC.ExecTool(ctx, runID, entity.ToolCall{
@@ -364,7 +396,7 @@ func (a *AgentActivities) ToolExecStreamActivity(ctx context.Context, input Tool
 		Type: "function",
 		Function: entity.ToolCallFunction{
 			Name:      input.ToolName,
-			Arguments: "", // args re-marshalled from input.Args
+			Arguments: "", // args re-marshaled from input.Args
 		},
 	})
 	durationMs := time.Since(execStart).Milliseconds()
@@ -380,9 +412,11 @@ func (a *AgentActivities) ToolExecStreamActivity(ctx context.Context, input Tool
 	}
 
 	// Write ToolExecFinish
-	_, _ = a.eventStore.Append(ctx, sessionID, runID, entity.NewToolExecFinishEvent(
+	if _, err := a.eventStore.Append(ctx, sessionID, runID, entity.NewToolExecFinishEvent(
 		input.ToolCallID, input.ToolName, output, exitCode, isError, durationMs,
-	))
+	)); err != nil {
+		a.logger.Warn("ToolExecStreamActivity - append finish event: %v", err)
+	}
 
 	return &ToolOutput{
 		Output:     output,
@@ -395,15 +429,21 @@ func (a *AgentActivities) ToolExecStreamActivity(ctx context.Context, input Tool
 // FinishStreamActivity writes the AgentRunFinish event to the EventStore.
 func (a *AgentActivities) FinishStreamActivity(ctx context.Context, input FinishStreamInput) error {
 	_, err := a.eventStore.Append(ctx, input.SessionID, input.RunID, input.Event)
+
 	return err
 }
+
+var (
+	ErrTriggerActivityNotConfigured    = errors.New("triggerUC/templateRepo not configured")
+	ErrTriggerActivityTemplateNotFound = errors.New("template not found")
+)
 
 // FireTriggerActivity loads a trigger and its associated template, records the fire
 // time, and returns the data needed for the TriggerFireWorkflow to dispatch a child
 // AgentWorkflow. Returns an error if the trigger or template is not found.
 func (a *AgentActivities) FireTriggerActivity(ctx context.Context, triggerID string) (*FireTriggerInput, error) {
 	if a.triggerUC == nil || a.templateRepo == nil {
-		return nil, fmt.Errorf("FireTriggerActivity - triggerUC/templateRepo not configured")
+		return nil, fmt.Errorf("FireTriggerActivity - %w", ErrTriggerActivityNotConfigured)
 	}
 
 	// Validate trigger exists and record fire time via the usecase
@@ -416,8 +456,9 @@ func (a *AgentActivities) FireTriggerActivity(ctx context.Context, triggerID str
 	if err != nil {
 		return nil, fmt.Errorf("FireTriggerActivity - get template: %w", err)
 	}
+
 	if !exists {
-		return nil, fmt.Errorf("FireTriggerActivity - template not found: %s", trigger.TemplateID)
+		return nil, fmt.Errorf("FireTriggerActivity - %w: %s", ErrTriggerActivityTemplateNotFound, trigger.TemplateID)
 	}
 
 	// Resolve {{variable}} placeholders in the agent prompt
@@ -440,7 +481,7 @@ func (a *AgentActivities) FireTriggerActivity(ctx context.Context, triggerID str
 	}
 
 	// Log rich audit trail (best-effort, non-fatal)
-	a.triggerUC.LogTriggerExecution(ctx, triggerID, entity.TriggerEventLog{
+	a.triggerUC.LogTriggerExecution(ctx, triggerID, &entity.TriggerEventLog{
 		TriggerID:     triggerID,
 		TemplateID:    trigger.TemplateID,
 		TriggerType:   trigger.TriggerType,
@@ -458,7 +499,6 @@ func (a *AgentActivities) FireTriggerActivity(ctx context.Context, triggerID str
 	}, nil
 }
 
-
 // ——— Internal helpers ———
 
 // eventStoreWriter implements usecase.StreamEventWriter by appending to EventStore.
@@ -470,6 +510,7 @@ type eventStoreWriter struct {
 
 func (w *eventStoreWriter) WriteEvent(ctx context.Context, event entity.StreamEvent) error {
 	_, err := w.store.Append(ctx, w.sessionID, w.runID, event)
+
 	return err
 }
 

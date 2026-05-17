@@ -27,6 +27,7 @@ func (h *triggerWebhookHandler) handleEvent(ctx *fiber.Ctx) error {
 	if err := ctx.BodyParser(&req); err != nil {
 		return errorResponse(ctx, http.StatusBadRequest, "invalid request body")
 	}
+
 	if req.EventSlug == "" {
 		return errorResponse(ctx, http.StatusBadRequest, "event_slug is required")
 	}
@@ -39,19 +40,22 @@ func (h *triggerWebhookHandler) handleEvent(ctx *fiber.Ctx) error {
 	results, err := h.eh.HandleEvent(ctx.UserContext(), req.EventSlug, req.Payload)
 	if err != nil {
 		h.l.Warn("trigger webhook: %v", err)
+
 		return errorResponse(ctx, http.StatusNotFound, fmt.Sprintf("no triggers matched event: %s", req.EventSlug))
 	}
 
 	// Start an agent workflow for each resolved trigger
 	fired := make([]response.TriggerFireResult, 0, len(results))
+
 	var lastErr error
+
 	for _, r := range results {
 		runID := r.RunID
 		if runID == "" {
 			runID = uuid.New().String()
 		}
 
-		status, execErr := h.t.Execute(ctx.UserContext(), entity.ExecuteRequest{
+		status, execErr := h.t.Execute(ctx.UserContext(), &entity.ExecuteRequest{
 			RunID:        runID,
 			SystemPrompt: r.SystemPrompt,
 			UserMessage:  r.Message,
@@ -60,11 +64,13 @@ func (h *triggerWebhookHandler) handleEvent(ctx *fiber.Ctx) error {
 		if execErr != nil {
 			lastErr = execErr
 			h.l.Error("trigger webhook - start workflow for trigger %s: %v", r.TriggerID, execErr)
+
 			continue
 		}
+
 		_ = status
 
-		fired = append(fired, response.NewTriggerFireResult(r))
+		fired = append(fired, response.NewTriggerFireResult(&r))
 	}
 
 	if len(fired) == 0 && lastErr != nil {

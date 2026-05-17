@@ -46,42 +46,7 @@ func main() {
 
 	status, err := c.ExecuteOrchestration(ctx, client.OrchestrationRequest{
 		RunID: runID,
-		Steps: []map[string]any{
-			{
-				"id": "hypothesis", "type": "agent", "agent_id": "scientist",
-				"input": map[string]any{"message": "Formulate a hypothesis about the relationship between temperature and CPU performance"},
-			},
-			{
-				"id": "design", "type": "agent", "agent_id": "scientist",
-				"input":      map[string]any{"message": "Design an experiment to test the hypothesis"},
-				"depends_on": []string{"hypothesis"},
-			},
-			{
-				"id": "review", "type": "wait",
-				"wait_for": map[string]any{
-					"signal_name": "expert-approval",
-					// 604800000000000 = 7 days in nanoseconds
-					"timeout":    604800000000000,
-					"on_timeout": "fail",
-				},
-				"depends_on": []string{"design"},
-			},
-			{
-				"id": "run-experiment", "type": "tool", "tool": "calculator",
-				"input":      map[string]any{"expression": "85 * 1.5 + 12"},
-				"depends_on": []string{"review"},
-			},
-			{
-				"id": "analyze", "type": "agent", "agent_id": "scientist",
-				"input":      map[string]any{"message": "Analyze the experimental results and draw conclusions"},
-				"depends_on": []string{"run-experiment"},
-			},
-			{
-				"id": "conclude", "type": "eval",
-				"input":      map[string]any{"condition": "hypothesis_supported"},
-				"depends_on": []string{"analyze"},
-			},
-		},
+		Steps: scientificSteps(),
 	})
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
@@ -100,4 +65,43 @@ func main() {
 	}
 
 	fmt.Printf("\nFinal status: lifecycle_state=%s step=%d\n", status.LifecycleState, status.Step)
+}
+
+func scientificSteps() []map[string]any {
+	return []map[string]any{
+		{
+			"id": "hypothesis", "type": "agent", "agent_id": "scientist",
+			"input": map[string]any{"message": "Formulate a hypothesis about the relationship between temperature and CPU performance"},
+		},
+		{
+			"id": "design", "type": "agent", "agent_id": "scientist",
+			"input":      map[string]any{"message": "Design an experiment to test the hypothesis"},
+			"depends_on": []string{"hypothesis"},
+		},
+		{
+			"id": "review", "type": "wait",
+			"wait_for": map[string]any{
+				"signal_name": "expert-approval",
+				// 604800000000000 = 7 days in nanoseconds
+				"timeout":    604800000000000,
+				"on_timeout": "fail",
+			},
+			"depends_on": []string{"design"},
+		},
+		{
+			"id": "run-experiment", "type": "tool", "tool": "calculator",
+			"input":      map[string]any{"expression": "85 * 1.5 + 12"},
+			"depends_on": []string{"review"},
+		},
+		{
+			"id": "analyze", "type": "agent", "agent_id": "scientist",
+			"input":      map[string]any{"message": "Analyze the experimental results and draw conclusions"},
+			"depends_on": []string{"run-experiment"},
+		},
+		{
+			"id": "conclude", "type": "eval",
+			"input":      map[string]any{"condition": "hypothesis_supported"},
+			"depends_on": []string{"analyze"},
+		},
+	}
 }

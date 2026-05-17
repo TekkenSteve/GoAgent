@@ -1,6 +1,6 @@
 // examples/plan-and-execute/main.go
 //
-// Plan-and-Execute Pattern
+// # Plan-and-Execute Pattern
 //
 // A planning agent first creates a step-by-step plan, then execution
 // agents carry out each step in parallel via Split/Join. An eval step
@@ -47,54 +47,7 @@ func main() {
 
 	status, err := c.ExecuteOrchestration(ctx, client.OrchestrationRequest{
 		RunID: runID,
-		Steps: []map[string]any{
-			{
-				"id": "plan", "type": "agent", "agent_id": "planner",
-				"input": map[string]any{"message": "Create a plan for: 'Set up a CI/CD pipeline with GitHub Actions'. Break it into 3 parallel tasks."},
-			},
-			{
-				"id": "execute", "type": "split",
-				"input": map[string]any{
-					"children": []map[string]any{
-						{
-							"id": "task-setup", "type": "agent", "agent_id": "worker",
-							"input": map[string]any{"message": "Design the workflow structure: triggers, jobs, and environment configuration"},
-						},
-						{
-							"id": "task-test", "type": "agent", "agent_id": "worker",
-							"input": map[string]any{"message": "Design the test automation: unit tests, integration tests, and linting steps"},
-						},
-						{
-							"id": "task-deploy", "type": "agent", "agent_id": "worker",
-							"input": map[string]any{"message": "Design the deployment: build, package, and deploy stages with rollback strategy"},
-						},
-					},
-				},
-			},
-			{
-				"id": "gather", "type": "join",
-				"input": map[string]any{"_join_group": "execute"},
-			},
-			{
-				"id": "evaluate", "type": "eval",
-				"input": map[string]any{"condition": "plan_complete"},
-				"on_result": map[string]any{
-					"append_after": "evaluate",
-					"insert_steps": []map[string]any{
-						{
-							"id": "task-security", "type": "agent", "agent_id": "worker",
-							"input":      map[string]any{"message": "Add security scanning: dependency audit, SAST, and secrets detection"},
-							"depends_on": []string{"evaluate"},
-						},
-					},
-				},
-			},
-			{
-				"id": "report", "type": "agent", "agent_id": "planner",
-				"input":      map[string]any{"message": "Synthesize all task outputs into a comprehensive CI/CD implementation plan"},
-				"depends_on": []string{"evaluate"},
-			},
-		},
+		Steps: planExecuteSteps(),
 	})
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
@@ -111,4 +64,55 @@ func main() {
 	}
 
 	fmt.Printf("\nFinal status: lifecycle_state=%s step=%d\n", status.LifecycleState, status.Step)
+}
+
+func planExecuteSteps() []map[string]any {
+	return []map[string]any{
+		{
+			"id": "plan", "type": "agent", "agent_id": "planner",
+			"input": map[string]any{"message": "Create a plan for: 'Set up a CI/CD pipeline with GitHub Actions'. Break it into 3 parallel tasks."},
+		},
+		{
+			"id": "execute", "type": "split",
+			"input": map[string]any{
+				"children": []map[string]any{
+					{
+						"id": "task-setup", "type": "agent", "agent_id": "worker",
+						"input": map[string]any{"message": "Design the workflow structure: triggers, jobs, and environment configuration"},
+					},
+					{
+						"id": "task-test", "type": "agent", "agent_id": "worker",
+						"input": map[string]any{"message": "Design the test automation: unit tests, integration tests, and linting steps"},
+					},
+					{
+						"id": "task-deploy", "type": "agent", "agent_id": "worker",
+						"input": map[string]any{"message": "Design the deployment: build, package, and deploy stages with rollback strategy"},
+					},
+				},
+			},
+		},
+		{
+			"id": "gather", "type": "join",
+			"input": map[string]any{"_join_group": "execute"},
+		},
+		{
+			"id": "evaluate", "type": "eval",
+			"input": map[string]any{"condition": "plan_complete"},
+			"on_result": map[string]any{
+				"append_after": "evaluate",
+				"insert_steps": []map[string]any{
+					{
+						"id": "task-security", "type": "agent", "agent_id": "worker",
+						"input":      map[string]any{"message": "Add security scanning: dependency audit, SAST, and secrets detection"},
+						"depends_on": []string{"evaluate"},
+					},
+				},
+			},
+		},
+		{
+			"id": "report", "type": "agent", "agent_id": "planner",
+			"input":      map[string]any{"message": "Synthesize all task outputs into a comprehensive CI/CD implementation plan"},
+			"depends_on": []string{"evaluate"},
+		},
+	}
 }

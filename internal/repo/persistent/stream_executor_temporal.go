@@ -30,7 +30,7 @@ func NewTemporalStreamExecutor(c client.Client, taskQueue string) *TemporalStrea
 // ExecuteStream starts a Temporal streaming workflow and returns immediately.
 // The workflow activities write events to the EventStore, which the controller
 // consumes via its EventStore subscription.
-func (e *TemporalStreamExecutor) ExecuteStream(ctx context.Context, req entity.StreamRequest, _ usecase.StreamEventWriter) error {
+func (e *TemporalStreamExecutor) ExecuteStream(ctx context.Context, req *entity.StreamRequest, _ usecase.StreamEventWriter) error {
 	workflowID := "agentfw-stream-" + req.RunID
 
 	input := orchestration.InitStreamInput{
@@ -48,7 +48,7 @@ func (e *TemporalStreamExecutor) ExecuteStream(ctx context.Context, req entity.S
 	_, err := e.client.ExecuteWorkflow(ctx, client.StartWorkflowOptions{
 		ID:        workflowID,
 		TaskQueue: e.taskQueue,
-	}, orchestration.StreamWorkflowName, input)
+	}, orchestration.StreamWorkflowName, &input)
 	if err != nil {
 		return fmt.Errorf("TemporalStreamExecutor - ExecuteStream - start workflow: %w", err)
 	}

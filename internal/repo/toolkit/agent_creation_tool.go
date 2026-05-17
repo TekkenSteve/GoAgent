@@ -60,24 +60,48 @@ func (t *AgentCreationTool) Meta() ToolMeta {
 	return t.meta
 }
 
-// Execute creates a new agent with the given configuration.
-func (t *AgentCreationTool) Execute(ctx context.Context, args map[string]any) (any, error) {
-	agentID, _ := args["agent_id"].(string)
-	name, _ := args["name"].(string)
-	systemPrompt, _ := args["system_prompt"].(string)
-	modelRef, _ := args["model_ref"].(string)
+type agentConfig struct {
+	id, name, systemPrompt, modelRef string
+	tools                            []string
+}
 
-	if agentID == "" || name == "" {
-		return nil, fmt.Errorf("agent_creation_tool: agent_id and name are required")
+var ErrAgentCreateFieldRequired = fmt.Errorf("agent_creation_tool: missing required field")
+
+func parseAgentArgs(args map[string]any) (*agentConfig, error) {
+	cfg := &agentConfig{modelRef: "gpt-4"}
+
+	required := []struct {
+		key string
+		ptr *string
+	}{
+		{"agent_id", &cfg.id},
+		{"name", &cfg.name},
+		{"system_prompt", &cfg.systemPrompt},
 	}
-	if systemPrompt == "" {
-		return nil, fmt.Errorf("agent_creation_tool: system_prompt is required")
-	}
-	if modelRef == "" {
-		modelRef = "gpt-4" // default
+	for _, r := range required {
+		v, ok := args[r.key].(string)
+		if !ok || v == "" {
+			return nil, fmt.Errorf("%w: %s", ErrAgentCreateFieldRequired, r.key)
+		}
+
+		*r.ptr = v
 	}
 
-	toolsRaw, _ := args["tools"].([]any)
+	if ref, ok := args["model_ref"].(string); ok && ref != "" {
+		cfg.modelRef = ref
+	}
+
+	cfg.tools = parseToolList(args["tools"])
+
+	return cfg, nil
+}
+
+func parseToolList(raw any) []string {
+	toolsRaw, ok := raw.([]any)
+	if !ok {
+		return nil
+	}
+
 	tools := make([]string, 0, len(toolsRaw))
 	for _, t := range toolsRaw {
 		if s, ok := t.(string); ok {
@@ -85,13 +109,23 @@ func (t *AgentCreationTool) Execute(ctx context.Context, args map[string]any) (a
 		}
 	}
 
-	if err := t.creator(ctx, agentID, name, systemPrompt, modelRef, tools); err != nil {
+	return tools
+}
+
+// Execute creates a new agent with the given configuration.
+func (t *AgentCreationTool) Execute(ctx context.Context, args map[string]any) (any, error) {
+	cfg, err := parseAgentArgs(args)
+	if err != nil {
+		return nil, err
+	}
+
+	if err := t.creator(ctx, cfg.id, cfg.name, cfg.systemPrompt, cfg.modelRef, cfg.tools); err != nil {
 		return nil, fmt.Errorf("agent_creation_tool - create: %w", err)
 	}
 
 	return map[string]any{
-		"agent_id": agentID,
-		"name":     name,
+		"agent_id": cfg.id,
+		"name":     cfg.name,
 		"status":   "created",
 	}, nil
 }

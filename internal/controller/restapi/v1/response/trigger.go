@@ -11,7 +11,7 @@ type TriggerFireResult struct {
 }
 
 // NewTriggerFireResult -.
-func NewTriggerFireResult(r entity.TriggerFireResult) TriggerFireResult {
+func NewTriggerFireResult(r *entity.TriggerFireResult) TriggerFireResult {
 	return TriggerFireResult{
 		TriggerID: r.TriggerID,
 		RunID:     r.RunID,
@@ -22,7 +22,7 @@ func NewTriggerFireResult(r entity.TriggerFireResult) TriggerFireResult {
 
 // EventWebhookResponse -.
 type EventWebhookResponse struct {
-	EventSlug string               `json:"event_slug"`
-	Fired     []TriggerFireResult  `json:"fired"`
-	Count     int                  `json:"count"`
+	EventSlug string              `json:"event_slug"`
+	Fired     []TriggerFireResult `json:"fired"`
+	Count     int                 `json:"count"`
 }

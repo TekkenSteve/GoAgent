@@ -17,7 +17,11 @@ func WithCorrelationID(ctx context.Context, correlationID string) context.Contex
 
 // CorrelationID returns correlation id from context.
 func CorrelationID(ctx context.Context) string {
-	v, _ := ctx.Value(correlationIDKey).(string)
+	v, ok := ctx.Value(correlationIDKey).(string)
+	if !ok {
+		return ""
+	}
+
 	return v
 }
 
@@ -40,6 +44,7 @@ func NewMetricsRecorder() *MetricsRecorder {
 func (m *MetricsRecorder) Inc(name string) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+
 	m.counters[name]++
 }
 
@@ -47,6 +52,7 @@ func (m *MetricsRecorder) Inc(name string) {
 func (m *MetricsRecorder) Observe(name string, d time.Duration) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+
 	m.durations[name] = append(m.durations[name], d)
 }
 
@@ -54,5 +60,6 @@ func (m *MetricsRecorder) Observe(name string, d time.Duration) {
 func (m *MetricsRecorder) Counter(name string) int64 {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+
 	return m.counters[name]
 }

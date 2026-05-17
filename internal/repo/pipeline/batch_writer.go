@@ -3,6 +3,7 @@ package pipeline
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"sync"
 	"time"
@@ -11,10 +12,15 @@ import (
 	"github.com/TekkenSteve/GoAgent/pkg/logger"
 )
 
+var ErrUnknownWriteType = errors.New("unknown write type")
+
 const (
-	defaultFlushInterval = 5 * time.Second
-	defaultBatchSize     = 50
-	defaultMaxRetries    = 3
+	defaultFlushInterval            = 5 * time.Second
+	defaultBatchSize                = 50
+	defaultMaxRetries               = 3
+	defaultBatchBaseDelay           = 100 * time.Millisecond
+	batchMaxDelayMultiplier         = 5
+	nanosPerSecond          float64 = 1e9
 )
 
 // PostgresWriter is the interface for writing to Postgres (implemented by MessageRepo).
@@ -77,8 +83,8 @@ func NewBatchWriter(
 		ctx:           ctx,
 		cancel:        cancel,
 		retryPolicy: &ExponentialBackoff{
-			BaseDelay: 100 * time.Millisecond,
-			MaxDelay:  5 * time.Second,
+			BaseDelay: defaultBatchBaseDelay,
+			MaxDelay:  defaultBatchBaseDelay * batchMaxDelayMultiplier,
 			MaxRetry:  defaultMaxRetries,
 		},
 	}
@@ -93,7 +99,9 @@ func NewBatchWriter(
 // Start begins the background flush loop.
 func (b *BatchWriter) Start() {
 	b.wg.Add(1)
+
 	go b.loop()
+
 	b.log.Info("[BatchWriter] started (interval: %s, batch: %d)", b.flushInterval, b.batchSize)
 }
 
@@ -137,6 +145,7 @@ func (b *BatchWriter) flushAllRuns() {
 		if b.ctx.Err() != nil {
 			return
 		}
+
 		if err := b.flushRun(runID); err != nil {
 			b.log.Warn("[BatchWriter] flush run %s: %v", runID, err)
 		}
@@ -160,22 +169,11 @@ func (b *BatchWriter) flushRun(runID string) error {
 			return b.ctx.Err()
 		}
 
-		switch entry.WriteType {
-		case WriteTypeMessage:
-			id, err := b.flushMessage(entry)
-			if err == nil {
-				completedIDs = append(completedIDs, id)
-			} else {
-				b.handleFailure(entry, err.Error())
-			}
-
-		case WriteTypeToolResult:
-			id, err := b.flushToolResult(entry)
-			if err == nil {
-				completedIDs = append(completedIDs, id)
-			} else {
-				b.handleFailure(entry, err.Error())
-			}
+		id, err := b.flushEntry(&entry)
+		if err == nil {
+			completedIDs = append(completedIDs, id)
+		} else {
+			b.handleFailure(&entry, err.Error())
 		}
 	}
 
@@ -188,63 +186,83 @@ func (b *BatchWriter) flushRun(runID string) error {
 	return nil
 }
 
-func (b *BatchWriter) flushMessage(entry WALEntry) (string, error) {
+func (b *BatchWriter) flushMessage(entry *WALEntry) (string, error) {
 	var record entity.MessageRecord
 	if err := json.Unmarshal([]byte(entry.Data), &record); err != nil {
 		return entry.EntryID, fmt.Errorf("flushMessage - unmarshal: %w", err)
 	}
 
-	err := RetryFn(b.ctx, func(ctx context.Context) error {
+	return entry.EntryID, b.flushWithRetry(func(ctx context.Context) error {
 		_, err := b.pg.PersistMessage(ctx, record)
-		return err
-	}, b.retryPolicy)
 
-	if err != nil {
-		return entry.EntryID, fmt.Errorf("flushMessage: %w", err)
-	}
-	return entry.EntryID, nil
+		return err
+	}, "flushMessage")
 }
 
-func (b *BatchWriter) flushToolResult(entry WALEntry) (string, error) {
+func (b *BatchWriter) flushToolResult(entry *WALEntry) (string, error) {
 	var record entity.ToolResultRecord
 	if err := json.Unmarshal([]byte(entry.Data), &record); err != nil {
 		return entry.EntryID, fmt.Errorf("flushToolResult - unmarshal: %w", err)
 	}
 
-	err := RetryFn(b.ctx, func(ctx context.Context) error {
+	return entry.EntryID, b.flushWithRetry(func(ctx context.Context) error {
 		_, err := b.pg.PersistToolResult(ctx, record)
-		return err
-	}, b.retryPolicy)
 
-	if err != nil {
-		return entry.EntryID, fmt.Errorf("flushToolResult: %w", err)
-	}
-	return entry.EntryID, nil
+		return err
+	}, "flushToolResult")
 }
 
-func (b *BatchWriter) handleFailure(entry WALEntry, errStr string) {
+func (b *BatchWriter) flushWithRetry(fn func(ctx context.Context) error, name string) error {
+	err := RetryFn(b.ctx, fn, b.retryPolicy)
+	if err != nil {
+		return fmt.Errorf("%s: %w", name, err)
+	}
+
+	return nil
+}
+
+func (b *BatchWriter) flushEntry(entry *WALEntry) (string, error) {
+	switch entry.WriteType {
+	case WriteTypeMessage:
+		return b.flushMessage(entry)
+	case WriteTypeToolResult:
+		return b.flushToolResult(entry)
+	default:
+		return entry.EntryID, fmt.Errorf("%w: %s", ErrUnknownWriteType, entry.WriteType)
+	}
+}
+
+func (b *BatchWriter) handleFailure(entry *WALEntry, errStr string) {
 	entry.Attempts++
-	entry.LastAttempt = float64(time.Now().UnixNano()) / 1e9
+	entry.LastAttempt = float64(time.Now().UnixNano()) / nanosPerSecond
 	entry.LastError = errStr
 
 	if entry.Attempts >= defaultMaxRetries {
-		b.log.Warn("[BatchWriter] sending to DLQ: run=%s entry=%s attempts=%d err=%s",
-			entry.RunID, entry.EntryID, entry.Attempts, errStr)
-
-		if err := b.dlq.Send(b.ctx, DLQEntry{
-			EntryID:   entry.EntryID,
-			RunID:     entry.RunID,
-			WriteType: string(entry.WriteType),
-			Data:      entry.Data,
-			Error:     errStr,
-			Attempts:  entry.Attempts,
-			CreatedAt: entry.CreatedAt,
-		}); err != nil {
-			b.log.Error("[BatchWriter] dlq.Send failed: %v", err)
-		}
-
-		b.wal.MarkCompleted(b.ctx, entry.RunID, []string{entry.EntryID})
+		b.sendToDLQ(entry, errStr)
 	} else {
-		b.wal.MarkFailed(b.ctx, entry.RunID, entry.EntryID, errStr)
+		if err := b.wal.MarkFailed(b.ctx, entry.RunID, entry.EntryID, errStr); err != nil {
+			b.log.Warn("[BatchWriter] MarkFailed: %v", err)
+		}
+	}
+}
+
+func (b *BatchWriter) sendToDLQ(entry *WALEntry, errStr string) {
+	b.log.Warn("[BatchWriter] sending to DLQ: run=%s entry=%s attempts=%d err=%s",
+		entry.RunID, entry.EntryID, entry.Attempts, errStr)
+
+	if err := b.dlq.Send(b.ctx, &DLQEntry{
+		EntryID:   entry.EntryID,
+		RunID:     entry.RunID,
+		WriteType: string(entry.WriteType),
+		Data:      entry.Data,
+		Error:     errStr,
+		Attempts:  entry.Attempts,
+		CreatedAt: entry.CreatedAt,
+	}); err != nil {
+		b.log.Error("[BatchWriter] dlq.Send failed: %v", err)
+	}
+
+	if _, err := b.wal.MarkCompleted(b.ctx, entry.RunID, []string{entry.EntryID}); err != nil {
+		b.log.Warn("[BatchWriter] MarkCompleted handleFailure: %v", err)
 	}
 }

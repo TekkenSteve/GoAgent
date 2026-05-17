@@ -3,6 +3,7 @@ package agent
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -10,7 +11,13 @@ import (
 	"github.com/TekkenSteve/GoAgent/internal/entity"
 	"github.com/TekkenSteve/GoAgent/internal/repo"
 	"github.com/TekkenSteve/GoAgent/internal/usecase"
+	"github.com/TekkenSteve/GoAgent/pkg/logger"
 	"github.com/google/uuid"
+)
+
+var (
+	ErrAgentRepoNotAvailable = errors.New("agent repo not available")
+	ErrAgentNotFound         = errors.New("agent not found")
 )
 
 const maxToolRounds = 10
@@ -46,6 +53,13 @@ type UseCase struct {
 	compressor repo.ContextCompressor
 	toolDefs   usecase.ToolDefProvider
 	agentRepo  repo.AgentRepo // optional; nil in tests or when agent management is not wired
+	log        logger.Interface
+}
+
+// SetLogger attaches a logger to the use case for best-effort WAL diagnostics.
+// Safe to call with nil — logging calls are no-ops when no logger is set.
+func (uc *UseCase) SetLogger(l logger.Interface) {
+	uc.log = l
 }
 
 // New -.
@@ -89,7 +103,7 @@ func (uc *UseCase) LLMStep(ctx context.Context, runID string, messages []entity.
 		Config:   config,
 	}
 
-	resp, err := uc.llm.Chat(ctx, llmReq)
+	resp, err := uc.llm.Chat(ctx, &llmReq)
 	if err != nil {
 		return nil, classifyLLMError(err)
 	}
@@ -122,10 +136,10 @@ func (uc *UseCase) ExecTool(ctx context.Context, runID string, tc entity.ToolCal
 	}
 
 	execStart := time.Now()
-	result, execErr := uc.tools.Execute(ctx, toolReq)
+	result, execErr := uc.tools.Execute(ctx, &toolReq)
 	durationMs := time.Since(execStart).Milliseconds()
 
-	uc.appendToolResultToWAL(ctx, runID, result, tc)
+	uc.appendToolResultToWAL(ctx, runID, &result, tc)
 
 	output := ""
 	exitCode := 0
@@ -169,10 +183,12 @@ func (uc *UseCase) CompressIfNeeded(ctx context.Context, messages []entity.Messa
 	if uc.compressor == nil {
 		return messages, false, nil
 	}
+
 	compressedMsgs, compressed, err := uc.compressor.Compress(ctx, messages, config)
 	if err != nil {
 		return messages, false, err
 	}
+
 	return compressedMsgs, compressed, nil
 }
 
@@ -181,15 +197,18 @@ func (uc *UseCase) CompressIfNeeded(ctx context.Context, messages []entity.Messa
 // GetAgent returns the agent record for the given ID, using cache when available.
 func (uc *UseCase) GetAgent(ctx context.Context, agentID string) (entity.AgentRecord, error) {
 	if uc.agentRepo == nil {
-		return entity.AgentRecord{}, fmt.Errorf("agent repo not available")
+		return entity.AgentRecord{}, ErrAgentRepoNotAvailable
 	}
+
 	record, exists, err := uc.agentRepo.Get(ctx, agentID)
 	if err != nil {
 		return entity.AgentRecord{}, fmt.Errorf("GetAgent: %w", err)
 	}
+
 	if !exists {
-		return entity.AgentRecord{}, fmt.Errorf("agent not found: %s", agentID)
+		return entity.AgentRecord{}, fmt.Errorf("%w: %s", ErrAgentNotFound, agentID)
 	}
+
 	return record, nil
 }
 
@@ -197,7 +216,7 @@ func (uc *UseCase) GetAgent(ctx context.Context, agentID string) (entity.AgentRe
 // config) change, it auto-creates a version snapshot before applying the update.
 func (uc *UseCase) UpdateAgent(ctx context.Context, agentID string, req entity.UpdateAgentRequest) (entity.AgentRecord, error) {
 	if uc.agentRepo == nil {
-		return entity.AgentRecord{}, fmt.Errorf("agent repo not available")
+		return entity.AgentRecord{}, ErrAgentRepoNotAvailable
 	}
 
 	// Fetch current record to detect field changes
@@ -207,62 +226,62 @@ func (uc *UseCase) UpdateAgent(ctx context.Context, agentID string, req entity.U
 	}
 
 	// Detect config-relevant field changes and auto-version
-	systemPromptChanged := req.SystemPrompt != nil && *req.SystemPrompt != current.SystemPrompt
-	modelRefChanged := req.ModelRef != nil && *req.ModelRef != current.ModelRef
-	configChanged := req.Config != nil
-
-	if systemPromptChanged || modelRefChanged || configChanged {
-		newVersionID := uuid.New().String()
-		now := time.Now().UTC()
-
-		version := entity.AgentVersionRecord{
-			VersionID:   newVersionID,
-			AgentID:     agentID,
-			VersionName: fmt.Sprintf("v-%s", now.Format("20060102-150405")),
-			SystemPrompt: func() string {
-				if req.SystemPrompt != nil {
-					return *req.SystemPrompt
-				}
-				return current.SystemPrompt
-			}(),
-			ModelRef: func() string {
-				if req.ModelRef != nil {
-					return *req.ModelRef
-				}
-				return current.ModelRef
-			}(),
-			Config: func() entity.LLMConfig {
-				if req.Config != nil {
-					return *req.Config
-				}
-				return current.Config
-			}(),
-			ChangeDescription: "auto-saved on config update",
-			CreatedAt:         now,
-		}
-
-		if err := uc.agentRepo.CreateVersion(ctx, version); err != nil {
+	if hasConfigChanges(req, &current) {
+		version := buildAgentVersionSnapshot(agentID, req, &current)
+		if err := uc.agentRepo.CreateVersion(ctx, &version); err != nil {
 			return entity.AgentRecord{}, fmt.Errorf("UpdateAgent - create version: %w", err)
 		}
 
-		req.CurrentVersion = &newVersionID
+		req.CurrentVersion = &version.VersionID
 	}
 
 	// Delegate to repo for the actual DB write
 	return uc.agentRepo.Update(ctx, agentID, req)
 }
 
+// buildAgentVersionSnapshot creates a version record snapshot from the current
+// agent state, using update values where provided.
+func buildAgentVersionSnapshot(agentID string, req entity.UpdateAgentRequest, current *entity.AgentRecord) entity.AgentVersionRecord {
+	now := time.Now().UTC()
+
+	systemPrompt := current.SystemPrompt
+	if req.SystemPrompt != nil {
+		systemPrompt = *req.SystemPrompt
+	}
+
+	modelRef := current.ModelRef
+	if req.ModelRef != nil {
+		modelRef = *req.ModelRef
+	}
+
+	cfg := current.Config
+	if req.Config != nil {
+		cfg = *req.Config
+	}
+
+	return entity.AgentVersionRecord{
+		VersionID:         uuid.New().String(),
+		AgentID:           agentID,
+		VersionName:       fmt.Sprintf("v-%s", now.Format("20060102-150405")),
+		SystemPrompt:      systemPrompt,
+		ModelRef:          modelRef,
+		Config:            cfg,
+		ChangeDescription: "auto-saved on config update",
+		CreatedAt:         now,
+	}
+}
+
 // ExecuteStep runs one LLM invocation plus subsequent tool rounds.
 // It returns the messages generated, tool results, and usage statistics.
-func (uc *UseCase) ExecuteStep(ctx context.Context, req StepRequest) (*StepResult, error) {
+func (uc *UseCase) ExecuteStep(ctx context.Context, req *StepRequest) (*StepResult, error) {
 	// Auto-populate tool definitions from registry if not explicitly provided
 	tools := req.Tools
 	if len(tools) == 0 && uc.toolDefs != nil {
 		tools = uc.toolDefs.Definitions()
 	}
 
-	// Phase 1: Prep — validate and initialise execution context
-	prepResult, err := uc.Prep(ctx, PrepRequest{
+	// Phase 1: Prep — validate and initialize execution context
+	prepResult, err := uc.Prep(ctx, &PrepRequest{
 		SystemPrompt: req.SystemPrompt,
 		UserMessage:  req.Message,
 		History:      req.History,
@@ -277,24 +296,19 @@ func (uc *UseCase) ExecuteStep(ctx context.Context, req StepRequest) (*StepResul
 	tools = prepResult.Tools
 
 	// Phase 2: Execute — LLM call + tool execution loop
-	var allToolResults []entity.ToolResult
-	var finalUsage entity.Usage
+	var (
+		allToolResults []entity.ToolResult
+		finalUsage     entity.Usage
+	)
 
 	for range maxToolRounds {
-		// Compress messages if approaching context limits (before LLM call)
-		if uc.compressor != nil {
-			if compressed, _, err := uc.compressor.Compress(ctx, messages, req.Config); err == nil {
-				messages = compressed
-			} // on error, continue with original messages
-		}
+		messages = uc.compressStepMessages(ctx, messages, req.Config)
 
-		llmReq := entity.LLMRequest{
+		resp, err := uc.llm.Chat(ctx, &entity.LLMRequest{
 			Messages: messages,
 			Tools:    tools,
 			Config:   req.Config,
-		}
-
-		resp, err := uc.llm.Chat(ctx, llmReq)
+		})
 		if err != nil {
 			return nil, classifyLLMError(err)
 		}
@@ -305,10 +319,10 @@ func (uc *UseCase) ExecuteStep(ctx context.Context, req StepRequest) (*StepResul
 			Role:    entity.RoleAssistant,
 			Content: resp.Content,
 		}
-
 		if len(resp.ToolCalls) > 0 {
 			assistantMsg.ToolCalls = resp.ToolCalls
 		}
+
 		messages = append(messages, assistantMsg)
 		uc.appendMessageToWAL(ctx, req.RunID, assistantMsg)
 
@@ -316,50 +330,10 @@ func (uc *UseCase) ExecuteStep(ctx context.Context, req StepRequest) (*StepResul
 			break
 		}
 
-		for _, tc := range resp.ToolCalls {
-			toolReq := entity.ToolRequest{
-				RunID:      req.RunID,
-				ToolCallID: tc.ID,
-				ToolName:   tc.Function.Name,
-				Args:       parseArgsJSON(tc.Function.Arguments),
-			}
-
-			toolResult, execErr := uc.tools.Execute(ctx, toolReq)
-			if execErr != nil {
-				toolResult = entity.ToolResult{
-					RunID:      req.RunID,
-					ToolCallID: tc.ID,
-					ToolName:   tc.Function.Name,
-				}
-			}
-
-			allToolResults = append(allToolResults, toolResult)
-			uc.appendToolResultToWAL(ctx, req.RunID, toolResult, tc)
-
-			content := ""
-			if execErr != nil {
-				content = fmt.Sprintf("Error executing tool %q: %v", tc.Function.Name, execErr)
-			} else if toolResult.Output != nil {
-				content = fmt.Sprintf("%v", toolResult.Output)
-			}
-
-			toolMsg := entity.Message{
-				Role:       entity.RoleTool,
-				ToolCallID: tc.ID,
-				Content:    content,
-			}
-			messages = append(messages, toolMsg)
-			uc.appendMessageToWAL(ctx, req.RunID, toolMsg)
-		}
+		allToolResults, messages = uc.executeStepToolCalls(ctx, req.RunID, resp.ToolCalls, allToolResults, messages)
 	}
 
-	// Compute delta safely: after compression messages may be shorter than history.
-	var delta []entity.Message
-	if len(messages) >= len(req.History) {
-		delta = messages[len(req.History):]
-	} else {
-		delta = messages
-	}
+	delta := computeStepDelta(messages, req.History)
 
 	return &StepResult{
 		Messages:      delta,
@@ -368,6 +342,81 @@ func (uc *UseCase) ExecuteStep(ctx context.Context, req StepRequest) (*StepResul
 		Usage:         finalUsage,
 		FinishReason:  entity.FinishStop,
 	}, nil
+}
+
+// compressStepMessages compresses messages when approaching context limits.
+// Returns the (possibly compressed) messages. On error, returns the originals.
+func (uc *UseCase) compressStepMessages(ctx context.Context, messages []entity.Message, config entity.LLMConfig) []entity.Message {
+	if uc.compressor == nil {
+		return messages
+	}
+
+	compressed, _, err := uc.compressor.Compress(ctx, messages, config)
+	if err == nil {
+		return compressed
+	}
+
+	return messages
+}
+
+// executeStepToolCalls iterates over tool calls from an LLM response,
+// executes each, and returns the accumulated results and updated messages.
+func (uc *UseCase) executeStepToolCalls(ctx context.Context, runID string, toolCalls []entity.ToolCall, allToolResults []entity.ToolResult, messages []entity.Message) ([]entity.ToolResult, []entity.Message) {
+	for _, tc := range toolCalls {
+		allToolResults, messages = uc.executeStepToolCall(ctx, runID, tc, allToolResults, messages)
+	}
+
+	return allToolResults, messages
+}
+
+// executeStepToolCall executes a single tool call and appends the result to
+// the message list.
+func (uc *UseCase) executeStepToolCall(ctx context.Context, runID string, tc entity.ToolCall, allToolResults []entity.ToolResult, messages []entity.Message) ([]entity.ToolResult, []entity.Message) {
+	toolReq := entity.ToolRequest{
+		RunID:      runID,
+		ToolCallID: tc.ID,
+		ToolName:   tc.Function.Name,
+		Args:       parseArgsJSON(tc.Function.Arguments),
+	}
+
+	toolResult, execErr := uc.tools.Execute(ctx, &toolReq)
+	if execErr != nil {
+		toolResult = entity.ToolResult{
+			RunID:      runID,
+			ToolCallID: tc.ID,
+			ToolName:   tc.Function.Name,
+		}
+	}
+
+	allToolResults = append(allToolResults, toolResult)
+	uc.appendToolResultToWAL(ctx, runID, &toolResult, tc)
+
+	content := ""
+	if execErr != nil {
+		content = fmt.Sprintf("Error executing tool %q: %v", tc.Function.Name, execErr)
+	} else if toolResult.Output != nil {
+		content = fmt.Sprintf("%v", toolResult.Output)
+	}
+
+	toolMsg := entity.Message{
+		Role:       entity.RoleTool,
+		ToolCallID: tc.ID,
+		Content:    content,
+	}
+	messages = append(messages, toolMsg)
+	uc.appendMessageToWAL(ctx, runID, toolMsg)
+
+	return allToolResults, messages
+}
+
+// computeStepDelta computes the delta from history safely, handling the case
+// where compression may have made messages shorter than the original history.
+func computeStepDelta(messages, history []entity.Message) []entity.Message {
+	if len(messages) >= len(history) {
+		return messages[len(history):]
+	}
+
+	return messages
 }
 
 // classifyLLMError wraps common LLM provider errors into structured AgentError types.
@@ -429,6 +478,7 @@ func containsAny(s string, substrs ...string) bool {
 			return true
 		}
 	}
+
 	return false
 }
 
@@ -436,10 +486,12 @@ func parseArgsJSON(raw string) map[string]any {
 	if raw == "" {
 		return nil
 	}
+
 	var args map[string]any
 	if err := json.Unmarshal([]byte(raw), &args); err != nil {
 		return nil
 	}
+
 	return args
 }
 
@@ -448,38 +500,54 @@ func (uc *UseCase) appendMessageToWAL(ctx context.Context, runID string, msg ent
 	if uc.wal == nil {
 		return
 	}
+
 	toolCallID := ""
 	if len(msg.ToolCalls) > 0 {
 		toolCallID = msg.ToolCalls[0].ID
 	}
+
 	if err := uc.wal.AppendMessage(ctx, runID, entity.MessageRecord{
 		RunID:      runID,
 		Role:       string(msg.Role),
 		Content:    msg.Content,
 		ToolCallID: toolCallID,
 	}); err != nil {
-		fmt.Printf("WARN: WAL append message failed (run=%s, role=%s): %v\n", runID, msg.Role, err)
+		if uc.log != nil {
+			uc.log.Warn("WAL append message failed (run=%s, role=%s): %v", runID, msg.Role, err)
+		}
 	}
 }
 
 // appendToolResultToWAL best-effort appends a tool result record to the write-ahead log.
-func (uc *UseCase) appendToolResultToWAL(ctx context.Context, runID string, result entity.ToolResult, tc entity.ToolCall) {
+func (uc *UseCase) appendToolResultToWAL(ctx context.Context, runID string, result *entity.ToolResult, tc entity.ToolCall) {
 	if uc.wal == nil {
 		return
 	}
+
 	var resultJSON string
+
 	if result.Output != nil {
 		b, err := json.Marshal(result.Output)
 		if err == nil {
 			resultJSON = string(b)
 		}
 	}
+
 	if err := uc.wal.AppendToolResult(ctx, runID, entity.ToolResultRecord{
 		RunID:      runID,
 		ToolCallID: tc.ID,
 		ToolName:   tc.Function.Name,
 		ResultJSON: resultJSON,
 	}); err != nil {
-		fmt.Printf("WARN: WAL append tool result failed (run=%s, tool=%s): %v\n", runID, tc.Function.Name, err)
+		if uc.log != nil {
+			uc.log.Warn("WAL append tool result failed (run=%s, tool=%s): %v", runID, tc.Function.Name, err)
+		}
 	}
+}
+
+// hasConfigChanges checks whether the request would modify agent configuration.
+func hasConfigChanges(req entity.UpdateAgentRequest, current *entity.AgentRecord) bool {
+	return (req.SystemPrompt != nil && *req.SystemPrompt != current.SystemPrompt) ||
+		(req.ModelRef != nil && *req.ModelRef != current.ModelRef) ||
+		req.Config != nil
 }

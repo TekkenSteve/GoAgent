@@ -10,7 +10,11 @@ import (
 	"go.temporal.io/sdk/workflow"
 )
 
-const maxToolRounds = 10
+const (
+	maxToolRounds      = 10
+	heartbeatTimeout   = 30 * time.Second
+	activityMaxRetries = 3
+)
 
 // StreamAgentWorkflow is the streaming agent workflow with step-level activities.
 // Each LLM call and tool execution is a separate Temporal activity, providing
@@ -20,19 +24,9 @@ const maxToolRounds = 10
 //   - "cancel": terminates the workflow immediately
 //   - "pause":   blocks until "resume" or "cancel"
 //   - "resume":  exits the pause loop
-func StreamAgentWorkflow(ctx workflow.Context, input InitStreamInput) error {
+func StreamAgentWorkflow(ctx workflow.Context, input *InitStreamInput) error {
 	signalCh := workflow.GetSignalChannel(ctx, AgentCommandSignal)
-
-	ao := workflow.ActivityOptions{
-		StartToCloseTimeout: 10 * time.Minute,
-		HeartbeatTimeout:    30 * time.Second,
-		RetryPolicy: &temporal.RetryPolicy{
-			InitialInterval: time.Second,
-			MaximumInterval: time.Minute,
-			MaximumAttempts: 3,
-		},
-	}
-	ctx = workflow.WithActivityOptions(ctx, ao)
+	ctx = setupStreamActivityOptions(ctx)
 
 	// Init phase: write start events + Prep
 	var initResult InitStreamOutput
@@ -44,8 +38,10 @@ func StreamAgentWorkflow(ctx workflow.Context, input InitStreamInput) error {
 	tools := initResult.Tools
 
 	// Agent loop
-	for round := 0; round < maxToolRounds; round++ {
-		if cancelled, _ := checkStreamSignal(signalCh, ctx); cancelled {
+	for round := range maxToolRounds {
+		if canceled, err := checkStreamSignal(signalCh, ctx); err != nil {
+			_ = err
+		} else if canceled {
 			return nil
 		}
 
@@ -53,70 +49,122 @@ func StreamAgentWorkflow(ctx workflow.Context, input InitStreamInput) error {
 		// message lifecycle for the streaming path as well.
 		messages = entity.RepairToolCallPairing(messages)
 
-		// Streaming LLM call — writes delta events to EventStore
-		var llmResult LLMStreamOutput
-		if err := workflow.ExecuteActivity(ctx, LLMStreamActivityName, LLMStreamInput{
-			AccountID: input.AccountID,
-			SessionID: input.SessionID,
-			RunID:     input.RunID,
-			Messages:  messages,
-			Tools:     tools,
-			Config:    input.Config,
-		}).Get(ctx, &llmResult); err != nil {
-			return fmt.Errorf("stream workflow - llm round %d: %w", round, err)
+		done, err := processStreamRound(ctx, signalCh, input, &messages, tools, round)
+		if err != nil {
+			return err
 		}
 
-		// Track messages for next round
-		assistantMsg := entity.Message{Role: entity.RoleAssistant}
-		if len(llmResult.ToolCalls) > 0 {
-			assistantMsg.ToolCalls = llmResult.ToolCalls
-		}
-		messages = append(messages, assistantMsg)
-
-		if len(llmResult.ToolCalls) == 0 {
-			var usage *entity.Usage
-			if llmResult.Usage.TotalTokens > 0 {
-				usage = &llmResult.Usage
-			}
-			_ = workflow.ExecuteActivity(ctx, FinishStreamActivityName, FinishStreamInput{
-				SessionID: input.SessionID,
-				RunID:     input.RunID,
-				Event:     entity.NewAgentRunFinishEvent(llmResult.FinishReason, usage),
-			}).Get(ctx, nil)
+		if done {
 			return nil
-		}
-
-		// Execute each tool call
-		for _, tc := range llmResult.ToolCalls {
-			if cancelled, _ := checkStreamSignal(signalCh, ctx); cancelled {
-				return nil
-			}
-
-			var toolResult ToolOutput
-			if err := workflow.ExecuteActivity(ctx, ToolExecStreamActivityName, ToolInput{
-				RunID:      input.RunID,
-				ToolCallID: tc.ID,
-				ToolName:   tc.Function.Name,
-				Args:       parseArgsJSON(tc.Function.Arguments),
-			}).Get(ctx, &toolResult); err != nil {
-				return fmt.Errorf("stream workflow - tool exec %s: %w", tc.Function.Name, err)
-			}
-
-			toolMsg := entity.Message{
-				Role:       entity.RoleTool,
-				ToolCallID: tc.ID,
-				Content:    toolResult.Output,
-			}
-			messages = append(messages, toolMsg)
 		}
 	}
 
-	_ = workflow.ExecuteActivity(ctx, FinishStreamActivityName, FinishStreamInput{
+	return finishStreamMaxRounds(ctx, input)
+}
+
+// setupStreamActivityOptions configures activity options for the streaming workflow.
+func setupStreamActivityOptions(ctx workflow.Context) workflow.Context {
+	ao := workflow.ActivityOptions{
+		HeartbeatTimeout: heartbeatTimeout,
+		RetryPolicy: &temporal.RetryPolicy{
+			InitialInterval: time.Second,
+			MaximumInterval: time.Minute,
+			MaximumAttempts: activityMaxRetries,
+		},
+	}
+
+	return workflow.WithActivityOptions(ctx, ao)
+}
+
+// processStreamRound runs one LLM call and its associated tool executions.
+// Returns (done, error) where done indicates the workflow should exit.
+func processStreamRound(
+	ctx workflow.Context,
+	signalCh workflow.ReceiveChannel,
+	input *InitStreamInput,
+	messages *[]entity.Message,
+	tools []entity.ToolDef,
+	round int,
+) (bool, error) {
+	// Streaming LLM call — writes delta events to EventStore
+	var llmResult LLMStreamOutput
+	if err := workflow.ExecuteActivity(ctx, LLMStreamActivityName, LLMStreamInput{
+		AccountID: input.AccountID,
+		SessionID: input.SessionID,
+		RunID:     input.RunID,
+		Messages:  *messages,
+		Tools:     tools,
+		Config:    input.Config,
+	}).Get(ctx, &llmResult); err != nil {
+		return false, fmt.Errorf("stream workflow - llm round %d: %w", round, err)
+	}
+
+	// Track messages for next round
+	assistantMsg := entity.Message{Role: entity.RoleAssistant}
+	if len(llmResult.ToolCalls) > 0 {
+		assistantMsg.ToolCalls = llmResult.ToolCalls
+	}
+
+	*messages = append(*messages, assistantMsg)
+
+	if len(llmResult.ToolCalls) == 0 {
+		return finishStreamRound(ctx, input, llmResult), nil
+	}
+
+	// Execute each tool call
+	for _, tc := range llmResult.ToolCalls {
+		if canceled, err := checkStreamSignal(signalCh, ctx); err != nil {
+			_ = err
+		} else if canceled {
+			return true, nil
+		}
+
+		var toolResult ToolOutput
+		if err := workflow.ExecuteActivity(ctx, ToolExecStreamActivityName, ToolInput{
+			RunID:      input.RunID,
+			ToolCallID: tc.ID,
+			ToolName:   tc.Function.Name,
+			Args:       parseArgsJSON(tc.Function.Arguments),
+		}).Get(ctx, &toolResult); err != nil {
+			return false, fmt.Errorf("stream workflow - tool exec %s: %w", tc.Function.Name, err)
+		}
+
+		toolMsg := entity.Message{
+			Role:       entity.RoleTool,
+			ToolCallID: tc.ID,
+			Content:    toolResult.Output,
+		}
+		*messages = append(*messages, toolMsg)
+	}
+
+	return false, nil
+}
+
+// finishStreamRound records the finish event when no tool calls remain.
+func finishStreamRound(ctx workflow.Context, input *InitStreamInput, llmResult LLMStreamOutput) bool {
+	var usage *entity.Usage
+	if llmResult.Usage.TotalTokens > 0 {
+		usage = &llmResult.Usage
+	}
+
+	if err := workflow.ExecuteActivity(ctx, FinishStreamActivityName, FinishStreamInput{
+		SessionID: input.SessionID,
+		RunID:     input.RunID,
+		Event:     entity.NewAgentRunFinishEvent(llmResult.FinishReason, usage),
+	}).Get(ctx, nil); err != nil {
+		return false
+	}
+
+	return true
+}
+
+// finishStreamMaxRounds records the finish event when the max round limit is reached.
+func finishStreamMaxRounds(ctx workflow.Context, input *InitStreamInput) error {
+	return workflow.ExecuteActivity(ctx, FinishStreamActivityName, FinishStreamInput{
 		SessionID: input.SessionID,
 		RunID:     input.RunID,
 		Event:     entity.NewAgentRunFinishEvent("max_rounds", nil),
 	}).Get(ctx, nil)
-	return nil
 }
 
 // checkStreamSignal does a non-blocking read on the signal channel.
@@ -126,14 +174,16 @@ func checkStreamSignal(signalCh workflow.ReceiveChannel, ctx workflow.Context) (
 	if ok := signalCh.ReceiveAsync(&signal); !ok {
 		return false, nil
 	}
+
 	switch signal {
-	case "cancel":
+	case AgentCmdCancel:
 		return true, nil
-	case "pause":
+	case AgentCmdPause:
 		return waitForResume(signalCh, ctx)
-	case "resume":
+	case AgentCmdResume:
 		return false, nil
 	}
+
 	return false, nil
 }
 
@@ -142,10 +192,11 @@ func waitForResume(signalCh workflow.ReceiveChannel, ctx workflow.Context) (bool
 	for {
 		var s string
 		signalCh.Receive(ctx, &s)
+
 		switch s {
-		case "resume":
+		case AgentCmdResume:
 			return false, nil
-		case "cancel":
+		case AgentCmdCancel:
 			return true, nil
 		}
 	}
@@ -157,9 +208,11 @@ func parseArgsJSON(raw string) map[string]any {
 	if raw == "" {
 		return nil
 	}
+
 	var args map[string]any
 	if err := json.Unmarshal([]byte(raw), &args); err != nil {
 		return nil
 	}
+
 	return args
 }

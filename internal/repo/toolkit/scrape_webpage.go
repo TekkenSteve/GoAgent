@@ -4,11 +4,18 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"strings"
 	"time"
 )
+
+// scrapeHTTPTimeout is the HTTP client timeout for web scraping.
+const scrapeHTTPTimeout = 60 * time.Second
+
+// ErrURLsRequired is returned when no URLs are provided to the scraper.
+var ErrURLsRequired = errors.New("urls is required")
 
 // ScrapeWebpageConfig configures the scrape_webpage tool.
 type ScrapeWebpageConfig struct {
@@ -29,10 +36,10 @@ type ScrapeResult struct {
 
 // ScrapeBatchResult wraps multiple scrape results.
 type ScrapeBatchResult struct {
-	Total       int             `json:"total"`
-	Successful  int             `json:"successful"`
-	Failed      int             `json:"failed"`
-	Results     []ScrapeResult  `json:"results"`
+	Total      int            `json:"total"`
+	Successful int            `json:"successful"`
+	Failed     int            `json:"failed"`
+	Results    []ScrapeResult `json:"results"`
 }
 
 // ScrapeWebpage fetches and extracts content from web pages using Firecrawl.
@@ -47,9 +54,10 @@ func NewScrapeWebpage(cfg ScrapeWebpageConfig) *ScrapeWebpage {
 	if cfg.BaseURL == "" {
 		cfg.BaseURL = "https://api.firecrawl.dev"
 	}
+
 	return &ScrapeWebpage{
 		cfg:  cfg,
-		http: &http.Client{Timeout: 60 * time.Second},
+		http: &http.Client{Timeout: scrapeHTTPTimeout},
 	}
 }
 
@@ -82,9 +90,13 @@ Always collect multiple relevant URLs from web-search results and scrape them al
 
 // Execute implements tool.Tool.
 func (s *ScrapeWebpage) Execute(ctx context.Context, args map[string]any) (any, error) {
-	urlsRaw, _ := args["urls"].(string)
+	urlsRaw, ok := args["urls"].(string)
+	if !ok {
+		urlsRaw = ""
+	}
+
 	if urlsRaw == "" {
-		return nil, fmt.Errorf("urls is required")
+		return nil, fmt.Errorf("%w", ErrURLsRequired)
 	}
 
 	urlList := strings.Split(urlsRaw, ",")
@@ -101,9 +113,10 @@ func (s *ScrapeWebpage) Execute(ctx context.Context, args map[string]any) (any, 
 				Error:   "Web scraping is not available. FIRECRAWL_API_KEY is not configured.",
 			}
 		}
+
 		return ScrapeBatchResult{
-			Total:  len(urlList),
-			Failed: len(urlList),
+			Total:   len(urlList),
+			Failed:  len(urlList),
 			Results: results,
 		}, nil
 	}
@@ -112,6 +125,7 @@ func (s *ScrapeWebpage) Execute(ctx context.Context, args map[string]any) (any, 
 		result ScrapeResult
 		index  int
 	}
+
 	ch := make(chan scrapeOut, len(urlList))
 
 	for i, u := range urlList {
@@ -123,8 +137,10 @@ func (s *ScrapeWebpage) Execute(ctx context.Context, args map[string]any) (any, 
 
 	results := make([]ScrapeResult, len(urlList))
 	successful := 0
+
 	for range urlList {
 		r := <-ch
+
 		results[r.index] = r.result
 		if r.result.Success {
 			successful++
@@ -149,8 +165,8 @@ type firecrawlResp struct {
 }
 
 type firecrawlData struct {
-	Markdown string            `json:"markdown"`
-	Metadata map[string]any    `json:"metadata"`
+	Markdown string         `json:"markdown"`
+	Metadata map[string]any `json:"metadata"`
 }
 
 func (s *ScrapeWebpage) scrape(ctx context.Context, url string) ScrapeResult {
@@ -158,12 +174,17 @@ func (s *ScrapeWebpage) scrape(ctx context.Context, url string) ScrapeResult {
 		URL:     url,
 		Formats: []string{"markdown"},
 	}
-	data, _ := json.Marshal(body)
+
+	data, err := json.Marshal(body)
+	if err != nil {
+		return ScrapeResult{URL: url, Success: false, Error: fmt.Sprintf("marshal scrape request: %v", err)}
+	}
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, s.cfg.BaseURL+"/v1/scrape", bytes.NewReader(data))
 	if err != nil {
 		return ScrapeResult{URL: url, Success: false, Error: err.Error()}
 	}
+
 	req.Header.Set("Authorization", "Bearer "+s.cfg.APIKey)
 	req.Header.Set("Content-Type", "application/json")
 
@@ -183,6 +204,7 @@ func (s *ScrapeWebpage) scrape(ctx context.Context, url string) ScrapeResult {
 	}
 
 	title := ""
+
 	if fcResp.Data.Metadata != nil {
 		if t, ok := fcResp.Data.Metadata["title"].(string); ok {
 			title = t

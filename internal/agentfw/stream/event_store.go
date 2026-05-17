@@ -101,7 +101,9 @@ func (s *RedisEventStore) Append(ctx context.Context, sessionID, runID string, e
 	}
 
 	// Best-effort TTL refresh so streams of finished runs eventually expire.
-	s.rdb.Expire(ctx, streamKey, DefaultEventStoreTTL)
+	if _, err := s.rdb.Expire(ctx, streamKey, DefaultEventStoreTTL); err != nil {
+		_ = err
+	}
 
 	return seq, nil
 }
@@ -112,6 +114,7 @@ func (s *RedisEventStore) Replay(ctx context.Context, sessionID string, afterSeq
 
 	// XRANGE from (afterSequence+1)-0 to +, limited by count
 	start := fmt.Sprintf("%d", afterSequence+1)
+
 	entries, err := s.rdb.StreamRange(ctx, streamKey, start, "+", limit)
 	if err != nil {
 		return nil, fmt.Errorf("event_store: replay: %w", err)
@@ -123,7 +126,12 @@ func (s *RedisEventStore) Replay(ctx context.Context, sessionID string, afterSeq
 		if !ok {
 			continue
 		}
-		dataStr, _ := rawData.(string)
+
+		dataStr, ok := rawData.(string)
+		if !ok {
+			continue
+		}
+
 		if dataStr == "" {
 			continue // skip corrupt entries
 		}
@@ -139,6 +147,7 @@ func (s *RedisEventStore) Replay(ctx context.Context, sessionID string, afterSeq
 			Sequence: seq,
 		})
 	}
+
 	return stored, nil
 }
 
@@ -149,6 +158,7 @@ func (s *RedisEventStore) SaveSnapshot(ctx context.Context, sessionID string, se
 		State:    state,
 		SavedAt:  time.Now().UTC(),
 	}
+
 	data, err := json.Marshal(snapshot)
 	if err != nil {
 		return fmt.Errorf("event_store: snapshot marshal: %w", err)
@@ -158,12 +168,14 @@ func (s *RedisEventStore) SaveSnapshot(ctx context.Context, sessionID string, se
 	if err := s.rdb.Set(ctx, key, string(data), DefaultSnapshotTTL); err != nil {
 		return fmt.Errorf("event_store: snapshot save: %w", err)
 	}
+
 	return nil
 }
 
 // GetSnapshot retrieves the latest snapshot for a session.
-func (s *RedisEventStore) GetSnapshot(ctx context.Context, sessionID string) (int64, map[string]any, error) {
+func (s *RedisEventStore) GetSnapshot(ctx context.Context, sessionID string) (sequence int64, state map[string]any, err error) {
 	key := snapshotKeyForSession(sessionID)
+
 	data, err := s.rdb.Get(ctx, key)
 	if err != nil {
 		return 0, nil, nil // no snapshot
@@ -173,10 +185,14 @@ func (s *RedisEventStore) GetSnapshot(ctx context.Context, sessionID string) (in
 	if err := json.Unmarshal([]byte(data), &snapshot); err != nil {
 		return 0, nil, fmt.Errorf("event_store: snapshot unmarshal: %w", err)
 	}
+
 	return snapshot.Sequence, snapshot.State, nil
 }
 
 // -- internal helpers --
+
+// entryIDPartsCount is the number of parts expected when splitting a stream entry ID.
+const entryIDPartsCount = 2
 
 type snapshotData struct {
 	Sequence int64          `json:"sequence"`
@@ -194,14 +210,16 @@ func snapshotKeyForSession(sessionID string) string {
 
 func parseSequenceFromID(entryID string) int64 {
 	// Entry ID format: "<sequence>-0"
-	parts := strings.SplitN(entryID, "-", 2)
+	parts := strings.SplitN(entryID, "-", entryIDPartsCount)
 	if len(parts) < 1 {
 		return 0
 	}
+
 	seq, err := strconv.ParseInt(parts[0], 10, 64)
 	if err != nil {
 		return 0
 	}
+
 	return seq
 }
 
@@ -209,9 +227,10 @@ func parseSequenceFromID(entryID string) int64 {
 // The event constructors don't populate these fields — they are injected at the
 // Event Store layer as the single authority for these identifiers.
 func injectEventMetadata(jsonData, sessionID, runID string) string {
-	if len(jsonData) < 2 {
+	if len(jsonData) < len("{}") {
 		return jsonData
 	}
+
 	return jsonData[:len(jsonData)-1] +
 		`,"session_id":"` + sessionID +
 		`","run_id":"` + runID + `"}`

@@ -1,8 +1,24 @@
 package mcp
 
 import (
+	"errors"
 	"fmt"
 	"os"
+)
+
+const (
+	TransportStdio          = "stdio"
+	TransportSSE            = "sse"
+	TransportStreamableHTTP = "streamable-http"
+)
+
+var (
+	ErrMCPServerNameRequired         = errors.New("mcp server name is required")
+	ErrMCPCommandRequired            = errors.New("command is required for stdio transport")
+	ErrMCPURLRequired                = errors.New("url is required for sse transport")
+	ErrMCPSHAURLRequired             = errors.New("url is required for streamable-http transport")
+	ErrMCPTransportRequired          = errors.New("transport type is required")
+	ErrMCPServerUnsupportedTransport = errors.New("unsupported transport")
 )
 
 // ServerConfig defines how to connect to an MCP server.
@@ -27,37 +43,40 @@ type ServerConfig struct {
 }
 
 // Validate checks that the server configuration is valid.
-func (c ServerConfig) Validate() error {
+func (c *ServerConfig) Validate() error {
 	if c.Name == "" {
-		return fmt.Errorf("mcp server name is required")
+		return ErrMCPServerNameRequired
 	}
+
 	switch c.Transport {
-	case "stdio":
+	case TransportStdio:
 		if c.Command == "" {
-			return fmt.Errorf("mcp server %q: command is required for stdio transport", c.Name)
+			return fmt.Errorf("%w: %q", ErrMCPCommandRequired, c.Name)
 		}
-	case "sse":
+	case TransportSSE:
 		if c.URL == "" {
-			return fmt.Errorf("mcp server %q: url is required for sse transport", c.Name)
+			return fmt.Errorf("%w: %q", ErrMCPURLRequired, c.Name)
 		}
-	case "streamable-http":
+	case TransportStreamableHTTP:
 		if c.URL == "" {
-			return fmt.Errorf("mcp server %q: url is required for streamable-http transport", c.Name)
+			return fmt.Errorf("%w: %q", ErrMCPSHAURLRequired, c.Name)
 		}
 	case "":
-		return fmt.Errorf("mcp server %q: transport type is required (stdio, sse, streamable-http)", c.Name)
+		return fmt.Errorf("%w: %q", ErrMCPTransportRequired, c.Name)
 	default:
-		return fmt.Errorf("mcp server %q: unsupported transport %q", c.Name, c.Transport)
+		return fmt.Errorf("%w: %q: %q", ErrMCPServerUnsupportedTransport, c.Name, c.Transport)
 	}
+
 	return nil
 }
 
 // BuildEnv merges the server's Env map with the current process environment.
 // Server-specific env vars override process-level ones.
-func (c ServerConfig) BuildEnv() []string {
+func (c *ServerConfig) BuildEnv() []string {
 	merged := os.Environ()
 	for k, v := range c.Env {
 		merged = append(merged, fmt.Sprintf("%s=%s", k, v))
 	}
+
 	return merged
 }

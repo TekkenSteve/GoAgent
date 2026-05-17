@@ -3,13 +3,19 @@ package webapi
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"sync"
 
+	"github.com/TekkenSteve/GoAgent/internal/entity"
 	bifrost "github.com/maximhq/bifrost/core"
 	"github.com/maximhq/bifrost/core/schemas"
+)
 
-	"github.com/TekkenSteve/GoAgent/internal/entity"
+var (
+	ErrBifrostChat  = errors.New("bifrost chat error")
+	ErrNoCandidates = errors.New("no candidates")
+	ErrNoProvider   = errors.New("no configured provider")
 )
 
 // ProviderEntry defines a single LLM provider configuration.
@@ -23,13 +29,13 @@ type ProviderEntry struct {
 // using the embedded Bifrost Go SDK for unified multi-provider LLM access,
 // built-in cost tracking, and automatic key management.
 type BifrostProvider struct {
-	mu                 sync.RWMutex
-	client             *bifrost.Bifrost
-	defaultProvider    schemas.ModelProvider
-	scenarios          map[string]ScenarioConfig
-	defaultScenario    string
+	mu                  sync.RWMutex
+	client              *bifrost.Bifrost
+	defaultProvider     schemas.ModelProvider
+	scenarios           map[string]ScenarioConfig
+	defaultScenario     string
 	configuredProviders map[schemas.ModelProvider]bool
-	account            *bifrostAccount
+	account             *bifrostAccount
 }
 
 // BifrostConfig configures the Bifrost LLM provider.
@@ -37,7 +43,7 @@ type BifrostConfig struct {
 	// Providers configures one or more LLM providers (API keys, base URLs).
 	Providers []ProviderEntry
 	// Scenarios maps scenario names to ordered candidate lists.
-	Scenarios       map[string]ScenarioConfig
+	Scenarios map[string]ScenarioConfig
 	// DefaultScenario is used when a request has no explicit scenario.
 	DefaultScenario string
 
@@ -47,10 +53,10 @@ type BifrostConfig struct {
 	BaseURL  string
 }
 
-// NewBifrost initialises the Bifrost SDK and returns a provider that delegates
+// NewBifrost initializes the Bifrost SDK and returns a provider that delegates
 // all LLM calls through Bifrost's unified ChatCompletion API.
 // The caller must call Close() to release Bifrost resources (workers, connections).
-func NewBifrost(cfg BifrostConfig) (*BifrostProvider, error) {
+func NewBifrost(cfg *BifrostConfig) (*BifrostProvider, error) {
 	// Merge legacy fields into Providers when Providers is empty.
 	entries := cfg.Providers
 	if len(entries) == 0 {
@@ -64,7 +70,9 @@ func NewBifrost(cfg BifrostConfig) (*BifrostProvider, error) {
 	}
 
 	var defaultProvider schemas.ModelProvider
+
 	providerMap := make(map[schemas.ModelProvider]*providerEntry, len(entries))
+
 	configured := make(map[schemas.ModelProvider]bool, len(entries))
 	for _, e := range entries {
 		providerMap[e.Provider] = &providerEntry{
@@ -74,6 +82,7 @@ func NewBifrost(cfg BifrostConfig) (*BifrostProvider, error) {
 		if e.APIKey != "" {
 			configured[e.Provider] = true
 		}
+
 		if defaultProvider == "" {
 			defaultProvider = e.Provider
 		}
@@ -94,10 +103,10 @@ func NewBifrost(cfg BifrostConfig) (*BifrostProvider, error) {
 	return &BifrostProvider{
 		client:              client,
 		defaultProvider:     defaultProvider,
-		scenarios:          cfg.Scenarios,
-		defaultScenario:    cfg.DefaultScenario,
+		scenarios:           cfg.Scenarios,
+		defaultScenario:     cfg.DefaultScenario,
 		configuredProviders: configured,
-		account:            account,
+		account:             account,
 	}, nil
 }
 
@@ -121,6 +130,7 @@ func (p *BifrostProvider) ReloadConfig(cfg *LLMConfigFile) {
 			configured[e.Provider] = true
 		}
 	}
+
 	p.configuredProviders = configured
 
 	if len(cfg.Scenarios) > 0 {
@@ -131,15 +141,16 @@ func (p *BifrostProvider) ReloadConfig(cfg *LLMConfigFile) {
 
 // resolveProvider picks the provider for a request: use req.Config.Provider when
 // non-empty, otherwise fall back to the default provider.
-func (p *BifrostProvider) resolveProvider(req entity.LLMRequest) schemas.ModelProvider {
+func (p *BifrostProvider) resolveProvider(req *entity.LLMRequest) schemas.ModelProvider {
 	if req.Config.Provider != "" {
 		return schemas.ModelProvider(req.Config.Provider)
 	}
+
 	return p.defaultProvider
 }
 
 // Chat sends a synchronous chat completion request via the Bifrost SDK.
-func (p *BifrostProvider) Chat(ctx context.Context, req entity.LLMRequest) (entity.LLMResponse, error) {
+func (p *BifrostProvider) Chat(ctx context.Context, req *entity.LLMRequest) (entity.LLMResponse, error) {
 	provider, model, params, fallbacks := p.resolveRequest(req)
 
 	bifrostReq := &schemas.BifrostChatRequest{
@@ -151,16 +162,17 @@ func (p *BifrostProvider) Chat(ctx context.Context, req entity.LLMRequest) (enti
 	}
 
 	bifrostCtx := schemas.NewBifrostContext(ctx, schemas.NoDeadline)
+
 	resp, bifrostErr := p.client.ChatCompletionRequest(bifrostCtx, bifrostReq)
 	if bifrostErr != nil {
-		return entity.LLMResponse{}, fmt.Errorf("bifrost chat: %s", bifrostErr.GetErrorString())
+		return entity.LLMResponse{}, fmt.Errorf("%w: %s", ErrBifrostChat, bifrostErr.GetErrorString())
 	}
 
 	return chatResponseToEntity(resp), nil
 }
 
 // ChatStream sends a streaming chat completion request and returns a channel of chunks.
-func (p *BifrostProvider) ChatStream(ctx context.Context, req entity.LLMRequest) (<-chan entity.LLMStreamChunk, error) {
+func (p *BifrostProvider) ChatStream(ctx context.Context, req *entity.LLMRequest) (<-chan entity.LLMStreamChunk, error) {
 	provider, model, params, fallbacks := p.resolveRequest(req)
 
 	bifrostReq := &schemas.BifrostChatRequest{
@@ -172,18 +184,22 @@ func (p *BifrostProvider) ChatStream(ctx context.Context, req entity.LLMRequest)
 	}
 
 	bifrostCtx := schemas.NewBifrostContext(ctx, schemas.NoDeadline)
+
 	streamCh, bifrostErr := p.client.ChatCompletionStreamRequest(bifrostCtx, bifrostReq)
 	if bifrostErr != nil {
-		return nil, fmt.Errorf("bifrost chat stream: %s", bifrostErr.GetErrorString())
+		return nil, fmt.Errorf("%w: %s", ErrBifrostChat, bifrostErr.GetErrorString())
 	}
 
 	out := make(chan entity.LLMStreamChunk)
+
 	go func() {
 		defer close(out)
+
 		for chunk := range streamCh {
 			if chunk.BifrostError != nil {
 				return
 			}
+
 			if chunk.BifrostChatResponse != nil {
 				ec := streamChunkToEntity(chunk.BifrostChatResponse)
 				select {
@@ -194,13 +210,14 @@ func (p *BifrostProvider) ChatStream(ctx context.Context, req entity.LLMRequest)
 			}
 		}
 	}()
+
 	return out, nil
 }
 
 // resolveRequest determines the provider, model, params, and fallbacks for a request.
 // It uses the ScenarioRouter when a scenario is specified, falling back to direct
 // provider selection for backward compatibility.
-func (p *BifrostProvider) resolveRequest(req entity.LLMRequest) (schemas.ModelProvider, string, entity.LLMConfig, []schemas.Fallback) {
+func (p *BifrostProvider) resolveRequest(req *entity.LLMRequest) (schemas.ModelProvider, string, entity.LLMConfig, []schemas.Fallback) {
 	p.mu.RLock()
 	scenarios := p.scenarios
 	defaultScenario := p.defaultScenario
@@ -220,9 +237,11 @@ func (p *BifrostProvider) resolveRequest(req entity.LLMRequest) (schemas.ModelPr
 	provider := p.resolveProvider(req)
 	model := req.Config.Model
 	params := req.Config
+
 	if model == "" {
 		model = "gpt-4.1-mini"
 	}
+
 	return provider, model, params, nil
 }
 
@@ -246,37 +265,14 @@ func resolveScenario(scenarios map[string]ScenarioConfig, defaultScenario, scena
 		}, nil
 	}
 
-	sc, ok := scenarios[scenario]
-	if !ok || len(sc.Candidates) == 0 {
-		if scenario != defaultScenario {
-			sc, ok = scenarios[defaultScenario]
-		}
-		if !ok || len(sc.Candidates) == 0 {
-			for _, s := range scenarios {
-				sc = s
-				break
-			}
-		}
-	}
-	if len(sc.Candidates) == 0 {
-		return ResolveResult{}, fmt.Errorf("no candidates for scenario %q and no fallback scenario", scenario)
+	sc, ok := findFallbackScenario(scenarios, defaultScenario, scenario)
+	if !ok {
+		return ResolveResult{}, fmt.Errorf("%w for scenario %q and no fallback scenario", ErrNoCandidates, scenario)
 	}
 
-	var primary CandidateConfig
-	var fallbackCandidates []CandidateConfig
-	found := false
-	for _, c := range sc.Candidates {
-		if configuredProviders[schemas.ModelProvider(c.Provider)] {
-			if !found {
-				primary = c
-				found = true
-			} else {
-				fallbackCandidates = append(fallbackCandidates, c)
-			}
-		}
-	}
+	primary, fallbackCandidates, found := pickPrimaryAndFallback(sc.Candidates, configuredProviders)
 	if !found {
-		return ResolveResult{}, fmt.Errorf("no configured provider for scenario %q", scenario)
+		return ResolveResult{}, fmt.Errorf("%w for scenario %q", ErrNoProvider, scenario)
 	}
 
 	cfg := mergeCandidateConfig(entity.LLMConfig{
@@ -301,17 +297,58 @@ func resolveScenario(scenarios map[string]ScenarioConfig, defaultScenario, scena
 	}, nil
 }
 
+// findFallbackScenario searches for a scenario config, falling back to default
+// and then to any available scenario if the specified one is not found.
+func findFallbackScenario(scenarios map[string]ScenarioConfig, defaultScenario, scenario string) (ScenarioConfig, bool) {
+	sc, ok := scenarios[scenario]
+	if !ok || len(sc.Candidates) == 0 {
+		if scenario != defaultScenario {
+			sc, ok = scenarios[defaultScenario]
+		}
+
+		if !ok || len(sc.Candidates) == 0 {
+			for _, s := range scenarios {
+				sc = s
+
+				break
+			}
+		}
+	}
+
+	return sc, len(sc.Candidates) > 0
+}
+
+// pickPrimaryAndFallback iterates candidates and selects the first configured
+// provider as primary and the rest as fallbacks.
+func pickPrimaryAndFallback(candidates []CandidateConfig, configuredProviders map[schemas.ModelProvider]bool) (primary CandidateConfig, fallbacks []CandidateConfig, found bool) {
+	for _, c := range candidates {
+		if configuredProviders[schemas.ModelProvider(c.Provider)] {
+			if !found {
+				primary = c
+				found = true
+			} else {
+				fallbacks = append(fallbacks, c)
+			}
+		}
+	}
+
+	return primary, fallbacks, found
+}
+
 // mergeCandidateConfig merges request overrides on top of scenario defaults.
 func mergeCandidateConfig(base, override entity.LLMConfig) entity.LLMConfig {
 	if override.Model != "" {
 		base.Model = override.Model
 	}
+
 	if override.MaxTokens != 0 {
 		base.MaxTokens = override.MaxTokens
 	}
+
 	if override.Temperature != 0 {
 		base.Temperature = override.Temperature
 	}
+
 	return base
 }
 
@@ -330,6 +367,7 @@ type bifrostAccount struct {
 func (a *bifrostAccount) setProviders(entries []ProviderEntry) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
+
 	a.providers = make(map[schemas.ModelProvider]*providerEntry, len(entries))
 	for _, e := range entries {
 		if e.APIKey != "" {
@@ -341,10 +379,12 @@ func (a *bifrostAccount) setProviders(entries []ProviderEntry) {
 func (a *bifrostAccount) GetConfiguredProviders() ([]schemas.ModelProvider, error) {
 	a.mu.RLock()
 	defer a.mu.RUnlock()
+
 	keys := make([]schemas.ModelProvider, 0, len(a.providers))
 	for k := range a.providers {
 		keys = append(keys, k)
 	}
+
 	return keys, nil
 }
 
@@ -352,9 +392,11 @@ func (a *bifrostAccount) GetKeysForProvider(_ context.Context, providerKey schem
 	a.mu.RLock()
 	entry, ok := a.providers[providerKey]
 	a.mu.RUnlock()
+
 	if !ok || entry.apiKey == "" {
 		return nil, nil
 	}
+
 	return []schemas.Key{
 		{
 			ID:     "default",
@@ -370,17 +412,21 @@ func (a *bifrostAccount) GetConfigForProvider(providerKey schemas.ModelProvider)
 	a.mu.RLock()
 	entry, ok := a.providers[providerKey]
 	a.mu.RUnlock()
+
 	if !ok {
 		nc := schemas.DefaultNetworkConfig
+
 		return &schemas.ProviderConfig{
 			NetworkConfig:            nc,
 			ConcurrencyAndBufferSize: schemas.DefaultConcurrencyAndBufferSize,
 		}, nil
 	}
+
 	nc := schemas.DefaultNetworkConfig
 	if entry.baseURL != "" {
 		nc.BaseURL = entry.baseURL
 	}
+
 	return &schemas.ProviderConfig{
 		NetworkConfig:            nc,
 		ConcurrencyAndBufferSize: schemas.DefaultConcurrencyAndBufferSize,
@@ -398,18 +444,22 @@ func messagesToBifrost(msgs []entity.Message) []schemas.ChatMessage {
 		}
 		if m.ToolCallID != "" {
 			cm.ChatToolMessage = &schemas.ChatToolMessage{
-				ToolCallID: schemas.Ptr(m.ToolCallID),
+				ToolCallID: new(m.ToolCallID),
 			}
 		}
+
 		if len(m.ToolCalls) > 0 {
 			tcs := make([]schemas.ChatAssistantMessageToolCall, 0, len(m.ToolCalls))
 			for _, tc := range m.ToolCalls {
 				tcs = append(tcs, toolCallToBifrost(tc))
 			}
+
 			cm.ChatAssistantMessage = &schemas.ChatAssistantMessage{ToolCalls: tcs}
 		}
+
 		out = append(out, cm)
 	}
+
 	return out
 }
 
@@ -432,7 +482,8 @@ func stringContent(s string) *schemas.ChatMessageContent {
 	if s == "" {
 		return nil
 	}
-	return &schemas.ChatMessageContent{ContentStr: schemas.Ptr(s)}
+
+	return &schemas.ChatMessageContent{ContentStr: new(s)}
 }
 
 func toolCallToBifrost(tc entity.ToolCall) schemas.ChatAssistantMessageToolCall {
@@ -440,11 +491,12 @@ func toolCallToBifrost(tc entity.ToolCall) schemas.ChatAssistantMessageToolCall 
 	if args == "" {
 		args = "{}"
 	}
+
 	return schemas.ChatAssistantMessageToolCall{
-		ID:   schemas.Ptr(tc.ID),
-		Type: schemas.Ptr(tc.Type),
+		ID:   new(tc.ID),
+		Type: new(tc.Type),
 		Function: schemas.ChatAssistantMessageToolCallFunction{
-			Name:      schemas.Ptr(tc.Function.Name),
+			Name:      new(tc.Function.Name),
 			Arguments: args,
 		},
 	}
@@ -452,16 +504,19 @@ func toolCallToBifrost(tc entity.ToolCall) schemas.ChatAssistantMessageToolCall 
 
 func configToBifrostParams(cfg entity.LLMConfig, tools []entity.ToolDef) *schemas.ChatParameters {
 	params := &schemas.ChatParameters{
-		MaxCompletionTokens: schemas.Ptr(cfg.MaxTokens),
-		Temperature:         schemas.Ptr(cfg.Temperature),
+		MaxCompletionTokens: new(cfg.MaxTokens),
+		Temperature:         new(cfg.Temperature),
 	}
+
 	if len(tools) > 0 {
 		bt := make([]schemas.ChatTool, 0, len(tools))
 		for _, t := range tools {
 			bt = append(bt, toolDefToBifrost(t))
 		}
+
 		params.Tools = bt
 	}
+
 	return params
 }
 
@@ -470,7 +525,7 @@ func toolDefToBifrost(t entity.ToolDef) schemas.ChatTool {
 		Type: schemas.ChatToolTypeFunction,
 		Function: &schemas.ChatToolFunction{
 			Name:        t.Function.Name,
-			Description: schemas.Ptr(t.Function.Description),
+			Description: new(t.Function.Description),
 			Parameters:  convertParameters(t.Function.Parameters),
 		},
 	}
@@ -482,14 +537,17 @@ func convertParameters(params any) *schemas.ToolFunctionParameters {
 	if params == nil {
 		return nil
 	}
+
 	data, err := json.Marshal(params)
 	if err != nil {
 		return nil
 	}
+
 	var tfp schemas.ToolFunctionParameters
 	if err := json.Unmarshal(data, &tfp); err != nil {
 		return nil
 	}
+
 	return &tfp
 }
 
@@ -506,14 +564,14 @@ func chatResponseToEntity(resp *schemas.BifrostChatResponse) entity.LLMResponse 
 	choice := resp.Choices[0]
 
 	// Extract text content from the non-stream choice message.
-	if choice.ChatNonStreamResponseChoice != nil && choice.ChatNonStreamResponseChoice.Message != nil {
-		msg := choice.ChatNonStreamResponseChoice.Message
+	if choice.ChatNonStreamResponseChoice != nil && choice.Message != nil {
+		msg := choice.Message
 		if msg.Content != nil && msg.Content.ContentStr != nil {
 			out.Content = *msg.Content.ContentStr
 		}
 		// Extract tool calls from the assistant message.
 		if msg.ChatAssistantMessage != nil {
-			out.ToolCalls = toolCallsFromBifrost(msg.ChatAssistantMessage.ToolCalls)
+			out.ToolCalls = toolCallsFromBifrost(msg.ToolCalls)
 		}
 	}
 
@@ -531,12 +589,14 @@ func toolCallsFromBifrost(tcs []schemas.ChatAssistantMessageToolCall) []entity.T
 	if len(tcs) == 0 {
 		return nil
 	}
+
 	out := make([]entity.ToolCall, 0, len(tcs))
 	for _, tc := range tcs {
 		name := ""
 		if tc.Function.Name != nil {
 			name = *tc.Function.Name
 		}
+
 		out = append(out, entity.ToolCall{
 			ID:   deref(tc.ID),
 			Type: deref(tc.Type),
@@ -546,6 +606,7 @@ func toolCallsFromBifrost(tcs []schemas.ChatAssistantMessageToolCall) []entity.T
 			},
 		})
 	}
+
 	return out
 }
 
@@ -554,6 +615,7 @@ func usageFromBifrost(u *schemas.BifrostLLMUsage) entity.Usage {
 	if u == nil {
 		return entity.Usage{}
 	}
+
 	usage := entity.Usage{
 		PromptTokens:     u.PromptTokens,
 		CompletionTokens: u.CompletionTokens,
@@ -562,6 +624,7 @@ func usageFromBifrost(u *schemas.BifrostLLMUsage) entity.Usage {
 	if u.Cost != nil {
 		usage.Cost = entity.Money(u.Cost.TotalCost)
 	}
+
 	return usage
 }
 
@@ -573,47 +636,20 @@ func streamChunkToEntity(chunk *schemas.BifrostChatResponse) entity.LLMStreamChu
 		if chunk.Usage != nil {
 			ec.Usage = usageFromBifrost(chunk.Usage)
 		}
+
 		return ec
 	}
 
 	choice := chunk.Choices[0]
 
-	if choice.ChatStreamResponseChoice != nil && choice.ChatStreamResponseChoice.Delta != nil {
-		delta := choice.ChatStreamResponseChoice.Delta
-		if delta.Content != nil {
-			ec.Content = *delta.Content
-		}
-		if delta.Reasoning != nil {
-			ec.Reasoning = *delta.Reasoning
-		}
-		// Convert streaming tool call deltas
-		if len(delta.ToolCalls) > 0 {
-			ec.ToolCallDeltas = make([]entity.ToolCallDelta, 0, len(delta.ToolCalls))
-			for _, tc := range delta.ToolCalls {
-				d := entity.ToolCallDelta{Index: int(tc.Index)}
-				if tc.ID != nil {
-					d.ToolCallID = *tc.ID
-				}
-				if tc.Function.Name != nil {
-					d.Name = *tc.Function.Name
-				}
-				if tc.Function.Arguments != "" {
-					d.ArgsDelta = tc.Function.Arguments
-				}
-				ec.ToolCallDeltas = append(ec.ToolCallDeltas, d)
-			}
-		}
+	if choice.ChatStreamResponseChoice != nil && choice.Delta != nil {
+		ec = handleStreamingDelta(choice.Delta)
 	}
 
 	// Non-streaming fallback (some chunks may arrive as complete choices)
-	if choice.ChatNonStreamResponseChoice != nil && choice.ChatNonStreamResponseChoice.Message != nil {
-		msg := choice.ChatNonStreamResponseChoice.Message
-		if msg.Content != nil && msg.Content.ContentStr != nil {
-			ec.Content = *msg.Content.ContentStr
-		}
-		if msg.ChatAssistantMessage != nil {
-			ec.ToolCalls = toolCallsFromBifrost(msg.ChatAssistantMessage.ToolCalls)
-		}
+	if choice.ChatNonStreamResponseChoice != nil && choice.Message != nil {
+		contentStr, toolCalls := handleNonStreamingChoice(choice)
+		applyNonStreamingContent(contentStr, toolCalls, &ec)
 	}
 
 	if choice.FinishReason != nil {
@@ -627,10 +663,83 @@ func streamChunkToEntity(chunk *schemas.BifrostChatResponse) entity.LLMStreamChu
 	return ec
 }
 
+// applyNonStreamingContent sets content and tool call fields on the stream chunk
+// from the results of a non-streaming response choice.
+func applyNonStreamingContent(contentStr string, toolCalls []entity.ToolCall, ec *entity.LLMStreamChunk) {
+	if contentStr != "" {
+		ec.Content = contentStr
+	}
+
+	if len(toolCalls) > 0 {
+		ec.ToolCalls = toolCalls
+	}
+}
+
+// handleStreamingDelta processes a streaming response delta and returns
+// the partial fields that need to be set on the stream chunk.
+func handleStreamingDelta(delta *schemas.ChatStreamResponseChoiceDelta) entity.LLMStreamChunk {
+	var ec entity.LLMStreamChunk
+
+	if delta.Content != nil {
+		ec.Content = *delta.Content
+	}
+
+	if delta.Reasoning != nil {
+		ec.Reasoning = *delta.Reasoning
+	}
+
+	// Convert streaming tool call deltas
+	if len(delta.ToolCalls) > 0 {
+		ec.ToolCallDeltas = make([]entity.ToolCallDelta, 0, len(delta.ToolCalls))
+		for _, tc := range delta.ToolCalls {
+			d := entity.ToolCallDelta{Index: int(tc.Index)}
+			if tc.ID != nil {
+				d.ToolCallID = *tc.ID
+			}
+
+			if tc.Function.Name != nil {
+				d.Name = *tc.Function.Name
+			}
+
+			if tc.Function.Arguments != "" {
+				d.ArgsDelta = tc.Function.Arguments
+			}
+
+			ec.ToolCallDeltas = append(ec.ToolCallDeltas, d)
+		}
+	}
+
+	return ec
+}
+
+// handleNonStreamingChoice extracts content and tool calls from a
+// non-streaming response choice.
+func handleNonStreamingChoice(choice schemas.BifrostResponseChoice) (string, []entity.ToolCall) {
+	if choice.ChatNonStreamResponseChoice == nil || choice.Message == nil {
+		return "", nil
+	}
+
+	msg := choice.Message
+
+	var contentStr string
+	if msg.Content != nil && msg.Content.ContentStr != nil {
+		contentStr = *msg.Content.ContentStr
+	}
+
+	var toolCalls []entity.ToolCall
+	if msg.ChatAssistantMessage != nil {
+		toolCalls = toolCallsFromBifrost(msg.ToolCalls)
+	}
+
+	return contentStr, toolCalls
+}
+
 func deref[T any](p *T) T {
 	if p == nil {
 		var zero T
+
 		return zero
 	}
+
 	return *p
 }

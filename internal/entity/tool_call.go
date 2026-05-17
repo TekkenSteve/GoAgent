@@ -36,13 +36,13 @@ type ToolRequest struct {
 
 // ToolResult is normalized tool execution output.
 type ToolResult struct {
-	RunID             string         `json:"run_id"              example:"run-550e8400-e29b-41d4-a716-446655440000"`
-	ToolCallID        string         `json:"tool_call_id"         example:"call-550e8400-e29b-41d4-a716-446655440000"`
-	ToolName          string         `json:"tool_name"            example:"web_search"`
-	Output            map[string]any `json:"output"               example:"{\"temperature\":\"72F\"}"`
-	PersistedRef      string         `json:"persisted_ref"        example:"ref-550e8400-e29b-41d4-a716-446655440000"`
-	FromIdempotent    bool           `json:"from_idempotent"       example:"false"`
-	Attempts          int            `json:"attempts"             example:"1"`
+	RunID              string             `json:"run_id"              example:"run-550e8400-e29b-41d4-a716-446655440000"`
+	ToolCallID         string             `json:"tool_call_id"         example:"call-550e8400-e29b-41d4-a716-446655440000"`
+	ToolName           string             `json:"tool_name"            example:"web_search"`
+	Output             map[string]any     `json:"output"               example:"{\"temperature\":\"72F\"}"`
+	PersistedRef       string             `json:"persisted_ref"        example:"ref-550e8400-e29b-41d4-a716-446655440000"`
+	FromIdempotent     bool               `json:"from_idempotent"       example:"false"`
+	Attempts           int                `json:"attempts"             example:"1"`
 	ExecutionIsolation ExecutionIsolation `json:"execution_isolation" example:"read_committed"`
 } // @name entity.ToolResult
 

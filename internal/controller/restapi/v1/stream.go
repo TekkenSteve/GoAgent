@@ -15,6 +15,8 @@ import (
 	"github.com/gofiber/fiber/v2"
 )
 
+const splitNMaxParts = 2
+
 const (
 	pingInterval      = 30 * time.Second
 	deadWorkerTimeout = 2 * time.Minute
@@ -24,45 +26,32 @@ const (
 // It starts agent execution, writes events to the EventStore,
 // and streams them back to the client via Server-Sent Events.
 func (r *V1) stream(ctx *fiber.Ctx) error {
-	message := ctx.Query("message")
-	if message == "" {
-		return errorResponse(ctx, 400, "missing message parameter")
+	params, err := parseStreamQueryParams(ctx)
+	if err != nil {
+		return err
 	}
-	model := ctx.Query("model")
-	if model == "" {
-		return errorResponse(ctx, 400, "missing model parameter")
-	}
-	runID := ctx.Query("run_id")
-	if runID == "" {
-		return errorResponse(ctx, 400, "missing run_id parameter")
-	}
-	systemPrompt := ctx.Query("system_prompt", "")
-	lastEventID := ctx.Query("last_event_id", "0")
 
 	// In non-Temporal mode, runID doubles as the sessionID.
-	sessionID := runID
-
-	// Parse last event sequence. Supports both plain integer and "seq-0" formats.
-	lastSequence := parseLastSequence(lastEventID)
+	sessionID := params.runID
 
 	// Create cancel context to stop the stream when client disconnects
 	streamCtx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
 	req := entity.StreamRequest{
-		RunID:        runID,
-		SystemPrompt: systemPrompt,
-		Message:      message,
+		RunID:        params.runID,
+		SystemPrompt: params.systemPrompt,
+		Message:      params.message,
 		Config: entity.LLMConfig{
-			Model: model,
+			Model: params.model,
 		},
 	}
 
 	// Subscribe to the EventStore BEFORE starting execution.
 	// lastSequence controls catch-up: 0 means live-only, >0 replays from after that seq.
-	sub, err := r.subscriber.Subscribe(streamCtx, sessionID, lastSequence)
+	sub, err := r.subscriber.Subscribe(streamCtx, sessionID, params.lastSequence)
 	if err != nil {
-		return errorResponse(ctx, 500, "failed to subscribe to event stream")
+		return errorResponse(ctx, fiber.StatusInternalServerError, "failed to subscribe to event stream")
 	}
 	defer sub.Close()
 
@@ -70,102 +59,216 @@ func (r *V1) stream(ctx *fiber.Ctx) error {
 	writer := &eventStoreWriter{
 		store:     r.eventStore,
 		sessionID: sessionID,
-		runID:     runID,
+		runID:     params.runID,
 	}
 
 	// Hijack the connection for SSE (fasthttp does not support response flushing)
+	r.hijackForSSE(streamCtx, ctx, cancel, &req, writer, sub)
+
+	return nil
+}
+
+// parseStreamQueryParams extracts and validates SSE stream query parameters.
+type streamQueryParams struct {
+	message      string
+	model        string
+	runID        string
+	systemPrompt string
+	lastSequence int64
+}
+
+func parseStreamQueryParams(ctx *fiber.Ctx) (*streamQueryParams, error) {
+	message := ctx.Query("message")
+	if message == "" {
+		return nil, errorResponse(ctx, fiber.StatusBadRequest, "missing message parameter")
+	}
+
+	model := ctx.Query("model")
+	if model == "" {
+		return nil, errorResponse(ctx, fiber.StatusBadRequest, "missing model parameter")
+	}
+
+	runID := ctx.Query("run_id")
+	if runID == "" {
+		return nil, errorResponse(ctx, fiber.StatusBadRequest, "missing run_id parameter")
+	}
+
+	systemPrompt := ctx.Query("system_prompt", "")
+	lastEventID := ctx.Query("last_event_id", "0")
+
+	return &streamQueryParams{
+		message:      message,
+		model:        model,
+		runID:        runID,
+		systemPrompt: systemPrompt,
+		lastSequence: parseLastSequence(lastEventID),
+	}, nil
+}
+
+// hijackForSSE hijacks the connection for SSE streaming.
+func (r *V1) hijackForSSE(streamCtx context.Context, ctx *fiber.Ctx, cancel func(), req *entity.StreamRequest, writer *eventStoreWriter, sub *stream.Subscription) {
 	ctx.Context().Hijack(func(conn net.Conn) {
 		defer conn.Close()
 		defer cancel()
 
 		bw := bufio.NewWriter(conn)
 
-		// Write HTTP response headers manually
-		bw.WriteString("HTTP/1.1 200 OK\r\n")
-		bw.WriteString("Content-Type: text/event-stream\r\n")
-		bw.WriteString("Cache-Control: no-cache\r\n")
-		bw.WriteString("Connection: keep-alive\r\n")
-		bw.WriteString("Access-Control-Allow-Origin: *\r\n")
-		bw.WriteString("\r\n")
-		bw.Flush()
+		if err := writeSSEHeaders(bw); err != nil {
+			return
+		}
 
 		// Start execution in background — writes events to EventStore.
 		// doneCh signals that the execution goroutine has exited.
 		doneCh := make(chan struct{})
-		go func() {
-			defer close(doneCh)
-			if err := r.s.ExecuteStream(streamCtx, req, writer); err != nil {
-				// Validation/config error — write as event
-				writer.WriteEvent(streamCtx, entity.NewAgentErrorEvent("EXECUTION_ERROR", err.Error()))
-			}
-		}()
 
-		// Write ack event to confirm stream is established
-		ackData, _ := json.Marshal(map[string]string{"type": "ack", "run_id": runID})
-		sse.WriteEvent(bw, sse.Event{Data: string(ackData)})
-		bw.Flush()
+		go r.startStreamExecution(streamCtx, req, writer, doneCh)
+
+		if err := writeAckEvent(bw, req.RunID); err != nil {
+			return
+		}
 
 		// Ping ticker keeps the connection alive.
 		pingTicker := time.NewTicker(pingInterval)
-		defer pingTicker.Stop()
+		r.runSSEEventLoop(streamCtx, bw, sub, pingTicker, doneCh)
+	})
+}
 
-		// Track last activity for dead worker detection
-		lastActivity := time.Now()
+// writeSSEHeaders writes HTTP response headers for a Server-Sent Events stream.
+func writeSSEHeaders(bw *bufio.Writer) error {
+	headers := []string{
+		"HTTP/1.1 200 OK\r\n",
+		"Content-Type: text/event-stream\r\n",
+		"Cache-Control: no-cache\r\n",
+		"Connection: keep-alive\r\n",
+		"Access-Control-Allow-Origin: *\r\n",
+		"\r\n",
+	}
+	for _, h := range headers {
+		if _, err := bw.WriteString(h); err != nil {
+			return err
+		}
+	}
 
-		for {
-			select {
-			case stored, ok := <-sub.C:
-				if !ok {
-					return
-				}
+	return bw.Flush()
+}
 
-				lastActivity = time.Now()
+// startStreamExecution runs the agent execution in the background.
+// It writes events to the EventStore and signals completion via doneCh.
+func (r *V1) startStreamExecution(ctx context.Context, req *entity.StreamRequest, writer *eventStoreWriter, doneCh chan struct{}) {
+	defer close(doneCh)
 
-				// Serialize event via gateway (SSEGateway = direct JSON)
-				payload, err := r.gateway.Convert(stored.Event)
-				if err != nil {
-					continue
-				}
+	if err := r.s.ExecuteStream(ctx, req, writer); err != nil {
+		if we := writer.WriteEvent(ctx, entity.NewAgentErrorEvent("EXECUTION_ERROR", err.Error())); we != nil {
+			_ = we
+		}
+	}
+}
 
-				sse.WriteEvent(bw, sse.Event{Data: string(payload)})
-				if flushErr := bw.Flush(); flushErr != nil {
-					return
-				}
+// writeAckEvent writes the ack event to confirm the stream is established.
+func writeAckEvent(bw *bufio.Writer, runID string) error {
+	ackData, err := json.Marshal(map[string]string{"type": "ack", "run_id": runID})
+	if err != nil {
+		return err
+	}
 
-				// Check for terminal event via type assertion
-				switch stored.Event.(type) {
-				case *entity.AgentRunFinishEvent, *entity.AgentErrorEvent:
-					return
-				}
+	if err := sse.WriteEvent(bw, sse.Event{Data: string(ackData)}); err != nil {
+		return err
+	}
 
-			case <-pingTicker.C:
-				// Send ping to keep connection alive
-				sse.WriteEvent(bw, sse.Event{Data: `{"type":"ping"}`})
-				if flushErr := bw.Flush(); flushErr != nil {
-					return
-				}
+	return bw.Flush()
+}
 
-				// Dead worker detection: if no events received for too long,
-				// the execution goroutine may have crashed silently.
-				if time.Since(lastActivity) > deadWorkerTimeout {
-					select {
-					case <-doneCh:
-						// Execution exited without terminal event — write error
-						sse.WriteEvent(bw, sse.Event{Data: `{"type":"error","error":"execution terminated unexpectedly"}`})
-						bw.Flush()
-						return
-					default:
-						// Still running, continue waiting
-					}
-				}
+// handleStreamSubEvent processes a single event from the subscription channel.
+// Returns true if the event is terminal (stream should end).
+func (r *V1) handleStreamSubEvent(bw *bufio.Writer, stored stream.StoredEvent) (bool, error) {
+	payload, err := r.gateway.Convert(stored.Event)
+	if err != nil {
+		return false, nil
+	}
 
-			case <-streamCtx.Done():
+	if err := sse.WriteEvent(bw, sse.Event{Data: string(payload)}); err != nil {
+		return false, err
+	}
+
+	if err := bw.Flush(); err != nil {
+		return false, err
+	}
+
+	switch stored.Event.(type) {
+	case *entity.AgentRunFinishEvent, *entity.AgentErrorEvent:
+		return true, nil
+	}
+
+	return false, nil
+}
+
+// checkDeadWorker checks if the execution goroutine has crashed silently.
+// Returns true if the connection should be closed.
+func checkDeadWorker(lastActivity time.Time, doneCh chan struct{}, bw *bufio.Writer) bool {
+	if time.Since(lastActivity) <= deadWorkerTimeout {
+		return false
+	}
+
+	select {
+	case <-doneCh:
+		if wErr := sse.WriteEvent(bw, sse.Event{Data: `{"type":"error","error":"execution terminated unexpectedly"}`}); wErr != nil {
+			_ = wErr
+		}
+
+		if fErr := bw.Flush(); fErr != nil {
+			_ = fErr
+		}
+
+		return true
+	default:
+		return false
+	}
+}
+
+// runSSEEventLoop runs the main event loop, reading from the subscription
+// channel and writing SSE events to the client until a terminal condition.
+func (r *V1) runSSEEventLoop(streamCtx context.Context, bw *bufio.Writer, sub *stream.Subscription, pingTicker *time.Ticker, doneCh chan struct{}) {
+	defer pingTicker.Stop()
+
+	lastActivity := time.Now()
+
+	for {
+		select {
+		case stored, ok := <-sub.C:
+			if !ok {
 				return
 			}
-		}
-	})
 
-	return nil
+			lastActivity = time.Now()
+
+			terminal, err := r.handleStreamSubEvent(bw, stored)
+			if err != nil || terminal {
+				return
+			}
+
+		case <-pingTicker.C:
+			if r.handleSSEPingTick(bw, lastActivity, doneCh) {
+				return
+			}
+
+		case <-streamCtx.Done():
+			return
+		}
+	}
+}
+
+// handleSSEPingTick sends a ping event and checks for dead worker.
+// Returns true if the event loop should stop.
+func (r *V1) handleSSEPingTick(bw *bufio.Writer, lastActivity time.Time, doneCh chan struct{}) bool {
+	if err := sse.WriteEvent(bw, sse.Event{Data: `{"type":"ping"}`}); err != nil {
+		return true
+	}
+
+	if err := bw.Flush(); err != nil {
+		return true
+	}
+
+	return checkDeadWorker(lastActivity, doneCh, bw)
 }
 
 // eventStoreWriter implements usecase.StreamEventWriter by appending to EventStore.
@@ -177,6 +280,7 @@ type eventStoreWriter struct {
 
 func (w *eventStoreWriter) WriteEvent(ctx context.Context, event entity.StreamEvent) error {
 	_, err := w.store.Append(ctx, w.sessionID, w.runID, event)
+
 	return err
 }
 
@@ -193,11 +297,12 @@ func parseLastSequence(s string) int64 {
 		return seq
 	}
 	// Try "seq-0" format (Redis Stream ID)
-	parts := strings.SplitN(s, "-", 2)
+	parts := strings.SplitN(s, "-", splitNMaxParts)
 	if len(parts) > 0 {
 		if seq, err := strconv.ParseInt(parts[0], 10, 64); err == nil {
 			return seq
 		}
 	}
+
 	return 0
 }

@@ -16,7 +16,7 @@ type CancelWorkflowFn func(ctx context.Context, workflowID string) error
 
 // SignalWorkflowFn sends a named signal with payload to a running workflow.
 // Set by app.go when Temporal is available; nil for in-process mode.
-type SignalWorkflowFn func(ctx context.Context, workflowID, signalName string, arg interface{}) error
+type SignalWorkflowFn func(ctx context.Context, workflowID, signalName string, arg any) error
 
 // V1 -.
 type V1 struct {
@@ -35,6 +35,6 @@ type V1 struct {
 
 	// WebSocket Hub for connection tracking (Phase 4)
 	wsHub          *stream.WebSocketHub
-	cancelWorkflow  CancelWorkflowFn  // non-nil only when running with Temporal
-	signalWorkflow  SignalWorkflowFn  // non-nil only when running with Temporal
+	cancelWorkflow CancelWorkflowFn // non-nil only when running with Temporal
+	signalWorkflow SignalWorkflowFn // non-nil only when running with Temporal
 }

@@ -21,13 +21,15 @@ type PrepResult struct {
 	Tools    []entity.ToolDef
 }
 
-// Prep initialises the execution context before the first step.
+// Prep initializes the execution context before the first step.
 // It constructs the initial message list with the system prompt injected at the front.
 // Tool validation and pairing repair are handled by the orchestration layer
 // (PrepareActivity and per-call repair in the workflow loop).
-func (uc *UseCase) Prep(ctx context.Context, req PrepRequest) (*PrepResult, error) {
+const prepBufferExtra = 2
+
+func (uc *UseCase) Prep(_ context.Context, req *PrepRequest) (*PrepResult, error) {
 	// Build initial message list
-	messages := make([]entity.Message, 0, len(req.History)+2)
+	messages := make([]entity.Message, 0, len(req.History)+prepBufferExtra)
 
 	// Inject system prompt only on first invocation (no prior history)
 	if req.SystemPrompt != "" && len(req.History) == 0 {

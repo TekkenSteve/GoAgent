@@ -1,5 +1,7 @@
 package entity
 
+const defaultMaxTokens = 4096
+
 // MessageRole represents the role of a message in a conversation.
 type MessageRole string // @name entity.MessageRole
 
@@ -33,7 +35,7 @@ type Message struct {
 
 // LLMConfig is the configuration for an LLM invocation.
 type LLMConfig struct {
-	Provider    string  `json:"provider,omitempty"`        // target provider name; empty = use default
+	Provider    string  `json:"provider,omitempty"` // target provider name; empty = use default
 	Model       string  `json:"model"`
 	MaxTokens   int     `json:"max_tokens"`
 	Temperature float64 `json:"temperature"`
@@ -44,7 +46,7 @@ type LLMConfig struct {
 func DefaultLLMConfig() LLMConfig {
 	return LLMConfig{
 		Model:       "gpt-4.1-mini",
-		MaxTokens:   4096,
+		MaxTokens:   defaultMaxTokens,
 		Temperature: 0,
 	}
 }
@@ -74,10 +76,10 @@ const (
 
 // Usage contains token usage statistics.
 type Usage struct {
-	PromptTokens     int    `json:"prompt_tokens"`
-	CompletionTokens int    `json:"completion_tokens"`
-	TotalTokens      int    `json:"total_tokens"`
-	Cost             Money  `json:"cost,omitempty"`
+	PromptTokens     int   `json:"prompt_tokens"`
+	CompletionTokens int   `json:"completion_tokens"`
+	TotalTokens      int   `json:"total_tokens"`
+	Cost             Money `json:"cost,omitempty"`
 } // @name entity.Usage
 
 // LLMRequest is a request to an LLM provider.

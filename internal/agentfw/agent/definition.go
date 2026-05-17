@@ -2,35 +2,42 @@
 package agent
 
 import (
+	"errors"
 	"fmt"
 
 	"github.com/TekkenSteve/GoAgent/internal/entity"
 )
 
-// ToolBindingOverride allows per-agent customization of a tool's behaviour.
+// ErrInvalidAgent is returned when an agent definition fails validation.
+var ErrInvalidAgent = errors.New("invalid agent definition")
+
+// ToolBindingOverride allows per-agent customization of a tool's behavior.
 type ToolBindingOverride struct {
 	Name        string
 	Description string // override tool description for this agent
 	Required    bool   // fail if tool is unavailable
 }
 
-// AgentDefinition is a fully resolved agent ready for execution.
+// Definition is a fully resolved agent ready for execution.
 // It combines the domain AgentSpec with resolved tool references.
-type AgentDefinition struct {
-	Spec   entity.AgentSpec
-	Tools  []entity.ToolDef // resolved tool definitions for LLM
+type Definition struct {
+	Spec  entity.AgentSpec
+	Tools []entity.ToolDef // resolved tool definitions for LLM
 }
 
 // Validate checks that the agent definition is internally consistent.
-func (a *AgentDefinition) Validate() error {
+func (a *Definition) Validate() error {
 	if a.Spec.ID == "" {
-		return fmt.Errorf("agent definition: id is required")
+		return fmt.Errorf("%w: id is required", ErrInvalidAgent)
 	}
+
 	if a.Spec.Name == "" {
-		return fmt.Errorf("agent definition: name is required for agent %q", a.Spec.ID)
+		return fmt.Errorf("%w: name is required for agent %q", ErrInvalidAgent, a.Spec.ID)
 	}
+
 	if a.Spec.ModelRef == "" {
-		return fmt.Errorf("agent definition: model_ref is required for agent %q", a.Spec.ID)
+		return fmt.Errorf("%w: model_ref is required for agent %q", ErrInvalidAgent, a.Spec.ID)
 	}
+
 	return nil
 }

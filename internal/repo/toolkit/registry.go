@@ -3,11 +3,18 @@ package toolkit
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"sync"
 
 	agenttool "github.com/TekkenSteve/GoAgent/internal/agentfw/tool"
 	"github.com/TekkenSteve/GoAgent/internal/entity"
+)
+
+var (
+	ErrToolMetaNameEmpty     = errors.New("tool meta name must not be empty")
+	ErrToolAlreadyRegistered = errors.New("tool already registered")
+	ErrToolNotFound          = errors.New("tool not found in registry")
 )
 
 // ToolRegistry maps tool names to implementations and serves dual purposes:
@@ -32,12 +39,15 @@ func (r *ToolRegistry) Register(t Tool) error {
 
 	meta := t.Meta()
 	if meta.Name == "" {
-		return fmt.Errorf("tool meta name must not be empty")
+		return ErrToolMetaNameEmpty
 	}
+
 	if _, exists := r.tools[meta.Name]; exists {
-		return fmt.Errorf("tool %q already registered", meta.Name)
+		return fmt.Errorf("%w: tool %q already registered", ErrToolAlreadyRegistered, meta.Name)
 	}
+
 	r.tools[meta.Name] = t
+
 	return nil
 }
 
@@ -45,7 +55,9 @@ func (r *ToolRegistry) Register(t Tool) error {
 func (r *ToolRegistry) Get(name string) (Tool, bool) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
+
 	t, ok := r.tools[name]
+
 	return t, ok
 }
 
@@ -53,21 +65,23 @@ func (r *ToolRegistry) Get(name string) (Tool, bool) {
 func (r *ToolRegistry) Names() []string {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
+
 	names := make([]string, 0, len(r.tools))
 	for n := range r.tools {
 		names = append(names, n)
 	}
+
 	return names
 }
 
 // Execute implements agentfw/tool.Executor by routing to the registered tool.
-func (r *ToolRegistry) Execute(ctx context.Context, req agenttool.ToolRequest) (agenttool.RawResult, error) {
+func (r *ToolRegistry) Execute(ctx context.Context, req *agenttool.Request) (agenttool.RawResult, error) {
 	r.mu.RLock()
 	tool, ok := r.tools[req.ToolName]
 	r.mu.RUnlock()
 
 	if !ok {
-		return agenttool.RawResult{}, fmt.Errorf("tool %q not found in registry", req.ToolName)
+		return agenttool.RawResult{}, fmt.Errorf("%w: tool %q not found in registry", ErrToolNotFound, req.ToolName)
 	}
 
 	result, err := tool.Execute(ctx, req.Args)
@@ -101,6 +115,7 @@ func (r *ToolRegistry) Definitions() []entity.ToolDef {
 			},
 		})
 	}
+
 	return defs
 }
 
@@ -109,6 +124,7 @@ func toMap(v any) (map[string]any, error) {
 	if v == nil {
 		return map[string]any{}, nil
 	}
+
 	if m, ok := v.(map[string]any); ok {
 		return m, nil
 	}
@@ -117,11 +133,13 @@ func toMap(v any) (map[string]any, error) {
 	if err != nil {
 		return nil, fmt.Errorf("marshal: %w", err)
 	}
+
 	if len(data) > 0 && data[0] == '{' {
 		var m map[string]any
 		if err := json.Unmarshal(data, &m); err != nil {
 			return nil, fmt.Errorf("unmarshal to map: %w", err)
 		}
+
 		return m, nil
 	}
 	// Scalar or array — wrap in a result envelope

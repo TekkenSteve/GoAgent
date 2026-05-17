@@ -8,11 +8,13 @@ import (
 	"time"
 
 	sq "github.com/Masterminds/squirrel"
-	"github.com/jackc/pgx/v5"
-
 	"github.com/TekkenSteve/GoAgent/internal/entity"
 	"github.com/TekkenSteve/GoAgent/pkg/postgres"
+	"github.com/jackc/pgx/v5"
 )
+
+// Sentinel errors.
+var ErrTriggerNotFound = errors.New("trigger not found")
 
 // TriggerRepo implements repo.TriggerRepo with Postgres.
 type TriggerRepo struct {
@@ -25,7 +27,7 @@ func NewTriggerRepo(pg *postgres.Postgres) *TriggerRepo {
 }
 
 // Create inserts a new trigger.
-func (r *TriggerRepo) Create(ctx context.Context, req entity.CreateTriggerRequest) (entity.TriggerSpec, error) {
+func (r *TriggerRepo) Create(ctx context.Context, req *entity.CreateTriggerRequest) (entity.TriggerSpec, error) {
 	configJSON, err := json.Marshal(req.Config)
 	if err != nil {
 		return entity.TriggerSpec{}, fmt.Errorf("TriggerRepo - Create - marshal config: %w", err)
@@ -51,10 +53,13 @@ func (r *TriggerRepo) Create(ctx context.Context, req entity.CreateTriggerReques
 		return entity.TriggerSpec{}, fmt.Errorf("TriggerRepo - Create - builder: %w", err)
 	}
 
-	var record entity.TriggerSpec
-	var configStr string
-	var varsStr []string
-	var varsValsStr string
+	var (
+		record      entity.TriggerSpec
+		configStr   string
+		varsStr     []string
+		varsValsStr string
+	)
+
 	err = r.Pool.QueryRow(ctx, sql, args...).Scan(
 		&record.ID, &record.TemplateID, &record.AccountID, &record.Name, &record.Description,
 		&record.TriggerType, &record.CronExpression, &record.EventSlug, &record.AgentPrompt,
@@ -64,12 +69,15 @@ func (r *TriggerRepo) Create(ctx context.Context, req entity.CreateTriggerReques
 	if err != nil {
 		return entity.TriggerSpec{}, fmt.Errorf("TriggerRepo - Create - query: %w", err)
 	}
+
 	if err := json.Unmarshal([]byte(configStr), &record.Config); err != nil {
 		return entity.TriggerSpec{}, fmt.Errorf("TriggerRepo - Create - unmarshal config: %w", err)
 	}
+
 	if err := json.Unmarshal([]byte(varsValsStr), &record.TemplateVarsVals); err != nil {
 		return entity.TriggerSpec{}, fmt.Errorf("TriggerRepo - Create - unmarshal template_vars_vals: %w", err)
 	}
+
 	record.TemplateVars = varsStr
 
 	return record, nil
@@ -87,10 +95,13 @@ func (r *TriggerRepo) Get(ctx context.Context, triggerID string) (entity.Trigger
 		return entity.TriggerSpec{}, false, fmt.Errorf("TriggerRepo - Get - builder: %w", err)
 	}
 
-	var record entity.TriggerSpec
-	var configStr string
-	var varsStr []string
-	var varsValsStr string
+	var (
+		record      entity.TriggerSpec
+		configStr   string
+		varsStr     []string
+		varsValsStr string
+	)
+
 	err = r.Pool.QueryRow(ctx, sql, args...).Scan(
 		&record.ID, &record.TemplateID, &record.AccountID, &record.Name, &record.Description,
 		&record.TriggerType, &record.CronExpression, &record.EventSlug, &record.AgentPrompt,
@@ -101,14 +112,18 @@ func (r *TriggerRepo) Get(ctx context.Context, triggerID string) (entity.Trigger
 		if errors.Is(err, pgx.ErrNoRows) {
 			return entity.TriggerSpec{}, false, nil
 		}
+
 		return entity.TriggerSpec{}, false, fmt.Errorf("TriggerRepo - Get - query: %w", err)
 	}
+
 	if err := json.Unmarshal([]byte(configStr), &record.Config); err != nil {
 		return entity.TriggerSpec{}, false, fmt.Errorf("TriggerRepo - Get - unmarshal config: %w", err)
 	}
+
 	if err := json.Unmarshal([]byte(varsValsStr), &record.TemplateVarsVals); err != nil {
 		return entity.TriggerSpec{}, false, fmt.Errorf("TriggerRepo - Get - unmarshal template_vars_vals: %w", err)
 	}
+
 	record.TemplateVars = varsStr
 
 	return record, true, nil
@@ -116,42 +131,9 @@ func (r *TriggerRepo) Get(ctx context.Context, triggerID string) (entity.Trigger
 
 // Update updates an existing trigger.
 func (r *TriggerRepo) Update(ctx context.Context, triggerID string, req entity.UpdateTriggerRequest) (entity.TriggerSpec, error) {
-	builder := r.Builder.Update("workflow_triggers").Where(sq.Eq{"id": triggerID})
-
-	if req.Name != nil {
-		builder = builder.Set("name", *req.Name)
-	}
-	if req.Description != nil {
-		builder = builder.Set("description", *req.Description)
-	}
-	if req.CronExpression != nil {
-		builder = builder.Set("cron_expression", *req.CronExpression)
-	}
-	if req.EventSlug != nil {
-		builder = builder.Set("event_slug", *req.EventSlug)
-	}
-	if req.AgentPrompt != nil {
-		builder = builder.Set("agent_prompt", *req.AgentPrompt)
-	}
-	if req.Config != nil {
-		configJSON, err := json.Marshal(req.Config)
-		if err != nil {
-			return entity.TriggerSpec{}, fmt.Errorf("TriggerRepo - Update - marshal config: %w", err)
-		}
-		builder = builder.Set("config", string(configJSON))
-	}
-	if req.TemplateVars != nil {
-		builder = builder.Set("template_vars", *req.TemplateVars)
-	}
-	if req.TemplateVarsVals != nil {
-		varsValsJSON, err := json.Marshal(req.TemplateVarsVals)
-		if err != nil {
-			return entity.TriggerSpec{}, fmt.Errorf("TriggerRepo - Update - marshal template_vars_vals: %w", err)
-		}
-		builder = builder.Set("template_vars_vals", string(varsValsJSON))
-	}
-	if req.IsActive != nil {
-		builder = builder.Set("is_active", *req.IsActive)
+	builder, err := buildTriggerUpdateQuery(r.Builder, triggerID, req)
+	if err != nil {
+		return entity.TriggerSpec{}, err
 	}
 
 	builder = builder.Set("updated_at", sq.Expr("NOW()"))
@@ -163,10 +145,13 @@ func (r *TriggerRepo) Update(ctx context.Context, triggerID string, req entity.U
 		return entity.TriggerSpec{}, fmt.Errorf("TriggerRepo - Update - builder: %w", err)
 	}
 
-	var record entity.TriggerSpec
-	var configStr string
-	var varsStr []string
-	var varsValsStr string
+	var (
+		record      entity.TriggerSpec
+		configStr   string
+		varsStr     []string
+		varsValsStr string
+	)
+
 	err = r.Pool.QueryRow(ctx, sql, args...).Scan(
 		&record.ID, &record.TemplateID, &record.AccountID, &record.Name, &record.Description,
 		&record.TriggerType, &record.CronExpression, &record.EventSlug, &record.AgentPrompt,
@@ -175,19 +160,78 @@ func (r *TriggerRepo) Update(ctx context.Context, triggerID string, req entity.U
 	)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
-			return entity.TriggerSpec{}, fmt.Errorf("TriggerRepo - Update - not found: %s", triggerID)
+			return entity.TriggerSpec{}, fmt.Errorf("TriggerRepo - Update - %w: %s", ErrTriggerNotFound, triggerID)
 		}
+
 		return entity.TriggerSpec{}, fmt.Errorf("TriggerRepo - Update - query: %w", err)
 	}
+
 	if err := json.Unmarshal([]byte(configStr), &record.Config); err != nil {
 		return entity.TriggerSpec{}, fmt.Errorf("TriggerRepo - Update - unmarshal config: %w", err)
 	}
+
 	if err := json.Unmarshal([]byte(varsValsStr), &record.TemplateVarsVals); err != nil {
 		return entity.TriggerSpec{}, fmt.Errorf("TriggerRepo - Update - unmarshal template_vars_vals: %w", err)
 	}
+
 	record.TemplateVars = varsStr
 
 	return record, nil
+}
+
+// buildTriggerUpdateQuery builds the update builder with non-nil fields from req.
+func buildTriggerUpdateQuery(b sq.StatementBuilderType, triggerID string, req entity.UpdateTriggerRequest) (sq.UpdateBuilder, error) {
+	builder := b.Update("workflow_triggers").Where(sq.Eq{"id": triggerID})
+
+	setIf := func(field string, val any) {
+		switch v := val.(type) {
+		case *string:
+			if v != nil {
+				builder = builder.Set(field, *v)
+			}
+		case *[]string:
+			if v != nil {
+				builder = builder.Set(field, *v)
+			}
+		}
+	}
+
+	setJSONIf := func(field string, val any) error {
+		if val == nil {
+			return nil
+		}
+
+		jsonBytes, err := json.Marshal(val)
+		if err != nil {
+			return fmt.Errorf("TriggerRepo - Update - marshal %s: %w", field, err)
+		}
+
+		builder = builder.Set(field, string(jsonBytes))
+
+		return nil
+	}
+
+	setIf("name", req.Name)
+	setIf("description", req.Description)
+	setIf("cron_expression", req.CronExpression)
+	setIf("event_slug", req.EventSlug)
+	setIf("agent_prompt", req.AgentPrompt)
+
+	if err := setJSONIf("config", req.Config); err != nil {
+		return builder, err
+	}
+
+	setIf("template_vars", req.TemplateVars)
+
+	if err := setJSONIf("template_vars_vals", req.TemplateVarsVals); err != nil {
+		return builder, err
+	}
+
+	if req.IsActive != nil {
+		builder = builder.Set("is_active", *req.IsActive)
+	}
+
+	return builder, nil
 }
 
 // Delete removes a trigger by ID.
@@ -201,6 +245,7 @@ func (r *TriggerRepo) Delete(ctx context.Context, triggerID string) error {
 	if err != nil {
 		return fmt.Errorf("TriggerRepo - Delete - exec: %w", err)
 	}
+
 	return nil
 }
 
@@ -222,6 +267,7 @@ func (r *TriggerRepo) ListActive(ctx context.Context) ([]entity.TriggerSpec, err
 // RecordFired updates the last_fired_at timestamp for a trigger.
 func (r *TriggerRepo) RecordFired(ctx context.Context, triggerID string) error {
 	now := time.Now().UTC()
+
 	sql, args, err := r.Builder.
 		Update("workflow_triggers").
 		Set("last_fired_at", now).
@@ -236,6 +282,7 @@ func (r *TriggerRepo) RecordFired(ctx context.Context, triggerID string) error {
 	if err != nil {
 		return fmt.Errorf("TriggerRepo - RecordFired - exec: %w", err)
 	}
+
 	return nil
 }
 
@@ -258,11 +305,15 @@ func (r *TriggerRepo) list(ctx context.Context, where sq.Eq) ([]entity.TriggerSp
 	defer rows.Close()
 
 	var records []entity.TriggerSpec
+
 	for rows.Next() {
-		var record entity.TriggerSpec
-		var configStr string
-		var varsStr []string
-		var varsValsStr string
+		var (
+			record      entity.TriggerSpec
+			configStr   string
+			varsStr     []string
+			varsValsStr string
+		)
+
 		if err := rows.Scan(
 			&record.ID, &record.TemplateID, &record.AccountID, &record.Name, &record.Description,
 			&record.TriggerType, &record.CronExpression, &record.EventSlug, &record.AgentPrompt,
@@ -271,12 +322,15 @@ func (r *TriggerRepo) list(ctx context.Context, where sq.Eq) ([]entity.TriggerSp
 		); err != nil {
 			return nil, fmt.Errorf("TriggerRepo - list - scan: %w", err)
 		}
+
 		if err := json.Unmarshal([]byte(configStr), &record.Config); err != nil {
 			return nil, fmt.Errorf("TriggerRepo - list - unmarshal config: %w", err)
 		}
+
 		if err := json.Unmarshal([]byte(varsValsStr), &record.TemplateVarsVals); err != nil {
 			return nil, fmt.Errorf("TriggerRepo - list - unmarshal template_vars_vals: %w", err)
 		}
+
 		record.TemplateVars = varsStr
 		records = append(records, record)
 	}
@@ -285,7 +339,7 @@ func (r *TriggerRepo) list(ctx context.Context, where sq.Eq) ([]entity.TriggerSp
 }
 
 // InsertTriggerEvent persists an audit log entry for a trigger fire.
-func (r *TriggerRepo) InsertTriggerEvent(ctx context.Context, event entity.TriggerEventLog) error {
+func (r *TriggerRepo) InsertTriggerEvent(ctx context.Context, event *entity.TriggerEventLog) error {
 	varsJSON, err := json.Marshal(event.ExecVariables)
 	if err != nil {
 		return fmt.Errorf("TriggerRepo - InsertTriggerEvent - marshal exec_variables: %w", err)
@@ -306,5 +360,6 @@ func (r *TriggerRepo) InsertTriggerEvent(ctx context.Context, event entity.Trigg
 	if err != nil {
 		return fmt.Errorf("TriggerRepo - InsertTriggerEvent - exec: %w", err)
 	}
+
 	return nil
 }

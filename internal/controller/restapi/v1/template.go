@@ -22,8 +22,10 @@ func (r *templateHandler) importYAML(ctx *fiber.Ctx) error {
 	var req request.TemplateImport
 	if err := ctx.BodyParser(&req); err != nil {
 		r.l.Error(err, "restapi - v1 - importYAML")
+
 		return errorResponse(ctx, http.StatusBadRequest, "invalid request body")
 	}
+
 	if req.AccountID == "" || req.YAMLData == "" {
 		return errorResponse(ctx, http.StatusBadRequest, "account_id and yaml_data are required")
 	}
@@ -31,6 +33,7 @@ func (r *templateHandler) importYAML(ctx *fiber.Ctx) error {
 	tpl, err := r.m.CreateFromYAML(ctx.UserContext(), req.AccountID, []byte(req.YAMLData))
 	if err != nil {
 		r.l.Error(err, "restapi - v1 - importYAML")
+
 		return errorResponse(ctx, http.StatusInternalServerError, "import failed: "+err.Error())
 	}
 
@@ -47,8 +50,10 @@ func (r *templateHandler) list(ctx *fiber.Ctx) error {
 	templates, err := r.m.ListByAccount(ctx.UserContext(), accountID)
 	if err != nil {
 		r.l.Error(err, "restapi - v1 - list")
+
 		return errorResponse(ctx, http.StatusInternalServerError, "list failed")
 	}
+
 	if templates == nil {
 		templates = []entity.WorkflowTemplate{}
 	}
@@ -68,6 +73,7 @@ func (r *templateHandler) get(ctx *fiber.Ctx) error {
 	tpl, err := r.m.Get(ctx.UserContext(), templateID)
 	if err != nil {
 		r.l.Error(err, "restapi - v1 - get")
+
 		return errorResponse(ctx, http.StatusNotFound, "template not found")
 	}
 
@@ -83,6 +89,7 @@ func (r *templateHandler) delete(ctx *fiber.Ctx) error {
 
 	if err := r.m.Delete(ctx.UserContext(), templateID); err != nil {
 		r.l.Error(err, "restapi - v1 - delete")
+
 		return errorResponse(ctx, http.StatusInternalServerError, "delete failed")
 	}
 

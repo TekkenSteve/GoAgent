@@ -1,6 +1,6 @@
 // examples/research/main.go
 //
-// Research Pattern
+// # Research Pattern
 //
 // A research workflow that fans out into parallel exploration
 // subtasks and then synthesizes the results.
@@ -46,47 +46,7 @@ func main() {
 
 	status, err := c.ExecuteOrchestration(ctx, client.OrchestrationRequest{
 		RunID: runID,
-		Steps: []map[string]any{
-			{
-				"id": "discover", "type": "tool", "tool": "web_search",
-				"input": map[string]any{"query": "climate change latest research 2026", "max_results": 5},
-			},
-			{
-				"id": "explore", "type": "split",
-				"input": map[string]any{
-					"children": []map[string]any{
-						{
-							"id": "explore-impacts", "type": "tool", "tool": "web_search",
-							"input": map[string]any{"query": "climate change impacts 2026", "max_results": 3},
-						},
-						{
-							"id": "explore-solutions", "type": "tool", "tool": "web_search",
-							"input": map[string]any{"query": "climate change solutions 2026", "max_results": 3},
-						},
-						{
-							"id": "explore-policy", "type": "tool", "tool": "web_search",
-							"input": map[string]any{"query": "climate policy 2026", "max_results": 3},
-						},
-					},
-				},
-			},
-			{
-				"id": "gather", "type": "join",
-				"input": map[string]any{"_join_group": "explore"},
-			},
-			{
-				"id": "synthesize", "type": "agent", "agent_id": "analyst",
-				"input": map[string]any{"message": "Synthesize all research findings into a summary report"},
-			},
-			{
-				"id": "review", "type": "wait",
-				"wait_for": map[string]any{
-					"signal_name": "review-approved",
-					"timeout":     10000000000, // 10 seconds in nanoseconds
-					"on_timeout":  "skip",
-				},
-			},
-		},
+		Steps: researchSteps(),
 	})
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
@@ -104,4 +64,48 @@ func main() {
 	}
 
 	fmt.Printf("\nFinal status: lifecycle_state=%s step=%d\n", status.LifecycleState, status.Step)
+}
+
+func researchSteps() []map[string]any {
+	return []map[string]any{
+		{
+			"id": "discover", "type": "tool", "tool": "web_search",
+			"input": map[string]any{"query": "climate change latest research 2026", "max_results": 5},
+		},
+		{
+			"id": "explore", "type": "split",
+			"input": map[string]any{
+				"children": []map[string]any{
+					{
+						"id": "explore-impacts", "type": "tool", "tool": "web_search",
+						"input": map[string]any{"query": "climate change impacts 2026", "max_results": 3},
+					},
+					{
+						"id": "explore-solutions", "type": "tool", "tool": "web_search",
+						"input": map[string]any{"query": "climate change solutions 2026", "max_results": 3},
+					},
+					{
+						"id": "explore-policy", "type": "tool", "tool": "web_search",
+						"input": map[string]any{"query": "climate policy 2026", "max_results": 3},
+					},
+				},
+			},
+		},
+		{
+			"id": "gather", "type": "join",
+			"input": map[string]any{"_join_group": "explore"},
+		},
+		{
+			"id": "synthesize", "type": "agent", "agent_id": "analyst",
+			"input": map[string]any{"message": "Synthesize all research findings into a summary report"},
+		},
+		{
+			"id": "review", "type": "wait",
+			"wait_for": map[string]any{
+				"signal_name": "review-approved",
+				"timeout":     10000000000, // 10 seconds in nanoseconds
+				"on_timeout":  "skip",
+			},
+		},
+	}
 }

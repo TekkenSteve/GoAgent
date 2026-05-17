@@ -2,9 +2,16 @@ package entity
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"reflect"
 	"sync"
+)
+
+var (
+	ErrMissingEventType    = errors.New("event_codec: missing event_type discriminator")
+	ErrUnknownEventType    = errors.New("event_codec: unknown event type")
+	ErrUnexpectedEventType = errors.New("event_codec: unexpected event type")
 )
 
 // EventRegistry manages the mapping of event_type → Go types.
@@ -15,7 +22,7 @@ type EventRegistry struct {
 	registry map[string]reflect.Type
 }
 
-var DefaultRegistry = &EventRegistry{
+var DefaultRegistry = &EventRegistry{ //nolint:gochecknoglobals // global singleton registry for event codec
 	registry: make(map[string]reflect.Type),
 }
 
@@ -23,12 +30,14 @@ var DefaultRegistry = &EventRegistry{
 // typ must be a pointer to a specific event type (e.g., &TextDeltaEvent{}).
 func RegisterEventType(typ StreamEvent) {
 	t := reflect.TypeOf(typ).Elem()
+
 	DefaultRegistry.mu.Lock()
 	defer DefaultRegistry.mu.Unlock()
+
 	DefaultRegistry.registry[typ.EventType()] = t
 }
 
-func init() {
+func init() { //nolint:gochecknoinits // init registers default event types
 	RegisterEventType(&TextDeltaEvent{})
 	RegisterEventType(&ReasoningDeltaEvent{})
 	RegisterEventType(&ToolCallStartEvent{})
@@ -65,20 +74,29 @@ func UnmarshalEvent(data []byte) (StreamEvent, error) {
 	if err := json.Unmarshal(data, &d); err != nil {
 		return nil, fmt.Errorf("event_codec: extract event_type: %w", err)
 	}
+
 	if d.EventType == "" {
-		return nil, fmt.Errorf("event_codec: missing event_type discriminator")
+		return nil, ErrMissingEventType
 	}
 
 	DefaultRegistry.mu.RLock()
 	typ, ok := DefaultRegistry.registry[d.EventType]
 	DefaultRegistry.mu.RUnlock()
+
 	if !ok {
-		return nil, fmt.Errorf("event_codec: unknown event type: %s", d.EventType)
+		return nil, fmt.Errorf("%w: %s", ErrUnknownEventType, d.EventType)
 	}
 
-	ev := reflect.New(typ).Interface().(StreamEvent)
+	rawEv := reflect.New(typ).Interface()
+
+	ev, ok := rawEv.(StreamEvent)
+	if !ok {
+		return nil, fmt.Errorf("%w: unexpected type %T for event_type %s", ErrUnexpectedEventType, rawEv, d.EventType)
+	}
+
 	if err := json.Unmarshal(data, ev); err != nil {
 		return nil, fmt.Errorf("event_codec: unmarshal %s: %w", d.EventType, err)
 	}
+
 	return ev, nil
 }

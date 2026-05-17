@@ -36,11 +36,15 @@ func NewRedisSequencer(rdb *redis.Redis) *RedisSequencer {
 // Best-effort refreshes the key TTL so stale sessions are eventually cleaned up.
 func (s *RedisSequencer) Next(ctx context.Context, sessionID string) (int64, error) {
 	key := fmt.Sprintf("agent:seq:%s", sessionID)
+
 	seq, err := s.rdb.Incr(ctx, key)
 	if err != nil {
 		return 0, err
 	}
 	// Best-effort TTL refresh
-	s.rdb.Expire(ctx, key, sequencerKeyTTL)
+	if _, err := s.rdb.Expire(ctx, key, sequencerKeyTTL); err != nil {
+		_ = err
+	}
+
 	return seq, nil
 }

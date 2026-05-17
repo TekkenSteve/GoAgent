@@ -6,10 +6,15 @@ import (
 	"fmt"
 
 	sq "github.com/Masterminds/squirrel"
-	"github.com/jackc/pgx/v5"
-
 	"github.com/TekkenSteve/GoAgent/internal/entity"
 	"github.com/TekkenSteve/GoAgent/pkg/postgres"
+	"github.com/jackc/pgx/v5"
+)
+
+// Sentinel errors.
+var (
+	ErrInsufficientBalance = errors.New("insufficient balance")
+	ErrNegativeLimitOffset = errors.New("limit and offset must be non-negative")
 )
 
 // BillingRepo implements repo.CreditManager with Postgres.
@@ -34,8 +39,11 @@ func (r *BillingRepo) GetBalance(ctx context.Context, accountID string) (entity.
 		return entity.CreditAccount{}, fmt.Errorf("BillingRepo - GetBalance - builder: %w", err)
 	}
 
-	var acct entity.CreditAccount
-	var version int64
+	var (
+		acct    entity.CreditAccount
+		version int64
+	)
+
 	err = r.Pool.QueryRow(ctx, sql, args...).Scan(
 		&acct.AccountID, &acct.Balance, &acct.Currency, &version, &acct.UpdatedAt,
 	)
@@ -47,6 +55,7 @@ func (r *BillingRepo) GetBalance(ctx context.Context, accountID string) (entity.
 				Currency:  "USD",
 			}, nil
 		}
+
 		return entity.CreditAccount{}, fmt.Errorf("BillingRepo - GetBalance - query: %w", err)
 	}
 
@@ -67,12 +76,14 @@ func (r *BillingRepo) Deduct(ctx context.Context, accountID string, amount entit
 	if err != nil {
 		return entity.CreditTransaction{}, fmt.Errorf("BillingRepo - Deduct - update: %w", err)
 	}
+
 	if tag.RowsAffected() == 0 {
-		return entity.CreditTransaction{}, fmt.Errorf("BillingRepo - Deduct - insufficient balance for account %s", accountID)
+		return entity.CreditTransaction{}, fmt.Errorf("BillingRepo - Deduct - %w: %s", ErrInsufficientBalance, accountID)
 	}
 
 	// Record in ledger
 	var txn entity.CreditTransaction
+
 	err = r.Pool.QueryRow(ctx, `
 		INSERT INTO credit_ledger (account_id, amount, type, description)
 		VALUES ($1, $2, $3, $4)
@@ -112,6 +123,7 @@ func (r *BillingRepo) AddCredits(ctx context.Context, accountID string, amount e
 	}
 
 	var txn entity.CreditTransaction
+
 	err = r.Pool.QueryRow(ctx, `
 		INSERT INTO credit_ledger (account_id, amount, type, description)
 		VALUES ($1, $2, $3, $4)
@@ -128,6 +140,10 @@ func (r *BillingRepo) AddCredits(ctx context.Context, accountID string, amount e
 
 // GetHistory retrieves credit transactions for an account, newest first.
 func (r *BillingRepo) GetHistory(ctx context.Context, accountID string, limit, offset int) ([]entity.CreditTransaction, error) {
+	if limit < 0 || offset < 0 {
+		return nil, ErrNegativeLimitOffset
+	}
+
 	sql, args, err := r.Builder.
 		Select("id", "account_id", "amount", "type", "description", "created_at").
 		From("credit_ledger").
@@ -147,6 +163,7 @@ func (r *BillingRepo) GetHistory(ctx context.Context, accountID string, limit, o
 	defer rows.Close()
 
 	var txns []entity.CreditTransaction
+
 	for rows.Next() {
 		var txn entity.CreditTransaction
 		if err := rows.Scan(
@@ -154,8 +171,10 @@ func (r *BillingRepo) GetHistory(ctx context.Context, accountID string, limit, o
 		); err != nil {
 			return nil, fmt.Errorf("BillingRepo - GetHistory - scan: %w", err)
 		}
+
 		txns = append(txns, txn)
 	}
+
 	if err := rows.Err(); err != nil {
 		return nil, fmt.Errorf("BillingRepo - GetHistory - rows: %w", err)
 	}
@@ -164,7 +183,7 @@ func (r *BillingRepo) GetHistory(ctx context.Context, accountID string, limit, o
 }
 
 // CreateUsageRecord persists an LLM usage record for audit and billing history.
-func (r *BillingRepo) CreateUsageRecord(ctx context.Context, record entity.UsageRecord) error {
+func (r *BillingRepo) CreateUsageRecord(ctx context.Context, record *entity.UsageRecord) error {
 	_, err := r.Pool.Exec(ctx, `
 		INSERT INTO usage_records (record_id, run_id, account_id, model_id, prompt_tokens, completion_tokens, total_tokens, cost)
 		VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
@@ -173,20 +192,6 @@ func (r *BillingRepo) CreateUsageRecord(ctx context.Context, record entity.Usage
 	if err != nil {
 		return fmt.Errorf("BillingRepo - CreateUsageRecord - insert: %w", err)
 	}
+
 	return nil
 }
-
-// ensureCreditAccount is a helper that creates a credit_account row if none exists.
-// Used by Deduct before attempting the balance check.
-func (r *BillingRepo) ensureCreditAccount(ctx context.Context, accountID string) error {
-	_, err := r.Pool.Exec(ctx, `
-		INSERT INTO credit_accounts (account_id, balance, currency)
-		VALUES ($1, 0, 'USD')
-		ON CONFLICT (account_id) DO NOTHING
-	`, accountID)
-	if err != nil {
-		return fmt.Errorf("BillingRepo - ensureCreditAccount: %w", err)
-	}
-	return nil
-}
-

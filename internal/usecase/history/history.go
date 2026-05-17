@@ -24,6 +24,7 @@ func (uc *UseCase) ListMessages(ctx context.Context, runID string, limit, offset
 	if err != nil {
 		return nil, fmt.Errorf("HistoryUseCase - ListMessages - uc.store.ListMessagesByRun: %w", err)
 	}
+
 	return records, nil
 }
 
@@ -33,5 +34,6 @@ func (uc *UseCase) ListToolResults(ctx context.Context, runID string, limit, off
 	if err != nil {
 		return nil, fmt.Errorf("HistoryUseCase - ListToolResults - uc.store.ListToolResultsByRun: %w", err)
 	}
+
 	return records, nil
 }

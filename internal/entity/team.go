@@ -34,7 +34,7 @@ type ToolBinding struct {
 type StepTemplate struct {
 	ID        string         `json:"id"`
 	Type      StepType       `json:"type"`
-	AgentRef  string         `json:"agent_ref,omitempty"`  // TeamSpec.Agents[i].ID
+	AgentRef  string         `json:"agent_ref,omitempty"` // TeamSpec.Agents[i].ID
 	Tool      string         `json:"tool,omitempty"`
 	Input     map[string]any `json:"input"`
 	DependsOn []string       `json:"depends_on,omitempty"`
@@ -44,24 +44,24 @@ type StepTemplate struct {
 
 // OrchestrationInput is the input for OrchestrationWorkflow.
 type OrchestrationInput struct {
-	RunID          string          `json:"run_id"`
-	TeamSpec       *TeamSpec       `json:"team_spec,omitempty"`       // from team definition
-	Steps          []Step          `json:"steps,omitempty"`           // direct step array
-	SystemPrompt   string          `json:"system_prompt,omitempty"`
-	Message        string          `json:"message,omitempty"`
-	MaxDepth       int             `json:"max_depth,omitempty"`       // max recursion depth
-	ContinuePolicy ContinuePolicy  `json:"continue_policy,omitempty"`
+	RunID          string         `json:"run_id"`
+	TeamSpec       *TeamSpec      `json:"team_spec,omitempty"` // from team definition
+	Steps          []Step         `json:"steps,omitempty"`     // direct step array
+	SystemPrompt   string         `json:"system_prompt,omitempty"`
+	Message        string         `json:"message,omitempty"`
+	MaxDepth       int            `json:"max_depth,omitempty"` // max recursion depth
+	ContinuePolicy ContinuePolicy `json:"continue_policy"`
 }
 
 // OrchestrationResult is the output of OrchestrationWorkflow.
 type OrchestrationResult struct {
-	RunID     string         `json:"run_id"`
-	Steps     []Step         `json:"steps"`      // final step queue with statuses
-	Summary   map[string]any `json:"summary"`
+	RunID   string         `json:"run_id"`
+	Steps   []Step         `json:"steps"` // final step queue with statuses
+	Summary map[string]any `json:"summary"`
 }
 
 // ContinuePolicy limits orchestration depth and duration.
 type ContinuePolicy struct {
-	MaxDepth   int `json:"max_depth"`   // max step queue length
-	MaxRounds  int `json:"max_rounds"`  // max workflow loop iterations
+	MaxDepth  int `json:"max_depth"`  // max step queue length
+	MaxRounds int `json:"max_rounds"` // max workflow loop iterations
 }

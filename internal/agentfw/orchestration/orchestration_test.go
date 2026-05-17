@@ -18,18 +18,20 @@ type mockToolExec struct {
 	err    error
 }
 
-func (m *mockToolExec) fn(ctx context.Context, input ToolInput) (*ToolOutput, error) {
+func (m *mockToolExec) fn(_ context.Context, _ ToolInput) (*ToolOutput, error) {
 	if m.err != nil {
 		return nil, m.err
 	}
+
 	return &m.result, nil
 }
 
 // ——— test: sequential agent steps ———
 
 func TestOrchestrationWorkflow_SequentialSteps(t *testing.T) {
-	var suite testsuite.WorkflowTestSuite
-	env := suite.NewTestWorkflowEnvironment()
+	t.Parallel()
+
+	env := (&testsuite.WorkflowTestSuite{}).NewTestWorkflowEnvironment()
 
 	// Register child workflow
 	env.RegisterWorkflowWithOptions(AgentWorkflow, workflow.RegisterOptions{
@@ -43,7 +45,7 @@ func TestOrchestrationWorkflow_SequentialSteps(t *testing.T) {
 	})
 
 	// Make PrepareActivity a simple pass-through
-	env.RegisterActivityWithOptions(func(ctx context.Context, input PrepareInput) (*PrepareOutput, error) {
+	env.RegisterActivityWithOptions(func(_ context.Context, input *PrepareInput) (*PrepareOutput, error) {
 		return &PrepareOutput{
 			Messages: []entity.Message{{Role: entity.RoleUser, Content: input.Message}},
 			Tools:    input.Tools,
@@ -77,7 +79,7 @@ func TestOrchestrationWorkflow_SequentialSteps(t *testing.T) {
 		},
 	}
 
-	env.ExecuteWorkflow(OrchestrationWorkflow, entity.OrchestrationInput{
+	env.ExecuteWorkflow(Workflow, &entity.OrchestrationInput{
 		RunID: "test-seq",
 		Steps: steps,
 	})
@@ -96,7 +98,10 @@ func TestOrchestrationWorkflow_SequentialSteps(t *testing.T) {
 // ——— test: tool step ———
 
 func TestOrchestrationWorkflow_ToolStep(t *testing.T) {
+	t.Parallel()
+
 	var suite testsuite.WorkflowTestSuite
+
 	env := suite.NewTestWorkflowEnvironment()
 
 	mockTool := &mockToolExec{
@@ -117,7 +122,7 @@ func TestOrchestrationWorkflow_ToolStep(t *testing.T) {
 		},
 	}
 
-	env.ExecuteWorkflow(OrchestrationWorkflow, entity.OrchestrationInput{
+	env.ExecuteWorkflow(Workflow, &entity.OrchestrationInput{
 		RunID: "test-tool",
 		Steps: steps,
 	})
@@ -133,7 +138,10 @@ func TestOrchestrationWorkflow_ToolStep(t *testing.T) {
 // ——— test: cancel signal ———
 
 func TestOrchestrationWorkflow_Cancel(t *testing.T) {
+	t.Parallel()
+
 	var suite testsuite.WorkflowTestSuite
+
 	env := suite.NewTestWorkflowEnvironment()
 
 	env.RegisterWorkflowWithOptions(AgentWorkflow, workflow.RegisterOptions{
@@ -144,7 +152,7 @@ func TestOrchestrationWorkflow_Cancel(t *testing.T) {
 	env.RegisterActivityWithOptions(mockLLM.fn, activity.RegisterOptions{
 		Name: LLMStepActivityName,
 	})
-	env.RegisterActivityWithOptions(func(ctx context.Context, input PrepareInput) (*PrepareOutput, error) {
+	env.RegisterActivityWithOptions(func(_ context.Context, input *PrepareInput) (*PrepareOutput, error) {
 		return &PrepareOutput{
 			Messages: []entity.Message{{Role: entity.RoleUser, Content: input.Message}},
 			Tools:    input.Tools,
@@ -152,6 +160,7 @@ func TestOrchestrationWorkflow_Cancel(t *testing.T) {
 	}, activity.RegisterOptions{
 		Name: PrepareActivityName,
 	})
+
 	mockTool := &mockToolExec{
 		result: ToolOutput{Output: "mock", ExitCode: 0},
 	}
@@ -173,7 +182,7 @@ func TestOrchestrationWorkflow_Cancel(t *testing.T) {
 		env.SignalWorkflow(AgentCommandSignal, "cancel")
 	}, 0)
 
-	env.ExecuteWorkflow(OrchestrationWorkflow, entity.OrchestrationInput{
+	env.ExecuteWorkflow(Workflow, &entity.OrchestrationInput{
 		RunID: "test-cancel",
 		Steps: steps,
 	})
@@ -185,69 +194,44 @@ func TestOrchestrationWorkflow_Cancel(t *testing.T) {
 // ——— test: step mutation via signal ———
 
 func TestOrchestrationWorkflow_StepMutation(t *testing.T) {
-	var suite testsuite.WorkflowTestSuite
-	env := suite.NewTestWorkflowEnvironment()
+	t.Parallel()
 
-	env.RegisterWorkflowWithOptions(AgentWorkflow, workflow.RegisterOptions{
-		Name: AgentWorkflowName,
-	})
+	env := (&testsuite.WorkflowTestSuite{}).NewTestWorkflowEnvironment()
+	env.RegisterWorkflowWithOptions(AgentWorkflow, workflow.RegisterOptions{Name: AgentWorkflowName})
+
 	mockLLM := &mockLLMStepNoTool{}
-	env.RegisterActivityWithOptions(mockLLM.fn, activity.RegisterOptions{
-		Name: LLMStepActivityName,
-	})
-	env.RegisterActivityWithOptions(func(ctx context.Context, input PrepareInput) (*PrepareOutput, error) {
+	env.RegisterActivityWithOptions(mockLLM.fn, activity.RegisterOptions{Name: LLMStepActivityName})
+	env.RegisterActivityWithOptions(func(_ context.Context, input *PrepareInput) (*PrepareOutput, error) {
 		return &PrepareOutput{
 			Messages: []entity.Message{{Role: entity.RoleUser, Content: input.Message}},
 			Tools:    input.Tools,
 		}, nil
-	}, activity.RegisterOptions{
-		Name: PrepareActivityName,
-	})
-	mockTool := &mockToolExec{
-		result: ToolOutput{Output: "mock", ExitCode: 0},
-	}
-	env.RegisterActivityWithOptions(mockTool.fn, activity.RegisterOptions{
-		Name: ToolExecActivityName,
-	})
+	}, activity.RegisterOptions{Name: PrepareActivityName})
+
+	mockTool := &mockToolExec{result: ToolOutput{Output: "mock", ExitCode: 0}}
+	env.RegisterActivityWithOptions(mockTool.fn, activity.RegisterOptions{Name: ToolExecActivityName})
 
 	// Start with one step, then inject a new step after it via signal
 	steps := []entity.Step{
-		{
-			ID:     "step-1",
-			Type:   entity.StepAgent,
-			Name:   "first",
-			Input:  map[string]any{"message": "Hello"},
-			Status: entity.StepPending,
-		},
+		{ID: "step-1", Type: entity.StepAgent, Name: "first", Input: map[string]any{"message": "Hello"}, Status: entity.StepPending},
 	}
 
 	env.RegisterDelayedCallback(func() {
 		env.SignalWorkflow(StepModifySignal, entity.StepMutation{
 			AppendAfter: "step-1",
 			InsertSteps: []entity.Step{
-				{
-					ID:     "step-2",
-					Type:   entity.StepAgent,
-					Name:   "injected",
-					Input:  map[string]any{"message": "injected"},
-					Status: entity.StepPending,
-				},
+				{ID: "step-2", Type: entity.StepAgent, Name: "injected", Input: map[string]any{"message": "injected"}, Status: entity.StepPending},
 			},
 		})
 	}, 0)
 
-	env.ExecuteWorkflow(OrchestrationWorkflow, entity.OrchestrationInput{
-		RunID: "test-mutation",
-		Steps: steps,
-	})
+	env.ExecuteWorkflow(Workflow, &entity.OrchestrationInput{RunID: "test-mutation", Steps: steps})
 
 	require.True(t, env.IsWorkflowCompleted())
 	require.NoError(t, env.GetWorkflowError())
 
 	var result entity.OrchestrationResult
 	require.NoError(t, env.GetWorkflowResult(&result))
-
-	// Should have 4 steps (step-1 completed, then injected steps added)
 	require.Len(t, result.Steps, 2)
 	require.Equal(t, entity.StepCompleted, result.Steps[1].Status)
 	require.Equal(t, "injected", result.Steps[1].Name)
@@ -256,7 +240,10 @@ func TestOrchestrationWorkflow_StepMutation(t *testing.T) {
 // ——— test: step dependencies ———
 
 func TestOrchestrationWorkflow_Dependencies(t *testing.T) {
+	t.Parallel()
+
 	var suite testsuite.WorkflowTestSuite
+
 	env := suite.NewTestWorkflowEnvironment()
 
 	mockTool := &mockToolExec{
@@ -287,7 +274,7 @@ func TestOrchestrationWorkflow_Dependencies(t *testing.T) {
 		},
 	}
 
-	env.ExecuteWorkflow(OrchestrationWorkflow, entity.OrchestrationInput{
+	env.ExecuteWorkflow(Workflow, &entity.OrchestrationInput{
 		RunID: "test-dep",
 		Steps: steps,
 	})
@@ -305,7 +292,7 @@ func TestOrchestrationWorkflow_Dependencies(t *testing.T) {
 
 type mockLLMStepNoTool struct{}
 
-func (m *mockLLMStepNoTool) fn(ctx context.Context, input LLMStepInput) (*LLMStepOutput, error) {
+func (m *mockLLMStepNoTool) fn(_ context.Context, input *LLMStepInput) (*LLMStepOutput, error) {
 	return &LLMStepOutput{
 		Content:      "response for " + input.RunID,
 		Usage:        entity.Usage{PromptTokens: 10, CompletionTokens: 5, TotalTokens: 15},

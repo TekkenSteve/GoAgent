@@ -28,26 +28,26 @@ type (
 	}
 	// AgentRepo persists agent definitions and version snapshots.
 	AgentRepo interface {
-		Create(ctx context.Context, req entity.CreateAgentRequest) (entity.AgentRecord, error)
+		Create(ctx context.Context, req *entity.CreateAgentRequest) (entity.AgentRecord, error)
 		Get(ctx context.Context, agentID string) (entity.AgentRecord, bool, error)
 		Update(ctx context.Context, agentID string, req entity.UpdateAgentRequest) (entity.AgentRecord, error)
 		Delete(ctx context.Context, agentID string) error
 		ListByAccount(ctx context.Context, accountID string) ([]entity.AgentRecord, error)
-		CreateVersion(ctx context.Context, record entity.AgentVersionRecord) error
+		CreateVersion(ctx context.Context, record *entity.AgentVersionRecord) error
 		GetVersion(ctx context.Context, versionID string) (entity.AgentVersionRecord, bool, error)
 		ListVersions(ctx context.Context, agentID string) ([]entity.AgentVersionRecord, error)
 	}
 	// LLMProvider performs LLM inference.
 	LLMProvider interface {
-		Chat(ctx context.Context, req entity.LLMRequest) (entity.LLMResponse, error)
+		Chat(ctx context.Context, req *entity.LLMRequest) (entity.LLMResponse, error)
 	}
 	// LLMStreamProvider optionally streams chat responses token by token.
 	LLMStreamProvider interface {
-		ChatStream(ctx context.Context, req entity.LLMRequest) (<-chan entity.LLMStreamChunk, error)
+		ChatStream(ctx context.Context, req *entity.LLMRequest) (<-chan entity.LLMStreamChunk, error)
 	}
 	// ToolExecutor executes a single tool call.
 	ToolExecutor interface {
-		Execute(ctx context.Context, req entity.ToolRequest) (entity.ToolResult, error)
+		Execute(ctx context.Context, req *entity.ToolRequest) (entity.ToolResult, error)
 	}
 	// WALAppender appends entries to a write-ahead log for async persistence.
 	// The agent usecase writes to the WAL; a BatchWriter flushes WAL → Postgres.
@@ -60,17 +60,17 @@ type (
 		Compress(ctx context.Context, messages []entity.Message, config entity.LLMConfig) ([]entity.Message, bool, error)
 	}
 	ExecutorRepo interface {
-		StartExecution(ctx context.Context, req entity.ExecuteRequest) (entity.RunStatus, error)
+		StartExecution(ctx context.Context, req *entity.ExecuteRequest) (entity.RunStatus, error)
 		GetStatus(ctx context.Context, runID string) (entity.RunStatus, error)
 		Pause(ctx context.Context, runID string) error
 		Resume(ctx context.Context, runID string) error
 		Cancel(ctx context.Context, runID string) error
-		StartOrchestration(ctx context.Context, input entity.OrchestrationInput) (entity.RunStatus, error)
+		StartOrchestration(ctx context.Context, input *entity.OrchestrationInput) (entity.RunStatus, error)
 		GetOrchestrationStatus(ctx context.Context, runID string) (entity.RunStatus, error)
 	}
 	// WorkflowTemplateRepo persists workflow template definitions.
 	WorkflowTemplateRepo interface {
-		Create(ctx context.Context, req entity.CreateWorkflowTemplateRequest) (entity.WorkflowTemplate, error)
+		Create(ctx context.Context, req *entity.CreateWorkflowTemplateRequest) (entity.WorkflowTemplate, error)
 		Get(ctx context.Context, templateID string) (entity.WorkflowTemplate, bool, error)
 		Update(ctx context.Context, templateID string, req entity.UpdateWorkflowTemplateRequest) (entity.WorkflowTemplate, error)
 		Delete(ctx context.Context, templateID string) error
@@ -78,7 +78,7 @@ type (
 	}
 	// TriggerRepo persists trigger specifications for scheduled/event-based execution.
 	TriggerRepo interface {
-		Create(ctx context.Context, req entity.CreateTriggerRequest) (entity.TriggerSpec, error)
+		Create(ctx context.Context, req *entity.CreateTriggerRequest) (entity.TriggerSpec, error)
 		Get(ctx context.Context, triggerID string) (entity.TriggerSpec, bool, error)
 		Update(ctx context.Context, triggerID string, req entity.UpdateTriggerRequest) (entity.TriggerSpec, error)
 		Delete(ctx context.Context, triggerID string) error
@@ -86,12 +86,12 @@ type (
 		ListByType(ctx context.Context, triggerType entity.TriggerType) ([]entity.TriggerSpec, error)
 		ListActive(ctx context.Context) ([]entity.TriggerSpec, error)
 		RecordFired(ctx context.Context, triggerID string) error
-		InsertTriggerEvent(ctx context.Context, event entity.TriggerEventLog) error
+		InsertTriggerEvent(ctx context.Context, event *entity.TriggerEventLog) error
 	}
 	// TriggerScheduler manages the lifecycle of scheduled trigger executions.
 	// Implementations use Temporal cron workflows or the Schedule API.
 	TriggerScheduler interface {
-		Schedule(ctx context.Context, trigger entity.TriggerSpec) error
+		Schedule(ctx context.Context, trigger *entity.TriggerSpec) error
 		Unschedule(ctx context.Context, triggerID string) error
 	}
 	// CreditManager manages account credit balances and transactions.
@@ -107,6 +107,6 @@ type (
 	}
 	// UsageRecordRepo persists usage records for audit and billing history.
 	UsageRecordRepo interface {
-		CreateUsageRecord(ctx context.Context, record entity.UsageRecord) error
+		CreateUsageRecord(ctx context.Context, record *entity.UsageRecord) error
 	}
 )

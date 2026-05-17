@@ -3,7 +3,7 @@ package entity
 
 import "fmt"
 
-// ErrorCode categorises agent execution failures for structured error handling.
+// ErrorCode categorizes agent execution failures for structured error handling.
 type ErrorCode string
 
 const (

@@ -39,25 +39,29 @@ type ContinuationPayload struct {
 	InitialRequestedAt time.Time
 }
 
+func thresholdExceeded(threshold, value int) bool {
+	return threshold > 0 && value >= threshold
+}
+
 // EvaluateContinueAsNew evaluates continuation policy from deterministic inputs.
 func EvaluateContinueAsNew(policy ContinueAsNewPolicy, snapshot ContinueAsNewSnapshot) ContinueAsNewDecision {
-	if policy.MaxContinuations > 0 && snapshot.ContinuationCnt >= policy.MaxContinuations {
+	if thresholdExceeded(int(policy.MaxContinuations), int(snapshot.ContinuationCnt)) {
 		return ContinueAsNewDecision{}
 	}
 
-	if policy.HistoryLengthThreshold > 0 && snapshot.HistoryLength >= policy.HistoryLengthThreshold {
+	if thresholdExceeded(policy.HistoryLengthThreshold, snapshot.HistoryLength) {
 		return ContinueAsNewDecision{ShouldContinue: true, Reason: "history_length_threshold"}
 	}
 
-	if policy.StateSizeThresholdByte > 0 && snapshot.StateSizeBytes >= policy.StateSizeThresholdByte {
+	if thresholdExceeded(policy.StateSizeThresholdByte, snapshot.StateSizeBytes) {
 		return ContinueAsNewDecision{ShouldContinue: true, Reason: "state_size_threshold"}
 	}
 
-	if policy.StepThreshold > 0 && snapshot.Step >= policy.StepThreshold {
+	if thresholdExceeded(int(policy.StepThreshold), int(snapshot.Step)) {
 		return ContinueAsNewDecision{ShouldContinue: true, Reason: "step_threshold"}
 	}
 
-	if policy.WallClockThreshold > 0 && snapshot.Elapsed >= policy.WallClockThreshold {
+	if thresholdExceeded(int(policy.WallClockThreshold), int(snapshot.Elapsed)) {
 		return ContinueAsNewDecision{ShouldContinue: true, Reason: "wall_clock_threshold"}
 	}
 

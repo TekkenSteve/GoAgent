@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/TekkenSteve/GoAgent/internal/entity"
 	"github.com/goccy/go-json"
 )
 
@@ -45,6 +46,7 @@ func executeAgentRun(t *testing.T, runID, accountID string) runStatus {
 	if err := json.NewDecoder(resp.Body).Decode(&status); err != nil {
 		t.Fatalf("executeAgentRun: decode failed: %v", err)
 	}
+
 	return status
 }
 
@@ -53,10 +55,13 @@ func waitForRunCompletion(t *testing.T, runID string) runStatus {
 	t.Helper()
 
 	url := basePathV1 + "/agent/status/" + runID
-	for i := 0; i < 30; i++ {
+
+	for range 30 {
 		ctx, cancel := context.WithTimeout(t.Context(), requestTimeout)
 		resp, err := doWebRequestWithTimeout(ctx, http.MethodGet, url, nil)
+
 		cancel()
+
 		if err != nil {
 			t.Fatalf("waitForRunCompletion: request failed: %v", err)
 		}
@@ -66,16 +71,20 @@ func waitForRunCompletion(t *testing.T, runID string) runStatus {
 			resp.Body.Close()
 			t.Fatalf("waitForRunCompletion: decode failed: %v", err)
 		}
+
 		resp.Body.Close()
 
-		if status.LifecycleState == "completed" ||
-			status.LifecycleState == "failed" ||
-			status.LifecycleState == "cancelled" {
+		if status.LifecycleState == string(entity.LifecycleCompleted) ||
+			status.LifecycleState == string(entity.LifecycleFailed) ||
+			status.LifecycleState == string(entity.LifecycleCancelled) {
 			return status
 		}
+
 		time.Sleep(time.Second)
 	}
+
 	t.Fatalf("waitForRunCompletion: timed out waiting for run %s", runID)
+
 	return runStatus{}
 }
 
@@ -122,35 +131,44 @@ func TestHTTPAgentExecuteV1(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.description, func(t *testing.T) {
-			body := fmt.Sprintf(`{
-				"run_id": "%s",
-				"account_id": "%s",
-				"user_message": "%s"
-			}`, tt.runID, tt.accountID, tt.message)
-
-			ctx, cancel := context.WithTimeout(t.Context(), requestTimeout)
-			defer cancel()
-
-			resp, err := doWebRequestWithTimeout(ctx, http.MethodPost, basePathV1+"/agent/execute", bytes.NewBufferString(body))
-			if err != nil {
-				t.Fatalf("Failed to send request: %v", err)
-			}
-			defer resp.Body.Close()
-
-			if resp.StatusCode != tt.expected {
-				t.Errorf("Expected status %d, got %d", tt.expected, resp.StatusCode)
-			}
-
-			if tt.expected == http.StatusOK {
-				var status runStatus
-				if err := json.NewDecoder(resp.Body).Decode(&status); err != nil {
-					t.Fatalf("Failed to decode response: %v", err)
-				}
-				if status.RunID == "" {
-					t.Error("Expected non-empty run_id")
-				}
-			}
+			testExecuteAgentRequest(t, tt.runID, tt.accountID, tt.message, tt.expected)
 		})
+	}
+}
+
+// testExecuteAgentRequest sends an agent execute request and asserts the
+// response status code and (for successful requests) the run status body.
+func testExecuteAgentRequest(t *testing.T, runID, accountID, message string, expectedStatus int) {
+	t.Helper()
+
+	body := fmt.Sprintf(`{
+		"run_id": "%s",
+		"account_id": "%s",
+		"user_message": "%s"
+	}`, runID, accountID, message)
+
+	ctx, cancel := context.WithTimeout(t.Context(), requestTimeout)
+	defer cancel()
+
+	resp, err := doWebRequestWithTimeout(ctx, http.MethodPost, basePathV1+"/agent/execute", bytes.NewBufferString(body))
+	if err != nil {
+		t.Fatalf("Failed to send request: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != expectedStatus {
+		t.Errorf("Expected status %d, got %d", expectedStatus, resp.StatusCode)
+	}
+
+	if expectedStatus == http.StatusOK {
+		var status runStatus
+		if err := json.NewDecoder(resp.Body).Decode(&status); err != nil {
+			t.Fatalf("Failed to decode response: %v", err)
+		}
+
+		if status.RunID == "" {
+			t.Error("Expected non-empty run_id")
+		}
 	}
 }
 
@@ -168,6 +186,7 @@ func TestHTTPAgentStatusV1(t *testing.T) {
 	if status.LifecycleState != "completed" {
 		t.Errorf("Expected lifecycle_state completed, got %q", status.LifecycleState)
 	}
+
 	if status.Step == 0 {
 		t.Error("Expected non-zero step count")
 	}
@@ -186,6 +205,7 @@ func TestHTTPAgentMessagesV1(t *testing.T) {
 	waitForRunCompletion(t, runID)
 
 	url := basePathV1 + "/agent/" + runID + "/messages"
+
 	ctx, cancel := context.WithTimeout(t.Context(), requestTimeout)
 	defer cancel()
 

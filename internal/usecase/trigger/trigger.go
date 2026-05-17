@@ -2,12 +2,23 @@ package trigger
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
 
 	"github.com/TekkenSteve/GoAgent/internal/entity"
 	"github.com/TekkenSteve/GoAgent/internal/repo"
 	"github.com/google/uuid"
+)
+
+var (
+	ErrTriggerNameRequired     = errors.New("trigger name is required")
+	ErrTriggerTemplateRequired = errors.New("trigger template_id is required")
+	ErrTriggerCronRequired     = errors.New("cron_expression is required for schedule triggers")
+	ErrTriggerNotFound         = errors.New("trigger not found")
+	ErrNoActiveTriggers        = errors.New("no active triggers for event")
+	ErrAllTriggersFailed       = errors.New("all matching triggers failed")
+	ErrTemplateNotFound        = errors.New("template not found for trigger")
 )
 
 // UseCase manages trigger lifecycle and coordinates scheduling.
@@ -27,15 +38,17 @@ func New(triggerRepo repo.TriggerRepo, scheduler repo.TriggerScheduler, template
 }
 
 // Create creates a new trigger and schedules it if it's a scheduled trigger.
-func (uc *UseCase) Create(ctx context.Context, req entity.CreateTriggerRequest) (entity.TriggerSpec, error) {
+func (uc *UseCase) Create(ctx context.Context, req *entity.CreateTriggerRequest) (entity.TriggerSpec, error) {
 	if req.Name == "" {
-		return entity.TriggerSpec{}, fmt.Errorf("TriggerUseCase - Create - name is required")
+		return entity.TriggerSpec{}, fmt.Errorf("TriggerUseCase - Create - %w", ErrTriggerNameRequired)
 	}
+
 	if req.TemplateID == "" {
-		return entity.TriggerSpec{}, fmt.Errorf("TriggerUseCase - Create - template_id is required")
+		return entity.TriggerSpec{}, fmt.Errorf("TriggerUseCase - Create - %w", ErrTriggerTemplateRequired)
 	}
+
 	if req.TriggerType == entity.TriggerSchedule && req.CronExpression == "" {
-		return entity.TriggerSpec{}, fmt.Errorf("TriggerUseCase - Create - cron_expression is required for schedule triggers")
+		return entity.TriggerSpec{}, fmt.Errorf("TriggerUseCase - Create - %w", ErrTriggerCronRequired)
 	}
 
 	// Persist the trigger first
@@ -46,7 +59,7 @@ func (uc *UseCase) Create(ctx context.Context, req entity.CreateTriggerRequest) 
 
 	// Schedule with Temporal if it's an active scheduled trigger
 	if trigger.IsActive && trigger.TriggerType == entity.TriggerSchedule {
-		if err := uc.scheduler.Schedule(ctx, trigger); err != nil {
+		if err := uc.scheduler.Schedule(ctx, &trigger); err != nil {
 			// Log but don't fail — the trigger is persisted; scheduling can be retried
 			return trigger, fmt.Errorf("TriggerUseCase - Create - persisted but schedule failed: %w", err)
 		}
@@ -61,9 +74,11 @@ func (uc *UseCase) Get(ctx context.Context, triggerID string) (entity.TriggerSpe
 	if err != nil {
 		return entity.TriggerSpec{}, fmt.Errorf("TriggerUseCase - Get - repo: %w", err)
 	}
+
 	if !exists {
-		return entity.TriggerSpec{}, fmt.Errorf("TriggerUseCase - Get - not found: %s", triggerID)
+		return entity.TriggerSpec{}, fmt.Errorf("TriggerUseCase - Get - %w: %s", ErrTriggerNotFound, triggerID)
 	}
+
 	return record, nil
 }
 
@@ -81,22 +96,39 @@ func (uc *UseCase) Update(ctx context.Context, triggerID string, req entity.Upda
 	}
 
 	// Reschedule if this is a scheduled trigger and the schedule may have changed
-	if current.TriggerType == entity.TriggerSchedule {
-		wasActive := current.IsActive
-		nowActive := trigger.IsActive
-		cronChanged := req.CronExpression != nil
-
-		if wasActive && (!nowActive || cronChanged) {
-			// Unschedule the old cron workflow
-			_ = uc.scheduler.Unschedule(ctx, triggerID)
-		}
-		if nowActive && (!wasActive || cronChanged) {
-			// Schedule the (possibly updated) cron workflow
-			_ = uc.scheduler.Schedule(ctx, trigger)
-		}
+	if err := uc.rescheduleTrigger(ctx, &current, req, &trigger); err != nil {
+		return trigger, fmt.Errorf("TriggerUseCase - Update - reschedule: %w", err)
 	}
 
 	return trigger, nil
+}
+
+// rescheduleTrigger handles unscheduling and rescheduling of cron triggers
+// when the schedule or active state changes.
+func (uc *UseCase) rescheduleTrigger(ctx context.Context, current *entity.TriggerSpec, req entity.UpdateTriggerRequest, updated *entity.TriggerSpec) error {
+	if current.TriggerType != entity.TriggerSchedule {
+		return nil
+	}
+
+	wasActive := current.IsActive
+	nowActive := updated.IsActive
+	cronChanged := req.CronExpression != nil
+
+	if wasActive && (!nowActive || cronChanged) {
+		// Unschedule the old cron workflow
+		if err := uc.scheduler.Unschedule(ctx, current.ID); err != nil {
+			return fmt.Errorf("unschedule: %w", err)
+		}
+	}
+
+	if nowActive && (!wasActive || cronChanged) {
+		// Schedule the (possibly updated) cron workflow
+		if err := uc.scheduler.Schedule(ctx, updated); err != nil {
+			return fmt.Errorf("schedule: %w", err)
+		}
+	}
+
+	return nil
 }
 
 // Delete removes a trigger and unschedules it if it was scheduled.
@@ -152,8 +184,10 @@ func (uc *UseCase) Toggle(ctx context.Context, triggerID string, isActive bool) 
 // LogTriggerExecution records a rich audit trail for a trigger execution.
 // Called by FireTriggerActivity after prompt resolution to log the actual
 // prompt used, execution variables, and any error.  Logging is best-effort.
-func (uc *UseCase) LogTriggerExecution(ctx context.Context, triggerID string, opts entity.TriggerEventLog) {
-	_ = uc.triggerRepo.InsertTriggerEvent(ctx, opts)
+func (uc *UseCase) LogTriggerExecution(ctx context.Context, _ string, opts *entity.TriggerEventLog) {
+	if err := uc.triggerRepo.InsertTriggerEvent(ctx, opts); err != nil {
+		_ = err // Logging is best-effort; discard InsertTriggerEvent errors.
+	}
 }
 
 // HandleEvent processes an incoming webhook event for event-type triggers.
@@ -167,83 +201,101 @@ func (uc *UseCase) HandleEvent(ctx context.Context, eventSlug string, payload ma
 	}
 
 	var matches []entity.TriggerSpec
-	for _, t := range allActive {
+
+	for i := range allActive {
+		t := allActive[i]
 		if t.TriggerType == entity.TriggerEvent && t.EventSlug == eventSlug {
 			matches = append(matches, t)
 		}
 	}
+
 	if len(matches) == 0 {
-		return nil, fmt.Errorf("TriggerUseCase - HandleEvent - no active triggers for event: %s", eventSlug)
+		return nil, fmt.Errorf("TriggerUseCase - HandleEvent - %w: %s", ErrNoActiveTriggers, eventSlug)
 	}
 
 	results := make([]entity.TriggerFireResult, 0, len(matches))
-	for _, t := range matches {
-		// Record the fire timestamp
-		if err := uc.triggerRepo.RecordFired(ctx, t.ID); err != nil {
-			uc.LogTriggerExecution(ctx, t.ID, entity.TriggerEventLog{
-				TriggerID:   t.ID,
-				TemplateID:  t.TemplateID,
-				TriggerType: t.TriggerType,
-				Success:     false,
-				Message:     fmt.Sprintf("RecordFired failed: %v", err),
-				FiredAt:     time.Now().UTC(),
-			})
+	for i := range matches {
+		result, err := uc.dispatchEvent(ctx, &matches[i], payload)
+		if err != nil {
 			continue
 		}
 
-		// Resolve prompt variables from the webhook payload
-		specCopy := t
-		specCopy.TemplateVarsVals = payload
-		resolvedPrompt := specCopy.ResolvePrompt()
-
-		// Load template for system prompt and default model
-		tmpl, exists, err := uc.templateRepo.Get(ctx, t.TemplateID)
-		if err != nil || !exists {
-			continue
+		if result != nil {
+			results = append(results, *result)
 		}
-
-		systemPrompt := tmpl.SystemPrompt
-		if resolvedPrompt != "" {
-			if systemPrompt != "" {
-				systemPrompt += "\n" + resolvedPrompt
-			} else {
-				systemPrompt = resolvedPrompt
-			}
-		}
-
-		model := tmpl.DefaultModel
-		if model == "" {
-			model = "gpt-4"
-		}
-
-		runID := uuid.New().String()
-		now := time.Now().UTC()
-
-		results = append(results, entity.TriggerFireResult{
-			TriggerID:    t.ID,
-			RunID:        runID,
-			Name:         t.Name,
-			SystemPrompt: systemPrompt,
-			Message:      resolvedPrompt,
-			ModelRef:     model,
-			FiredAt:      now,
-		})
-
-		// Rich audit log
-		uc.LogTriggerExecution(ctx, t.ID, entity.TriggerEventLog{
-			TriggerID:     t.ID,
-			TemplateID:    t.TemplateID,
-			TriggerType:   t.TriggerType,
-			Success:       true,
-			AgentPrompt:   resolvedPrompt,
-			ExecVariables: payload,
-			FiredAt:       now,
-		})
 	}
 
 	if len(results) == 0 {
-		return nil, fmt.Errorf("TriggerUseCase - HandleEvent - all matching triggers failed: %s", eventSlug)
+		return nil, fmt.Errorf("TriggerUseCase - HandleEvent - %w: %s", ErrAllTriggersFailed, eventSlug)
 	}
 
 	return results, nil
+}
+
+// dispatchEvent processes a single trigger match: records the fire, resolves
+// prompt variables from the payload, loads the template, and returns a
+// TriggerFireResult for workflow execution.
+func (uc *UseCase) dispatchEvent(ctx context.Context, t *entity.TriggerSpec, payload map[string]string) (*entity.TriggerFireResult, error) {
+	// Record the fire timestamp
+	if err := uc.triggerRepo.RecordFired(ctx, t.ID); err != nil {
+		uc.LogTriggerExecution(ctx, t.ID, &entity.TriggerEventLog{
+			TriggerID:   t.ID,
+			TemplateID:  t.TemplateID,
+			TriggerType: t.TriggerType,
+			Success:     false,
+			Message:     fmt.Sprintf("RecordFired failed: %v", err),
+			FiredAt:     time.Now().UTC(),
+		})
+
+		return nil, err
+	}
+
+	// Resolve prompt variables from the webhook payload
+	specCopy := *t
+	specCopy.TemplateVarsVals = payload
+	resolvedPrompt := specCopy.ResolvePrompt()
+
+	// Load template for system prompt and default model
+	tmpl, exists, err := uc.templateRepo.Get(ctx, t.TemplateID)
+	if err != nil || !exists {
+		return nil, fmt.Errorf("%w %s", ErrTemplateNotFound, t.ID)
+	}
+
+	systemPrompt := tmpl.SystemPrompt
+	if resolvedPrompt != "" {
+		if systemPrompt != "" {
+			systemPrompt += "\n" + resolvedPrompt
+		} else {
+			systemPrompt = resolvedPrompt
+		}
+	}
+
+	model := tmpl.DefaultModel
+	if model == "" {
+		model = "gpt-4"
+	}
+
+	runID := uuid.New().String()
+	now := time.Now().UTC()
+
+	// Rich audit log
+	uc.LogTriggerExecution(ctx, t.ID, &entity.TriggerEventLog{
+		TriggerID:     t.ID,
+		TemplateID:    t.TemplateID,
+		TriggerType:   t.TriggerType,
+		Success:       true,
+		AgentPrompt:   resolvedPrompt,
+		ExecVariables: payload,
+		FiredAt:       now,
+	})
+
+	return &entity.TriggerFireResult{
+		TriggerID:    t.ID,
+		RunID:        runID,
+		Name:         t.Name,
+		SystemPrompt: systemPrompt,
+		Message:      resolvedPrompt,
+		ModelRef:     model,
+		FiredAt:      now,
+	}, nil
 }

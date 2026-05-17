@@ -7,9 +7,12 @@ import (
 
 	"github.com/TekkenSteve/GoAgent/internal/entity"
 	"github.com/TekkenSteve/GoAgent/internal/repo/compressor"
+	"github.com/stretchr/testify/require"
 )
 
 func TestCompress_NoCompressionNeeded(t *testing.T) {
+	t.Parallel()
+
 	c := compressor.New(compressor.Config{
 		ModelWindows: map[string]int{"test-model": 128000},
 	})
@@ -23,15 +26,19 @@ func TestCompress_NoCompressionNeeded(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	if did {
 		t.Error("expected no compression for small messages")
 	}
+
 	if len(compressed) != 2 {
 		t.Errorf("expected 2 messages, got %d", len(compressed))
 	}
 }
 
 func TestCompress_EmptyMessages(t *testing.T) {
+	t.Parallel()
+
 	c := compressor.New(compressor.Config{
 		ModelWindows: map[string]int{"test-model": 128000},
 	})
@@ -40,15 +47,19 @@ func TestCompress_EmptyMessages(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	if did {
 		t.Error("expected no compression for empty messages")
 	}
+
 	if compressed != nil {
 		t.Errorf("expected nil, got %v", compressed)
 	}
 }
 
 func TestCompress_TruncationOnly(t *testing.T) {
+	t.Parallel()
+
 	c := compressor.New(compressor.Config{
 		ModelWindows: map[string]int{"test-model": 2000},
 		SafetyRatio:  0.50, // 1000 token threshold
@@ -66,6 +77,7 @@ func TestCompress_TruncationOnly(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	if !did {
 		t.Error("expected compression for over-threshold messages")
 	}
@@ -84,6 +96,8 @@ func TestCompress_TruncationOnly(t *testing.T) {
 }
 
 func TestCompress_ArchivalWithLLM(t *testing.T) {
+	t.Parallel()
+
 	summaryContent := "Archived summary of old conversation"
 	c := compressor.New(compressor.Config{
 		LLM: &mockLLM{response: entity.LLMResponse{
@@ -103,6 +117,7 @@ func TestCompress_ArchivalWithLLM(t *testing.T) {
 		if i%2 == 1 {
 			role = entity.RoleAssistant
 		}
+
 		messages[i] = entity.Message{
 			Role:    role,
 			Content: strings.Repeat("x", 200),
@@ -113,6 +128,7 @@ func TestCompress_ArchivalWithLLM(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	if !did {
 		t.Error("expected compression")
 	}
@@ -131,6 +147,8 @@ func TestCompress_ArchivalWithLLM(t *testing.T) {
 }
 
 func TestCompress_ArchivalWithToolPairProtection(t *testing.T) {
+	t.Parallel()
+
 	c := compressor.New(compressor.Config{
 		LLM: &mockLLM{response: entity.LLMResponse{
 			Content: "summary",
@@ -159,6 +177,7 @@ func TestCompress_ArchivalWithToolPairProtection(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	if !did {
 		t.Error("expected compression")
 	}
@@ -169,6 +188,7 @@ func TestCompress_ArchivalWithToolPairProtection(t *testing.T) {
 			if i > 0 {
 				prevRole = compressed[i-1].Role
 			}
+
 			if prevRole != entity.RoleAssistant && prevRole != entity.RoleTool {
 				t.Errorf("tool message at index %d is orphaned (previous role: %v)", i, prevRole)
 			}
@@ -177,6 +197,8 @@ func TestCompress_ArchivalWithToolPairProtection(t *testing.T) {
 }
 
 func TestCompress_EmergencyTruncation(t *testing.T) {
+	t.Parallel()
+
 	c := compressor.New(compressor.Config{
 		ModelWindows: map[string]int{"test-model": 100},
 		SafetyRatio:  0.50, // 50 token threshold — will always exceed
@@ -196,6 +218,7 @@ func TestCompress_EmergencyTruncation(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	if !did {
 		t.Error("expected compression")
 	}
@@ -212,31 +235,39 @@ func TestCompress_EmergencyTruncation(t *testing.T) {
 }
 
 func TestCompress_ModelWindowLookup(t *testing.T) {
+	t.Parallel()
+
 	// Known model
 	c := compressor.New(compressor.Config{
 		ModelWindows: map[string]int{"gpt-4.1-mini": 1000000},
 	})
 
 	short := []entity.Message{{Role: entity.RoleUser, Content: "hi"}}
-	_, did, _ := c.Compress(context.Background(), short, entity.LLMConfig{Model: "gpt-4.1-mini"})
+	_, did, err := c.Compress(context.Background(), short, entity.LLMConfig{Model: "gpt-4.1-mini"})
+	require.NoError(t, err)
+
 	if did {
 		t.Error("expected no compression for short messages with large window")
 	}
 
 	// Unknown model falls back to default (128K)
-	_, did, _ = c.Compress(context.Background(), short, entity.LLMConfig{Model: "unknown-model"})
+	_, did, err = c.Compress(context.Background(), short, entity.LLMConfig{Model: "unknown-model"})
+	require.NoError(t, err)
+
 	if did {
 		t.Error("expected no compression for unknown model with default 128K window")
 	}
 }
 
 func TestCompress_ArchivalLLMFallbackToTruncation(t *testing.T) {
+	t.Parallel()
+
 	// LLM returns error → should fall through to truncation
 	c := compressor.New(compressor.Config{
-		LLM: &mockLLM{err: assertError("llm unavailable")},
-		ModelWindows: map[string]int{"test-model": 2000},
-		SafetyRatio:  0.50,
-		MinToCompress: 1,
+		LLM:              &mockLLM{err: assertError("llm unavailable")},
+		ModelWindows:     map[string]int{"test-model": 2000},
+		SafetyRatio:      0.50,
+		MinToCompress:    1,
 		MaxWorkingMemory: 2,
 		MinWorkingMemory: 2,
 	})
@@ -250,6 +281,7 @@ func TestCompress_ArchivalLLMFallbackToTruncation(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	if !did {
 		t.Error("expected compression even after LLM failure")
 	}
@@ -260,6 +292,8 @@ func TestCompress_ArchivalLLMFallbackToTruncation(t *testing.T) {
 }
 
 func TestEstimateTokens(t *testing.T) {
+	t.Parallel()
+
 	messages := []entity.Message{
 		{Role: entity.RoleUser, Content: "hello world"},
 		{Role: entity.RoleAssistant, Content: "hi there, how can I help you today?"},
@@ -273,23 +307,30 @@ func TestEstimateTokens(t *testing.T) {
 }
 
 func TestSafeTruncateContent(t *testing.T) {
+	t.Parallel()
+
 	short := "short text"
+
 	result := safeTruncateContent(short, 100)
 	if result != short {
 		t.Errorf("expected unchanged text, got %q", result)
 	}
 
 	long := strings.Repeat("A", 500)
+
 	result = safeTruncateContent(long, 100)
 	if len(result) >= len(long) {
 		t.Errorf("expected truncated content, got %d chars", len(result))
 	}
+
 	if !strings.Contains(result, "truncated") {
 		t.Error("expected truncation indicator in output")
 	}
+
 	if !strings.HasPrefix(result, "AAAAA") {
 		t.Error("expected content start preserved")
 	}
+
 	if !strings.HasSuffix(result, "AAAAA") {
 		t.Error("expected content end preserved")
 	}
@@ -306,6 +347,7 @@ func estimateTokens(messages []entity.Message) int {
 			tokens += len(tc.Function.Arguments)/3 + 5
 		}
 	}
+
 	return tokens
 }
 
@@ -313,11 +355,13 @@ func safeTruncateContent(content string, maxLen int) string {
 	if len(content) <= maxLen {
 		return content
 	}
+
 	keep := maxLen - 50
 	startLen := keep / 2
 	endLen := keep - startLen
 	start := content[:startLen]
 	end := content[len(content)-endLen:]
+
 	return start + "\n\n... (chars truncated) ...\n\n" + end
 }
 
@@ -326,10 +370,11 @@ type mockLLM struct {
 	err      error
 }
 
-func (m *mockLLM) Chat(_ context.Context, _ entity.LLMRequest) (entity.LLMResponse, error) {
+func (m *mockLLM) Chat(_ context.Context, _ *entity.LLMRequest) (entity.LLMResponse, error) {
 	if m.err != nil {
 		return entity.LLMResponse{}, m.err
 	}
+
 	return m.response, nil
 }
 

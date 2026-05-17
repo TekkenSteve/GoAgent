@@ -16,12 +16,12 @@ func NewRoutes(apiV1Group fiber.Router, t usecase.AgentExecutor, o usecase.Orche
 	eventStore stream.EventStore, subscriber stream.Subscriber, gateway stream.StatelessGateway,
 	wsHub *stream.WebSocketHub,
 	cancelWorkflow CancelWorkflowFn, signalWorkflow SignalWorkflowFn,
-	m usecase.TemplateManager, eh usecase.TriggerEventHandler) {
-
+	m usecase.TemplateManager, eh usecase.TriggerEventHandler,
+) {
 	r := &V1{
 		t: t, o: o, h: h, s: s, l: l, v: validator.New(validator.WithRequiredStructEnabled()), rdb: rdb,
 		eventStore: eventStore, subscriber: subscriber, gateway: gateway,
-		wsHub: wsHub,
+		wsHub:          wsHub,
 		cancelWorkflow: cancelWorkflow, signalWorkflow: signalWorkflow,
 	}
 

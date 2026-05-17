@@ -2,12 +2,16 @@ package runtimeops
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strconv"
 	"strings"
 	"sync"
 	"time"
 )
+
+// ErrInvalidSchemaVersion is returned when a schema version string cannot be parsed.
+var ErrInvalidSchemaVersion = errors.New("invalid schema version")
 
 // EventType identifies stream event categories.
 type EventType string
@@ -34,7 +38,7 @@ type StreamEvent struct {
 
 // EventPublisher publishes runtime events.
 type EventPublisher interface {
-	Publish(ctx context.Context, event StreamEvent) error
+	Publish(ctx context.Context, event *StreamEvent) error
 }
 
 // Sequencer assigns monotonic sequence numbers per run.
@@ -52,7 +56,9 @@ func NewSequencer() *Sequencer {
 func (s *Sequencer) Next(runID string) int64 {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+
 	s.seq[runID]++
+
 	return s.seq[runID]
 }
 
@@ -60,6 +66,7 @@ func (s *Sequencer) Next(runID string) int64 {
 func (s *Sequencer) Remove(runID string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+
 	delete(s.seq, runID)
 }
 
@@ -70,16 +77,19 @@ type FailOpenPublisher struct {
 }
 
 // Publish attempts publish and suppresses transient channel failures.
-func (p FailOpenPublisher) Publish(ctx context.Context, event StreamEvent) error {
+func (p FailOpenPublisher) Publish(ctx context.Context, event *StreamEvent) error {
 	if p.Inner == nil {
 		return nil
 	}
+
 	if err := p.Inner.Publish(ctx, event); err != nil {
 		if p.OnPublishError != nil {
 			p.OnPublishError(err)
 		}
+
 		return nil
 	}
+
 	return nil
 }
 
@@ -90,6 +100,7 @@ func IsNMinusOneCompatible(producerSchema, consumerSchema string) (bool, error) 
 	if err != nil {
 		return false, err
 	}
+
 	consumerN, err := parseSchemaVersion(consumerSchema)
 	if err != nil {
 		return false, err
@@ -101,9 +112,11 @@ func IsNMinusOneCompatible(producerSchema, consumerSchema string) (bool, error) 
 
 func parseSchemaVersion(v string) (int, error) {
 	raw := strings.TrimPrefix(strings.ToLower(v), "v")
+
 	n, err := strconv.Atoi(raw)
 	if err != nil || n <= 0 {
-		return 0, fmt.Errorf("invalid schema version %q", v)
+		return 0, fmt.Errorf("%w: %q", ErrInvalidSchemaVersion, v)
 	}
+
 	return n, nil
 }

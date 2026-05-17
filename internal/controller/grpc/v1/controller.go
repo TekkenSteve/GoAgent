@@ -22,7 +22,7 @@ type V1 struct {
 
 // Execute starts a new agent workflow run.
 func (s *V1) Execute(ctx context.Context, req *v1.ExecuteRequest) (*v1.RunStatus, error) {
-	statusResp, err := s.t.Execute(ctx, entity.ExecuteRequest{
+	statusResp, err := s.t.Execute(ctx, &entity.ExecuteRequest{
 		RunID:           req.GetRunId(),
 		AccountID:       req.GetAccountId(),
 		AgentID:         req.GetAgentId(),
@@ -36,6 +36,7 @@ func (s *V1) Execute(ctx context.Context, req *v1.ExecuteRequest) (*v1.RunStatus
 	})
 	if err != nil {
 		s.l.Error(err, "grpc - v1 - Execute")
+
 		return nil, status.Error(codes.Internal, "execution failed")
 	}
 
@@ -53,6 +54,7 @@ func (s *V1) GetStatus(ctx context.Context, req *v1.GetStatusRequest) (*v1.RunSt
 	statusResp, err := s.t.GetStatus(ctx, req.GetRunId())
 	if err != nil {
 		s.l.Error(err, "grpc - v1 - GetStatus")
+
 		return nil, status.Error(codes.Internal, "query failed")
 	}
 

@@ -42,12 +42,15 @@ func (uc *UseCase) DeductUsage(ctx context.Context, accountID, modelID string, u
 	if cost <= 0 && uc.costs != nil {
 		// Not provided by gateway — calculate from pricing catalog
 		var err error
+
 		c, err := uc.costs.Calculate(ctx, modelID, usage)
 		if err != nil {
 			return entity.CreditTransaction{}, 0, fmt.Errorf("billing - DeductUsage - calculate cost: %w", err)
 		}
+
 		cost = c
 	}
+
 	if cost <= 0 {
 		// Cost calculation unavailable for this model — skip deduction.
 		// This is a graceful fallback when pricing data is missing.
@@ -75,7 +78,7 @@ func (uc *UseCase) DeductUsage(ctx context.Context, accountID, modelID string, u
 			TotalTokens:      usage.TotalTokens,
 			Cost:             cost,
 		}
-		if err := uc.usage.CreateUsageRecord(ctx, rec); err != nil {
+		if err := uc.usage.CreateUsageRecord(ctx, &rec); err != nil {
 			// Non-fatal: billing already succeeded, audit record is best-effort
 			return txn, cost, nil
 		}
@@ -94,8 +97,10 @@ func (uc *UseCase) GetHistory(ctx context.Context, accountID string, limit, offs
 	if limit <= 0 {
 		limit = 50
 	}
+
 	if offset < 0 {
 		offset = 0
 	}
+
 	return uc.credits.GetHistory(ctx, accountID, limit, offset)
 }

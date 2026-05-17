@@ -1,6 +1,12 @@
 package runtime
 
-import "fmt"
+import (
+	"errors"
+	"fmt"
+)
+
+// ErrNilRuntime is returned when StartWorker receives a nil runtime or worker.
+var ErrNilRuntime = errors.New("agentfw runtime - start worker: nil runtime")
 
 // Registrar installs workflows and activities into worker before start.
 type Registrar interface {
@@ -11,7 +17,7 @@ type Registrar interface {
 // StartWorker registers framework components and starts polling.
 func StartWorker(rt *TemporalRuntime, registrar Registrar) error {
 	if rt == nil || rt.Worker == nil {
-		return fmt.Errorf("agentfw runtime - start worker: nil runtime")
+		return ErrNilRuntime
 	}
 
 	if registrar != nil {

@@ -33,6 +33,29 @@ const (
 	emergencyMaxMessages = 20
 
 	summaryContentPrefix = "[Archived context — Earlier in the conversation]"
+
+	// Model context window sizes (in tokens).
+	gpt41ContextWindow      = 1000000
+	gpt4oContextWindow      = 128000
+	gpt4ContextWindow       = 8192
+	gpt35TurboContextWindow = 16385
+	claudeContextWindow     = 200000
+	deepseekContextWindow   = 65536
+
+	// Summarization max tokens.
+	summarizeMaxTokens = 1024
+
+	// Token estimation heuristics.
+	charsPerTokenEstimate = 3
+
+	// Token overhead for each message, function name, and function args in token estimation.
+	tokenOverheadPerMessage  = 5
+	tokenOverheadPerFuncName = 10
+	tokenOverheadPerFuncArgs = 5
+
+	// Truncation display constants.
+	truncationIndicatorReserve = 50
+	contentSplitParts          = 2
 )
 
 // Config configures the compressor.
@@ -62,20 +85,20 @@ type Compressor struct {
 	minToCompress    int
 }
 
-var defaultModelWindows = map[string]int{
-	"gpt-4.1-mini":             1000000,
-	"gpt-4.1":                  1000000,
-	"gpt-4o-mini":              128000,
-	"gpt-4o":                   128000,
-	"gpt-4-turbo":              128000,
-	"gpt-4":                    8192,
-	"gpt-3.5-turbo":            16385,
-	"claude-sonnet-4-20250514": 200000,
-	"claude-3-5-sonnet-latest": 200000,
-	"claude-3-haiku":           200000,
-	"claude-opus-4-20250514":   200000,
-	"deepseek-chat":            65536,
-	"deepseek-v4-flash":        65536,
+var defaultModelWindows = map[string]int{ //nolint:gochecknoglobals // model window size lookup table
+	"gpt-4.1-mini":             gpt41ContextWindow,
+	"gpt-4.1":                  gpt41ContextWindow,
+	"gpt-4o-mini":              gpt4oContextWindow,
+	"gpt-4o":                   gpt4oContextWindow,
+	"gpt-4-turbo":              gpt4oContextWindow,
+	"gpt-4":                    gpt4ContextWindow,
+	"gpt-3.5-turbo":            gpt35TurboContextWindow,
+	"claude-sonnet-4-20250514": claudeContextWindow,
+	"claude-3-5-sonnet-latest": claudeContextWindow,
+	"claude-3-haiku":           claudeContextWindow,
+	"claude-opus-4-20250514":   claudeContextWindow,
+	"deepseek-chat":            deepseekContextWindow,
+	"deepseek-v4-flash":        deepseekContextWindow,
 }
 
 // New creates a Compressor. If cfg.LLM is nil, archival summarization is skipped.
@@ -88,6 +111,7 @@ func New(cfg Config) *Compressor {
 	if cfg.SafetyRatio > 0 {
 		c.safetyRatio = cfg.SafetyRatio
 	}
+
 	c.maxWorkingMemory = nonZero(cfg.MaxWorkingMemory, defaultMaxWorkingMemory)
 	c.minWorkingMemory = nonZero(cfg.MinWorkingMemory, defaultMinWorkingMemory)
 	c.minToCompress = nonZero(cfg.MinToCompress, defaultMinToCompress)
@@ -96,6 +120,7 @@ func New(cfg Config) *Compressor {
 	maps.Copy(c.modelWindows, defaultModelWindows)
 	// Apply user overrides
 	maps.Copy(c.modelWindows, cfg.ModelWindows)
+
 	return c
 }
 
@@ -103,6 +128,7 @@ func nonZero(a, b int) int {
 	if a > 0 {
 		return a
 	}
+
 	return b
 }
 
@@ -125,6 +151,7 @@ func (c *Compressor) Compress(ctx context.Context, messages []entity.Message, co
 		archived, err := c.archive(ctx, messages, config)
 		if err == nil {
 			messages = archived
+
 			tokens = estimateTokens(messages)
 			if tokens < threshold {
 				return messages, true, nil
@@ -134,6 +161,7 @@ func (c *Compressor) Compress(ctx context.Context, messages []entity.Message, co
 
 	// Tier 2: Working memory truncation
 	messages = truncateWorkingMemory(messages)
+
 	tokens = estimateTokens(messages)
 	if tokens < threshold {
 		return messages, true, nil
@@ -141,6 +169,7 @@ func (c *Compressor) Compress(ctx context.Context, messages []entity.Message, co
 
 	// Tier 3: Emergency truncation
 	messages = emergencyTruncate(messages)
+
 	return messages, true, nil
 }
 
@@ -148,6 +177,7 @@ func (c *Compressor) contextWindow(model string) int {
 	if w, ok := c.modelWindows[model]; ok {
 		return w
 	}
+
 	return defaultContextWindow
 }
 
@@ -179,6 +209,7 @@ func (c *Compressor) archive(ctx context.Context, messages []entity.Message, con
 	result := make([]entity.Message, 0, 1+len(workingMemory))
 	result = append(result, summaryMsg)
 	result = append(result, workingMemory...)
+
 	return result, nil
 }
 
@@ -191,11 +222,11 @@ func (c *Compressor) summarize(ctx context.Context, messages []entity.Message, c
 	summarizeMessages = append(summarizeMessages, systemMsg)
 	summarizeMessages = append(summarizeMessages, messages...)
 
-	resp, err := c.llm.Chat(ctx, entity.LLMRequest{
+	resp, err := c.llm.Chat(ctx, &entity.LLMRequest{
 		Messages: summarizeMessages,
 		Config: entity.LLMConfig{
 			Model:       config.Model,
-			MaxTokens:   1024,
+			MaxTokens:   summarizeMaxTokens,
 			Temperature: 0,
 		},
 	})
@@ -211,12 +242,13 @@ func (c *Compressor) summarize(ctx context.Context, messages []entity.Message, c
 func estimateTokens(messages []entity.Message) int {
 	tokens := 0
 	for _, msg := range messages {
-		tokens += len(msg.Content)/3 + 5
+		tokens += len(msg.Content)/charsPerTokenEstimate + tokenOverheadPerMessage
 		for _, tc := range msg.ToolCalls {
-			tokens += len(tc.Function.Name)/3 + 10
-			tokens += len(tc.Function.Arguments)/3 + 5
+			tokens += len(tc.Function.Name)/charsPerTokenEstimate + tokenOverheadPerFuncName
+			tokens += len(tc.Function.Arguments)/charsPerTokenEstimate + tokenOverheadPerFuncArgs
 		}
 	}
+
 	return tokens
 }
 
@@ -233,29 +265,20 @@ func truncateWorkingMemory(messages []entity.Message) []entity.Message {
 			toolIndices = append(toolIndices, i)
 		}
 	}
+
 	for idx, i := range toolIndices {
 		limit := toolOutputLimit
 		if idx >= len(toolIndices)-2 {
 			limit = toolOutputLastLimit
 		}
+
 		if len(result[i].Content) > limit {
 			result[i].Content = safeTruncateContent(result[i].Content, limit)
 		}
 	}
 
-	// Tier 2: truncate large user messages
-	for i, m := range result {
-		if m.Role == entity.RoleUser && len(m.Content) > userMsgLimit {
-			result[i].Content = safeTruncateContent(m.Content, userMsgLimit)
-		}
-	}
-
-	// Tier 3: truncate large assistant messages
-	for i, m := range result {
-		if m.Role == entity.RoleAssistant && len(m.Content) > assistantMsgLimit {
-			result[i].Content = safeTruncateContent(m.Content, assistantMsgLimit)
-		}
-	}
+	truncateLongMessages(result, entity.RoleUser, userMsgLimit)
+	truncateLongMessages(result, entity.RoleAssistant, assistantMsgLimit)
 
 	return result
 }
@@ -265,22 +288,26 @@ func emergencyTruncate(messages []entity.Message) []entity.Message {
 	if len(messages) <= emergencyMaxMessages {
 		result := make([]entity.Message, len(messages))
 		copy(result, messages)
+
 		for i, m := range result {
 			if len(m.Content) > emergencyMsgLimit {
 				result[i].Content = safeTruncateContent(m.Content, emergencyMsgLimit)
 			}
 		}
+
 		return result
 	}
 
 	// Keep the last emergencyMaxMessages, but compress all content
 	result := make([]entity.Message, emergencyMaxMessages)
 	copy(result, messages[len(messages)-emergencyMaxMessages:])
+
 	for i, m := range result {
 		if len(m.Content) > emergencyMsgLimit {
 			result[i].Content = safeTruncateContent(m.Content, emergencyMsgLimit)
 		}
 	}
+
 	return result
 }
 
@@ -289,10 +316,21 @@ func safeTruncateContent(content string, maxLen int) string {
 	if len(content) <= maxLen {
 		return content
 	}
-	keep := maxLen - 50 // reserve for truncation indicator
-	startLen := keep / 2
+
+	keep := maxLen - truncationIndicatorReserve // reserve for truncation indicator
+	startLen := keep / contentSplitParts
 	endLen := keep - startLen
 	start := content[:startLen]
 	end := content[len(content)-endLen:]
+
 	return start + "\n\n... (" + fmt.Sprintf("%d", len(content)-keep) + " chars truncated) ...\n\n" + end
+}
+
+// truncateLongMessages truncates message content that exceeds the limit for a given role.
+func truncateLongMessages(messages []entity.Message, role entity.MessageRole, limit int) {
+	for i, m := range messages {
+		if m.Role == role && len(m.Content) > limit {
+			messages[i].Content = safeTruncateContent(m.Content, limit)
+		}
+	}
 }

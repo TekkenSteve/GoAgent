@@ -3,15 +3,18 @@ package pipeline
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"sync"
 	"time"
 
+	"github.com/TekkenSteve/GoAgent/internal/entity"
 	"github.com/google/uuid"
 	goredis "github.com/redis/go-redis/v9"
-
-	"github.com/TekkenSteve/GoAgent/internal/entity"
 )
+
+// ErrWALEntryNotFound is returned when a WAL entry is not found.
+var ErrWALEntryNotFound = errors.New("WAL entry not found")
 
 const (
 	walStreamPrefix      = "wal:run:"
@@ -65,7 +68,7 @@ func (w *WriteAheadLog) Append(ctx context.Context, runID string, writeType Writ
 		RunID:     runID,
 		WriteType: writeType,
 		Data:      data,
-		CreatedAt: float64(time.Now().UnixNano()) / 1e9,
+		CreatedAt: float64(time.Now().UnixNano()) / nanosPerSecond,
 	}
 
 	payload, err := json.Marshal(entry)
@@ -83,6 +86,7 @@ func (w *WriteAheadLog) Append(ctx context.Context, runID string, writeType Writ
 	}).Err()
 	if err == nil {
 		w.client.Expire(ctx, streamKey, walEntryTTL)
+
 		return entry.EntryID, nil
 	}
 
@@ -94,9 +98,11 @@ func (w *WriteAheadLog) Append(ctx context.Context, runID string, writeType Writ
 		if len(w.localBuffer) >= walMaxLocalRunBuffer {
 			for k := range w.localBuffer {
 				delete(w.localBuffer, k)
+
 				break
 			}
 		}
+
 		w.localBuffer[runID] = make([]WALEntry, 0, walLocalBufferSize)
 	}
 
@@ -104,48 +110,113 @@ func (w *WriteAheadLog) Append(ctx context.Context, runID string, writeType Writ
 	if len(buf) >= walLocalBufferSize {
 		buf = buf[1:]
 	}
+
 	w.localBuffer[runID] = append(buf, entry)
 
 	return entry.EntryID, nil
 }
 
+// entryWithID pairs a WAL entry with its Redis stream message ID.
+type entryWithID struct {
+	ID    string
+	Entry WALEntry
+}
+
+// readStreamEntries reads and parses all entries from a WAL stream.
+func (w *WriteAheadLog) readStreamEntries(ctx context.Context, streamKey string) ([]entryWithID, error) {
+	results, err := w.client.XRange(ctx, streamKey, "-", "+").Result()
+	if err != nil {
+		return nil, err
+	}
+
+	entries := make([]entryWithID, 0, len(results))
+	for _, msg := range results {
+		payload, ok := msg.Values["payload"].(string)
+		if !ok {
+			continue
+		}
+
+		var entry WALEntry
+		if json.Unmarshal([]byte(payload), &entry) != nil {
+			continue
+		}
+
+		entries = append(entries, entryWithID{ID: msg.ID, Entry: entry})
+	}
+
+	return entries, nil
+}
+
+// filterLocalBuffer removes entries from the local buffer that are in the given set.
+func (w *WriteAheadLog) filterLocalBuffer(runID string, keepSet map[string]struct{}) int {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+
+	buf, ok := w.localBuffer[runID]
+	if !ok {
+		return 0
+	}
+
+	filtered := make([]WALEntry, 0, len(buf))
+	for _, e := range buf {
+		if _, ok := keepSet[e.EntryID]; !ok {
+			filtered = append(filtered, e)
+		}
+	}
+
+	removed := len(buf) - len(filtered)
+	if removed > 0 {
+		w.localBuffer[runID] = filtered
+	}
+
+	return removed
+}
+
+// mergeLocalEntries returns local buffer entries not already in existing.
+func (w *WriteAheadLog) mergeLocalEntries(runID string, existing []entryWithID) []WALEntry {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+
+	buf, ok := w.localBuffer[runID]
+	if !ok {
+		return nil
+	}
+
+	seen := make(map[string]bool, len(existing))
+	for _, e := range existing {
+		seen[e.Entry.EntryID] = true
+	}
+
+	var result []WALEntry
+
+	for _, e := range buf {
+		if !seen[e.EntryID] {
+			result = append(result, e)
+		}
+	}
+
+	return result
+}
+
 // GetPending returns all pending WAL entries for a run (Redis + local buffer).
 func (w *WriteAheadLog) GetPending(ctx context.Context, runID string) ([]WALEntry, error) {
 	streamKey := walStreamPrefix + runID
-	var entries []WALEntry
 
-	results, err := w.client.XRange(ctx, streamKey, "-", "+").Result()
-	if err == nil {
-		for _, msg := range results {
-			payload, ok := msg.Values["payload"].(string)
-			if !ok {
-				continue
-			}
-			var entry WALEntry
-			if err := json.Unmarshal([]byte(payload), &entry); err != nil {
-				continue
-			}
-			entries = append(entries, entry)
-		}
+	entries, err := w.readStreamEntries(ctx, streamKey)
+	if err != nil {
+		entries = nil
 	}
 
-	w.mu.Lock()
-	localEntries := make([]WALEntry, 0)
-	if buf, ok := w.localBuffer[runID]; ok {
-		seen := make(map[string]bool, len(entries))
-		for _, e := range entries {
-			seen[e.EntryID] = true
-		}
-		for _, e := range buf {
-			if !seen[e.EntryID] {
-				localEntries = append(localEntries, e)
-			}
-		}
-	}
-	w.mu.Unlock()
+	localEntries := w.mergeLocalEntries(runID, entries)
+	result := make([]WALEntry, 0, len(entries)+len(localEntries))
 
-	entries = append(entries, localEntries...)
-	return entries, nil
+	for _, e := range entries {
+		result = append(result, e.Entry)
+	}
+
+	result = append(result, localEntries...)
+
+	return result, nil
 }
 
 // MarkCompleted removes entries from the WAL after successful flush.
@@ -155,82 +226,59 @@ func (w *WriteAheadLog) MarkCompleted(ctx context.Context, runID string, entryID
 	}
 
 	streamKey := walStreamPrefix + runID
+
+	entries, err := w.readStreamEntries(ctx, streamKey)
+	if err != nil {
+		entries = nil
+	}
+
+	entrySet := make(map[string]struct{}, len(entryIDs))
+	for _, id := range entryIDs {
+		entrySet[id] = struct{}{}
+	}
+
+	toDelete := make([]string, 0, len(entries))
+	for _, me := range entries {
+		if _, ok := entrySet[me.Entry.EntryID]; ok {
+			toDelete = append(toDelete, me.ID)
+		}
+	}
+
 	completed := 0
 
-	results, err := w.client.XRange(ctx, streamKey, "-", "+").Result()
-	if err == nil {
-		toDelete := make([]string, 0)
-		entrySet := make(map[string]struct{}, len(entryIDs))
-		for _, id := range entryIDs {
-			entrySet[id] = struct{}{}
-		}
-
-		for _, msg := range results {
-			payload, ok := msg.Values["payload"].(string)
-			if !ok {
-				continue
-			}
-			var entry WALEntry
-			if json.Unmarshal([]byte(payload), &entry) != nil {
-				continue
-			}
-			if _, ok := entrySet[entry.EntryID]; ok {
-				toDelete = append(toDelete, msg.ID)
-			}
-		}
-
-		if len(toDelete) > 0 {
-			if err := w.client.XDel(ctx, streamKey, toDelete...).Err(); err == nil {
-				completed += len(toDelete)
-			}
+	if len(toDelete) > 0 {
+		if err := w.client.XDel(ctx, streamKey, toDelete...).Err(); err == nil {
+			completed += len(toDelete)
 		}
 	}
 
-	w.mu.Lock()
-	if buf, ok := w.localBuffer[runID]; ok {
-		entrySet := make(map[string]struct{}, len(entryIDs))
-		for _, id := range entryIDs {
-			entrySet[id] = struct{}{}
-		}
-		filtered := make([]WALEntry, 0, len(buf))
-		for _, e := range buf {
-			if _, ok := entrySet[e.EntryID]; !ok {
-				filtered = append(filtered, e)
-			}
-		}
-		completed += len(buf) - len(filtered)
-		w.localBuffer[runID] = filtered
-	}
-	w.mu.Unlock()
+	completed += w.filterLocalBuffer(runID, entrySet)
 
 	return completed, nil
 }
 
 // MarkFailed increments the attempt count and records the error.
-func (w *WriteAheadLog) MarkFailed(ctx context.Context, runID string, entryID string, errStr string) error {
+func (w *WriteAheadLog) MarkFailed(ctx context.Context, runID, entryID, errStr string) error {
 	streamKey := walStreamPrefix + runID
 
-	results, err := w.client.XRange(ctx, streamKey, "-", "+").Result()
+	entries, err := w.readStreamEntries(ctx, streamKey)
 	if err == nil {
-		for _, msg := range results {
-			payload, ok := msg.Values["payload"].(string)
-			if !ok {
-				continue
-			}
-			var entry WALEntry
-			if json.Unmarshal([]byte(payload), &entry) != nil {
-				continue
-			}
-			if entry.EntryID != entryID {
+		for _, me := range entries {
+			if me.Entry.EntryID != entryID {
 				continue
 			}
 
+			entry := me.Entry
 			entry.Attempts++
-			entry.LastAttempt = float64(time.Now().UnixNano()) / 1e9
+			entry.LastAttempt = float64(time.Now().UnixNano()) / nanosPerSecond
 			entry.LastError = errStr
 
-			newPayload, _ := json.Marshal(entry)
-			w.client.XDel(ctx, streamKey, msg.ID)
+			newPayload, err := json.Marshal(entry)
+			if err != nil {
+				return fmt.Errorf("marshal updated entry: %w", err)
+			}
+
+			w.client.XDel(ctx, streamKey, me.ID)
 			w.client.XAdd(ctx, &goredis.XAddArgs{
 				Stream: streamKey,
 				Values: map[string]any{"payload": string(newPayload)},
@@ -238,35 +286,42 @@ func (w *WriteAheadLog) MarkFailed(ctx context.Context, runID string, entryID st
 				Approx: true,
 			})
 			w.client.Expire(ctx, streamKey, walEntryTTL)
+
 			return nil
 		}
 	}
 
 	w.mu.Lock()
 	defer w.mu.Unlock()
+
 	if buf, ok := w.localBuffer[runID]; ok {
 		for i, e := range buf {
-			if e.EntryID == entryID {
-				e.Attempts++
-				e.LastAttempt = float64(time.Now().UnixNano()) / 1e9
-				e.LastError = errStr
-				buf[i] = e
-				return nil
+			if e.EntryID != entryID {
+				continue
 			}
+
+			e.Attempts++
+			e.LastAttempt = float64(time.Now().UnixNano()) / nanosPerSecond
+			e.LastError = errStr
+			buf[i] = e
+
+			return nil
 		}
 	}
 
-	return fmt.Errorf("WAL - MarkFailed - entry %s not found in run %s", entryID, runID)
+	return fmt.Errorf("%w: entry %s in run %s", ErrWALEntryNotFound, entryID, runID)
 }
 
 // PendingRuns returns the run IDs with entries in the local buffer.
 func (w *WriteAheadLog) PendingRuns() []string {
 	w.mu.Lock()
 	defer w.mu.Unlock()
+
 	runIDs := make([]string, 0, len(w.localBuffer))
 	for runID := range w.localBuffer {
 		runIDs = append(runIDs, runID)
 	}
+
 	return runIDs
 }
 
@@ -278,6 +333,7 @@ func (w *WriteAheadLog) CleanupRun(ctx context.Context, runID string) error {
 	w.mu.Lock()
 	delete(w.localBuffer, runID)
 	w.mu.Unlock()
+
 	return nil
 }
 
@@ -287,10 +343,12 @@ func (w *WriteAheadLog) AppendMessage(ctx context.Context, runID string, record 
 	if err != nil {
 		return fmt.Errorf("WriteAheadLog - AppendMessage - marshal: %w", err)
 	}
+
 	_, err = w.Append(ctx, runID, WriteTypeMessage, string(data))
 	if err != nil {
 		return fmt.Errorf("WriteAheadLog - AppendMessage: %w", err)
 	}
+
 	return nil
 }
 
@@ -300,9 +358,11 @@ func (w *WriteAheadLog) AppendToolResult(ctx context.Context, runID string, reco
 	if err != nil {
 		return fmt.Errorf("WriteAheadLog - AppendToolResult - marshal: %w", err)
 	}
+
 	_, err = w.Append(ctx, runID, WriteTypeToolResult, string(data))
 	if err != nil {
 		return fmt.Errorf("WriteAheadLog - AppendToolResult: %w", err)
 	}
+
 	return nil
 }

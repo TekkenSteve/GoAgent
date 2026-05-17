@@ -33,7 +33,7 @@ func NewExecutorTemporal(c client.Client, cfg config.Temporal) *ExecutorTemporal
 	}
 }
 
-func (r *ExecutorTemporal) StartExecution(ctx context.Context, req entity.ExecuteRequest) (entity.RunStatus, error) {
+func (r *ExecutorTemporal) StartExecution(ctx context.Context, req *entity.ExecuteRequest) (entity.RunStatus, error) {
 	workflowID := r.opts.workflowIDPrefix + req.RunID
 
 	input := orchestration.AgentWorkflowInput{
@@ -50,7 +50,7 @@ func (r *ExecutorTemporal) StartExecution(ctx context.Context, req entity.Execut
 		TaskQueue: r.opts.taskQueue,
 	}
 
-	_, err := r.client.ExecuteWorkflow(ctx, opts, r.opts.workflowName, input)
+	_, err := r.client.ExecuteWorkflow(ctx, opts, r.opts.workflowName, &input)
 	if err != nil {
 		return entity.RunStatus{}, fmt.Errorf("ExecutorTemporal - StartExecution - r.client.ExecuteWorkflow: %w", err)
 	}
@@ -87,7 +87,7 @@ func (r *ExecutorTemporal) GetStatus(ctx context.Context, runID string) (entity.
 	}, nil
 }
 
-func (r *ExecutorTemporal) StartOrchestration(ctx context.Context, input entity.OrchestrationInput) (entity.RunStatus, error) {
+func (r *ExecutorTemporal) StartOrchestration(ctx context.Context, input *entity.OrchestrationInput) (entity.RunStatus, error) {
 	workflowID := "orch-" + r.opts.workflowIDPrefix + input.RunID
 
 	opts := client.StartWorkflowOptions{
@@ -116,7 +116,7 @@ func (r *ExecutorTemporal) GetOrchestrationStatus(ctx context.Context, runID str
 		return entity.RunStatus{}, fmt.Errorf("ExecutorTemporal - GetOrchestrationStatus - r.client.QueryWorkflow: %w", err)
 	}
 
-	var orchStatus orchestration.OrchestrationStatus
+	var orchStatus orchestration.Status
 	if err := resp.Get(&orchStatus); err != nil {
 		return entity.RunStatus{}, fmt.Errorf("ExecutorTemporal - GetOrchestrationStatus - resp.Get: %w", err)
 	}

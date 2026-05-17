@@ -7,9 +7,9 @@ import "time"
 //   - OnResult callback from a completed step
 //   - External Signal "step-modify"
 type StepMutation struct {
-	AppendAfter string `json:"append_after,omitempty"` // insert after this step ID
-	InsertSteps []Step `json:"insert_steps"`           // steps to insert
-	ModifyStep  string `json:"modify_step,omitempty"`  // replace this step ID
+	AppendAfter string   `json:"append_after,omitempty"` // insert after this step ID
+	InsertSteps []Step   `json:"insert_steps"`           // steps to insert
+	ModifyStep  string   `json:"modify_step,omitempty"`  // replace this step ID
 	DeleteSteps []string `json:"delete_steps,omitempty"` // delete these step IDs
 }
 

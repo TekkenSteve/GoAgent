@@ -2,11 +2,18 @@ package mcp
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sync"
 
 	"github.com/TekkenSteve/GoAgent/internal/entity"
 	"github.com/TekkenSteve/GoAgent/internal/repo/toolkit"
+)
+
+var (
+	ErrMCPNotRegistered = errors.New("mcp server not registered")
+	ErrMCPToolNotFound  = errors.New("mcp tool not found")
+	ErrMCPNotConnected  = errors.New("mcp server not connected")
 )
 
 // mcpToolEntry tracks a tool discovered from an MCP server.
@@ -25,8 +32,8 @@ type mcpToolEntry struct {
 // wrappers registered with the toolkit registry.
 type Manager struct {
 	mu       sync.RWMutex
-	cfgs     map[string]ServerConfig // registered server configs (not connected)
-	servers  map[string]*Client      // active connections (JIT established)
+	cfgs     map[string]*ServerConfig // registered server configs (not connected)
+	servers  map[string]*Client       // active connections (JIT established)
 	toolMap  map[string]mcpToolEntry
 	registry *toolkit.ToolRegistry // optional: auto-register tools on connect → server binding
 }
@@ -34,7 +41,7 @@ type Manager struct {
 // NewManager creates an empty MCP manager with no connections.
 func NewManager() *Manager {
 	return &Manager{
-		cfgs:    make(map[string]ServerConfig),
+		cfgs:    make(map[string]*ServerConfig),
 		servers: make(map[string]*Client),
 		toolMap: make(map[string]mcpToolEntry),
 	}
@@ -55,19 +62,24 @@ func (m *Manager) SetRegistry(registry *toolkit.ToolRegistry) {
 			},
 			mgr: m,
 		}
-		_ = registry.Register(t) // skip duplicates
+		if err := registry.Register(t); err != nil {
+			_ = err
+		}
 	}
 }
 
 // RegisterServer stores a server configuration for later JIT connection.
 // No connection is made until Connect() or ConnectDynamic() is called.
-func (m *Manager) RegisterServer(cfg ServerConfig) error {
+func (m *Manager) RegisterServer(cfg *ServerConfig) error {
 	if err := cfg.Validate(); err != nil {
 		return err
 	}
+
 	m.mu.Lock()
 	defer m.mu.Unlock()
+
 	m.cfgs[cfg.Name] = cfg
+
 	return nil
 }
 
@@ -84,8 +96,9 @@ func (m *Manager) Connect(ctx context.Context, name string) ([]entity.ToolDef, e
 		// Already connected — return cached tool defs
 		return m.serverToolDefs(name), nil
 	}
+
 	if !hasCfg {
-		return nil, fmt.Errorf("mcp server %q not registered", name)
+		return nil, fmt.Errorf("%w: %q", ErrMCPNotRegistered, name)
 	}
 
 	return m.connectLocked(ctx, cfg)
@@ -94,7 +107,7 @@ func (m *Manager) Connect(ctx context.Context, name string) ([]entity.ToolDef, e
 // ConnectDynamic JIT-connects an ad-hoc server (from agent/template config),
 // discovers its tools, and returns the tool definitions. The server config
 // is also cached for future connections by name.
-func (m *Manager) ConnectDynamic(ctx context.Context, cfg ServerConfig) ([]entity.ToolDef, error) {
+func (m *Manager) ConnectDynamic(ctx context.Context, cfg *ServerConfig) ([]entity.ToolDef, error) {
 	if err := cfg.Validate(); err != nil {
 		return nil, err
 	}
@@ -116,7 +129,7 @@ func (m *Manager) ConnectDynamic(ctx context.Context, cfg ServerConfig) ([]entit
 }
 
 // connectLocked performs the actual JIT connection (caller must NOT hold write lock).
-func (m *Manager) connectLocked(ctx context.Context, cfg ServerConfig) ([]entity.ToolDef, error) {
+func (m *Manager) connectLocked(ctx context.Context, cfg *ServerConfig) ([]entity.ToolDef, error) {
 	client := NewClient(cfg)
 	if err := client.Start(ctx); err != nil {
 		return nil, fmt.Errorf("connect mcp server %q: %w", cfg.Name, err)
@@ -125,16 +138,19 @@ func (m *Manager) connectLocked(ctx context.Context, cfg ServerConfig) ([]entity
 	tools, err := client.ListTools(ctx)
 	if err != nil {
 		client.Close()
+
 		return nil, fmt.Errorf("discover tools from %q: %w", cfg.Name, err)
 	}
 
 	m.mu.Lock()
+
 	m.servers[cfg.Name] = client
 	for _, def := range tools {
 		name := def.Function.Name
 		if _, exists := m.toolMap[name]; exists {
 			continue
 		}
+
 		m.toolMap[name] = mcpToolEntry{
 			serverName: cfg.Name,
 			toolName:   name,
@@ -142,14 +158,16 @@ func (m *Manager) connectLocked(ctx context.Context, cfg ServerConfig) ([]entity
 		}
 		// Auto-register with toolkit registry if set
 		if m.registry != nil {
-			_ = m.registry.Register(&mcpTool{
+			if err := m.registry.Register(&mcpTool{
 				meta: toolkit.ToolMeta{
 					Name:        def.Function.Name,
 					Description: def.Function.Description,
 					Parameters:  toParamsMap(def.Function.Parameters),
 				},
 				mgr: m,
-			})
+			}); err != nil {
+				_ = err
+			}
 		}
 	}
 	m.mu.Unlock()
@@ -163,23 +181,22 @@ func (m *Manager) serverToolDefs(name string) []entity.ToolDef {
 	defer m.mu.RUnlock()
 
 	var defs []entity.ToolDef
+
 	for _, entry := range m.toolMap {
 		if entry.serverName == name {
 			defs = append(defs, entry.def)
 		}
 	}
+
 	return defs
 }
 
 // EnsureConnected checks all given server configs, JIT-connects any that
 // aren't yet connected, and returns the combined tool definitions.
 // This is the main entry point for PrepMCP.
-func (m *Manager) EnsureConnected(ctx context.Context, configs []entity.MCPServerConfig) ([]entity.ToolDef, []string) {
-	var allTools []entity.ToolDef
-	var errors []string
-
+func (m *Manager) EnsureConnected(ctx context.Context, configs []entity.MCPServerConfig) (allTools []entity.ToolDef, errs []string) {
 	for _, ecfg := range configs {
-		cfg := ServerConfig{
+		cfg := &ServerConfig{
 			Name:      ecfg.Name,
 			Transport: ecfg.Transport,
 			Command:   ecfg.Command,
@@ -193,8 +210,10 @@ func (m *Manager) EnsureConnected(ctx context.Context, configs []entity.MCPServe
 		_, registered := m.cfgs[cfg.Name]
 		m.mu.RUnlock()
 
-		var tools []entity.ToolDef
-		var err error
+		var (
+			tools []entity.ToolDef
+			err   error
+		)
 
 		if registered {
 			tools, err = m.Connect(ctx, cfg.Name)
@@ -203,13 +222,15 @@ func (m *Manager) EnsureConnected(ctx context.Context, configs []entity.MCPServe
 		}
 
 		if err != nil {
-			errors = append(errors, fmt.Sprintf("%s: %v", cfg.Name, err))
+			errs = append(errs, fmt.Sprintf("%s: %v", cfg.Name, err))
+
 			continue
 		}
+
 		allTools = append(allTools, tools...)
 	}
 
-	return allTools, errors
+	return allTools, errs
 }
 
 // Definitions returns all discovered MCP tool definitions from all connected servers.
@@ -221,16 +242,19 @@ func (m *Manager) Definitions() []entity.ToolDef {
 	for _, entry := range m.toolMap {
 		defs = append(defs, entry.def)
 	}
+
 	return defs
 }
 
 // RemoveServer disconnects and removes an MCP server.
-func (m *Manager) RemoveServer(ctx context.Context, name string) error {
+func (m *Manager) RemoveServer(_ context.Context, name string) error {
 	m.mu.Lock()
+
 	client, ok := m.servers[name]
 	if ok {
 		delete(m.servers, name)
 	}
+
 	delete(m.cfgs, name)
 
 	// Remove all tools from this server
@@ -244,6 +268,7 @@ func (m *Manager) RemoveServer(ctx context.Context, name string) error {
 	if ok {
 		return client.Close()
 	}
+
 	return nil
 }
 
@@ -253,13 +278,15 @@ func (m *Manager) Close() error {
 	defer m.mu.Unlock()
 
 	var lastErr error
+
 	for name, client := range m.servers {
 		if err := client.Close(); err != nil {
 			lastErr = fmt.Errorf("close mcp server %q: %w", name, err)
 		}
 	}
+
 	m.servers = make(map[string]*Client)
-	m.cfgs = make(map[string]ServerConfig)
+	m.cfgs = make(map[string]*ServerConfig)
 	m.toolMap = make(map[string]mcpToolEntry)
 
 	return lastErr
@@ -274,6 +301,7 @@ func (m *Manager) ListServerTools() map[string][]entity.ToolDef {
 	for _, entry := range m.toolMap {
 		result[entry.serverName] = append(result[entry.serverName], entry.def)
 	}
+
 	return result
 }
 
@@ -286,6 +314,7 @@ func (m *Manager) RegisteredTools() map[string]string {
 	for name, entry := range m.toolMap {
 		result[name] = entry.serverName
 	}
+
 	return result
 }
 
@@ -311,7 +340,7 @@ func (t *mcpTool) Execute(ctx context.Context, args map[string]any) (any, error)
 	t.mgr.mu.RUnlock()
 
 	if !ok {
-		return nil, fmt.Errorf("mcp tool %q not found", t.meta.Name)
+		return nil, fmt.Errorf("%w: %q", ErrMCPToolNotFound, t.meta.Name)
 	}
 
 	t.mgr.mu.RLock()
@@ -319,7 +348,7 @@ func (t *mcpTool) Execute(ctx context.Context, args map[string]any) (any, error)
 	t.mgr.mu.RUnlock()
 
 	if !ok {
-		return nil, fmt.Errorf("mcp server %q for tool %q not connected — Prep should have established connection", entry.serverName, t.meta.Name)
+		return nil, fmt.Errorf("%w: %q for tool %q", ErrMCPNotConnected, entry.serverName, t.meta.Name)
 	}
 
 	output, err := client.CallTool(ctx, entry.toolName, args)
@@ -327,17 +356,18 @@ func (t *mcpTool) Execute(ctx context.Context, args map[string]any) (any, error)
 		return nil, fmt.Errorf("mcp tool %q: %w", t.meta.Name, err)
 	}
 
-	return map[string]interface{}{"result": output}, nil
+	return map[string]any{"result": output}, nil
 }
 
 // toParamsMap converts interface{} to map[string]interface{} for ToolMeta.Parameters.
-func toParamsMap(v interface{}) map[string]interface{} {
-	if m, ok := v.(map[string]interface{}); ok {
+func toParamsMap(v any) map[string]any {
+	if m, ok := v.(map[string]any); ok {
 		return m
 	}
-	return map[string]interface{}{
+
+	return map[string]any{
 		"type":       "object",
-		"properties": map[string]interface{}{},
+		"properties": map[string]any{},
 	}
 }
 
@@ -364,5 +394,6 @@ func (m *Manager) RegisterToolsWithRegistry(registry *toolkit.ToolRegistry) erro
 			}
 		}
 	}
+
 	return nil
 }

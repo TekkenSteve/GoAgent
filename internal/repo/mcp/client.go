@@ -3,24 +3,30 @@ package mcp
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 
+	"github.com/TekkenSteve/GoAgent/internal/entity"
 	mcpclient "github.com/mark3labs/mcp-go/client"
 	"github.com/mark3labs/mcp-go/mcp"
+)
 
-	"github.com/TekkenSteve/GoAgent/internal/entity"
+var (
+	ErrMCPUnsupportedTransport = errors.New("unsupported transport")
+	ErrMCPNotStarted           = errors.New("mcp client not started")
+	ErrMCPToolError            = errors.New("mcp tool returned error")
 )
 
 // Client connects to a single MCP server via the mcp-go library and provides
 // tool discovery + execution.
 type Client struct {
 	name   string
-	cfg    ServerConfig
+	cfg    *ServerConfig
 	client *mcpclient.Client
 }
 
 // NewClient creates a new MCP client from a server configuration.
-func NewClient(cfg ServerConfig) *Client {
+func NewClient(cfg *ServerConfig) *Client {
 	return &Client{
 		name: cfg.Name,
 		cfg:  cfg,
@@ -35,6 +41,7 @@ func (c *Client) Start(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("mcp client %q: %w", c.name, err)
 	}
+
 	c.client = cl
 
 	// Initialize handshake — required by MCP protocol
@@ -50,6 +57,7 @@ func (c *Client) Start(ctx context.Context) error {
 	}
 	if _, err := cl.Initialize(ctx, initReq); err != nil {
 		cl.Close()
+
 		return fmt.Errorf("initialize: %w", err)
 	}
 
@@ -67,6 +75,7 @@ func (c *Client) createClient(ctx context.Context) (*mcpclient.Client, error) {
 		if err != nil {
 			return nil, fmt.Errorf("stdio: %w", err)
 		}
+
 		return cl, nil
 
 	case "sse":
@@ -74,10 +83,13 @@ func (c *Client) createClient(ctx context.Context) (*mcpclient.Client, error) {
 		if err != nil {
 			return nil, fmt.Errorf("sse create: %w", err)
 		}
+
 		if err := cl.Start(ctx); err != nil {
 			cl.Close()
+
 			return nil, fmt.Errorf("sse start: %w", err)
 		}
+
 		return cl, nil
 
 	case "streamable-http":
@@ -85,21 +97,24 @@ func (c *Client) createClient(ctx context.Context) (*mcpclient.Client, error) {
 		if err != nil {
 			return nil, fmt.Errorf("streamable-http create: %w", err)
 		}
+
 		if err := cl.Start(ctx); err != nil {
 			cl.Close()
+
 			return nil, fmt.Errorf("streamable-http start: %w", err)
 		}
+
 		return cl, nil
 
 	default:
-		return nil, fmt.Errorf("unsupported transport %q", c.cfg.Transport)
+		return nil, fmt.Errorf("%w: %q", ErrMCPUnsupportedTransport, c.cfg.Transport)
 	}
 }
 
 // ListTools discovers all tools available from this MCP server.
 func (c *Client) ListTools(ctx context.Context) ([]entity.ToolDef, error) {
 	if c.client == nil {
-		return nil, fmt.Errorf("mcp client %q not started", c.name)
+		return nil, fmt.Errorf("%w: %q", ErrMCPNotStarted, c.name)
 	}
 
 	result, err := c.client.ListTools(ctx, mcp.ListToolsRequest{})
@@ -108,7 +123,8 @@ func (c *Client) ListTools(ctx context.Context) ([]entity.ToolDef, error) {
 	}
 
 	defs := make([]entity.ToolDef, 0, len(result.Tools))
-	for _, t := range result.Tools {
+	for i := range result.Tools {
+		t := result.Tools[i]
 		defs = append(defs, entity.ToolDef{
 			Type: "function",
 			Function: entity.ToolFuncDef{
@@ -118,13 +134,14 @@ func (c *Client) ListTools(ctx context.Context) ([]entity.ToolDef, error) {
 			},
 		})
 	}
+
 	return defs, nil
 }
 
 // CallTool executes a tool on the MCP server.
 func (c *Client) CallTool(ctx context.Context, name string, args map[string]any) (string, error) {
 	if c.client == nil {
-		return "", fmt.Errorf("mcp client %q not started", c.name)
+		return "", fmt.Errorf("%w: %q", ErrMCPNotStarted, c.name)
 	}
 
 	req := mcp.CallToolRequest{
@@ -141,17 +158,19 @@ func (c *Client) CallTool(ctx context.Context, name string, args map[string]any)
 
 	// Concatenate text content items
 	var text string
+
 	for _, content := range result.Content {
 		if tc, ok := mcp.AsTextContent(content); ok {
 			if text != "" {
 				text += "\n"
 			}
+
 			text += tc.Text
 		}
 	}
 
 	if result.IsError {
-		return text, fmt.Errorf("mcp tool %q returned error: %s", name, text)
+		return text, fmt.Errorf("%w: %q: %s", ErrMCPToolError, name, text)
 	}
 
 	return text, nil
@@ -162,6 +181,7 @@ func (c *Client) Close() error {
 	if c.client != nil {
 		return c.client.Close()
 	}
+
 	return nil
 }
 
@@ -176,6 +196,7 @@ func toolInputSchemaToMap(schema mcp.ToolInputSchema) map[string]any {
 			"properties": map[string]any{},
 		}
 	}
+
 	var m map[string]any
 	if err := json.Unmarshal(data, &m); err != nil {
 		return map[string]any{
@@ -183,5 +204,6 @@ func toolInputSchemaToMap(schema mcp.ToolInputSchema) map[string]any {
 			"properties": map[string]any{},
 		}
 	}
+
 	return m
 }

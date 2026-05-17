@@ -1,6 +1,7 @@
 package webapi
 
 import (
+	"errors"
 	"fmt"
 
 	"github.com/knadh/koanf/parsers/yaml"
@@ -8,6 +9,10 @@ import (
 	"github.com/knadh/koanf/v2"
 	"github.com/maximhq/bifrost/core/schemas"
 )
+
+var ErrLLMNoProviders = errors.New("LLM config has no providers")
+
+// ...
 
 // CandidateConfig is a single model candidate within a scenario.
 type CandidateConfig struct {
@@ -41,6 +46,7 @@ type LLMConfigFile struct {
 // LoadLLMConfigFile reads and parses a YAML LLM configuration file via koanf.
 func LoadLLMConfigFile(path string) (*LLMConfigFile, error) {
 	k := koanf.New(".")
+
 	fp := file.Provider(path)
 	if err := k.Load(fp, yaml.Parser()); err != nil {
 		return nil, fmt.Errorf("koanf load: %w", err)
@@ -52,7 +58,7 @@ func LoadLLMConfigFile(path string) (*LLMConfigFile, error) {
 	}
 
 	if len(cfg.Providers) == 0 {
-		return nil, fmt.Errorf("LLM config has no providers")
+		return nil, ErrLLMNoProviders
 	}
 
 	return &cfg, nil
@@ -68,6 +74,7 @@ func (f *LLMConfigFile) ToProviderEntries() []ProviderEntry {
 			BaseURL:  p.BaseURL,
 		})
 	}
+
 	return entries
 }
 
@@ -77,9 +84,11 @@ func (f *LLMConfigFile) DefaultScenarioName() string {
 	if _, ok := f.Scenarios["default"]; ok {
 		return "default"
 	}
+
 	for name := range f.Scenarios {
 		return name
 	}
+
 	return ""
 }
 
@@ -96,10 +105,12 @@ func LoadLLMProviders(path string) (*LLMProvidersResult, error) {
 	if path == "" {
 		return nil, nil
 	}
+
 	cfg, err := LoadLLMConfigFile(path)
 	if err != nil {
 		return nil, fmt.Errorf("load LLM config: %w", err)
 	}
+
 	return &LLMProvidersResult{
 		Providers:       cfg.ToProviderEntries(),
 		Scenarios:       cfg.Scenarios,

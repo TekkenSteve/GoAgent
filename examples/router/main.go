@@ -1,6 +1,6 @@
 // examples/router/main.go
 //
-// Router Pattern
+// # Router Pattern
 //
 // A classifier step evaluates the input and uses OnResult to inject
 // the appropriate branch steps dynamically. This enables conditional
@@ -48,31 +48,7 @@ func main() {
 
 	status, err := c.ExecuteOrchestration(ctx, client.OrchestrationRequest{
 		RunID: runID,
-		Steps: []map[string]any{
-			{
-				"id": "classify", "type": "agent", "agent_id": "classifier",
-				"input": map[string]any{"message": "Classify the following input as either 'technical' or 'business': 'We need to migrate our database to PostgreSQL and set up replication.'"},
-			},
-			{
-				"id": "route", "type": "eval",
-				"input": map[string]any{"condition": "classify_result"},
-				"on_result": map[string]any{
-					"append_after": "route",
-					"insert_steps": []map[string]any{
-						{
-							"id": "technical-branch", "type": "agent", "agent_id": "engineer",
-							"input":      map[string]any{"message": "Create a detailed technical migration plan for PostgreSQL including replication setup"},
-							"depends_on": []string{"classify"},
-						},
-					},
-				},
-			},
-			{
-				"id": "finalize", "type": "agent", "agent_id": "classifier",
-				"input":      map[string]any{"message": "Summarize the output and format it as a final response"},
-				"depends_on": []string{"route"},
-			},
-		},
+		Steps: routerSteps(),
 	})
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
@@ -89,4 +65,32 @@ func main() {
 	}
 
 	fmt.Printf("\nFinal status: lifecycle_state=%s step=%d\n", status.LifecycleState, status.Step)
+}
+
+func routerSteps() []map[string]any {
+	return []map[string]any{
+		{
+			"id": "classify", "type": "agent", "agent_id": "classifier",
+			"input": map[string]any{"message": "Classify the following input as either 'technical' or 'business': 'We need to migrate our database to PostgreSQL and set up replication.'"},
+		},
+		{
+			"id": "route", "type": "eval",
+			"input": map[string]any{"condition": "classify_result"},
+			"on_result": map[string]any{
+				"append_after": "route",
+				"insert_steps": []map[string]any{
+					{
+						"id": "technical-branch", "type": "agent", "agent_id": "engineer",
+						"input":      map[string]any{"message": "Create a detailed technical migration plan for PostgreSQL including replication setup"},
+						"depends_on": []string{"classify"},
+					},
+				},
+			},
+		},
+		{
+			"id": "finalize", "type": "agent", "agent_id": "classifier",
+			"input":      map[string]any{"message": "Summarize the output and format it as a final response"},
+			"depends_on": []string{"route"},
+		},
+	}
 }
