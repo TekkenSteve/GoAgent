@@ -134,7 +134,7 @@ func executeStreamToolCalls(
 		}
 
 		if isDelegateToolCall(tc) {
-			resultContent, err := executeDelegateTool(ctx, tc, input.Config)
+			resultContent, err := executeDelegateTool(ctx, tc, input.Config, input.AccountID)
 			if err != nil {
 				resultContent = fmt.Sprintf("Error delegating task: %v", err)
 			}

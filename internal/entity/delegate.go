@@ -6,6 +6,6 @@ const DelegateToolName = "delegate_to_agent"
 type DelegateTaskInput struct {
 	SystemPrompt string   `json:"system_prompt"`
 	Task         string   `json:"task"`
-	ModelRef     string   `json:"model_ref,omitempty"`
+	ModelRef     string   `json:"model,omitempty"`
 	Tools        []string `json:"tools,omitempty"`
 }

@@ -51,7 +51,7 @@ func isDelegateToolCall(tc entity.ToolCall) bool {
 
 // executeDelegateTool spawns a child AgentWorkflow for the delegated task
 // and returns the final assistant output.
-func executeDelegateTool(ctx workflow.Context, tc entity.ToolCall, parentCfg entity.LLMConfig) (string, error) {
+func executeDelegateTool(ctx workflow.Context, tc entity.ToolCall, parentCfg entity.LLMConfig, accountID string) (string, error) {
 	args := parseArgsJSON(tc.Function.Arguments)
 
 	systemPrompt := getStringArg(args, "system_prompt")
@@ -74,6 +74,7 @@ func executeDelegateTool(ctx workflow.Context, tc entity.ToolCall, parentCfg ent
 	var result WorkflowResult
 
 	err := workflow.ExecuteChildWorkflow(childCtx, AgentWorkflowName, &AgentWorkflowInput{
+		AccountID:    accountID,
 		RunID:        tc.ID,
 		SystemPrompt: systemPrompt,
 		Message:      task,
