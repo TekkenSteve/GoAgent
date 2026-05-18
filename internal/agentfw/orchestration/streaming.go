@@ -37,6 +37,9 @@ func StreamAgentWorkflow(ctx workflow.Context, input *InitStreamInput) error {
 	messages := initResult.Messages
 	tools := initResult.Tools
 
+	// Inject delegate_to_agent tool into every agent's tool set
+	tools = append(tools, DelegateToolDef())
+
 	// Agent loop
 	for round := range maxToolRounds {
 		if canceled, err := checkStreamSignal(signalCh, ctx); err != nil {
@@ -111,12 +114,38 @@ func processStreamRound(
 		return finishStreamRound(ctx, input, llmResult), nil
 	}
 
-	// Execute each tool call
-	for _, tc := range llmResult.ToolCalls {
+	return executeStreamToolCalls(ctx, signalCh, input, messages, llmResult.ToolCalls)
+}
+
+// executeStreamToolCalls runs tool calls for the streaming path, intercepting
+// delegate_to_agent calls to spawn child workflows instead of activities.
+func executeStreamToolCalls(
+	ctx workflow.Context,
+	signalCh workflow.ReceiveChannel,
+	input *InitStreamInput,
+	messages *[]entity.Message,
+	toolCalls []entity.ToolCall,
+) (bool, error) {
+	for _, tc := range toolCalls {
 		if canceled, err := checkStreamSignal(signalCh, ctx); err != nil {
 			_ = err
 		} else if canceled {
 			return true, nil
+		}
+
+		if isDelegateToolCall(tc) {
+			resultContent, err := executeDelegateTool(ctx, tc, input.Config)
+			if err != nil {
+				resultContent = fmt.Sprintf("Error delegating task: %v", err)
+			}
+
+			*messages = append(*messages, entity.Message{
+				Role:       entity.RoleTool,
+				ToolCallID: tc.ID,
+				Content:    resultContent,
+			})
+
+			continue
 		}
 
 		var toolResult ToolOutput
@@ -129,12 +158,11 @@ func processStreamRound(
 			return false, fmt.Errorf("stream workflow - tool exec %s: %w", tc.Function.Name, err)
 		}
 
-		toolMsg := entity.Message{
+		*messages = append(*messages, entity.Message{
 			Role:       entity.RoleTool,
 			ToolCallID: tc.ID,
 			Content:    toolResult.Output,
-		}
-		*messages = append(*messages, toolMsg)
+		})
 	}
 
 	return false, nil

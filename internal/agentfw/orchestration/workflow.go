@@ -44,6 +44,9 @@ func AgentWorkflow(ctx workflow.Context, input *AgentWorkflowInput) (WorkflowRes
 		return makeWorkflowResult(ctx, &status), err
 	}
 
+	// Inject delegate_to_agent tool into every agent's tool set
+	tools = append(tools, DelegateToolDef())
+
 	// Agent loop
 	for round := range maxToolRounds {
 		done, err := agentWorkflowRound(ctx, signalCh, input, &status, messages, tools, baseRequestedAt, round)
@@ -82,6 +85,7 @@ func makeWorkflowResult(ctx workflow.Context, status *RunStatus) WorkflowResult 
 		LifecycleState: status.LifecycleState,
 		Step:           status.Step,
 		CompletedAt:    workflow.Now(ctx),
+		Output:         status.Output,
 	}
 }
 
@@ -134,6 +138,25 @@ func executeAgentToolCalls(
 			status.LifecycleState = string(entity.LifecycleCancelled)
 
 			return true, nil
+		}
+
+		// Intercept delegate_to_agent calls — spawn a child workflow
+		// instead of routing through ToolExecActivity, giving the
+		// sub-agent full conversational isolation.
+		if isDelegateToolCall(tc) {
+			resultContent, err := executeDelegateTool(ctx, tc, input.Config)
+			if err != nil {
+				resultContent = fmt.Sprintf("Error delegating task: %v", err)
+			}
+
+			toolMsg := entity.Message{
+				Role:       entity.RoleTool,
+				ToolCallID: tc.ID,
+				Content:    resultContent,
+			}
+			*messages = append(*messages, toolMsg)
+
+			continue
 		}
 
 		var toolResult ToolOutput
@@ -239,6 +262,7 @@ func agentWorkflowRound(
 
 	if len(llmResult.ToolCalls) == 0 {
 		status.LifecycleState = string(entity.LifecycleCompleted)
+		status.Output = llmResult.Content
 
 		return true, nil
 	}

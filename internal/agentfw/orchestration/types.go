@@ -207,6 +207,7 @@ type RunStatus struct {
 	Step           int32
 	Reason         string
 	UpdatedAt      time.Time
+	Output         string // final assistant text output; carried for delegation
 }
 
 // WorkflowResult is the deterministic workflow output payload.
@@ -215,6 +216,7 @@ type WorkflowResult struct {
 	LifecycleState string
 	Step           int32
 	CompletedAt    time.Time
+	Output         string // final assistant text output; populated for delegation
 }
 
 // AgentWorkflowInput is the input for the step-level AgentWorkflow.
