@@ -126,7 +126,7 @@ services:
 
   temporal:
     container_name: temporal
-    image: temporalio/server:1.29.6.1
+    image: temporalio/server:1.31.0
     restart: always
     depends_on:
       db:
