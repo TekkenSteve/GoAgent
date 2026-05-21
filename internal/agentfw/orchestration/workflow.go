@@ -44,12 +44,18 @@ func AgentWorkflow(ctx workflow.Context, input *AgentWorkflowInput) (WorkflowRes
 		return makeWorkflowResult(ctx, &status), err
 	}
 
-	// Inject delegate_to_agent tool into every agent's tool set
-	tools = append(tools, DelegateToolDef())
+	// Separate domain tools from meta-tools so delegate_to_agent
+	// is never leaked into child workflows. The LLM sees allTools
+	// (can invoke delegate_to_agent), but only domainTools are
+	// passable to delegate children.
+	domainTools := tools
+	allTools := make([]entity.ToolDef, 0, len(domainTools)+1)
+	allTools = append(allTools, domainTools...)
+	allTools = append(allTools, DelegateToolDef())
 
 	// Agent loop
 	for round := range maxToolRounds {
-		done, err := agentWorkflowRound(ctx, signalCh, input, &status, messages, tools, baseRequestedAt, round)
+		done, err := agentWorkflowRound(ctx, signalCh, input, &status, messages, allTools, domainTools, baseRequestedAt, round)
 		if err != nil {
 			return makeWorkflowResult(ctx, &status), err
 		}
@@ -130,6 +136,7 @@ func executeAgentToolCalls(
 	status *RunStatus,
 	messages *[]entity.Message,
 	toolCalls []entity.ToolCall,
+	domainTools []entity.ToolDef,
 ) (bool, error) {
 	for _, tc := range toolCalls {
 		if canceled, err := checkStreamSignal(signalCh, ctx); err != nil {
@@ -144,7 +151,7 @@ func executeAgentToolCalls(
 		// instead of routing through ToolExecActivity, giving the
 		// sub-agent full conversational isolation.
 		if isDelegateToolCall(tc) {
-			resultContent, err := executeDelegateTool(ctx, tc, input.Config, input.AccountID)
+			resultContent, err := executeDelegateTool(ctx, tc, input.Config, input.AccountID, domainTools, input.MCPServerConfigs)
 			if err != nil {
 				resultContent = fmt.Sprintf("Error delegating task: %v", err)
 			}
@@ -212,13 +219,16 @@ func buildContinueAsNewInput(input *AgentWorkflowInput, status *RunStatus, messa
 
 // agentWorkflowRound executes one iteration of the agent loop.
 // Returns true if the workflow should exit (completed, canceled, failed, or continued-as-new).
+// allTools is the full tool set exposed to the LLM (including meta-tools like delegate_to_agent).
+// domainTools is the subset of tools allowed to be passed to child workflows.
 func agentWorkflowRound(
 	ctx workflow.Context,
 	signalCh workflow.ReceiveChannel,
 	input *AgentWorkflowInput,
 	status *RunStatus,
 	messages []entity.Message,
-	tools []entity.ToolDef,
+	allTools []entity.ToolDef,
+	domainTools []entity.ToolDef,
 	baseRequestedAt time.Time,
 	round int,
 ) (bool, error) {
@@ -241,7 +251,7 @@ func agentWorkflowRound(
 		AccountID: input.AccountID,
 		RunID:     input.RunID,
 		Messages:  messages,
-		Tools:     tools,
+		Tools:     allTools,
 		Config:    input.Config,
 	}).Get(ctx, &llmResult); err != nil {
 		status.LifecycleState = string(entity.LifecycleFailed)
@@ -268,7 +278,7 @@ func agentWorkflowRound(
 	}
 
 	// Execute each tool call
-	if done, err := executeAgentToolCalls(ctx, signalCh, input, status, &messages, llmResult.ToolCalls); err != nil || done {
+	if done, err := executeAgentToolCalls(ctx, signalCh, input, status, &messages, llmResult.ToolCalls, domainTools); err != nil || done {
 		return true, err
 	}
 

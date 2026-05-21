@@ -37,8 +37,12 @@ func StreamAgentWorkflow(ctx workflow.Context, input *InitStreamInput) error {
 	messages := initResult.Messages
 	tools := initResult.Tools
 
-	// Inject delegate_to_agent tool into every agent's tool set
-	tools = append(tools, DelegateToolDef())
+	// Separate domain tools from meta-tools so delegate_to_agent
+	// is never leaked into child workflows.
+	domainTools := tools
+	allTools := make([]entity.ToolDef, 0, len(domainTools)+1)
+	allTools = append(allTools, domainTools...)
+	allTools = append(allTools, DelegateToolDef())
 
 	// Agent loop
 	for round := range maxToolRounds {
@@ -52,7 +56,7 @@ func StreamAgentWorkflow(ctx workflow.Context, input *InitStreamInput) error {
 		// message lifecycle for the streaming path as well.
 		messages = entity.RepairToolCallPairing(messages)
 
-		done, err := processStreamRound(ctx, signalCh, input, &messages, tools, round)
+		done, err := processStreamRound(ctx, signalCh, input, &messages, allTools, domainTools, round)
 		if err != nil {
 			return err
 		}
@@ -81,12 +85,15 @@ func setupStreamActivityOptions(ctx workflow.Context) workflow.Context {
 
 // processStreamRound runs one LLM call and its associated tool executions.
 // Returns (done, error) where done indicates the workflow should exit.
+// allTools is the full tool set exposed to the LLM (including meta-tools).
+// domainTools is the subset allowed to be passed to child workflows.
 func processStreamRound(
 	ctx workflow.Context,
 	signalCh workflow.ReceiveChannel,
 	input *InitStreamInput,
 	messages *[]entity.Message,
-	tools []entity.ToolDef,
+	allTools []entity.ToolDef,
+	domainTools []entity.ToolDef,
 	round int,
 ) (bool, error) {
 	// Streaming LLM call — writes delta events to EventStore
@@ -96,7 +103,7 @@ func processStreamRound(
 		SessionID: input.SessionID,
 		RunID:     input.RunID,
 		Messages:  *messages,
-		Tools:     tools,
+		Tools:     allTools,
 		Config:    input.Config,
 	}).Get(ctx, &llmResult); err != nil {
 		return false, fmt.Errorf("stream workflow - llm round %d: %w", round, err)
@@ -114,7 +121,7 @@ func processStreamRound(
 		return finishStreamRound(ctx, input, llmResult), nil
 	}
 
-	return executeStreamToolCalls(ctx, signalCh, input, messages, llmResult.ToolCalls)
+	return executeStreamToolCalls(ctx, signalCh, input, messages, llmResult.ToolCalls, domainTools)
 }
 
 // executeStreamToolCalls runs tool calls for the streaming path, intercepting
@@ -125,6 +132,7 @@ func executeStreamToolCalls(
 	input *InitStreamInput,
 	messages *[]entity.Message,
 	toolCalls []entity.ToolCall,
+	domainTools []entity.ToolDef,
 ) (bool, error) {
 	for _, tc := range toolCalls {
 		if canceled, err := checkStreamSignal(signalCh, ctx); err != nil {
@@ -134,7 +142,7 @@ func executeStreamToolCalls(
 		}
 
 		if isDelegateToolCall(tc) {
-			resultContent, err := executeDelegateTool(ctx, tc, input.Config, input.AccountID)
+			resultContent, err := executeDelegateTool(ctx, tc, input.Config, input.AccountID, domainTools, input.MCPServerConfigs)
 			if err != nil {
 				resultContent = fmt.Sprintf("Error delegating task: %v", err)
 			}
