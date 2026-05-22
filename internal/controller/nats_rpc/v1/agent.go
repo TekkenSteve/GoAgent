@@ -4,9 +4,9 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/TekkenSteve/GoAgent/entity"
 	"github.com/TekkenSteve/GoAgent/internal/controller/nats_rpc/v1/request"
 	"github.com/TekkenSteve/GoAgent/internal/controller/nats_rpc/v1/response"
-	"github.com/TekkenSteve/GoAgent/internal/entity"
 	"github.com/TekkenSteve/GoAgent/pkg/nats/nats_rpc/server"
 	"github.com/goccy/go-json"
 	"github.com/nats-io/nats.go"

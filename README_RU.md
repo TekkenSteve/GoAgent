@@ -89,23 +89,32 @@ make compose-up-all
 
 ## Структура проекта
 
-### Основные директории
+GoAgent использует структуру **библиотека + оболочка приложения** по паттерну [go-clean-template](https://github.com/evrone/go-clean-template). Публичные пакеты на верхнем уровне доступны для импорта внешними проектами; `internal/` содержит только оболочку приложения.
 
-- `cmd/app/` — точка входа приложения
-- `config/` — управление конфигурацией (на основе переменных окружения)
-- `internal/` — приватный код приложения
-  - `app/` — инициализация приложения и внедрение зависимостей
-  - `controller/` — слой обработчиков сервера (REST, gRPC, RPC)
-  - `usecase/` — слой бизнес-логики
-  - `entity/` — бизнес-сущности (Step, AgentSpec, TeamSpec и др.)
-  - `repo/` — слой доступа к данным (Temporal, PostgreSQL)
-  - `agentfw/` — реализация Agent Framework (среда выполнения, команды, стриминг)
-- `pkg/` — переиспользуемые публичные пакеты
-- `docs/` — документация API и Proto файлы
-- `examples/` — исполняемые примеры паттернов (клиентский SDK)
-- `integration-test/` — интеграционные тесты
-- `scripts/` — проверки детерминизма, нагрузочные тесты
-- `migrations/` — файлы миграций PostgreSQL
+### Публичные пакеты библиотеки
+
+| Пакет | Слой | Описание |
+|---------|-------|-------------|
+| `entity/` | Внутренний | Доменные примитивы — без зависимостей, только stdlib |
+| `usecase/` | Внутренний | Бизнес-логика + интерфейсы **входных портов** (вызываются контроллерами) |
+| `repo/` | Внутр./Внеш. | Интерфейсы **выходных портов** (вызываются usecase) + адаптеры инфраструктуры |
+| `state/` | Внутренний | Абстракции управления состоянием — hot/warm/cold слои |
+| `agentfw/` | Оба | Среда выполнения агентов — `agent/`, `team/`, `tool/`, `stream/` (внутренний); `orchestration/`, `runtime/`, `config/` (внешний) |
+| `config/` | Внешний | Конфигурация приложения (на основе env) |
+| `pkg/` | Внешний | Инфраструктурные обертки — Postgres, Redis, HTTP сервер и др. |
+
+### Оболочка приложения
+
+- `internal/app/` — внедрение зависимостей и инициализация приложения
+- `internal/controller/` — транспортный слой (REST, gRPC, AMQP RPC, NATS RPC)
+- `cmd/app/` — точка входа
+
+### Прочие директории
+
+- `docs/` — Swagger документация и Proto файлы
+- `examples/` — исполняемые примеры паттернов
+- `integration-test/` — интеграционные тесты (требуется Docker)
+- `migrations/` — миграции PostgreSQL
 
 ### Управление конфигурацией
 
@@ -136,40 +145,127 @@ make compose-up-all
 | `join` | Сбор параллельных результатов |
 | `eval` | Условная оценка с динамической мутацией шагов |
 
+### Паттерны оркестрации (Режим 1 — HTTP клиент)
+
+Директория `examples/http/` содержит исполняемые демонстрации с использованием HTTP клиентского SDK:
+
+| Паттерн | Файл | Ключевые концепции |
+|---------|------|-------------|
+| [ReAct](examples/http/react/) | Один агент + цикл инструментов | `ExecuteRequest`, опрос |
+| [Pipeline](examples/http/pipeline/) | Последовательные этапы обработки | Цепочка `depends_on` |
+| [DAG](examples/http/dag/) | Направленный ациклический граф | Разрешение множественных зависимостей |
+| [Research](examples/http/research/) | Параллельное исследование + синтез | `split`/`join`, `wait` (HITL) |
+| [Supervisor-Worker](examples/http/supervisor-worker/) | Декомпозиция + параллельные исполнители | `split`/`join`, агент-супервизор |
+| [Router](examples/http/router/) | Условное ветвление | `eval` + мутация `OnResult` |
+| [Reflexion](examples/http/reflexion/) | Цикл самокритики и улучшения | `eval` + динамическое уточнение |
+| [Plan-and-Execute](examples/http/plan-and-execute/) | План → параллельное выполнение → оценка | `split`/`join` + мутация `eval` |
+| [Exploratory](examples/http/exploratory/) | Самоизменяющаяся очередь шагов | `eval` + мутация `append_after` |
+| [ToT / LATS](examples/http/tot-lats/) | Множественные пути рассуждения | Параллельное исследование + выбор лучшего пути |
+| [Scientific](examples/http/scientific/) | Гипотеза → HITL → эксперимент | Сигнал `wait`, обработка таймаута |
+| [Team](examples/http/team/) | Многоагентная иерархия | `TeamSpec` + `SubTeams` |
+| [Hierarchical](examples/http/hierarchical/) | Руководитель → отделы | Вложенный `TeamSpec` с расширением |
+
+### Примеры встраивания библиотеки (Режим 2 — Прямой импорт)
+
+Директория `examples/embed/` показывает, как импортировать пакеты GoAgent напрямую:
+
+| Пример | Файл | Что демонстрирует |
+|---------|------|---------------|
+| [ReAct](examples/embed/react/) | `examples/embed/react/main.go` | `agent.New()`, `ExecuteStep`, mock LLM |
+| [Conversation](examples/embed/conversation/) | `examples/embed/conversation/main.go` | Многошаговый диалог с накоплением истории |
+| [Tools](examples/embed/tools/) | `examples/embed/tools/main.go` | Вызов инструментов с `repo.ToolExecutor` |
+
+### Только типы (Режим 3)
+
+Директория `examples/types/` показывает импорт только `entity/` для общих определений типов.
+
+## Три режима использования
+
+GoAgent поддерживает три способа интеграции, от простого к глубокому:
+
+### Режим 1 — Автономный сервер (REST API)
+
+Запустите GoAgent как самостоятельный сервис. Приложение взаимодействует с ним через HTTP/gRPC.
+
+```go
+import "github.com/TekkenSteve/GoAgent/examples/client"
+
+c := client.New("http://localhost:8080", "my-account")
+status, _ := c.ExecuteAgent(ctx, client.ExecuteRequest{
+    RunID: "run-1", UserMessage: "Сколько будет 2+2?",
+})
+```
+
+### Режим 2 — Встраивание библиотеки
+
+Импортируйте пакеты GoAgent напрямую в ваше Go-приложение. Используйте встроенные адаптеры или создайте свои.
+
+```go
+import (
+    "github.com/TekkenSteve/GoAgent/usecase/agent"
+    "github.com/TekkenSteve/GoAgent/repo/webapi"      // LLM провайдер
+    "github.com/TekkenSteve/GoAgent/repo/pipeline"    // Redis WAL
+    "github.com/TekkenSteve/GoAgent/repo/compressor"  // Сжатие контекста
+    "github.com/TekkenSteve/GoAgent/repo/toolkit"     // Встроенные инструменты
+)
+
+llm := webapi.NewBifrostProvider(cfg)
+tools := toolkit.NewRegistry(llm)
+wal := pipeline.NewRedisWAL(appender, rdb)
+
+agentUC := agent.New(llm, tools, wal, compressor, tools, nil)
+result, _ := agentUC.ExecuteStep(ctx, &agent.StepRequest{
+    RunID:   "run-1",
+    Message: "Сколько будет 2+2?",
+    Config:  entity.LLMConfig{Model: "claude-sonnet-4-20250514"},
+})
+```
+
+### Режим 3 — Только типы
+
+Импортируйте только `entity/` для обмена доменными типами между микросервисами.
+
+```go
+import "github.com/TekkenSteve/GoAgent/entity"
+
+type MyService struct {
+    messages []entity.Message
+    tools    []entity.ToolDef
+}
+```
+
 ## Архитектурный дизайн
 
 ### Принципы Clean Architecture
 
-Проект следует принципам Clean Architecture Роберта Мартина (Uncle Bob):
+Проект следует архитектурному паттерну [go-clean-template](https://github.com/evrone/go-clean-template):
 
-1. **Инверсия зависимостей**: зависимости направлены от внешнего слоя к внутреннему
-2. **Независимость бизнес-логики**: ядро бизнес-логики не зависит от внешних фреймворков и инструментов
-3. **Тестируемость**: изоляция через интерфейсы облегчает юнит-тестирование
-4. **Разделение ответственности**: четкое разделение по слоям
+1. **Входные порты** (`usecase/contracts.go`) — интерфейсы, реализуемые бизнес-логикой, вызываются контроллерами
+2. **Выходные порты** (`repo/contracts.go`) — интерфейсы, вызываемые бизнес-логикой, реализуемые адаптерами
+3. **Направление зависимостей**: внешние слои импортируют внутренние, никогда наоборот
+4. **Тестируемость**: изоляция через интерфейсы упрощает юнит-тестирование с моками
 
-### Слоистая архитектура
+### Поток зависимостей
 
 ```
-┌─────────────────────────────────────┐
-│   Controller (HTTP/gRPC/RPC)        │  Внешний слой: адаптеры интерфейсов
-├─────────────────────────────────────┤
-│   Use Case (Business Logic)         │  Внутренний слой: бизнес-логика
-├─────────────────────────────────────┤
-│   Repository / WebAPI               │  Внешний слой: доступ к данным
-├─────────────────────────────────────┤
-│   Database / External Services      │  Внешний слой: инфраструктура
-└─────────────────────────────────────┘
+┌──────────────────────────────────────────────┐
+│  entity/   │  state/                         │  Внутренний слой
+│  ──────────┼──────────                        │  (без внешних зависимостей,
+│  usecase/contracts.go  (входные порты)       │   только stdlib)
+│  repo/contracts.go     (выходные порты)      │
+├──────────────────────────────────────────────┤
+│  usecase/agent/  usecase/template/  ...     │  Внутренний слой
+│  (импортирует repo/ для выходных портов)     │  (бизнес-логика)
+├──────────────────────────────────────────────┤
+│  repo/persistent/  repo/webapi/  ...         │  Внешний слой
+│  internal/controller/  internal/app/         │  (инфраструктура,
+│  agentfw/orchestration/                       │   импортирует внутренний)
+└──────────────────────────────────────────────┘
 ```
 
-**Внутренний слой (бизнес-логика)**:
-- Использует только стандартную библиотеку Go
-- Не зависит от реализации внешнего слоя
-- Взаимодействует с внешним слоем через интерфейсы
-
-**Внешний слой (инфраструктура)**:
-- Реализует интерфейсы, определенные внутренним слоем
-- Обрабатывает конкретные технические реализации
-- Компоненты взаимодействуют через слой бизнес-логики
+- **Внутренний слой** (`entity/`, `state/`, `usecase/`, `repo/contracts.go`) зависит только от stdlib
+- **Внешний слой** (`repo/*/`, `internal/`, `pkg/`) реализует интерфейсы внутреннего слоя
+- `usecase/agent/` импортирует `repo/` для интерфейсов выходных портов — по аналогии с `usecase/translation/` → `repo/` в go-clean-template
 
 ### Внедрение зависимостей
 
@@ -184,6 +280,14 @@ func New(r Repository) *UseCase {
     return &UseCase{repo: r}
 }
 ```
+
+### Версионирование API
+
+Поддерживается простая стратегия версионирования, версии различаются структурой директорий:
+
+- REST API: `internal/controller/restapi/v1`, `v2`...
+- gRPC: `internal/controller/grpc/v1`, `v2`...
+- RPC: `internal/controller/amqp_rpc/v1`, `v2`...
 
 ## Руководство разработчика
 
@@ -221,6 +325,16 @@ make format
 
 # Запуск юнит-тестов
 make test
+```
+
+## CI проверки (запустите локально перед push)
+
+```sh
+make linter-golangci               # golangci-lint
+make linter-hadolint               # проверка Dockerfile
+make linter-dotenv                  # проверка .env
+make check-workflow-determinism    # проверка детерминизма Temporal
+make test                          # юнит-тесты
 ```
 
 ## Справочные материалы

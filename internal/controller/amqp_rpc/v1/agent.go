@@ -5,9 +5,9 @@ import (
 	"errors"
 	"fmt"
 
+	"github.com/TekkenSteve/GoAgent/entity"
 	"github.com/TekkenSteve/GoAgent/internal/controller/amqp_rpc/v1/request"
 	"github.com/TekkenSteve/GoAgent/internal/controller/amqp_rpc/v1/response"
-	"github.com/TekkenSteve/GoAgent/internal/entity"
 	"github.com/TekkenSteve/GoAgent/pkg/rabbitmq/rmq_rpc/server"
 	"github.com/goccy/go-json"
 	amqp "github.com/rabbitmq/amqp091-go"

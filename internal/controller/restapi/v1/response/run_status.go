@@ -1,6 +1,6 @@
 package response
 
-import "github.com/TekkenSteve/GoAgent/internal/entity"
+import "github.com/TekkenSteve/GoAgent/entity"
 
 // RunStatus -.
 type RunStatus struct {

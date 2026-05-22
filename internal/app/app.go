@@ -8,34 +8,19 @@ import (
 	"os/signal"
 	"syscall"
 
+	agentfwconfig "github.com/TekkenSteve/GoAgent/agentfw/config"
+	"github.com/TekkenSteve/GoAgent/agentfw/orchestration"
+	agentfwruntime "github.com/TekkenSteve/GoAgent/agentfw/runtime"
+	agentfwops "github.com/TekkenSteve/GoAgent/agentfw/runtimeops"
+	"github.com/TekkenSteve/GoAgent/agentfw/stream"
+	"github.com/TekkenSteve/GoAgent/agentfw/tool"
 	"github.com/TekkenSteve/GoAgent/config"
-	agentfwconfig "github.com/TekkenSteve/GoAgent/internal/agentfw/config"
-	"github.com/TekkenSteve/GoAgent/internal/agentfw/orchestration"
-	agentfwruntime "github.com/TekkenSteve/GoAgent/internal/agentfw/runtime"
-	agentfwops "github.com/TekkenSteve/GoAgent/internal/agentfw/runtimeops"
-	"github.com/TekkenSteve/GoAgent/internal/agentfw/stream"
-	"github.com/TekkenSteve/GoAgent/internal/agentfw/tool"
+	"github.com/TekkenSteve/GoAgent/entity"
 	amqp_rpc "github.com/TekkenSteve/GoAgent/internal/controller/amqp_rpc"
 	"github.com/TekkenSteve/GoAgent/internal/controller/grpc"
 	nats_rpc "github.com/TekkenSteve/GoAgent/internal/controller/nats_rpc"
 	"github.com/TekkenSteve/GoAgent/internal/controller/restapi"
 	restapiv1 "github.com/TekkenSteve/GoAgent/internal/controller/restapi/v1"
-	"github.com/TekkenSteve/GoAgent/internal/entity"
-	"github.com/TekkenSteve/GoAgent/internal/repo/cached"
-	"github.com/TekkenSteve/GoAgent/internal/repo/compressor"
-	"github.com/TekkenSteve/GoAgent/internal/repo/framework"
-	mcpRepo "github.com/TekkenSteve/GoAgent/internal/repo/mcp"
-	temporalrepo "github.com/TekkenSteve/GoAgent/internal/repo/persistent"
-	pipelinepkg "github.com/TekkenSteve/GoAgent/internal/repo/pipeline"
-	"github.com/TekkenSteve/GoAgent/internal/repo/toolkit"
-	"github.com/TekkenSteve/GoAgent/internal/repo/webapi"
-	"github.com/TekkenSteve/GoAgent/internal/usecase"
-	"github.com/TekkenSteve/GoAgent/internal/usecase/agent"
-	billingpkg "github.com/TekkenSteve/GoAgent/internal/usecase/billing"
-	agentfwusecase "github.com/TekkenSteve/GoAgent/internal/usecase/executor"
-	"github.com/TekkenSteve/GoAgent/internal/usecase/history"
-	templatepkg "github.com/TekkenSteve/GoAgent/internal/usecase/template"
-	triggerpkg "github.com/TekkenSteve/GoAgent/internal/usecase/trigger"
 	"github.com/TekkenSteve/GoAgent/pkg/grpcserver"
 	"github.com/TekkenSteve/GoAgent/pkg/httpserver"
 	"github.com/TekkenSteve/GoAgent/pkg/logger"
@@ -43,6 +28,22 @@ import (
 	"github.com/TekkenSteve/GoAgent/pkg/postgres"
 	rmqRPCServer "github.com/TekkenSteve/GoAgent/pkg/rabbitmq/rmq_rpc/server"
 	goredis "github.com/TekkenSteve/GoAgent/pkg/redis"
+	"github.com/TekkenSteve/GoAgent/repo/cached"
+	"github.com/TekkenSteve/GoAgent/repo/compressor"
+	"github.com/TekkenSteve/GoAgent/repo/framework"
+	mcpRepo "github.com/TekkenSteve/GoAgent/repo/mcp"
+	temporalrepo "github.com/TekkenSteve/GoAgent/repo/persistent"
+	pipelinepkg "github.com/TekkenSteve/GoAgent/repo/pipeline"
+	repostream "github.com/TekkenSteve/GoAgent/repo/stream"
+	"github.com/TekkenSteve/GoAgent/repo/toolkit"
+	"github.com/TekkenSteve/GoAgent/repo/webapi"
+	"github.com/TekkenSteve/GoAgent/usecase"
+	"github.com/TekkenSteve/GoAgent/usecase/agent"
+	billingpkg "github.com/TekkenSteve/GoAgent/usecase/billing"
+	agentfwusecase "github.com/TekkenSteve/GoAgent/usecase/executor"
+	"github.com/TekkenSteve/GoAgent/usecase/history"
+	templatepkg "github.com/TekkenSteve/GoAgent/usecase/template"
+	triggerpkg "github.com/TekkenSteve/GoAgent/usecase/trigger"
 )
 
 // Run creates objects via constructors.
@@ -53,7 +54,7 @@ func Run(cfg *config.Config) { //nolint: gocyclo,cyclop,funlen,gocritic,nolintli
 		temporalRuntime *agentfwruntime.TemporalRuntime
 		batchWriter     *pipelinepkg.BatchWriter
 		agentUC         *agent.UseCase
-		wsHub           *stream.WebSocketHub
+		wsHub           *repostream.WebSocketHub
 		cancelWorkflow  restapiv1.CancelWorkflowFn
 		signalWorkflow  restapiv1.SignalWorkflowFn
 		templateUC      *templatepkg.UseCase
@@ -94,13 +95,13 @@ func Run(cfg *config.Config) { //nolint: gocyclo,cyclop,funlen,gocritic,nolintli
 	defer rdb.Close()
 
 	// Event Store infrastructure for streaming
-	eventSequencer := stream.NewRedisSequencer(rdb)
-	eventStore := stream.NewRedisEventStore(rdb, eventSequencer)
-	streamSubscriber := stream.NewRedisSubscriber(rdb.Hub())
-	sseGateway := stream.NewSSEGateway()
+	eventSequencer := repostream.NewRedisSequencer(rdb)
+	eventStore := repostream.NewRedisEventStore(rdb, eventSequencer)
+	streamSubscriber := repostream.NewRedisSubscriber(rdb.Hub())
+	sseGateway := repostream.NewSSEGateway()
 
 	// WebSocket Hub for bidirectional streaming (Phase 4)
-	wsHub = stream.NewWebSocketHub()
+	wsHub = repostream.NewWebSocketHub()
 
 	if !controlDecision.UseTemporal {
 		l.Info("app - Run - agent framework temporal worker skipped: %s", controlDecision.Reason)
