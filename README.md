@@ -89,23 +89,32 @@ make compose-up-all
 
 ## Project Structure
 
-### Core Directories
+GoAgent is structured as a **library + application shell** following the [go-clean-template](https://github.com/evrone/go-clean-template) pattern. Public packages at the root level are importable by external projects; `internal/` contains only the application shell.
 
-- `cmd/app/` — Application entry point
-- `config/` — Configuration management (environment variable based)
-- `internal/` — Private application code
-  - `app/` — Application initialization and dependency injection
-  - `controller/` — Server handling layer (REST, gRPC, RPC)
-  - `usecase/` — Business logic layer
-  - `entity/` — Business entities (Step, AgentSpec, TeamSpec, etc.)
-  - `repo/` — Data access layer (Temporal, PostgreSQL)
-  - `agentfw/` — Agent framework (runtime, team composition, streaming)
-- `pkg/` — Reusable public packages
-- `docs/` — API documentation and Proto files
-- `examples/` — Runnable pattern examples (client SDK)
-- `integration-test/` — Integration tests
-- `scripts/` — Workflow determinism checks, load/security suites
-- `migrations/` — PostgreSQL migration files
+### Public Library Packages
+
+| Package | Layer | Description |
+|---------|-------|-------------|
+| `entity/` | Inner | Domain primitives — zero dependencies, stdlib only |
+| `usecase/` | Inner | Business logic + **input port** interfaces (called by controllers) |
+| `repo/` | Inner/Outer | **Output port** interfaces (called by use cases) + infrastructure adapters |
+| `state/` | Inner | State management abstractions — hot/warm/cold layering |
+| `agentfw/` | Both | Agent runtime — `agent/`, `team/`, `tool/`, `stream/` (inner); `orchestration/`, `runtime/`, `config/` (outer) |
+| `config/` | Outer | Application configuration (env-based) |
+| `pkg/` | Outer | Infrastructure wrappers — Postgres, Redis, HTTP server, etc. |
+
+### Application Shell
+
+- `internal/app/` — Dependency injection and application bootstrap
+- `internal/controller/` — Transport layer (REST, gRPC, AMQP RPC, NATS RPC)
+- `cmd/app/` — Entry point
+
+### Other Directories
+
+- `docs/` — Swagger docs and Proto files
+- `examples/` — Runnable pattern examples
+- `integration-test/` — Integration tests (requires Docker)
+- `migrations/` — PostgreSQL migrations
 
 ### Configuration Management
 
@@ -158,40 +167,93 @@ The `examples/` directory contains runnable demonstrations of common agent patte
 
 Each example uses the [examples/client](examples/client/) SDK to interact with the REST API.
 
+## Three Usage Modes
+
+GoAgent can be consumed in three ways, from simple to deeply integrated:
+
+### Mode 1 — Standalone Server (REST API)
+
+Run GoAgent as a standalone service. Your application talks to it via HTTP/gRPC.
+
+```go
+import "github.com/TekkenSteve/GoAgent/examples/client"
+
+c := client.New("http://localhost:8080", "my-account")
+status, _ := c.ExecuteAgent(ctx, client.ExecuteRequest{
+    RunID: "run-1", UserMessage: "What is 2+2?",
+})
+```
+
+### Mode 2 — Library Embedding
+
+Import GoAgent packages directly into your Go application. Bring your own infrastructure adapters or use the built-in ones.
+
+```go
+import (
+    "github.com/TekkenSteve/GoAgent/usecase/agent"
+    "github.com/TekkenSteve/GoAgent/repo/webapi"      // LLM provider
+    "github.com/TekkenSteve/GoAgent/repo/pipeline"    // Redis WAL
+    "github.com/TekkenSteve/GoAgent/repo/compressor"  // Context compression
+    "github.com/TekkenSteve/GoAgent/repo/toolkit"     // Built-in tools
+)
+
+llm := webapi.NewBifrostProvider(cfg)
+tools := toolkit.NewRegistry(llm)
+wal := pipeline.NewRedisWAL(appender, rdb)
+
+agentUC := agent.New(llm, tools, wal, compressor, tools, nil)
+result, _ := agentUC.ExecuteStep(ctx, &agent.StepRequest{
+    RunID:   "run-1",
+    Message: "What is 2+2?",
+    Config:  entity.LLMConfig{Model: "claude-sonnet-4-20250514"},
+})
+```
+
+### Mode 3 — Type-Only
+
+Import only `entity/` to share domain type definitions across microservices.
+
+```go
+import "github.com/TekkenSteve/GoAgent/entity"
+
+type MyService struct {
+    messages []entity.Message
+    tools    []entity.ToolDef
+}
+```
+
 ## Architecture Design
 
 ### Clean Architecture Principles
 
-This project follows Robert Martin (Uncle Bob)'s Clean Architecture principles:
+This project follows the [go-clean-template](https://github.com/evrone/go-clean-template) architecture pattern:
 
-1. **Dependency Inversion**: Dependencies flow from outer layers to inner layers
-2. **Independent Business Logic**: Core business logic does not depend on external frameworks and tools
-3. **Testability**: Interface isolation enables easy unit testing
-4. **Separation of Concerns**: Clear layer separation
+1. **Input ports** (`usecase/contracts.go`) — interfaces implemented by business logic, called by controllers
+2. **Output ports** (`repo/contracts.go`) — interfaces called by business logic, implemented by infrastructure adapters
+3. **Dependency direction**: outer layers import inner layers, never the reverse
+4. **Testability**: interface isolation enables easy unit testing with mocks
 
-### Layered Architecture
+### Dependency Flow
 
 ```
-┌─────────────────────────────────────┐
-│   Controller (HTTP/gRPC/RPC)        │  Outer Layer: Interface Adapters
-├─────────────────────────────────────┤
-│   Use Case (Business Logic)         │  Inner Layer: Business Logic
-├─────────────────────────────────────┤
-│   Repository / WebAPI               │  Outer Layer: Data Access
-├─────────────────────────────────────┤
-│   Database / External Services      │  Outer Layer: Infrastructure
-└─────────────────────────────────────┘
+┌──────────────────────────────────────────────┐
+│  entity/   │  state/                         │  Inner Layer
+│  ──────────┼──────────                        │  (zero external deps,
+│  usecase/contracts.go  (input ports)         │   stdlib only)
+│  repo/contracts.go     (output ports)        │
+├──────────────────────────────────────────────┤
+│  usecase/agent/  usecase/template/  ...     │  Inner Layer
+│  (imports repo/ for output ports)            │  (business logic)
+├──────────────────────────────────────────────┤
+│  repo/persistent/  repo/webapi/  ...         │  Outer Layer
+│  internal/controller/  internal/app/         │  (infrastructure,
+│  agentfw/orchestration/                       │   imports inner)
+└──────────────────────────────────────────────┘
 ```
 
-**Inner Layer (Business Logic)**:
-- Uses only Go standard library
-- Does not depend on outer layer implementations
-- Interacts with outer layers through interfaces
-
-**Outer Layer (Infrastructure)**:
-- Implements interfaces defined by the inner layer
-- Handles specific technical implementations
-- Components communicate through the business logic layer
+- **Inner layer** (`entity/`, `state/`, `usecase/`, `repo/contracts.go`) depends only on Go stdlib
+- **Outer layer** (`repo/*/`, `internal/`, `pkg/`) implements interfaces defined by the inner layer
+- `usecase/agent/` imports `repo/` for output port interfaces — the same pattern as go-clean-template's `usecase/translation/` importing `repo/`
 
 ### Dependency Injection
 

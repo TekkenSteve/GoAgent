@@ -89,22 +89,31 @@ make compose-up-all
 
 ## 项目结构
 
-### 核心目录
+GoAgent 采用 **库 + 应用壳** 结构，遵循 [go-clean-template](https://github.com/evrone/go-clean-template) 模式。根级公共包可被外部项目导入；`internal/` 仅包含应用壳。
 
-- `cmd/app/` — 应用入口点
-- `config/` — 配置管理（基于环境变量）
-- `internal/` — 私有应用代码
-  - `app/` — 应用初始化和依赖注入
-  - `controller/` — 服务器处理层（REST、gRPC、RPC）
-  - `usecase/` — 业务逻辑层
-  - `entity/` — 业务实体（Step、AgentSpec、TeamSpec 等）
-  - `repo/` — 数据访问层（Temporal、PostgreSQL）
-  - `agentfw/` — Agent 框架（运行时、团队组合、流式处理）
-- `pkg/` — 可复用的公共包
-- `docs/` — API 文档和 Proto 文件
-- `examples/` — 可运行的 pattern 示例（客户端 SDK）
-- `integration-test/` — 集成测试
-- `scripts/` — 工作流确定性检查、负载/安全测试套件
+### 公共库包
+
+| 包 | 层 | 说明 |
+|---------|-------|-------------|
+| `entity/` | 内层 | 领域原语——零依赖，仅标准库 |
+| `usecase/` | 内层 | 业务逻辑 + **输入端口**接口（由 controller 调用） |
+| `repo/` | 内层/外层 | **输出端口**接口（由 usecase 调用）+ 基础设施适配器 |
+| `state/` | 内层 | 状态管理抽象——热/温/冷分层 |
+| `agentfw/` | 双层 | Agent 运行时——`agent/`、`team/`、`tool/`、`stream/`（内层）；`orchestration/`、`runtime/`、`config/`（外层） |
+| `config/` | 外层 | 应用配置（基于环境变量） |
+| `pkg/` | 外层 | 基础设施包装——Postgres、Redis、HTTP 服务器等 |
+
+### 应用壳
+
+- `internal/app/` — 依赖注入与应用引导
+- `internal/controller/` — 传输层（REST、gRPC、AMQP RPC、NATS RPC）
+- `cmd/app/` — 入口点
+
+### 其他目录
+
+- `docs/` — Swagger 文档和 Proto 文件
+- `examples/` — 可运行的模式示例
+- `integration-test/` — 集成测试（需要 Docker）
 - `migrations/` — PostgreSQL 迁移文件
 
 ### 配置管理
@@ -158,40 +167,93 @@ Agent 框架由以下部分组成：
 
 每个示例都使用 [examples/client](examples/client/) SDK 与 REST API 交互。
 
+## 三种使用方式
+
+GoAgent 支持三种集成方式，从简单到深度集成：
+
+### 方式一 — 独立服务（REST API）
+
+将 GoAgent 作为独立服务运行，应用通过 HTTP/gRPC 与其交互。
+
+```go
+import "github.com/TekkenSteve/GoAgent/examples/client"
+
+c := client.New("http://localhost:8080", "my-account")
+status, _ := c.ExecuteAgent(ctx, client.ExecuteRequest{
+    RunID: "run-1", UserMessage: "1+1 等于几？",
+})
+```
+
+### 方式二 — 库嵌入
+
+直接将 GoAgent 包导入你的 Go 应用。可自行提供基础设施适配器或使用内置实现。
+
+```go
+import (
+    "github.com/TekkenSteve/GoAgent/usecase/agent"
+    "github.com/TekkenSteve/GoAgent/repo/webapi"      // LLM 提供者
+    "github.com/TekkenSteve/GoAgent/repo/pipeline"    // Redis WAL
+    "github.com/TekkenSteve/GoAgent/repo/compressor"  // 上下文压缩
+    "github.com/TekkenSteve/GoAgent/repo/toolkit"     // 内置工具
+)
+
+llm := webapi.NewBifrostProvider(cfg)
+tools := toolkit.NewRegistry(llm)
+wal := pipeline.NewRedisWAL(appender, rdb)
+
+agentUC := agent.New(llm, tools, wal, compressor, tools, nil)
+result, _ := agentUC.ExecuteStep(ctx, &agent.StepRequest{
+    RunID:   "run-1",
+    Message: "1+1 等于几？",
+    Config:  entity.LLMConfig{Model: "claude-sonnet-4-20250514"},
+})
+```
+
+### 方式三 — 仅使用类型
+
+仅导入 `entity/` 跨微服务共享领域类型定义。
+
+```go
+import "github.com/TekkenSteve/GoAgent/entity"
+
+type MyService struct {
+    messages []entity.Message
+    tools    []entity.ToolDef
+}
+```
+
 ## 架构设计
 
 ### Clean Architecture 原则
 
-本项目遵循 Robert Martin (Uncle Bob) 的 Clean Architecture 原则：
+本项目遵循 [go-clean-template](https://github.com/evrone/go-clean-template) 架构模式：
 
-1. **依赖倒置**：依赖方向从外层指向内层
-2. **业务逻辑独立**：核心业务逻辑不依赖外部框架和工具
-3. **可测试性**：通过接口隔离，便于单元测试
-4. **关注点分离**：清晰的层次划分
+1. **输入端口**（`usecase/contracts.go`）——业务逻辑实现的接口，由 controller 调用
+2. **输出端口**（`repo/contracts.go`）——业务逻辑调用的接口，由基础设施适配器实现
+3. **依赖方向**：外层导入内层，绝不反向
+4. **可测试性**：接口隔离，便于使用 mock 进行单元测试
 
-### 分层架构
+### 依赖流向
 
 ```
-┌─────────────────────────────────────┐
-│   Controller (HTTP/gRPC/RPC)        │  外层：接口适配
-├─────────────────────────────────────┤
-│   Use Case (Business Logic)         │  内层：业务逻辑
-├─────────────────────────────────────┤
-│   Repository / WebAPI               │  外层：数据访问
-├─────────────────────────────────────┤
-│   Database / External Services      │  外层：基础设施
-└─────────────────────────────────────┘
+┌──────────────────────────────────────────────┐
+│  entity/   │  state/                         │  内层
+│  ──────────┼──────────                        │  （零外部依赖，
+│  usecase/contracts.go  （输入端口）           │   仅标准库）
+│  repo/contracts.go     （输出端口）           │
+├──────────────────────────────────────────────┤
+│  usecase/agent/  usecase/template/  ...     │  内层
+│  （导入 repo/ 获取输出端口）                  │  （业务逻辑）
+├──────────────────────────────────────────────┤
+│  repo/persistent/  repo/webapi/  ...         │  外层
+│  internal/controller/  internal/app/         │  （基础设施，
+│  agentfw/orchestration/                       │   导入内层）
+└──────────────────────────────────────────────┘
 ```
 
-**内层（业务逻辑）**：
-- 只使用 Go 标准库
-- 不依赖外层实现
-- 通过接口与外层交互
-
-**外层（基础设施）**：
-- 实现内层定义的接口
-- 处理具体的技术实现
-- 组件间通过业务逻辑层通信
+- **内层**（`entity/`、`state/`、`usecase/`、`repo/contracts.go`）仅依赖 Go 标准库
+- **外层**（`repo/*/`、`internal/`、`pkg/`）实现内层定义的接口
+- `usecase/agent/` 导入 `repo/` 获取输出端口接口——与 go-clean-template 中 `usecase/translation/` 导入 `repo/` 的模式一致
 
 ### 依赖注入
 
