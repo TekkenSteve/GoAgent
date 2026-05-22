@@ -5,7 +5,7 @@ import (
 	"fmt"
 
 	agenttool "github.com/TekkenSteve/GoAgent/internal/agentfw/tool"
-	"github.com/TekkenSteve/GoAgent/internal/entity"
+	"github.com/TekkenSteve/GoAgent/entity"
 )
 
 // ToolPipeline wraps agentfw/tool.Pipeline as a repo.ToolExecutor.

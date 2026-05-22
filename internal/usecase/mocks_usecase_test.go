@@ -13,7 +13,7 @@ import (
 	context "context"
 	reflect "reflect"
 
-	entity "github.com/TekkenSteve/GoAgent/internal/entity"
+	entity "github.com/TekkenSteve/GoAgent/entity"
 	usecase "github.com/TekkenSteve/GoAgent/internal/usecase"
 	gomock "go.uber.org/mock/gomock"
 )

@@ -1,7 +1,7 @@
 package stream
 
 import (
-	"github.com/TekkenSteve/GoAgent/internal/entity"
+	"github.com/TekkenSteve/GoAgent/entity"
 )
 
 // StatelessGateway converts a StreamEvent to a wire format byte slice.

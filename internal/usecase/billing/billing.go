@@ -5,7 +5,7 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/TekkenSteve/GoAgent/internal/entity"
+	"github.com/TekkenSteve/GoAgent/entity"
 	"github.com/TekkenSteve/GoAgent/internal/repo"
 	"github.com/google/uuid"
 )

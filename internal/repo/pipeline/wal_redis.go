@@ -8,7 +8,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/TekkenSteve/GoAgent/internal/entity"
+	"github.com/TekkenSteve/GoAgent/entity"
 	"github.com/google/uuid"
 	goredis "github.com/redis/go-redis/v9"
 )

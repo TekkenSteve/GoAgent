@@ -7,7 +7,7 @@ import (
 
 	"github.com/TekkenSteve/GoAgent/internal/agentfw/agent"
 	"github.com/TekkenSteve/GoAgent/internal/agentfw/team"
-	"github.com/TekkenSteve/GoAgent/internal/entity"
+	"github.com/TekkenSteve/GoAgent/entity"
 	"github.com/TekkenSteve/GoAgent/internal/repo"
 )
 

@@ -3,7 +3,7 @@ package agent
 import (
 	"context"
 
-	"github.com/TekkenSteve/GoAgent/internal/entity"
+	"github.com/TekkenSteve/GoAgent/entity"
 )
 
 // PrepRequest is the input for agent pre-execution initialization.

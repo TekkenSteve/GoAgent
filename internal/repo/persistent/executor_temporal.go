@@ -7,7 +7,7 @@ import (
 
 	"github.com/TekkenSteve/GoAgent/internal/agentfw/config"
 	"github.com/TekkenSteve/GoAgent/internal/agentfw/orchestration"
-	"github.com/TekkenSteve/GoAgent/internal/entity"
+	"github.com/TekkenSteve/GoAgent/entity"
 	"go.temporal.io/sdk/client"
 )
 

@@ -20,7 +20,7 @@ import (
 	nats_rpc "github.com/TekkenSteve/GoAgent/internal/controller/nats_rpc"
 	"github.com/TekkenSteve/GoAgent/internal/controller/restapi"
 	restapiv1 "github.com/TekkenSteve/GoAgent/internal/controller/restapi/v1"
-	"github.com/TekkenSteve/GoAgent/internal/entity"
+	"github.com/TekkenSteve/GoAgent/entity"
 	"github.com/TekkenSteve/GoAgent/internal/repo/cached"
 	"github.com/TekkenSteve/GoAgent/internal/repo/compressor"
 	"github.com/TekkenSteve/GoAgent/internal/repo/framework"

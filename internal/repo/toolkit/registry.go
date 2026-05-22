@@ -8,7 +8,7 @@ import (
 	"sync"
 
 	agenttool "github.com/TekkenSteve/GoAgent/internal/agentfw/tool"
-	"github.com/TekkenSteve/GoAgent/internal/entity"
+	"github.com/TekkenSteve/GoAgent/entity"
 )
 
 var (

@@ -3,7 +3,7 @@ package repo
 import (
 	"context"
 
-	"github.com/TekkenSteve/GoAgent/internal/entity"
+	"github.com/TekkenSteve/GoAgent/entity"
 )
 
 type (

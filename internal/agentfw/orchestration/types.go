@@ -3,7 +3,7 @@ package orchestration
 import (
 	"time"
 
-	"github.com/TekkenSteve/GoAgent/internal/entity"
+	"github.com/TekkenSteve/GoAgent/entity"
 )
 
 // ——— Workflow type names ———
