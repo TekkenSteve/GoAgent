@@ -6,7 +6,7 @@ import (
 	"testing"
 
 	"github.com/TekkenSteve/GoAgent/entity"
-	"github.com/TekkenSteve/GoAgent/internal/usecase/trigger"
+	"github.com/TekkenSteve/GoAgent/usecase/trigger"
 )
 
 const testTriggerID = "t-1"

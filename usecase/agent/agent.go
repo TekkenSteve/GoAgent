@@ -9,8 +9,7 @@ import (
 	"time"
 
 	"github.com/TekkenSteve/GoAgent/entity"
-	"github.com/TekkenSteve/GoAgent/internal/repo"
-	"github.com/TekkenSteve/GoAgent/internal/usecase"
+	"github.com/TekkenSteve/GoAgent/usecase"
 	"github.com/TekkenSteve/GoAgent/pkg/logger"
 	"github.com/google/uuid"
 )
@@ -47,12 +46,12 @@ type StepResult struct {
 
 // UseCase -.
 type UseCase struct {
-	llm        repo.LLMProvider
-	tools      repo.ToolExecutor
-	wal        repo.WALAppender
-	compressor repo.ContextCompressor
+	llm        usecase.LLMProvider
+	tools      usecase.ToolExecutor
+	wal        usecase.WALAppender
+	compressor usecase.ContextCompressor
 	toolDefs   usecase.ToolDefProvider
-	agentRepo  repo.AgentRepo // optional; nil in tests or when agent management is not wired
+	agentRepo  usecase.AgentRepo // optional; nil in tests or when agent management is not wired
 	log        logger.Interface
 }
 
@@ -63,7 +62,7 @@ func (uc *UseCase) SetLogger(l logger.Interface) {
 }
 
 // New -.
-func New(llm repo.LLMProvider, tools repo.ToolExecutor, wal repo.WALAppender, compressor repo.ContextCompressor, toolDefs usecase.ToolDefProvider, agentRepo repo.AgentRepo) *UseCase {
+func New(llm usecase.LLMProvider, tools usecase.ToolExecutor, wal usecase.WALAppender, compressor usecase.ContextCompressor, toolDefs usecase.ToolDefProvider, agentRepo usecase.AgentRepo) *UseCase {
 	return &UseCase{llm: llm, tools: tools, wal: wal, compressor: compressor, toolDefs: toolDefs, agentRepo: agentRepo}
 }
 

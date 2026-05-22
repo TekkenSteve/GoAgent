@@ -6,7 +6,7 @@ import (
 
 	"github.com/TekkenSteve/GoAgent/agentfw/orchestration"
 	"github.com/TekkenSteve/GoAgent/entity"
-	"github.com/TekkenSteve/GoAgent/internal/usecase"
+	"github.com/TekkenSteve/GoAgent/usecase"
 	"go.temporal.io/sdk/client"
 )
 

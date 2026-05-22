@@ -5,16 +5,16 @@ import (
 	"fmt"
 
 	"github.com/TekkenSteve/GoAgent/entity"
-	"github.com/TekkenSteve/GoAgent/internal/repo"
+	"github.com/TekkenSteve/GoAgent/usecase"
 )
 
 // UseCase -.
 type UseCase struct {
-	store repo.WarmStateRepo
+	store usecase.WarmStateRepo
 }
 
 // New -.
-func New(r repo.WarmStateRepo) *UseCase {
+func New(r usecase.WarmStateRepo) *UseCase {
 	return &UseCase{store: r}
 }
 

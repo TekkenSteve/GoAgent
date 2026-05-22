@@ -9,7 +9,7 @@ import (
 	repostream "github.com/TekkenSteve/GoAgent/repo/stream"
 	"github.com/TekkenSteve/GoAgent/internal/controller/restapi/middleware"
 	v1 "github.com/TekkenSteve/GoAgent/internal/controller/restapi/v1"
-	"github.com/TekkenSteve/GoAgent/internal/usecase"
+	"github.com/TekkenSteve/GoAgent/usecase"
 	"github.com/TekkenSteve/GoAgent/pkg/logger"
 	"github.com/TekkenSteve/GoAgent/pkg/redis"
 	"github.com/ansrivas/fiberprometheus/v2"

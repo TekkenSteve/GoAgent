@@ -14,7 +14,7 @@ import (
 	reflect "reflect"
 
 	entity "github.com/TekkenSteve/GoAgent/entity"
-	usecase "github.com/TekkenSteve/GoAgent/internal/usecase"
+	usecase "github.com/TekkenSteve/GoAgent/usecase"
 	gomock "go.uber.org/mock/gomock"
 )
 

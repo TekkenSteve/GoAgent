@@ -6,7 +6,7 @@ import (
 
 	v1 "github.com/TekkenSteve/GoAgent/docs/proto/v1"
 	"github.com/TekkenSteve/GoAgent/entity"
-	"github.com/TekkenSteve/GoAgent/internal/usecase"
+	"github.com/TekkenSteve/GoAgent/usecase"
 	"github.com/TekkenSteve/GoAgent/pkg/logger"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"

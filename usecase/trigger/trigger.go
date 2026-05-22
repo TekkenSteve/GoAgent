@@ -7,7 +7,7 @@ import (
 	"time"
 
 	"github.com/TekkenSteve/GoAgent/entity"
-	"github.com/TekkenSteve/GoAgent/internal/repo"
+	"github.com/TekkenSteve/GoAgent/usecase"
 	"github.com/google/uuid"
 )
 
@@ -23,13 +23,13 @@ var (
 
 // UseCase manages trigger lifecycle and coordinates scheduling.
 type UseCase struct {
-	triggerRepo  repo.TriggerRepo
-	scheduler    repo.TriggerScheduler
-	templateRepo repo.WorkflowTemplateRepo
+	triggerRepo  usecase.TriggerRepo
+	scheduler    usecase.TriggerScheduler
+	templateRepo usecase.WorkflowTemplateRepo
 }
 
 // New creates a trigger usecase.
-func New(triggerRepo repo.TriggerRepo, scheduler repo.TriggerScheduler, templateRepo repo.WorkflowTemplateRepo) *UseCase {
+func New(triggerRepo usecase.TriggerRepo, scheduler usecase.TriggerScheduler, templateRepo usecase.WorkflowTemplateRepo) *UseCase {
 	return &UseCase{
 		triggerRepo:  triggerRepo,
 		scheduler:    scheduler,

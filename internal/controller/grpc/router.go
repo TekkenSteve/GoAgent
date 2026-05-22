@@ -2,7 +2,7 @@ package grpc
 
 import (
 	v1 "github.com/TekkenSteve/GoAgent/internal/controller/grpc/v1"
-	"github.com/TekkenSteve/GoAgent/internal/usecase"
+	"github.com/TekkenSteve/GoAgent/usecase"
 	"github.com/TekkenSteve/GoAgent/pkg/logger"
 	pbgrpc "google.golang.org/grpc"
 	"google.golang.org/grpc/reflection"

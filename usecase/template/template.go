@@ -6,8 +6,8 @@ import (
 	"fmt"
 
 	"github.com/TekkenSteve/GoAgent/entity"
-	"github.com/TekkenSteve/GoAgent/internal/repo"
-	"github.com/TekkenSteve/GoAgent/internal/usecase/loader"
+	"github.com/TekkenSteve/GoAgent/usecase"
+	"github.com/TekkenSteve/GoAgent/usecase/loader"
 )
 
 var (
@@ -18,11 +18,11 @@ var (
 
 // UseCase handles workflow template management and orchestration input preparation.
 type UseCase struct {
-	templateRepo repo.WorkflowTemplateRepo
+	templateRepo usecase.WorkflowTemplateRepo
 }
 
 // New creates a template usecase.
-func New(templateRepo repo.WorkflowTemplateRepo) *UseCase {
+func New(templateRepo usecase.WorkflowTemplateRepo) *UseCase {
 	return &UseCase{templateRepo: templateRepo}
 }
 

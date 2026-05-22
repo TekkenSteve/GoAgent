@@ -2,7 +2,7 @@ package v1
 
 import (
 	v1 "github.com/TekkenSteve/GoAgent/docs/proto/v1"
-	"github.com/TekkenSteve/GoAgent/internal/usecase"
+	"github.com/TekkenSteve/GoAgent/usecase"
 	"github.com/TekkenSteve/GoAgent/pkg/logger"
 	pbgrpc "google.golang.org/grpc"
 )

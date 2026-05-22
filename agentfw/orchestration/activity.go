@@ -8,9 +8,9 @@ import (
 
 	"github.com/TekkenSteve/GoAgent/agentfw/stream"
 	"github.com/TekkenSteve/GoAgent/entity"
-	agentuc "github.com/TekkenSteve/GoAgent/internal/usecase/agent"
-	billinguc "github.com/TekkenSteve/GoAgent/internal/usecase/billing"
-	triggeruc "github.com/TekkenSteve/GoAgent/internal/usecase/trigger"
+	agentuc "github.com/TekkenSteve/GoAgent/usecase/agent"
+	billinguc "github.com/TekkenSteve/GoAgent/usecase/billing"
+	triggeruc "github.com/TekkenSteve/GoAgent/usecase/trigger"
 	"github.com/TekkenSteve/GoAgent/pkg/logger"
 	"github.com/google/uuid"
 )
