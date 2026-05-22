@@ -1,7 +1,7 @@
 package runtime
 
 import (
-	"github.com/TekkenSteve/GoAgent/internal/agentfw/orchestration"
+	"github.com/TekkenSteve/GoAgent/agentfw/orchestration"
 	"go.temporal.io/sdk/activity"
 	"go.temporal.io/sdk/workflow"
 )

@@ -7,37 +7,14 @@ import (
 	"strings"
 	"time"
 
+	"github.com/TekkenSteve/GoAgent/agentfw/stream"
 	"github.com/TekkenSteve/GoAgent/entity"
 	"github.com/TekkenSteve/GoAgent/pkg/redis"
 )
 
-// Subscriber receives events from the EventStore for a given session.
-// This abstracts away the underlying stream transport (Redis Stream, channel, etc.)
-// and provides parsed StreamEvent values.
-type Subscriber interface {
-	// Subscribe starts receiving events for a session starting from afterSequence.
-	// afterSequence=0 starts from the beginning of the stream ("$" for live-only).
-	// Returns a Subscription that delivers events until Close() is called.
-	Subscribe(ctx context.Context, sessionID string, afterSequence int64) (*Subscription, error)
-}
-
-// Subscription provides a channel of stored events.
-// The caller must call Close() to release resources.
-type Subscription struct {
-	C       <-chan StoredEvent
-	closeFn func()
-}
-
-// Close terminates the subscription and releases underlying resources.
-func (s *Subscription) Close() {
-	if s.closeFn != nil {
-		s.closeFn()
-	}
-}
-
 const subscriberChannelBufferSize = 256
 
-// RedisSubscriber implements Subscriber using redis.StreamHub for fan-out.
+// RedisSubscriber implements stream.Subscriber using redis.StreamHub for fan-out.
 //
 // It maintains one pump goroutine per stream via StreamHub, so multiple
 // subscribers to the same session share a single XREAD connection.
@@ -52,7 +29,7 @@ func NewRedisSubscriber(hub *redis.StreamHub) *RedisSubscriber {
 
 // Subscribe starts receiving events for a session.
 // afterSequence maps to the Redis Stream entry ID <sequence>-0 for catch-up.
-func (s *RedisSubscriber) Subscribe(_ context.Context, sessionID string, afterSequence int64) (*Subscription, error) {
+func (s *RedisSubscriber) Subscribe(_ context.Context, sessionID string, afterSequence int64) (*stream.Subscription, error) {
 	streamKey := fmt.Sprintf("agent:events:%s", sessionID)
 
 	// Convert sequence to Stream lastID:
@@ -65,8 +42,8 @@ func (s *RedisSubscriber) Subscribe(_ context.Context, sessionID string, afterSe
 
 	hubSub := s.hub.Subscribe(streamKey, lastID)
 
-	// Translate XStreamEntry → StoredEvent via UnmarshalEvent
-	ch := make(chan StoredEvent, subscriberChannelBufferSize)
+	// Translate XStreamEntry → stream.StoredEvent via UnmarshalEvent
+	ch := make(chan stream.StoredEvent, subscriberChannelBufferSize)
 
 	go func() {
 		defer close(ch)
@@ -84,7 +61,7 @@ func (s *RedisSubscriber) Subscribe(_ context.Context, sessionID string, afterSe
 
 			seq := parseSequenceFromHubID(entry.ID)
 			select {
-			case ch <- StoredEvent{
+			case ch <- stream.StoredEvent{
 				Event:    event,
 				Sequence: seq,
 				StoredAt: time.Now().UTC(),
@@ -95,10 +72,7 @@ func (s *RedisSubscriber) Subscribe(_ context.Context, sessionID string, afterSe
 		}
 	}()
 
-	return &Subscription{
-		C:       ch,
-		closeFn: hubSub.Close,
-	}, nil
+	return stream.NewSubscription(ch, hubSub.Close), nil
 }
 
 const entryIDParts = 2

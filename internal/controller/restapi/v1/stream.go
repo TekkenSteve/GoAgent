@@ -9,7 +9,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/TekkenSteve/GoAgent/internal/agentfw/stream"
+	"github.com/TekkenSteve/GoAgent/agentfw/stream"
 	"github.com/TekkenSteve/GoAgent/entity"
 	"github.com/TekkenSteve/GoAgent/pkg/sse"
 	"github.com/gofiber/fiber/v2"

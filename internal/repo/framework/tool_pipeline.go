@@ -4,7 +4,7 @@ import (
 	"context"
 	"fmt"
 
-	agenttool "github.com/TekkenSteve/GoAgent/internal/agentfw/tool"
+	agenttool "github.com/TekkenSteve/GoAgent/agentfw/tool"
 	"github.com/TekkenSteve/GoAgent/entity"
 )
 

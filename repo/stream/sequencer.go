@@ -1,5 +1,4 @@
-// Package stream provides framework-level abstractions for Event Sourcing,
-// event sequencing, pub/sub, and transport gateway for agent streaming events.
+// Package stream provides concrete implementations of agentfw/stream interfaces.
 package stream
 
 import (
@@ -15,13 +14,7 @@ import (
 // are cleaned up on the same cadence.
 const sequencerKeyTTL = 2 * time.Hour
 
-// Sequencer generates monotonically increasing sequence numbers for events.
-// Each session has its own sequence space, independent of other sessions.
-type Sequencer interface {
-	Next(ctx context.Context, sessionID string) (int64, error)
-}
-
-// RedisSequencer uses Redis INCR for distributed sequence generation.
+// RedisSequencer implements stream.Sequencer using Redis INCR for distributed sequence generation.
 // The sequence key is scoped per sessionID, with format "agent:seq:<sessionID>".
 type RedisSequencer struct {
 	rdb *redis.Redis

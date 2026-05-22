@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/TekkenSteve/GoAgent/internal/agentfw/stream"
+	"github.com/TekkenSteve/GoAgent/agentfw/stream"
 	"github.com/TekkenSteve/GoAgent/entity"
 	agentuc "github.com/TekkenSteve/GoAgent/internal/usecase/agent"
 	billinguc "github.com/TekkenSteve/GoAgent/internal/usecase/billing"

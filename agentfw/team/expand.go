@@ -5,7 +5,7 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/TekkenSteve/GoAgent/internal/agentfw/agent"
+	"github.com/TekkenSteve/GoAgent/agentfw/agent"
 	"github.com/TekkenSteve/GoAgent/entity"
 )
 

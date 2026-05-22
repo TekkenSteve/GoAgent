@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/TekkenSteve/GoAgent/internal/agentfw/orchestration"
+	"github.com/TekkenSteve/GoAgent/agentfw/orchestration"
 	"github.com/TekkenSteve/GoAgent/entity"
 	"go.temporal.io/sdk/client"
 )

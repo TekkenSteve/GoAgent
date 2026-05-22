@@ -9,12 +9,13 @@ import (
 	"syscall"
 
 	"github.com/TekkenSteve/GoAgent/config"
-	agentfwconfig "github.com/TekkenSteve/GoAgent/internal/agentfw/config"
-	"github.com/TekkenSteve/GoAgent/internal/agentfw/orchestration"
-	agentfwruntime "github.com/TekkenSteve/GoAgent/internal/agentfw/runtime"
-	agentfwops "github.com/TekkenSteve/GoAgent/internal/agentfw/runtimeops"
-	"github.com/TekkenSteve/GoAgent/internal/agentfw/stream"
-	"github.com/TekkenSteve/GoAgent/internal/agentfw/tool"
+	agentfwconfig "github.com/TekkenSteve/GoAgent/agentfw/config"
+	"github.com/TekkenSteve/GoAgent/agentfw/orchestration"
+	agentfwruntime "github.com/TekkenSteve/GoAgent/agentfw/runtime"
+	agentfwops "github.com/TekkenSteve/GoAgent/agentfw/runtimeops"
+	"github.com/TekkenSteve/GoAgent/agentfw/stream"
+	repostream "github.com/TekkenSteve/GoAgent/repo/stream"
+	"github.com/TekkenSteve/GoAgent/agentfw/tool"
 	amqp_rpc "github.com/TekkenSteve/GoAgent/internal/controller/amqp_rpc"
 	"github.com/TekkenSteve/GoAgent/internal/controller/grpc"
 	nats_rpc "github.com/TekkenSteve/GoAgent/internal/controller/nats_rpc"
@@ -53,7 +54,7 @@ func Run(cfg *config.Config) { //nolint: gocyclo,cyclop,funlen,gocritic,nolintli
 		temporalRuntime *agentfwruntime.TemporalRuntime
 		batchWriter     *pipelinepkg.BatchWriter
 		agentUC         *agent.UseCase
-		wsHub           *stream.WebSocketHub
+		wsHub           *repostream.WebSocketHub
 		cancelWorkflow  restapiv1.CancelWorkflowFn
 		signalWorkflow  restapiv1.SignalWorkflowFn
 		templateUC      *templatepkg.UseCase
@@ -94,13 +95,13 @@ func Run(cfg *config.Config) { //nolint: gocyclo,cyclop,funlen,gocritic,nolintli
 	defer rdb.Close()
 
 	// Event Store infrastructure for streaming
-	eventSequencer := stream.NewRedisSequencer(rdb)
-	eventStore := stream.NewRedisEventStore(rdb, eventSequencer)
-	streamSubscriber := stream.NewRedisSubscriber(rdb.Hub())
-	sseGateway := stream.NewSSEGateway()
+	eventSequencer := repostream.NewRedisSequencer(rdb)
+	eventStore := repostream.NewRedisEventStore(rdb, eventSequencer)
+	streamSubscriber := repostream.NewRedisSubscriber(rdb.Hub())
+	sseGateway := repostream.NewSSEGateway()
 
 	// WebSocket Hub for bidirectional streaming (Phase 4)
-	wsHub = stream.NewWebSocketHub()
+	wsHub = repostream.NewWebSocketHub()
 
 	if !controlDecision.UseTemporal {
 		l.Info("app - Run - agent framework temporal worker skipped: %s", controlDecision.Reason)

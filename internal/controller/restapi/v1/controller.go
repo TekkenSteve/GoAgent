@@ -3,7 +3,8 @@ package v1
 import (
 	"context"
 
-	"github.com/TekkenSteve/GoAgent/internal/agentfw/stream"
+	"github.com/TekkenSteve/GoAgent/agentfw/stream"
+	repostream "github.com/TekkenSteve/GoAgent/repo/stream"
 	"github.com/TekkenSteve/GoAgent/internal/usecase"
 	"github.com/TekkenSteve/GoAgent/pkg/logger"
 	"github.com/TekkenSteve/GoAgent/pkg/redis"
@@ -34,7 +35,7 @@ type V1 struct {
 	gateway    stream.StatelessGateway
 
 	// WebSocket Hub for connection tracking (Phase 4)
-	wsHub          *stream.WebSocketHub
+	wsHub          *repostream.WebSocketHub
 	cancelWorkflow CancelWorkflowFn // non-nil only when running with Temporal
 	signalWorkflow SignalWorkflowFn // non-nil only when running with Temporal
 }

@@ -3,7 +3,7 @@ package runtime
 import (
 	"fmt"
 
-	agentfwconfig "github.com/TekkenSteve/GoAgent/internal/agentfw/config"
+	agentfwconfig "github.com/TekkenSteve/GoAgent/agentfw/config"
 	"go.temporal.io/sdk/client"
 	"go.temporal.io/sdk/worker"
 )

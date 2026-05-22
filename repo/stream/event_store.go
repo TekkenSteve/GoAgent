@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/TekkenSteve/GoAgent/agentfw/stream"
 	"github.com/TekkenSteve/GoAgent/entity"
 	"github.com/TekkenSteve/GoAgent/pkg/redis"
 )
@@ -22,35 +23,7 @@ const (
 	DefaultSnapshotTTL = 2 * time.Hour
 )
 
-// EventStore is the Event Sourcing interface for agent run events.
-// Events are append-only, immutable, and ordered by sequence number per session.
-type EventStore interface {
-	// Append appends an event to the session's event log.
-	// sessionID/runID are injected into the event's BaseEvent metadata during storage.
-	// Returns the assigned sequence number.
-	Append(ctx context.Context, sessionID, runID string, event entity.StreamEvent) (sequence int64, err error)
-
-	// Replay replays events after a given sequence number.
-	// afterSequence=0 replays from the beginning.
-	// Returns up to limit events, ordered by sequence ascending.
-	Replay(ctx context.Context, sessionID string, afterSequence int64, limit int) ([]StoredEvent, error)
-
-	// SaveSnapshot persists a snapshot of the session state at a given sequence.
-	SaveSnapshot(ctx context.Context, sessionID string, sequence int64, state map[string]any) error
-
-	// GetSnapshot retrieves the latest snapshot for a session.
-	// Returns (0, nil, nil) if no snapshot exists.
-	GetSnapshot(ctx context.Context, sessionID string) (sequence int64, state map[string]any, err error)
-}
-
-// StoredEvent represents a single event retrieved from the store.
-type StoredEvent struct {
-	Event    entity.StreamEvent
-	Sequence int64
-	StoredAt time.Time
-}
-
-// RedisEventStore implements EventStore backed by Redis Stream.
+// RedisEventStore implements stream.EventStore backed by Redis Stream.
 //
 // Key design:
 //   - Events are stored in Redis Stream `agent:events:<sessionID>`
@@ -60,11 +33,11 @@ type StoredEvent struct {
 //   - Snapshots are stored in `agent:snapshot:<sessionID>` as JSON
 type RedisEventStore struct {
 	rdb       *redis.Redis
-	sequencer Sequencer
+	sequencer stream.Sequencer
 }
 
 // NewRedisEventStore creates a RedisEventStore.
-func NewRedisEventStore(rdb *redis.Redis, sequencer Sequencer) *RedisEventStore {
+func NewRedisEventStore(rdb *redis.Redis, sequencer stream.Sequencer) *RedisEventStore {
 	return &RedisEventStore{
 		rdb:       rdb,
 		sequencer: sequencer,
@@ -109,7 +82,7 @@ func (s *RedisEventStore) Append(ctx context.Context, sessionID, runID string, e
 }
 
 // Replay returns events after a given sequence number, up to limit.
-func (s *RedisEventStore) Replay(ctx context.Context, sessionID string, afterSequence int64, limit int) ([]StoredEvent, error) {
+func (s *RedisEventStore) Replay(ctx context.Context, sessionID string, afterSequence int64, limit int) ([]stream.StoredEvent, error) {
 	streamKey := streamKeyForSession(sessionID)
 
 	// XRANGE from (afterSequence+1)-0 to +, limited by count
@@ -120,7 +93,7 @@ func (s *RedisEventStore) Replay(ctx context.Context, sessionID string, afterSeq
 		return nil, fmt.Errorf("event_store: replay: %w", err)
 	}
 
-	stored := make([]StoredEvent, 0, len(entries))
+	stored := make([]stream.StoredEvent, 0, len(entries))
 	for _, entry := range entries {
 		rawData, ok := entry.Values["data"]
 		if !ok {
@@ -142,7 +115,7 @@ func (s *RedisEventStore) Replay(ctx context.Context, sessionID string, afterSeq
 		}
 
 		seq := parseSequenceFromID(entry.ID)
-		stored = append(stored, StoredEvent{
+		stored = append(stored, stream.StoredEvent{
 			Event:    event,
 			Sequence: seq,
 		})
