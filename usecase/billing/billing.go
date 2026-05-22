@@ -6,20 +6,20 @@ import (
 	"fmt"
 
 	"github.com/TekkenSteve/GoAgent/entity"
-	"github.com/TekkenSteve/GoAgent/usecase"
+	"github.com/TekkenSteve/GoAgent/repo"
 	"github.com/google/uuid"
 )
 
 // UseCase implements billing and credit management.
 type UseCase struct {
-	credits usecase.CreditManager
-	costs   usecase.CostCalculator
-	usage   usecase.UsageRecordRepo
+	credits repo.CreditManager
+	costs   repo.CostCalculator
+	usage   repo.UsageRecordRepo
 }
 
 // New creates a billing usecase.
 // usageRepo may be nil; usage recording is skipped when nil.
-func New(credits usecase.CreditManager, costs usecase.CostCalculator, usageRepo usecase.UsageRecordRepo) *UseCase {
+func New(credits repo.CreditManager, costs repo.CostCalculator, usageRepo repo.UsageRecordRepo) *UseCase {
 	return &UseCase{
 		credits: credits,
 		costs:   costs,

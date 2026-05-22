@@ -9,7 +9,7 @@ import (
 	"maps"
 
 	"github.com/TekkenSteve/GoAgent/entity"
-	"github.com/TekkenSteve/GoAgent/internal/repo"
+	"github.com/TekkenSteve/GoAgent/repo"
 )
 
 const (

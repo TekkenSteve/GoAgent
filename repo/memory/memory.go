@@ -11,7 +11,7 @@ import (
 )
 
 // InMemoryRepository is a baseline persistence adapter for warm/cold state.
-// It implements both usecase.WarmStateRepo and usecase.ColdStateRepo.
+// It implements both repo.WarmStateRepo and repo.ColdStateRepo.
 type InMemoryRepository struct {
 	mu sync.RWMutex
 

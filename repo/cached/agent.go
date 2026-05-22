@@ -7,7 +7,7 @@ import (
 	"sync"
 
 	"github.com/TekkenSteve/GoAgent/entity"
-	"github.com/TekkenSteve/GoAgent/internal/repo"
+	"github.com/TekkenSteve/GoAgent/repo"
 )
 
 var (
@@ -21,7 +21,7 @@ type agentCacheEntry struct {
 }
 
 // AgentRepo is a caching decorator around repo.AgentRepo.
-// It provides cache-first reads and delegates writes to the underlying repo.
+// It provides cache-first reads and delegates writes to the underlying usecase.
 type AgentRepo struct {
 	inner repo.AgentRepo
 	cache sync.Map
@@ -100,17 +100,17 @@ func (r *AgentRepo) ListByAccount(ctx context.Context, accountID string) ([]enti
 	return r.inner.ListByAccount(ctx, accountID)
 }
 
-// CreateVersion delegates to the inner repo.
+// CreateVersion delegates to the inner usecase.
 func (r *AgentRepo) CreateVersion(ctx context.Context, record *entity.AgentVersionRecord) error {
 	return r.inner.CreateVersion(ctx, record)
 }
 
-// GetVersion delegates to the inner repo.
+// GetVersion delegates to the inner usecase.
 func (r *AgentRepo) GetVersion(ctx context.Context, versionID string) (entity.AgentVersionRecord, bool, error) {
 	return r.inner.GetVersion(ctx, versionID)
 }
 
-// ListVersions delegates to the inner repo.
+// ListVersions delegates to the inner usecase.
 func (r *AgentRepo) ListVersions(ctx context.Context, agentID string) ([]entity.AgentVersionRecord, error) {
 	return r.inner.ListVersions(ctx, agentID)
 }

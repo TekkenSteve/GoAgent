@@ -4,7 +4,7 @@ import (
 	"testing"
 
 	"github.com/TekkenSteve/GoAgent/entity"
-	"github.com/TekkenSteve/GoAgent/internal/repo/mcp"
+	"github.com/TekkenSteve/GoAgent/repo/mcp"
 )
 
 func TestServerConfig_Validate(t *testing.T) {

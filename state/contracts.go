@@ -14,7 +14,7 @@ import (
 )
 
 // WarmStateStore persists and queries operational state outside workflow history.
-// This is the minimal interface; usecase.WarmStateRepo extends it with list operations.
+// This is the minimal interface; repo.WarmStateRepo extends it with list operations.
 type WarmStateStore interface {
 	PersistMessage(ctx context.Context, record entity.MessageRecord) (string, error)
 	PersistToolResult(ctx context.Context, record entity.ToolResultRecord) (string, error)

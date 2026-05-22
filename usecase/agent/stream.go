@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/TekkenSteve/GoAgent/entity"
+	"github.com/TekkenSteve/GoAgent/repo"
 	"github.com/TekkenSteve/GoAgent/usecase"
 )
 
@@ -47,7 +48,7 @@ func (uc *UseCase) ExecuteStream(ctx context.Context, req *entity.StreamRequest,
 		return fmt.Errorf("AgentUseCase - ExecuteStream - write ready event: %w", err)
 	}
 
-	if _, ok := uc.llm.(usecase.LLMStreamProvider); !ok {
+	if _, ok := uc.llm.(repo.LLMStreamProvider); !ok {
 		return &entity.AgentError{
 			Code:        entity.ErrorCodeInternal,
 			Message:     "LLM provider does not support ChatStream",
@@ -69,7 +70,7 @@ func (uc *UseCase) ExecuteStream(ctx context.Context, req *entity.StreamRequest,
 // to the writer as chunks arrive. It returns the accumulated result (tool calls,
 // usage, finish reason) for workflow-level decision making.
 func (uc *UseCase) LLMStreamCall(ctx context.Context, runID string, messages []entity.Message, tools []entity.ToolDef, config entity.LLMConfig, writer usecase.StreamEventWriter) (*LLMStepResult, error) {
-	streamLLM, ok := uc.llm.(usecase.LLMStreamProvider)
+	streamLLM, ok := uc.llm.(repo.LLMStreamProvider)
 	if !ok {
 		return nil, &entity.AgentError{
 			Code:        entity.ErrorCodeInternal,
@@ -143,7 +144,7 @@ func (uc *UseCase) ExecuteStreamSync(ctx context.Context, req *entity.StreamRequ
 		_ = fmt.Sprintf("stream write: %v", err)
 	}
 
-	if _, ok := uc.llm.(usecase.LLMStreamProvider); !ok {
+	if _, ok := uc.llm.(repo.LLMStreamProvider); !ok {
 		return &entity.AgentError{
 			Code:        entity.ErrorCodeInternal,
 			Message:     "LLM provider does not support ChatStream",
@@ -161,7 +162,7 @@ func (uc *UseCase) ExecuteStreamSync(ctx context.Context, req *entity.StreamRequ
 // executeStreamLoop is the shared LLM + tool execution loop.
 // It blocks until all tool rounds complete or context is canceled.
 func (uc *UseCase) executeStreamLoop(ctx context.Context, req *entity.StreamRequest, writer usecase.StreamEventWriter, messages []entity.Message, tools []entity.ToolDef) {
-	streamLLM, ok := uc.llm.(usecase.LLMStreamProvider)
+	streamLLM, ok := uc.llm.(repo.LLMStreamProvider)
 	if !ok {
 		return
 	}

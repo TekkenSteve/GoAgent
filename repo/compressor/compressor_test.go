@@ -6,7 +6,7 @@ import (
 	"testing"
 
 	"github.com/TekkenSteve/GoAgent/entity"
-	"github.com/TekkenSteve/GoAgent/internal/repo/compressor"
+	"github.com/TekkenSteve/GoAgent/repo/compressor"
 	"github.com/stretchr/testify/require"
 )
 

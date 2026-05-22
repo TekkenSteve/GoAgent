@@ -8,18 +8,18 @@ import (
 	"github.com/TekkenSteve/GoAgent/agentfw/agent"
 	"github.com/TekkenSteve/GoAgent/agentfw/team"
 	"github.com/TekkenSteve/GoAgent/entity"
-	"github.com/TekkenSteve/GoAgent/usecase"
+	"github.com/TekkenSteve/GoAgent/repo"
 )
 
 var ErrUnknownOperation = errors.New("unknown operation")
 
 // UseCase -.
 type UseCase struct {
-	temporal usecase.ExecutorRepo
+	temporal repo.ExecutorRepo
 }
 
 // New -.
-func New(r usecase.ExecutorRepo) *UseCase {
+func New(r repo.ExecutorRepo) *UseCase {
 	return &UseCase{temporal: r}
 }
 

@@ -7,7 +7,7 @@ import (
 	"sync"
 
 	"github.com/TekkenSteve/GoAgent/entity"
-	"github.com/TekkenSteve/GoAgent/internal/repo/toolkit"
+	"github.com/TekkenSteve/GoAgent/repo/toolkit"
 )
 
 var (
