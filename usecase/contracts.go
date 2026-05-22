@@ -7,7 +7,7 @@ import (
 )
 
 type (
-	// --- Input ports (implemented by use cases, called by controllers) ---
+	// --- Input ports (implemented by use cases, called by controllers) ---.
 
 	// AgentExecutor is the business interface for agent workflow execution.
 	AgentExecutor interface {
@@ -54,5 +54,4 @@ type (
 		Delete(ctx context.Context, templateID string) error
 		ListByAccount(ctx context.Context, accountID string) ([]entity.WorkflowTemplate, error)
 	}
-
 )

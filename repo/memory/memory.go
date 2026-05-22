@@ -80,11 +80,12 @@ func (r *InMemoryRepository) GetToolResult(_ context.Context, ref string) (entit
 }
 
 // ListMessagesByRun returns all message records for a given run, ordered by insertion sequence.
-func (r *InMemoryRepository) ListMessagesByRun(_ context.Context, runID string, _ uint64, _ uint64) ([]entity.MessageRecord, error) {
+func (r *InMemoryRepository) ListMessagesByRun(_ context.Context, runID string, _, _ uint64) ([]entity.MessageRecord, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 
 	var result []entity.MessageRecord
+
 	for _, m := range r.messages {
 		if m.RunID == runID {
 			result = append(result, m)
@@ -95,11 +96,12 @@ func (r *InMemoryRepository) ListMessagesByRun(_ context.Context, runID string, 
 }
 
 // ListToolResultsByRun returns all tool result records for a given run.
-func (r *InMemoryRepository) ListToolResultsByRun(_ context.Context, runID string, _ uint64, _ uint64) ([]entity.ToolResultRecord, error) {
+func (r *InMemoryRepository) ListToolResultsByRun(_ context.Context, runID string, _, _ uint64) ([]entity.ToolResultRecord, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 
 	var result []entity.ToolResultRecord
+
 	for _, tr := range r.toolResults {
 		if tr.RunID == runID {
 			result = append(result, tr)

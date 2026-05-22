@@ -19,5 +19,5 @@ func (g *SSEGateway) Convert(event entity.StreamEvent) ([]byte, error) {
 	return entity.MarshalEvent(event)
 }
 
-// compile-time interface checks
+// compile-time interface checks.
 var _ stream.StatelessGateway = (*SSEGateway)(nil)

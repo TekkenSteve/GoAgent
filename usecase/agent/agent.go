@@ -9,9 +9,9 @@ import (
 	"time"
 
 	"github.com/TekkenSteve/GoAgent/entity"
+	"github.com/TekkenSteve/GoAgent/pkg/logger"
 	"github.com/TekkenSteve/GoAgent/repo"
 	"github.com/TekkenSteve/GoAgent/usecase"
-	"github.com/TekkenSteve/GoAgent/pkg/logger"
 	"github.com/google/uuid"
 )
 

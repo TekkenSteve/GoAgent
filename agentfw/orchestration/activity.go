@@ -8,10 +8,10 @@ import (
 
 	"github.com/TekkenSteve/GoAgent/agentfw/stream"
 	"github.com/TekkenSteve/GoAgent/entity"
+	"github.com/TekkenSteve/GoAgent/pkg/logger"
 	agentuc "github.com/TekkenSteve/GoAgent/usecase/agent"
 	billinguc "github.com/TekkenSteve/GoAgent/usecase/billing"
 	triggeruc "github.com/TekkenSteve/GoAgent/usecase/trigger"
-	"github.com/TekkenSteve/GoAgent/pkg/logger"
 	"github.com/google/uuid"
 )
 
@@ -80,7 +80,7 @@ func (a *AgentActivities) WithBilling(uc *billinguc.UseCase) *AgentActivities {
 	return a
 }
 
-// ——— Activities (step-level, Temporal-native) ———
+// ——— Activities (step-level, Temporal-native) ———.
 type billingResult struct {
 	out *PrepBillingOutput
 	err error

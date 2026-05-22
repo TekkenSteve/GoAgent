@@ -56,5 +56,5 @@ func (e *TemporalStreamExecutor) ExecuteStream(ctx context.Context, req *entity.
 	return nil
 }
 
-// compile-time interface check
+// compile-time interface check.
 var _ usecase.StreamExecutor = (*TemporalStreamExecutor)(nil)

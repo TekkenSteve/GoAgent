@@ -1,9 +1,9 @@
 package v1
 
 import (
-	"github.com/TekkenSteve/GoAgent/usecase"
 	"github.com/TekkenSteve/GoAgent/pkg/logger"
 	"github.com/TekkenSteve/GoAgent/pkg/rabbitmq/rmq_rpc/server"
+	"github.com/TekkenSteve/GoAgent/usecase"
 	"github.com/go-playground/validator/v10"
 )
 
