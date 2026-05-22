@@ -145,27 +145,39 @@ Agent 框架由以下部分组成：
 | `join` | 扇入收集并行结果 |
 | `eval` | 条件评估，支持动态步骤变更 |
 
-### 编排模式
+### 编排模式（方式一 — HTTP 客户端）
 
-`examples/` 目录包含常见 Agent 模式的可运行演示：
+`examples/http/` 目录包含使用 HTTP 客户端 SDK 的可运行演示：
 
 | 模式 | 文件 | 关键概念 |
 |---------|------|---------|
-| [ReAct](examples/react/) | 单 Agent + 工具循环 | `ExecuteRequest`、轮询 |
-| [Pipeline](examples/pipeline/) | 顺序处理阶段 | `depends_on` 链 |
-| [DAG](examples/dag/) | 有向无环图 | 多依赖解析 |
-| [Research](examples/research/) | 并行探索 + 综合 | `split`/`join`、`wait`（HITL） |
-| [Supervisor-Worker](examples/supervisor-worker/) | 分解 + 并行工作 | `split`/`join`、监督 Agent |
-| [Router](examples/router/) | 条件分支 | `eval` + `OnResult` 变更 |
-| [Reflexion](examples/reflexion/) | 自我批判质量循环 | `eval` + 动态优化 |
-| [Plan-and-Execute](examples/plan-and-execute/) | 计划 → 并行执行 → 评估 | `split`/`join` + `eval` 变更 |
-| [Exploratory](examples/exploratory/) | 自我修改步骤队列 | `eval` + `append_after` 变更 |
-| [ToT / LATS](examples/tot-lats/) | 多推理路径 | 并行探索 + 最优路径评估 |
-| [Scientific](examples/scientific/) | 假设 → HITL → 实验 | `wait` 信号、超时处理 |
-| [Team](examples/team/) | 多 Agent 层级 | `TeamSpec` + `SubTeams` |
-| [Hierarchical](examples/hierarchical/) | 高管 → 部门 | 嵌套 `TeamSpec` + 扩展 |
+| [ReAct](examples/http/react/) | 单 Agent + 工具循环 | `ExecuteRequest`、轮询 |
+| [Pipeline](examples/http/pipeline/) | 顺序处理阶段 | `depends_on` 链 |
+| [DAG](examples/http/dag/) | 有向无环图 | 多依赖解析 |
+| [Research](examples/http/research/) | 并行探索 + 综合 | `split`/`join`、`wait`（HITL） |
+| [Supervisor-Worker](examples/http/supervisor-worker/) | 分解 + 并行工作 | `split`/`join`、监督 Agent |
+| [Router](examples/http/router/) | 条件分支 | `eval` + `OnResult` 变更 |
+| [Reflexion](examples/http/reflexion/) | 自我批判质量循环 | `eval` + 动态优化 |
+| [Plan-and-Execute](examples/http/plan-and-execute/) | 计划 → 并行执行 → 评估 | `split`/`join` + `eval` 变更 |
+| [Exploratory](examples/http/exploratory/) | 自我修改步骤队列 | `eval` + `append_after` 变更 |
+| [ToT / LATS](examples/http/tot-lats/) | 多推理路径 | 并行探索 + 最优路径评估 |
+| [Scientific](examples/http/scientific/) | 假设 → HITL → 实验 | `wait` 信号、超时处理 |
+| [Team](examples/http/team/) | 多 Agent 层级 | `TeamSpec` + `SubTeams` |
+| [Hierarchical](examples/http/hierarchical/) | 高管 → 部门 | 嵌套 `TeamSpec` + 扩展 |
 
-每个示例都使用 [examples/client](examples/client/) SDK 与 REST API 交互。
+### 库嵌入示例（方式二 — 直接导入）
+
+`examples/embed/` 目录展示如何直接导入 GoAgent 包：
+
+| 示例 | 文件 | 展示内容 |
+|---------|------|---------------|
+| [ReAct](examples/embed/react/) | `examples/embed/react/main.go` | `agent.New()`、`ExecuteStep`、mock LLM |
+| [对话](examples/embed/conversation/) | `examples/embed/conversation/main.go` | 多轮对话与历史累积 |
+| [工具](examples/embed/tools/) | `examples/embed/tools/main.go` | 工具调用与 `repo.ToolExecutor` |
+
+### 仅使用类型（方式三）
+
+`examples/types/` 目录展示仅导入 `entity/` 来共享领域类型定义。
 
 ## 三种使用方式
 

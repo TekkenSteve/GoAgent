@@ -145,27 +145,39 @@ The agent framework consists of:
 | `join` | Fan-in to gather parallel results |
 | `eval` | Conditional evaluation with dynamic step mutation |
 
-### Orchestration Patterns
+### Orchestration Patterns (Mode 1 — HTTP Client)
 
-The `examples/` directory contains runnable demonstrations of common agent patterns:
+The `examples/http/` directory contains runnable demonstrations using the HTTP client SDK:
 
 | Pattern | File | Key Concepts |
 |---------|------|-------------|
-| [ReAct](examples/react/) | Single agent + tool loop | `ExecuteRequest`, polling |
-| [Pipeline](examples/pipeline/) | Sequential processing stages | `depends_on` chain |
-| [DAG](examples/dag/) | Directed acyclic graph | Multi-dependency resolution |
-| [Research](examples/research/) | Parallel exploration + synthesis | `split`/`join`, `wait` (HITL) |
-| [Supervisor-Worker](examples/supervisor-worker/) | Decompose + parallel workers | `split`/`join`, supervisor agent |
-| [Router](examples/router/) | Conditional branching | `eval` + `OnResult` mutation |
-| [Reflexion](examples/reflexion/) | Self-critique quality loop | `eval` + dynamic refinement |
-| [Plan-and-Execute](examples/plan-and-execute/) | Plan → parallel execute → evaluate | `split`/`join` + `eval` mutation |
-| [Exploratory](examples/exploratory/) | Self-modifying step queue | `eval` + `append_after` mutation |
-| [ToT / LATS](examples/tot-lats/) | Multiple reasoning paths | Parallel exploration + best-path eval |
-| [Scientific](examples/scientific/) | Hypothesis → HITL → experiment | `wait` signal, timeout handling |
-| [Team](examples/team/) | Multi-agent hierarchy | `TeamSpec` + `SubTeams` |
-| [Hierarchical](examples/hierarchical/) | Executive → departments | Nested `TeamSpec` with expansion |
+| [ReAct](examples/http/react/) | Single agent + tool loop | `ExecuteRequest`, polling |
+| [Pipeline](examples/http/pipeline/) | Sequential processing stages | `depends_on` chain |
+| [DAG](examples/http/dag/) | Directed acyclic graph | Multi-dependency resolution |
+| [Research](examples/http/research/) | Parallel exploration + synthesis | `split`/`join`, `wait` (HITL) |
+| [Supervisor-Worker](examples/http/supervisor-worker/) | Decompose + parallel workers | `split`/`join`, supervisor agent |
+| [Router](examples/http/router/) | Conditional branching | `eval` + `OnResult` mutation |
+| [Reflexion](examples/http/reflexion/) | Self-critique quality loop | `eval` + dynamic refinement |
+| [Plan-and-Execute](examples/http/plan-and-execute/) | Plan → parallel execute → evaluate | `split`/`join` + `eval` mutation |
+| [Exploratory](examples/http/exploratory/) | Self-modifying step queue | `eval` + `append_after` mutation |
+| [ToT / LATS](examples/http/tot-lats/) | Multiple reasoning paths | Parallel exploration + best-path eval |
+| [Scientific](examples/http/scientific/) | Hypothesis → HITL → experiment | `wait` signal, timeout handling |
+| [Team](examples/http/team/) | Multi-agent hierarchy | `TeamSpec` + `SubTeams` |
+| [Hierarchical](examples/http/hierarchical/) | Executive → departments | Nested `TeamSpec` with expansion |
 
-Each example uses the [examples/client](examples/client/) SDK to interact with the REST API.
+### Library Embedding Examples (Mode 2 — Direct Import)
+
+The `examples/embed/` directory shows how to import GoAgent packages directly:
+
+| Example | File | What It Shows |
+|---------|------|---------------|
+| [ReAct](examples/embed/react/) | `examples/embed/react/main.go` | `agent.New()`, `ExecuteStep`, mock LLM |
+| [Conversation](examples/embed/conversation/) | `examples/embed/conversation/main.go` | Multi-turn with history accumulation |
+| [Tools](examples/embed/tools/) | `examples/embed/tools/main.go` | Tool calling with `repo.ToolExecutor` |
+
+### Type-Only Usage (Mode 3)
+
+The `examples/types/` directory shows importing only `entity/` for shared type definitions.
 
 ## Three Usage Modes
 

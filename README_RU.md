@@ -145,6 +145,40 @@ GoAgent использует структуру **библиотека + обо�
 | `join` | Сбор параллельных результатов |
 | `eval` | Условная оценка с динамической мутацией шагов |
 
+### Паттерны оркестрации (Режим 1 — HTTP клиент)
+
+Директория `examples/http/` содержит исполняемые демонстрации с использованием HTTP клиентского SDK:
+
+| Паттерн | Файл | Ключевые концепции |
+|---------|------|-------------|
+| [ReAct](examples/http/react/) | Один агент + цикл инструментов | `ExecuteRequest`, опрос |
+| [Pipeline](examples/http/pipeline/) | Последовательные этапы обработки | Цепочка `depends_on` |
+| [DAG](examples/http/dag/) | Направленный ациклический граф | Разрешение множественных зависимостей |
+| [Research](examples/http/research/) | Параллельное исследование + синтез | `split`/`join`, `wait` (HITL) |
+| [Supervisor-Worker](examples/http/supervisor-worker/) | Декомпозиция + параллельные исполнители | `split`/`join`, агент-супервизор |
+| [Router](examples/http/router/) | Условное ветвление | `eval` + мутация `OnResult` |
+| [Reflexion](examples/http/reflexion/) | Цикл самокритики и улучшения | `eval` + динамическое уточнение |
+| [Plan-and-Execute](examples/http/plan-and-execute/) | План → параллельное выполнение → оценка | `split`/`join` + мутация `eval` |
+| [Exploratory](examples/http/exploratory/) | Самоизменяющаяся очередь шагов | `eval` + мутация `append_after` |
+| [ToT / LATS](examples/http/tot-lats/) | Множественные пути рассуждения | Параллельное исследование + выбор лучшего пути |
+| [Scientific](examples/http/scientific/) | Гипотеза → HITL → эксперимент | Сигнал `wait`, обработка таймаута |
+| [Team](examples/http/team/) | Многоагентная иерархия | `TeamSpec` + `SubTeams` |
+| [Hierarchical](examples/http/hierarchical/) | Руководитель → отделы | Вложенный `TeamSpec` с расширением |
+
+### Примеры встраивания библиотеки (Режим 2 — Прямой импорт)
+
+Директория `examples/embed/` показывает, как импортировать пакеты GoAgent напрямую:
+
+| Пример | Файл | Что демонстрирует |
+|---------|------|---------------|
+| [ReAct](examples/embed/react/) | `examples/embed/react/main.go` | `agent.New()`, `ExecuteStep`, mock LLM |
+| [Conversation](examples/embed/conversation/) | `examples/embed/conversation/main.go` | Многошаговый диалог с накоплением истории |
+| [Tools](examples/embed/tools/) | `examples/embed/tools/main.go` | Вызов инструментов с `repo.ToolExecutor` |
+
+### Только типы (Режим 3)
+
+Директория `examples/types/` показывает импорт только `entity/` для общих определений типов.
+
 ## Три режима использования
 
 GoAgent поддерживает три способа интеграции, от простого к глубокому:
@@ -247,6 +281,14 @@ func New(r Repository) *UseCase {
 }
 ```
 
+### Версионирование API
+
+Поддерживается простая стратегия версионирования, версии различаются структурой директорий:
+
+- REST API: `internal/controller/restapi/v1`, `v2`...
+- gRPC: `internal/controller/grpc/v1`, `v2`...
+- RPC: `internal/controller/amqp_rpc/v1`, `v2`...
+
 ## Руководство разработчика
 
 ### Миграции базы данных
@@ -283,6 +325,16 @@ make format
 
 # Запуск юнит-тестов
 make test
+```
+
+## CI проверки (запустите локально перед push)
+
+```sh
+make linter-golangci               # golangci-lint
+make linter-hadolint               # проверка Dockerfile
+make linter-dotenv                  # проверка .env
+make check-workflow-determinism    # проверка детерминизма Temporal
+make test                          # юнит-тесты
 ```
 
 ## Справочные материалы
