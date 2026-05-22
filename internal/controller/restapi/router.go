@@ -3,14 +3,15 @@ package restapi
 import (
 	"net/http"
 
+	"github.com/TekkenSteve/GoAgent/agentfw/stream"
 	"github.com/TekkenSteve/GoAgent/config"
 	_ "github.com/TekkenSteve/GoAgent/docs" // Swagger docs.
-	"github.com/TekkenSteve/GoAgent/internal/agentfw/stream"
 	"github.com/TekkenSteve/GoAgent/internal/controller/restapi/middleware"
 	v1 "github.com/TekkenSteve/GoAgent/internal/controller/restapi/v1"
-	"github.com/TekkenSteve/GoAgent/internal/usecase"
 	"github.com/TekkenSteve/GoAgent/pkg/logger"
 	"github.com/TekkenSteve/GoAgent/pkg/redis"
+	repostream "github.com/TekkenSteve/GoAgent/repo/stream"
+	"github.com/TekkenSteve/GoAgent/usecase"
 	"github.com/ansrivas/fiberprometheus/v2"
 	"github.com/gofiber/fiber/v2"
 	"github.com/gofiber/swagger"
@@ -25,7 +26,7 @@ import (
 // @BasePath    /v1
 func NewRouter(app *fiber.App, cfg *config.Config, t usecase.AgentExecutor, o usecase.OrchestrationExecutor, h usecase.HistoryQuery, s usecase.StreamExecutor, l logger.Interface, rdb *redis.Redis,
 	eventStore stream.EventStore, subscriber stream.Subscriber, gateway stream.StatelessGateway,
-	wsHub *stream.WebSocketHub,
+	wsHub *repostream.WebSocketHub,
 	cancelWorkflow v1.CancelWorkflowFn, signalWorkflow v1.SignalWorkflowFn,
 	m usecase.TemplateManager, eh usecase.TriggerEventHandler,
 ) {

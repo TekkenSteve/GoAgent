@@ -2,9 +2,9 @@ package amqp_rpc
 
 import (
 	v1 "github.com/TekkenSteve/GoAgent/internal/controller/amqp_rpc/v1"
-	"github.com/TekkenSteve/GoAgent/internal/usecase"
 	"github.com/TekkenSteve/GoAgent/pkg/logger"
 	"github.com/TekkenSteve/GoAgent/pkg/rabbitmq/rmq_rpc/server"
+	"github.com/TekkenSteve/GoAgent/usecase"
 )
 
 // NewRouter -.
