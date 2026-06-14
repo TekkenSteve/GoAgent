@@ -119,7 +119,7 @@ GoAgent 围绕小而稳定的 **AgentOS SDK 边界** 和应用壳组织。实现
 
 遵循 [12-Factor App](https://12factor.net/) 原则，所有配置通过环境变量管理。
 
-配置文件：[internal/config/config.go](internal/config/config.go)  
+配置文件：[config/config.go](config/config.go)  
 示例配置：[.env.example](.env.example)
 
 ## Agent 框架

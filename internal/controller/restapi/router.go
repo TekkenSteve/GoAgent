@@ -3,9 +3,9 @@ package restapi
 import (
 	"net/http"
 
+	"github.com/TekkenSteve/GoAgent/config"
 	_ "github.com/TekkenSteve/GoAgent/docs" // Swagger docs.
 	"github.com/TekkenSteve/GoAgent/internal/agentfw/stream"
-	"github.com/TekkenSteve/GoAgent/internal/config"
 	"github.com/TekkenSteve/GoAgent/internal/controller/restapi/middleware"
 	v1 "github.com/TekkenSteve/GoAgent/internal/controller/restapi/v1"
 	"github.com/TekkenSteve/GoAgent/internal/pkg/redis"
