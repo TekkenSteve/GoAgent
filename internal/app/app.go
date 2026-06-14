@@ -8,6 +8,8 @@ import (
 	"os/signal"
 	"syscall"
 
+	"github.com/TekkenSteve/GoAgent/agentos"
+	agentostemporal "github.com/TekkenSteve/GoAgent/agentos/temporal"
 	"github.com/TekkenSteve/GoAgent/config"
 	agentfwconfig "github.com/TekkenSteve/GoAgent/internal/agentfw/config"
 	"github.com/TekkenSteve/GoAgent/internal/agentfw/orchestration"
@@ -52,6 +54,7 @@ func Run(cfg *config.Config) { //nolint: gocyclo,cyclop,funlen,gocritic,nolintli
 
 	var (
 		temporalRuntime *agentfwruntime.TemporalRuntime
+		agentOSRuntime  agentos.Runtime
 		batchWriter     *pipelinepkg.BatchWriter
 		agentUC         *agent.UseCase
 		wsHub           *repostream.WebSocketHub
@@ -109,6 +112,7 @@ func Run(cfg *config.Config) { //nolint: gocyclo,cyclop,funlen,gocritic,nolintli
 		tc := initTemporalComponents(l, cfg, &fwCfg, pg, rdb, messageRepo, agentRepo, templateRepo, triggerRepo, templateUC, eventStore)
 		if tc != nil {
 			temporalRuntime = tc.runtime
+			agentOSRuntime = tc.agentOSRuntime
 			batchWriter = tc.batchWriter
 			agentUC = tc.agentUC
 			triggerUC = tc.triggerUC
@@ -133,9 +137,12 @@ func Run(cfg *config.Config) { //nolint: gocyclo,cyclop,funlen,gocritic,nolintli
 
 	if temporalRuntime != nil {
 		temporalRepo := temporalrepo.NewExecutorTemporal(temporalRuntime.Client, fwCfg.Temporal)
-		exec := agentfwusecase.New(temporalRepo)
-		agentExecutor = exec
-		orchExecutor = exec
+		orchExecutor = agentfwusecase.New(temporalRepo)
+		if agentOSRuntime != nil {
+			agentExecutor = newAgentOSExecutor(agentOSRuntime)
+		} else {
+			agentExecutor = agentfwusecase.New(temporalRepo)
+		}
 	} else {
 		l.Warn("app - Run - agent executor is nil, agent endpoints will be unavailable")
 	}
@@ -234,6 +241,7 @@ func Run(cfg *config.Config) { //nolint: gocyclo,cyclop,funlen,gocritic,nolintli
 // temporalComponents holds the initialized components returned by initTemporalComponents.
 type temporalComponents struct {
 	runtime        *agentfwruntime.TemporalRuntime
+	agentOSRuntime agentos.Runtime
 	batchWriter    *pipelinepkg.BatchWriter
 	agentUC        *agent.UseCase
 	triggerUC      *triggerpkg.UseCase
@@ -289,8 +297,18 @@ func initTemporalComponents(
 
 	l.Info("app - Run - agent framework worker started on task queue: %s", fwCfg.Temporal.TaskQueue)
 
+	agentOSRuntime, err := agentostemporal.NewRuntimeWithClient(context.Background(), agentostemporal.RuntimeConfig{
+		TemporalAddress:   fwCfg.Temporal.Address,
+		TemporalNamespace: fwCfg.Temporal.Namespace,
+		TemporalTaskQueue: fwCfg.Temporal.TaskQueue,
+	}, runtime.Client)
+	if err != nil {
+		l.Fatal(fmt.Errorf("app - Run - agentos temporal runtime: %w", err))
+	}
+
 	return &temporalComponents{
 		runtime:        runtime,
+		agentOSRuntime: agentOSRuntime,
 		batchWriter:    comp.batchWriter,
 		agentUC:        comp.agentUC,
 		triggerUC:      comp.triggerUC,
