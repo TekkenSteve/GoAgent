@@ -89,23 +89,22 @@ make compose-up-all
 
 ## 项目结构
 
-GoAgent 采用 **库 + 应用壳** 结构，遵循 [go-clean-template](https://github.com/evrone/go-clean-template) 模式。根级公共包可被外部项目导入；`internal/` 仅包含应用壳。
+GoAgent 围绕小而稳定的 **AgentOS SDK 边界** 和应用壳组织。实现包位于 `internal/`，不是外部项目的公共契约。
 
 ### 公共库包
 
 | 包 | 层 | 说明 |
 |---------|-------|-------------|
-| `entity/` | 内层 | 领域原语——零依赖，仅标准库 |
-| `usecase/` | 内层 | 业务逻辑 + **输入端口**接口（由 controller 调用） |
-| `repo/` | 内层/外层 | **输出端口**接口（由 usecase 调用）+ 基础设施适配器 |
-| `state/` | 内层 | 状态管理抽象——热/温/冷分层 |
-| `agentfw/` | 双层 | Agent 运行时——`agent/`、`team/`、`tool/`、`stream/`（内层）；`orchestration/`、`runtime/`、`config/`（外层） |
+| `agentos/` | 公共 SDK | 稳定的运行时接口、运行规格、状态、事件、消息和工具定义 |
+| `agentos/temporal/` | 公共实现 | 默认 Temporal/Redis 运行时和 worker 注册工具 |
 | `config/` | 外层 | 应用配置（基于环境变量） |
-| `pkg/` | 外层 | 基础设施包装——Postgres、Redis、HTTP 服务器等 |
+| `pkg/` | 通用工具 | 不作为 GoAgent 实现契约的基础设施包装 |
 
 ### 应用壳
 
 - `internal/app/` — 依赖注入与应用引导
+- `internal/agentfw/` — Agent 工作流和运行时实现
+- `internal/entity/`、`internal/usecase/`、`internal/repo/`、`internal/state/` — 内部领域和基础设施实现
 - `internal/controller/` — 传输层（REST、gRPC、AMQP RPC、NATS RPC）
 - `cmd/app/` — 入口点
 
@@ -165,19 +164,19 @@ Agent 框架由以下部分组成：
 | [Team](examples/http/team/) | 多 Agent 层级 | `TeamSpec` + `SubTeams` |
 | [Hierarchical](examples/http/hierarchical/) | 高管 → 部门 | 嵌套 `TeamSpec` + 扩展 |
 
-### 库嵌入示例（方式二 — 直接导入）
+### 库嵌入示例（方式二 — AgentOS Runtime）
 
-`examples/embed/` 目录展示如何直接导入 GoAgent 包：
+`examples/embed/` 目录展示如何通过公共 AgentOS 边界嵌入 GoAgent：
 
 | 示例 | 文件 | 展示内容 |
 |---------|------|---------------|
-| [ReAct](examples/embed/react/) | `examples/embed/react/main.go` | `agent.New()`、`ExecuteStep`、mock LLM |
-| [对话](examples/embed/conversation/) | `examples/embed/conversation/main.go` | 多轮对话与历史累积 |
-| [工具](examples/embed/tools/) | `examples/embed/tools/main.go` | 工具调用与 `repo.ToolExecutor` |
+| [ReAct](examples/embed/react/) | `examples/embed/react/main.go` | 使用 `agentos.Runtime` 启动通用运行 |
+| [对话](examples/embed/conversation/) | `examples/embed/conversation/main.go` | 通过 `agentos/temporal` 启动对话运行 |
+| [工具](examples/embed/tools/) | `examples/embed/tools/main.go` | 通过运行时边界启动可使用工具的提示 |
 
 ### 仅使用类型（方式三）
 
-`examples/types/` 目录展示仅导入 `entity/` 来共享领域类型定义。
+`examples/types/` 目录展示仅导入 `agentos/` 来共享公共类型定义。
 
 ## 三种使用方式
 
@@ -198,39 +197,38 @@ status, _ := c.ExecuteAgent(ctx, client.ExecuteRequest{
 
 ### 方式二 — 库嵌入
 
-直接将 GoAgent 包导入你的 Go 应用。可自行提供基础设施适配器或使用内置实现。
+将稳定的 AgentOS 运行时边界导入你的 Go 应用。默认 Temporal/Redis 实现位于 `agentos/temporal`。
 
 ```go
 import (
-    "github.com/TekkenSteve/GoAgent/usecase/agent"
-    "github.com/TekkenSteve/GoAgent/repo/webapi"      // LLM 提供者
-    "github.com/TekkenSteve/GoAgent/repo/pipeline"    // Redis WAL
-    "github.com/TekkenSteve/GoAgent/repo/compressor"  // 上下文压缩
-    "github.com/TekkenSteve/GoAgent/repo/toolkit"     // 内置工具
+    "github.com/TekkenSteve/GoAgent/agentos"
+    agentostemporal "github.com/TekkenSteve/GoAgent/agentos/temporal"
 )
 
-llm := webapi.NewBifrostProvider(cfg)
-tools := toolkit.NewRegistry(llm)
-wal := pipeline.NewRedisWAL(appender, rdb)
-
-agentUC := agent.New(llm, tools, wal, compressor, tools, nil)
-result, _ := agentUC.ExecuteStep(ctx, &agent.StepRequest{
-    RunID:   "run-1",
-    Message: "1+1 等于几？",
-    Config:  entity.LLMConfig{Model: "claude-sonnet-4-20250514"},
+rt, _ := agentostemporal.NewRuntime(ctx, agentostemporal.RuntimeConfig{
+    TemporalAddress: "127.0.0.1:7233",
+    TemporalNamespace: "default",
+    TemporalTaskQueue: "agent-framework",
+    RedisURL: "redis://127.0.0.1:6379/0",
+})
+status, _ := rt.Start(ctx, agentos.RunSpec{
+    RunID: "run-1",
+    AccountID: "acct-1",
+    ModelRef: "gpt-4.1-mini",
+    UserMessage: "1+1 等于几？",
 })
 ```
 
 ### 方式三 — 仅使用类型
 
-仅导入 `entity/` 跨微服务共享领域类型定义。
+仅导入 `agentos/` 跨微服务共享公共 AgentOS 类型定义。
 
 ```go
-import "github.com/TekkenSteve/GoAgent/entity"
+import "github.com/TekkenSteve/GoAgent/agentos"
 
 type MyService struct {
-    messages []entity.Message
-    tools    []entity.ToolDef
+    messages []agentos.Message
+    tools    []agentos.ToolDef
 }
 ```
 
@@ -240,8 +238,8 @@ type MyService struct {
 
 本项目遵循 [go-clean-template](https://github.com/evrone/go-clean-template) 架构模式：
 
-1. **输入端口**（`usecase/contracts.go`）——业务逻辑实现的接口，由 controller 调用
-2. **输出端口**（`repo/contracts.go`）——业务逻辑调用的接口，由基础设施适配器实现
+1. **公共 SDK 边界**（`agentos/`）——面向外部嵌入调用方的稳定契约
+2. **内部端口**（`internal/usecase/contracts.go`、`internal/repo/contracts.go`）——对下游项目隐藏的实现契约
 3. **依赖方向**：外层导入内层，绝不反向
 4. **可测试性**：接口隔离，便于使用 mock 进行单元测试
 
@@ -249,23 +247,26 @@ type MyService struct {
 
 ```
 ┌──────────────────────────────────────────────┐
-│  entity/   │  state/                         │  内层
+│  agentos/                                      │  公共 SDK
+│  agentos/temporal/                             │  默认实现
+├──────────────────────────────────────────────┤
+│  internal/entity/ │  internal/state/         │  内层
 │  ──────────┼──────────                        │  （零外部依赖，
-│  usecase/contracts.go  （输入端口）           │   仅标准库）
-│  repo/contracts.go     （输出端口）           │
+│  internal/usecase/contracts.go                │   仅标准库）
+│  internal/repo/contracts.go                   │
 ├──────────────────────────────────────────────┤
-│  usecase/agent/  usecase/template/  ...     │  内层
-│  （导入 repo/ 获取输出端口）                  │  （业务逻辑）
+│  internal/usecase/agent/  ...                │  内层
+│  （导入 internal/repo 获取输出端口）          │  （业务逻辑）
 ├──────────────────────────────────────────────┤
-│  repo/persistent/  repo/webapi/  ...         │  外层
+│  internal/repo/persistent/  ...              │  外层
 │  internal/controller/  internal/app/         │  （基础设施，
-│  agentfw/orchestration/                       │   导入内层）
+│  internal/agentfw/orchestration/              │   导入内层）
 └──────────────────────────────────────────────┘
 ```
 
-- **内层**（`entity/`、`state/`、`usecase/`、`repo/contracts.go`）仅依赖 Go 标准库
-- **外层**（`repo/*/`、`internal/`、`pkg/`）实现内层定义的接口
-- `usecase/agent/` 导入 `repo/` 获取输出端口接口——与 go-clean-template 中 `usecase/translation/` 导入 `repo/` 的模式一致
+- **公共层**（`agentos/`、`agentos/temporal/`）是唯一支持的嵌入式导入契约
+- **内层**（`internal/entity/`、`internal/state/`、`internal/usecase/`、`internal/repo/contracts.go`）仅作为实现细节
+- **外层**（`internal/repo/*/`、`internal/controller/`、`internal/app/`、`pkg/`）实现内层定义的接口
 
 ### 依赖注入
 

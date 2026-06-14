@@ -89,23 +89,22 @@ make compose-up-all
 
 ## Project Structure
 
-GoAgent is structured as a **library + application shell** following the [go-clean-template](https://github.com/evrone/go-clean-template) pattern. Public packages at the root level are importable by external projects; `internal/` contains only the application shell.
+GoAgent is structured around a small public **AgentOS SDK boundary** plus an application shell. Implementation packages live under `internal/` and are not public contracts.
 
 ### Public Library Packages
 
 | Package | Layer | Description |
 |---------|-------|-------------|
-| `entity/` | Inner | Domain primitives — zero dependencies, stdlib only |
-| `usecase/` | Inner | Business logic + **input port** interfaces (called by controllers) |
-| `repo/` | Inner/Outer | **Output port** interfaces (called by use cases) + infrastructure adapters |
-| `state/` | Inner | State management abstractions — hot/warm/cold layering |
-| `agentfw/` | Both | Agent runtime — `agent/`, `team/`, `tool/`, `stream/` (inner); `orchestration/`, `runtime/`, `config/` (outer) |
+| `agentos/` | Public SDK | Stable runtime interface, run specs, statuses, events, messages, and tool definitions |
+| `agentos/temporal/` | Public implementation | Default Temporal/Redis runtime and worker registration kit |
 | `config/` | Outer | Application configuration (env-based) |
-| `pkg/` | Outer | Infrastructure wrappers — Postgres, Redis, HTTP server, etc. |
+| `pkg/` | Generic utilities | Infrastructure wrappers that are not GoAgent implementation contracts |
 
 ### Application Shell
 
 - `internal/app/` — Dependency injection and application bootstrap
+- `internal/agentfw/` — Agent workflow/runtime implementation
+- `internal/entity/`, `internal/usecase/`, `internal/repo/`, `internal/state/` — Internal domain and infrastructure implementation
 - `internal/controller/` — Transport layer (REST, gRPC, AMQP RPC, NATS RPC)
 - `cmd/app/` — Entry point
 
@@ -165,19 +164,19 @@ The `examples/http/` directory contains runnable demonstrations using the HTTP c
 | [Team](examples/http/team/) | Multi-agent hierarchy | `TeamSpec` + `SubTeams` |
 | [Hierarchical](examples/http/hierarchical/) | Executive → departments | Nested `TeamSpec` with expansion |
 
-### Library Embedding Examples (Mode 2 — Direct Import)
+### Library Embedding Examples (Mode 2 — AgentOS Runtime)
 
-The `examples/embed/` directory shows how to import GoAgent packages directly:
+The `examples/embed/` directory shows how to embed GoAgent through the public AgentOS boundary:
 
 | Example | File | What It Shows |
 |---------|------|---------------|
-| [ReAct](examples/embed/react/) | `examples/embed/react/main.go` | `agent.New()`, `ExecuteStep`, mock LLM |
-| [Conversation](examples/embed/conversation/) | `examples/embed/conversation/main.go` | Multi-turn with history accumulation |
-| [Tools](examples/embed/tools/) | `examples/embed/tools/main.go` | Tool calling with `repo.ToolExecutor` |
+| [ReAct](examples/embed/react/) | `examples/embed/react/main.go` | Start a generic run with `agentos.Runtime` |
+| [Conversation](examples/embed/conversation/) | `examples/embed/conversation/main.go` | Start a conversational run through `agentos/temporal` |
+| [Tools](examples/embed/tools/) | `examples/embed/tools/main.go` | Start a tool-capable prompt through the runtime boundary |
 
 ### Type-Only Usage (Mode 3)
 
-The `examples/types/` directory shows importing only `entity/` for shared type definitions.
+The `examples/types/` directory shows importing only `agentos/` for shared public type definitions.
 
 ## Three Usage Modes
 
@@ -198,39 +197,38 @@ status, _ := c.ExecuteAgent(ctx, client.ExecuteRequest{
 
 ### Mode 2 — Library Embedding
 
-Import GoAgent packages directly into your Go application. Bring your own infrastructure adapters or use the built-in ones.
+Import the stable AgentOS runtime boundary into your Go application. Use `agentos/temporal` for the default Temporal/Redis implementation.
 
 ```go
 import (
-    "github.com/TekkenSteve/GoAgent/usecase/agent"
-    "github.com/TekkenSteve/GoAgent/repo/webapi"      // LLM provider
-    "github.com/TekkenSteve/GoAgent/repo/pipeline"    // Redis WAL
-    "github.com/TekkenSteve/GoAgent/repo/compressor"  // Context compression
-    "github.com/TekkenSteve/GoAgent/repo/toolkit"     // Built-in tools
+    "github.com/TekkenSteve/GoAgent/agentos"
+    agentostemporal "github.com/TekkenSteve/GoAgent/agentos/temporal"
 )
 
-llm := webapi.NewBifrostProvider(cfg)
-tools := toolkit.NewRegistry(llm)
-wal := pipeline.NewRedisWAL(appender, rdb)
-
-agentUC := agent.New(llm, tools, wal, compressor, tools, nil)
-result, _ := agentUC.ExecuteStep(ctx, &agent.StepRequest{
-    RunID:   "run-1",
-    Message: "What is 2+2?",
-    Config:  entity.LLMConfig{Model: "claude-sonnet-4-20250514"},
+rt, _ := agentostemporal.NewRuntime(ctx, agentostemporal.RuntimeConfig{
+    TemporalAddress: "127.0.0.1:7233",
+    TemporalNamespace: "default",
+    TemporalTaskQueue: "agent-framework",
+    RedisURL: "redis://127.0.0.1:6379/0",
+})
+status, _ := rt.Start(ctx, agentos.RunSpec{
+    RunID: "run-1",
+    AccountID: "acct-1",
+    ModelRef: "gpt-4.1-mini",
+    UserMessage: "What is 2+2?",
 })
 ```
 
 ### Mode 3 — Type-Only
 
-Import only `entity/` to share domain type definitions across microservices.
+Import only `agentos/` to share public AgentOS type definitions across microservices.
 
 ```go
-import "github.com/TekkenSteve/GoAgent/entity"
+import "github.com/TekkenSteve/GoAgent/agentos"
 
 type MyService struct {
-    messages []entity.Message
-    tools    []entity.ToolDef
+    messages []agentos.Message
+    tools    []agentos.ToolDef
 }
 ```
 
@@ -240,8 +238,8 @@ type MyService struct {
 
 This project follows the [go-clean-template](https://github.com/evrone/go-clean-template) architecture pattern:
 
-1. **Input ports** (`usecase/contracts.go`) — interfaces implemented by business logic, called by controllers
-2. **Output ports** (`repo/contracts.go`) — interfaces called by business logic, implemented by infrastructure adapters
+1. **Public SDK boundary** (`agentos/`) — stable external contract for embedded callers
+2. **Internal ports** (`internal/usecase/contracts.go`, `internal/repo/contracts.go`) — implementation contracts hidden from downstream projects
 3. **Dependency direction**: outer layers import inner layers, never the reverse
 4. **Testability**: interface isolation enables easy unit testing with mocks
 
@@ -249,23 +247,26 @@ This project follows the [go-clean-template](https://github.com/evrone/go-clean-
 
 ```
 ┌──────────────────────────────────────────────┐
-│  entity/   │  state/                         │  Inner Layer
+│  agentos/                                      │  Public SDK
+│  agentos/temporal/                             │  Default implementation
+├──────────────────────────────────────────────┤
+│  internal/entity/   │  internal/state/       │  Inner Layer
 │  ──────────┼──────────                        │  (zero external deps,
-│  usecase/contracts.go  (input ports)         │   stdlib only)
-│  repo/contracts.go     (output ports)        │
+│  internal/usecase/contracts.go               │   stdlib only)
+│  internal/repo/contracts.go                  │
 ├──────────────────────────────────────────────┤
-│  usecase/agent/  usecase/template/  ...     │  Inner Layer
-│  (imports repo/ for output ports)            │  (business logic)
+│  internal/usecase/agent/  ...                │  Inner Layer
+│  (imports internal/repo for output ports)     │  (business logic)
 ├──────────────────────────────────────────────┤
-│  repo/persistent/  repo/webapi/  ...         │  Outer Layer
+│  internal/repo/persistent/  ...              │  Outer Layer
 │  internal/controller/  internal/app/         │  (infrastructure,
-│  agentfw/orchestration/                       │   imports inner)
+│  internal/agentfw/orchestration/              │   imports inner)
 └──────────────────────────────────────────────┘
 ```
 
-- **Inner layer** (`entity/`, `state/`, `usecase/`, `repo/contracts.go`) depends only on Go stdlib
-- **Outer layer** (`repo/*/`, `internal/`, `pkg/`) implements interfaces defined by the inner layer
-- `usecase/agent/` imports `repo/` for output port interfaces — the same pattern as go-clean-template's `usecase/translation/` importing `repo/`
+- **Public layer** (`agentos/`, `agentos/temporal/`) is the only supported embedded import contract
+- **Inner layer** (`internal/entity/`, `internal/state/`, `internal/usecase/`, `internal/repo/contracts.go`) is implementation-only
+- **Outer layer** (`internal/repo/*/`, `internal/controller/`, `internal/app/`, `pkg/`) implements interfaces defined by the inner layer
 
 ### Dependency Injection
 

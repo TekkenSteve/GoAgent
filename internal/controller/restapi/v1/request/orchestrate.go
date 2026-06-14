@@ -1,6 +1,6 @@
 package request
 
-import "github.com/TekkenSteve/GoAgent/entity"
+import "github.com/TekkenSteve/GoAgent/internal/entity"
 
 // Orchestrate -.
 type Orchestrate struct {

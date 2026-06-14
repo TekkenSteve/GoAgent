@@ -5,9 +5,9 @@ import (
 	"time"
 
 	v1 "github.com/TekkenSteve/GoAgent/docs/proto/v1"
-	"github.com/TekkenSteve/GoAgent/entity"
+	"github.com/TekkenSteve/GoAgent/internal/entity"
+	"github.com/TekkenSteve/GoAgent/internal/usecase"
 	"github.com/TekkenSteve/GoAgent/pkg/logger"
-	"github.com/TekkenSteve/GoAgent/usecase"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 )
