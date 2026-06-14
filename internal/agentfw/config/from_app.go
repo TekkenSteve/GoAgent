@@ -4,7 +4,7 @@ import (
 	"strings"
 	"time"
 
-	appconfig "github.com/TekkenSteve/GoAgent/config"
+	appconfig "github.com/TekkenSteve/GoAgent/internal/config"
 )
 
 // FromAppConfig maps application config into the framework-specific config model.
