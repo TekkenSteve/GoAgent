@@ -39,7 +39,7 @@ compose-down: ### Down docker compose
 .PHONY: compose-down
 
 swag-v1: ### swag init
-	swag init --dir internal/controller/restapi,entity,internal/controller/restapi/v1/request,internal/controller/restapi/v1/response \
+	swag init --dir internal/controller/restapi,internal/entity,internal/controller/restapi/v1/request,internal/controller/restapi/v1/response \
 		-g router.go --output docs --parseInternal --parseDependency
 .PHONY: swag-v1
 
@@ -104,8 +104,7 @@ agentfw-security-suite: ### run agent framework security validation suites
 
 test: ### run test
 	go test -v -race -covermode atomic -coverprofile=coverage.txt \
-		./agentfw/... ./entity/... ./internal/... ./pkg/... \
-		./repo/... ./state/... ./usecase/...
+		./agentos/... ./internal/... ./pkg/...
 .PHONY: test
 
 integration-test: ### run integration-test
@@ -113,8 +112,8 @@ integration-test: ### run integration-test
 .PHONY: integration-test
 
 mock: ### run mockgen
-	mockgen -source ./repo/contracts.go -package usecase_test > ./usecase/mocks_repo_test.go
-	mockgen -source ./usecase/contracts.go -package usecase_test > ./usecase/mocks_usecase_test.go
+	mockgen -source ./internal/repo/contracts.go -package usecase_test > ./internal/usecase/mocks_repo_test.go
+	mockgen -source ./internal/usecase/contracts.go -package usecase_test > ./internal/usecase/mocks_usecase_test.go
 .PHONY: mock
 
 migrate-create:  ### create new migration
