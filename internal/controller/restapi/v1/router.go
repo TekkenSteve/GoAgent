@@ -2,10 +2,10 @@ package v1
 
 import (
 	"github.com/TekkenSteve/GoAgent/internal/agentfw/stream"
+	"github.com/TekkenSteve/GoAgent/internal/pkg/redis"
 	repostream "github.com/TekkenSteve/GoAgent/internal/repo/stream"
 	"github.com/TekkenSteve/GoAgent/internal/usecase"
 	"github.com/TekkenSteve/GoAgent/pkg/logger"
-	"github.com/TekkenSteve/GoAgent/pkg/redis"
 	"github.com/go-playground/validator/v10"
 	"github.com/gofiber/fiber/v2"
 )

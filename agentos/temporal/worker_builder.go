@@ -9,6 +9,8 @@ import (
 	"github.com/TekkenSteve/GoAgent/internal/agentfw/orchestration"
 	agenttool "github.com/TekkenSteve/GoAgent/internal/agentfw/tool"
 	"github.com/TekkenSteve/GoAgent/internal/entity"
+	"github.com/TekkenSteve/GoAgent/internal/pkg/postgres"
+	goredis "github.com/TekkenSteve/GoAgent/internal/pkg/redis"
 	"github.com/TekkenSteve/GoAgent/internal/repo/cached"
 	"github.com/TekkenSteve/GoAgent/internal/repo/compressor"
 	"github.com/TekkenSteve/GoAgent/internal/repo/framework"
@@ -23,8 +25,6 @@ import (
 	templatepkg "github.com/TekkenSteve/GoAgent/internal/usecase/template"
 	triggerpkg "github.com/TekkenSteve/GoAgent/internal/usecase/trigger"
 	"github.com/TekkenSteve/GoAgent/pkg/logger"
-	"github.com/TekkenSteve/GoAgent/pkg/postgres"
-	goredis "github.com/TekkenSteve/GoAgent/pkg/redis"
 	"go.temporal.io/sdk/client"
 )
 
