@@ -6,7 +6,6 @@ import (
 	"fmt"
 
 	"github.com/TekkenSteve/GoAgent/agentos"
-	agentfwruntime "github.com/TekkenSteve/GoAgent/internal/agentfw/runtime"
 	"github.com/TekkenSteve/GoAgent/internal/entity"
 	goredis "github.com/TekkenSteve/GoAgent/internal/pkg/redis"
 	temporalrepo "github.com/TekkenSteve/GoAgent/internal/repo/persistent"
@@ -15,30 +14,35 @@ import (
 )
 
 type runtime struct {
-	temporalRuntime *agentfwruntime.TemporalRuntime
-	executor        *temporalrepo.ExecutorTemporal
-	subscriber      *repostream.RedisSubscriber
-	redis           *goredis.Redis
+	temporalClient client.Client
+	closeTemporal  bool
+	executor       *temporalrepo.ExecutorTemporal
+	subscriber     *repostream.RedisSubscriber
+	redis          *goredis.Redis
 }
 
 // NewRuntime creates the default Temporal/Redis implementation of agentos.Runtime.
 func NewRuntime(ctx context.Context, cfg RuntimeConfig) (agentos.Runtime, error) {
 	fwTemporal := temporalConfig(cfg)
 
-	rt, err := agentfwruntime.NewTemporalRuntime(fwTemporal)
+	c, err := client.Dial(client.Options{
+		HostPort:  fwTemporal.Address,
+		Namespace: fwTemporal.Namespace,
+	})
 	if err != nil {
-		return nil, fmt.Errorf("agentos temporal runtime: %w", err)
+		return nil, fmt.Errorf("agentos temporal runtime client: %w", err)
 	}
 
 	r := &runtime{
-		temporalRuntime: rt,
-		executor:        temporalrepo.NewExecutorTemporal(rt.Client, fwTemporal),
+		temporalClient: c,
+		closeTemporal:  true,
+		executor:       temporalrepo.NewExecutorTemporal(c, fwTemporal),
 	}
 
 	if cfg.RedisURL != "" {
 		rdb, err := goredis.New(ctx, cfg.RedisURL)
 		if err != nil {
-			rt.Close()
+			c.Close()
 
 			return nil, fmt.Errorf("agentos temporal runtime redis: %w", err)
 		}
@@ -53,9 +57,14 @@ func NewRuntime(ctx context.Context, cfg RuntimeConfig) (agentos.Runtime, error)
 // Hosts that already own worker/client lifecycle can use this without opening
 // another Temporal connection.
 func NewRuntimeWithClient(ctx context.Context, cfg RuntimeConfig, c client.Client) (agentos.Runtime, error) {
+	if c == nil {
+		return nil, errors.New("agentos temporal runtime: nil temporal client")
+	}
+
 	fwTemporal := temporalConfig(cfg)
 	r := &runtime{
-		executor: temporalrepo.NewExecutorTemporal(c, fwTemporal),
+		temporalClient: c,
+		executor:       temporalrepo.NewExecutorTemporal(c, fwTemporal),
 	}
 
 	if cfg.RedisURL != "" {
@@ -134,8 +143,8 @@ func (r *runtime) Subscribe(ctx context.Context, scope agentos.StreamScope) (age
 
 func (r *runtime) Close() error {
 	var errs []error
-	if r.temporalRuntime != nil {
-		r.temporalRuntime.Close()
+	if r.closeTemporal && r.temporalClient != nil {
+		r.temporalClient.Close()
 	}
 	if r.redis != nil {
 		errs = append(errs, r.redis.Close())
