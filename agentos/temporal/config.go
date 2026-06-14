@@ -10,4 +10,16 @@ type RuntimeConfig struct {
 
 // WorkerConfig configures registration of GoAgent workflows and activities into
 // a Temporal worker.
-type WorkerConfig struct{}
+type WorkerConfig struct {
+	TemporalAddress   string
+	TemporalNamespace string
+	TemporalTaskQueue string
+	PostgresURL       string
+	PostgresPoolMax   int
+	RedisURL          string
+	LLMConfigPath     string
+	LogLevel          string
+
+	RegisterEnvTools      bool
+	EnsureDefaultTemplate bool
+}
