@@ -2,6 +2,7 @@ package temporal
 
 import (
 	"context"
+	"errors"
 
 	"github.com/TekkenSteve/GoAgent/internal/agentfw/orchestration"
 	"go.temporal.io/sdk/activity"
@@ -12,13 +13,13 @@ import (
 // WorkerKit registers GoAgent workflows and activities into an existing worker.
 type WorkerKit struct {
 	activities *orchestration.AgentActivities
+	closeFns   []func() error
 }
 
-// NewWorkerKit creates a worker registration kit. Activity wiring will be
-// supplied by the application builder once repository/provider construction is
-// centralized under agentos/temporal.
-func NewWorkerKit(_ context.Context, _ WorkerConfig) (*WorkerKit, error) {
-	return &WorkerKit{}, nil
+// NewWorkerKit creates a worker registration kit backed by the default
+// Temporal/Postgres/Redis/Bifrost implementation.
+func NewWorkerKit(ctx context.Context, cfg WorkerConfig) (*WorkerKit, error) {
+	return newWorkerKit(ctx, cfg)
 }
 
 // Register installs GoAgent workflow definitions into a Temporal worker.
@@ -70,5 +71,10 @@ func (k *WorkerKit) Register(w worker.Worker) error {
 
 // Close releases resources owned by the kit.
 func (k *WorkerKit) Close() error {
-	return nil
+	var err error
+	for _, closeFn := range k.closeFns {
+		err = errors.Join(err, closeFn())
+	}
+
+	return err
 }
