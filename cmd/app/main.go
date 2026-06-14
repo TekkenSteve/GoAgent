@@ -3,8 +3,8 @@ package main
 import (
 	"log"
 
+	"github.com/TekkenSteve/GoAgent/config"
 	"github.com/TekkenSteve/GoAgent/internal/app"
-	"github.com/TekkenSteve/GoAgent/internal/config"
 )
 
 func main() {
