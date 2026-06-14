@@ -8,9 +8,9 @@ import (
 	"github.com/TekkenSteve/GoAgent/agentos"
 	agentfwruntime "github.com/TekkenSteve/GoAgent/internal/agentfw/runtime"
 	"github.com/TekkenSteve/GoAgent/internal/entity"
+	goredis "github.com/TekkenSteve/GoAgent/internal/pkg/redis"
 	temporalrepo "github.com/TekkenSteve/GoAgent/internal/repo/persistent"
 	repostream "github.com/TekkenSteve/GoAgent/internal/repo/stream"
-	goredis "github.com/TekkenSteve/GoAgent/pkg/redis"
 	"go.temporal.io/sdk/client"
 )
 

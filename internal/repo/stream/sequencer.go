@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/TekkenSteve/GoAgent/pkg/redis"
+	"github.com/TekkenSteve/GoAgent/internal/pkg/redis"
 )
 
 // sequencerKeyTTL is how long sequencer keys live after last access.

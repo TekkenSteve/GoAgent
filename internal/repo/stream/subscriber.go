@@ -9,7 +9,7 @@ import (
 
 	"github.com/TekkenSteve/GoAgent/internal/agentfw/stream"
 	"github.com/TekkenSteve/GoAgent/internal/entity"
-	"github.com/TekkenSteve/GoAgent/pkg/redis"
+	"github.com/TekkenSteve/GoAgent/internal/pkg/redis"
 )
 
 const subscriberChannelBufferSize = 256

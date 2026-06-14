@@ -23,6 +23,8 @@ import (
 	"github.com/TekkenSteve/GoAgent/internal/controller/restapi"
 	restapiv1 "github.com/TekkenSteve/GoAgent/internal/controller/restapi/v1"
 	"github.com/TekkenSteve/GoAgent/internal/entity"
+	"github.com/TekkenSteve/GoAgent/internal/pkg/postgres"
+	goredis "github.com/TekkenSteve/GoAgent/internal/pkg/redis"
 	"github.com/TekkenSteve/GoAgent/internal/repo/cached"
 	"github.com/TekkenSteve/GoAgent/internal/repo/compressor"
 	"github.com/TekkenSteve/GoAgent/internal/repo/framework"
@@ -43,9 +45,7 @@ import (
 	"github.com/TekkenSteve/GoAgent/pkg/httpserver"
 	"github.com/TekkenSteve/GoAgent/pkg/logger"
 	natsRPCServer "github.com/TekkenSteve/GoAgent/pkg/nats/nats_rpc/server"
-	"github.com/TekkenSteve/GoAgent/pkg/postgres"
 	rmqRPCServer "github.com/TekkenSteve/GoAgent/pkg/rabbitmq/rmq_rpc/server"
-	goredis "github.com/TekkenSteve/GoAgent/pkg/redis"
 )
 
 // Run creates objects via constructors.

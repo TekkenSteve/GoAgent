@@ -9,7 +9,7 @@ import (
 
 	sq "github.com/Masterminds/squirrel"
 	"github.com/TekkenSteve/GoAgent/internal/entity"
-	"github.com/TekkenSteve/GoAgent/pkg/postgres"
+	"github.com/TekkenSteve/GoAgent/internal/pkg/postgres"
 	"github.com/jackc/pgx/v5"
 )
 
