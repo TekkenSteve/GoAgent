@@ -1,6 +1,6 @@
 package response
 
-import "github.com/TekkenSteve/GoAgent/entity"
+import "github.com/TekkenSteve/GoAgent/internal/entity"
 
 // RunStatus wraps entity.RunStatus for AMQP RPC response.
 type RunStatus struct {

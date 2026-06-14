@@ -89,23 +89,22 @@ make compose-up-all
 
 ## Структура проекта
 
-GoAgent использует структуру **библиотека + оболочка приложения** по паттерну [go-clean-template](https://github.com/evrone/go-clean-template). Публичные пакеты на верхнем уровне доступны для импорта внешними проектами; `internal/` содержит только оболочку приложения.
+GoAgent организован вокруг небольшой публичной границы **AgentOS SDK** и оболочки приложения. Реализация находится в `internal/` и не является публичным контрактом.
 
 ### Публичные пакеты библиотеки
 
 | Пакет | Слой | Описание |
 |---------|-------|-------------|
-| `entity/` | Внутренний | Доменные примитивы — без зависимостей, только stdlib |
-| `usecase/` | Внутренний | Бизнес-логика + интерфейсы **входных портов** (вызываются контроллерами) |
-| `repo/` | Внутр./Внеш. | Интерфейсы **выходных портов** (вызываются usecase) + адаптеры инфраструктуры |
-| `state/` | Внутренний | Абстракции управления состоянием — hot/warm/cold слои |
-| `agentfw/` | Оба | Среда выполнения агентов — `agent/`, `team/`, `tool/`, `stream/` (внутренний); `orchestration/`, `runtime/`, `config/` (внешний) |
+| `agentos/` | Public SDK | Стабильный runtime-интерфейс, спецификации запусков, статусы, события, сообщения и определения инструментов |
+| `agentos/temporal/` | Публичная реализация | Реализация по умолчанию на Temporal/Redis и kit для регистрации worker |
 | `config/` | Внешний | Конфигурация приложения (на основе env) |
-| `pkg/` | Внешний | Инфраструктурные обертки — Postgres, Redis, HTTP сервер и др. |
+| `pkg/` | Общие утилиты | Инфраструктурные обертки, которые не являются контрактами реализации GoAgent |
 
 ### Оболочка приложения
 
 - `internal/app/` — внедрение зависимостей и инициализация приложения
+- `internal/agentfw/` — реализация agent workflow/runtime
+- `internal/entity/`, `internal/usecase/`, `internal/repo/`, `internal/state/` — внутренняя доменная и инфраструктурная реализация
 - `internal/controller/` — транспортный слой (REST, gRPC, AMQP RPC, NATS RPC)
 - `cmd/app/` — точка входа
 
@@ -165,19 +164,19 @@ GoAgent использует структуру **библиотека + обо�
 | [Team](examples/http/team/) | Многоагентная иерархия | `TeamSpec` + `SubTeams` |
 | [Hierarchical](examples/http/hierarchical/) | Руководитель → отделы | Вложенный `TeamSpec` с расширением |
 
-### Примеры встраивания библиотеки (Режим 2 — Прямой импорт)
+### Примеры встраивания библиотеки (Режим 2 — AgentOS Runtime)
 
-Директория `examples/embed/` показывает, как импортировать пакеты GoAgent напрямую:
+Директория `examples/embed/` показывает, как встраивать GoAgent через публичную границу AgentOS:
 
 | Пример | Файл | Что демонстрирует |
 |---------|------|---------------|
-| [ReAct](examples/embed/react/) | `examples/embed/react/main.go` | `agent.New()`, `ExecuteStep`, mock LLM |
-| [Conversation](examples/embed/conversation/) | `examples/embed/conversation/main.go` | Многошаговый диалог с накоплением истории |
-| [Tools](examples/embed/tools/) | `examples/embed/tools/main.go` | Вызов инструментов с `repo.ToolExecutor` |
+| [ReAct](examples/embed/react/) | `examples/embed/react/main.go` | Запуск generic run через `agentos.Runtime` |
+| [Conversation](examples/embed/conversation/) | `examples/embed/conversation/main.go` | Запуск диалогового run через `agentos/temporal` |
+| [Tools](examples/embed/tools/) | `examples/embed/tools/main.go` | Запуск tool-capable prompt через runtime boundary |
 
 ### Только типы (Режим 3)
 
-Директория `examples/types/` показывает импорт только `entity/` для общих определений типов.
+Директория `examples/types/` показывает импорт только `agentos/` для общих публичных типов.
 
 ## Три режима использования
 
@@ -198,39 +197,38 @@ status, _ := c.ExecuteAgent(ctx, client.ExecuteRequest{
 
 ### Режим 2 — Встраивание библиотеки
 
-Импортируйте пакеты GoAgent напрямую в ваше Go-приложение. Используйте встроенные адаптеры или создайте свои.
+Импортируйте стабильную границу AgentOS runtime в ваше Go-приложение. Реализация по умолчанию на Temporal/Redis находится в `agentos/temporal`.
 
 ```go
 import (
-    "github.com/TekkenSteve/GoAgent/usecase/agent"
-    "github.com/TekkenSteve/GoAgent/repo/webapi"      // LLM провайдер
-    "github.com/TekkenSteve/GoAgent/repo/pipeline"    // Redis WAL
-    "github.com/TekkenSteve/GoAgent/repo/compressor"  // Сжатие контекста
-    "github.com/TekkenSteve/GoAgent/repo/toolkit"     // Встроенные инструменты
+    "github.com/TekkenSteve/GoAgent/agentos"
+    agentostemporal "github.com/TekkenSteve/GoAgent/agentos/temporal"
 )
 
-llm := webapi.NewBifrostProvider(cfg)
-tools := toolkit.NewRegistry(llm)
-wal := pipeline.NewRedisWAL(appender, rdb)
-
-agentUC := agent.New(llm, tools, wal, compressor, tools, nil)
-result, _ := agentUC.ExecuteStep(ctx, &agent.StepRequest{
-    RunID:   "run-1",
-    Message: "Сколько будет 2+2?",
-    Config:  entity.LLMConfig{Model: "claude-sonnet-4-20250514"},
+rt, _ := agentostemporal.NewRuntime(ctx, agentostemporal.RuntimeConfig{
+    TemporalAddress: "127.0.0.1:7233",
+    TemporalNamespace: "default",
+    TemporalTaskQueue: "agent-framework",
+    RedisURL: "redis://127.0.0.1:6379/0",
+})
+status, _ := rt.Start(ctx, agentos.RunSpec{
+    RunID: "run-1",
+    AccountID: "acct-1",
+    ModelRef: "gpt-4.1-mini",
+    UserMessage: "Сколько будет 2+2?",
 })
 ```
 
 ### Режим 3 — Только типы
 
-Импортируйте только `entity/` для обмена доменными типами между микросервисами.
+Импортируйте только `agentos/` для обмена публичными типами AgentOS между микросервисами.
 
 ```go
-import "github.com/TekkenSteve/GoAgent/entity"
+import "github.com/TekkenSteve/GoAgent/agentos"
 
 type MyService struct {
-    messages []entity.Message
-    tools    []entity.ToolDef
+    messages []agentos.Message
+    tools    []agentos.ToolDef
 }
 ```
 
@@ -240,8 +238,8 @@ type MyService struct {
 
 Проект следует архитектурному паттерну [go-clean-template](https://github.com/evrone/go-clean-template):
 
-1. **Входные порты** (`usecase/contracts.go`) — интерфейсы, реализуемые бизнес-логикой, вызываются контроллерами
-2. **Выходные порты** (`repo/contracts.go`) — интерфейсы, вызываемые бизнес-логикой, реализуемые адаптерами
+1. **Публичная SDK-граница** (`agentos/`) — стабильный контракт для внешних embedded callers
+2. **Внутренние порты** (`internal/usecase/contracts.go`, `internal/repo/contracts.go`) — контракты реализации, скрытые от downstream-проектов
 3. **Направление зависимостей**: внешние слои импортируют внутренние, никогда наоборот
 4. **Тестируемость**: изоляция через интерфейсы упрощает юнит-тестирование с моками
 
@@ -249,23 +247,26 @@ type MyService struct {
 
 ```
 ┌──────────────────────────────────────────────┐
-│  entity/   │  state/                         │  Внутренний слой
+│  agentos/                                      │  Public SDK
+│  agentos/temporal/                             │  Реализация по умолчанию
+├──────────────────────────────────────────────┤
+│  internal/entity/ │  internal/state/         │  Внутренний слой
 │  ──────────┼──────────                        │  (без внешних зависимостей,
-│  usecase/contracts.go  (входные порты)       │   только stdlib)
-│  repo/contracts.go     (выходные порты)      │
+│  internal/usecase/contracts.go                │   только stdlib)
+│  internal/repo/contracts.go                   │
 ├──────────────────────────────────────────────┤
-│  usecase/agent/  usecase/template/  ...     │  Внутренний слой
-│  (импортирует repo/ для выходных портов)     │  (бизнес-логика)
+│  internal/usecase/agent/  ...                │  Внутренний слой
+│  (импортирует internal/repo для портов)       │  (бизнес-логика)
 ├──────────────────────────────────────────────┤
-│  repo/persistent/  repo/webapi/  ...         │  Внешний слой
+│  internal/repo/persistent/  ...              │  Внешний слой
 │  internal/controller/  internal/app/         │  (инфраструктура,
-│  agentfw/orchestration/                       │   импортирует внутренний)
+│  internal/agentfw/orchestration/              │   импортирует внутренний)
 └──────────────────────────────────────────────┘
 ```
 
-- **Внутренний слой** (`entity/`, `state/`, `usecase/`, `repo/contracts.go`) зависит только от stdlib
-- **Внешний слой** (`repo/*/`, `internal/`, `pkg/`) реализует интерфейсы внутреннего слоя
-- `usecase/agent/` импортирует `repo/` для интерфейсов выходных портов — по аналогии с `usecase/translation/` → `repo/` в go-clean-template
+- **Публичный слой** (`agentos/`, `agentos/temporal/`) — единственный поддерживаемый embedded import contract
+- **Внутренний слой** (`internal/entity/`, `internal/state/`, `internal/usecase/`, `internal/repo/contracts.go`) является деталью реализации
+- **Внешний слой** (`internal/repo/*/`, `internal/controller/`, `internal/app/`, `pkg/`) реализует интерфейсы внутреннего слоя
 
 ### Внедрение зависимостей
 
