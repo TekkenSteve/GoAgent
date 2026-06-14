@@ -119,7 +119,7 @@ GoAgent организован вокруг небольшой публично�
 
 Следуя принципам [12-Factor App](https://12factor.net/), вся конфигурация управляется через переменные окружения.
 
-Файл конфигурации: [config/config.go](config/config.go)  
+Файл конфигурации: [internal/config/config.go](internal/config/config.go)  
 Пример конфигурации: [.env.example](.env.example)
 
 ## Agent Framework

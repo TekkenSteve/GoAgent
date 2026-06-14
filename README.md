@@ -119,7 +119,7 @@ GoAgent is structured around a small public **AgentOS SDK boundary** plus an app
 
 Follows the [12-Factor App](https://12factor.net/) principles. All configuration is managed through environment variables.
 
-Configuration file: [config/config.go](config/config.go)  
+Configuration file: [internal/config/config.go](internal/config/config.go)  
 Example configuration: [.env.example](.env.example)
 
 ## Agent Framework
