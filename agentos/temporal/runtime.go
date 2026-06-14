@@ -11,6 +11,7 @@ import (
 	temporalrepo "github.com/TekkenSteve/GoAgent/internal/repo/persistent"
 	repostream "github.com/TekkenSteve/GoAgent/internal/repo/stream"
 	goredis "github.com/TekkenSteve/GoAgent/pkg/redis"
+	"go.temporal.io/sdk/client"
 )
 
 type runtime struct {
@@ -39,6 +40,27 @@ func NewRuntime(ctx context.Context, cfg RuntimeConfig) (agentos.Runtime, error)
 		if err != nil {
 			rt.Close()
 
+			return nil, fmt.Errorf("agentos temporal runtime redis: %w", err)
+		}
+		r.redis = rdb
+		r.subscriber = repostream.NewRedisSubscriber(rdb.Hub())
+	}
+
+	return r, nil
+}
+
+// NewRuntimeWithClient adapts an existing Temporal client to agentos.Runtime.
+// Hosts that already own worker/client lifecycle can use this without opening
+// another Temporal connection.
+func NewRuntimeWithClient(ctx context.Context, cfg RuntimeConfig, c client.Client) (agentos.Runtime, error) {
+	fwTemporal := temporalConfig(cfg)
+	r := &runtime{
+		executor: temporalrepo.NewExecutorTemporal(c, fwTemporal),
+	}
+
+	if cfg.RedisURL != "" {
+		rdb, err := goredis.New(ctx, cfg.RedisURL)
+		if err != nil {
 			return nil, fmt.Errorf("agentos temporal runtime redis: %w", err)
 		}
 		r.redis = rdb
