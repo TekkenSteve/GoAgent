@@ -1,6 +1,7 @@
 .idea
 .git
 .github
+archive
 nginx
 
 .dockerignore
@@ -10,6 +11,7 @@ nginx
 .gitignore
 
 coverage.txt
+*.test
 
 docker-compose.yml
 
