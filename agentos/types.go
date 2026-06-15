@@ -18,6 +18,38 @@ type RunSpec struct {
 	IdempotencyKey string
 	RequestedAt    time.Time
 	Metadata       map[string]string
+	Backend        BackendRef
+	Input          map[string]any
+}
+
+// BackendKind identifies the execution substrate used by an agent backend.
+type BackendKind string
+
+const (
+	BackendKindNative           BackendKind = "native"
+	BackendKindTemporalNative   BackendKind = "temporal_native"
+	BackendKindTemporalExternal BackendKind = "temporal_external"
+	BackendKindHTTP             BackendKind = "http"
+	BackendKindGRPC             BackendKind = "grpc"
+)
+
+const (
+	// BackendNameGoAgentNative is the built-in GoAgent native backend.
+	BackendNameGoAgentNative = "goagent-native"
+)
+
+// BackendRef selects the backend that owns a run.
+type BackendRef struct {
+	Kind BackendKind
+	Name string
+}
+
+// DefaultBackendRef returns the built-in GoAgent backend reference.
+func DefaultBackendRef() BackendRef {
+	return BackendRef{
+		Kind: BackendKindTemporalNative,
+		Name: BackendNameGoAgentNative,
+	}
 }
 
 // RunStatus is the public lifecycle view for a run.
@@ -37,6 +69,7 @@ type Event struct {
 	ThreadID  string
 	Sequence  int64
 	Timestamp time.Time
+	Source    string
 	Payload   map[string]any
 }
 
