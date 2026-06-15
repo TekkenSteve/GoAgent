@@ -6,6 +6,7 @@ import (
 	"fmt"
 
 	"github.com/TekkenSteve/GoAgent/agentos"
+	agentfwbackend "github.com/TekkenSteve/GoAgent/internal/agentfw/backend"
 	"github.com/TekkenSteve/GoAgent/internal/entity"
 	goredis "github.com/TekkenSteve/GoAgent/internal/pkg/redis"
 	temporalrepo "github.com/TekkenSteve/GoAgent/internal/repo/persistent"
@@ -16,8 +17,7 @@ import (
 type runtime struct {
 	temporalClient client.Client
 	closeTemporal  bool
-	executor       *temporalrepo.ExecutorTemporal
-	subscriber     *repostream.RedisSubscriber
+	router         *agentfwbackend.Router
 	redis          *goredis.Redis
 }
 
@@ -36,9 +36,9 @@ func NewRuntime(ctx context.Context, cfg RuntimeConfig) (agentos.Runtime, error)
 	r := &runtime{
 		temporalClient: c,
 		closeTemporal:  true,
-		executor:       temporalrepo.NewExecutorTemporal(c, fwTemporal),
 	}
 
+	var subscriber *repostream.RedisSubscriber
 	if cfg.RedisURL != "" {
 		rdb, err := goredis.New(ctx, cfg.RedisURL)
 		if err != nil {
@@ -47,7 +47,16 @@ func NewRuntime(ctx context.Context, cfg RuntimeConfig) (agentos.Runtime, error)
 			return nil, fmt.Errorf("agentos temporal runtime redis: %w", err)
 		}
 		r.redis = rdb
-		r.subscriber = repostream.NewRedisSubscriber(rdb.Hub())
+		subscriber = repostream.NewRedisSubscriber(rdb.Hub())
+	}
+
+	if err := r.configureRouter(temporalrepo.NewExecutorTemporal(c, fwTemporal), subscriber); err != nil {
+		c.Close()
+		if r.redis != nil {
+			_ = r.redis.Close()
+		}
+
+		return nil, err
 	}
 
 	return r, nil
@@ -64,81 +73,72 @@ func NewRuntimeWithClient(ctx context.Context, cfg RuntimeConfig, c client.Clien
 	fwTemporal := temporalConfig(cfg)
 	r := &runtime{
 		temporalClient: c,
-		executor:       temporalrepo.NewExecutorTemporal(c, fwTemporal),
 	}
 
+	var subscriber *repostream.RedisSubscriber
 	if cfg.RedisURL != "" {
 		rdb, err := goredis.New(ctx, cfg.RedisURL)
 		if err != nil {
 			return nil, fmt.Errorf("agentos temporal runtime redis: %w", err)
 		}
 		r.redis = rdb
-		r.subscriber = repostream.NewRedisSubscriber(rdb.Hub())
+		subscriber = repostream.NewRedisSubscriber(rdb.Hub())
+	}
+
+	if err := r.configureRouter(temporalrepo.NewExecutorTemporal(c, fwTemporal), subscriber); err != nil {
+		if r.redis != nil {
+			_ = r.redis.Close()
+		}
+
+		return nil, err
 	}
 
 	return r, nil
 }
 
 func (r *runtime) Start(ctx context.Context, spec agentos.RunSpec) (agentos.RunStatus, error) {
-	req, err := executionRequestFromRunSpec(spec)
-	if err != nil {
-		return agentos.RunStatus{}, err
-	}
+	return r.router.Start(ctx, spec)
+}
 
-	status, err := r.executor.StartExecution(ctx, req)
-	if err != nil {
-		return agentos.RunStatus{}, err
-	}
-
-	return runStatusFromEntity(status), nil
+func (r *runtime) Signal(ctx context.Context, runID string, signal agentos.Signal) error {
+	return r.router.Signal(ctx, runID, signal)
 }
 
 func (r *runtime) Status(ctx context.Context, runID string) (agentos.RunStatus, error) {
-	status, err := r.executor.GetStatus(ctx, runID)
-	if err != nil {
-		return agentos.RunStatus{}, err
-	}
-
-	return runStatusFromEntity(status), nil
+	return r.router.Status(ctx, runID)
 }
 
 func (r *runtime) Control(ctx context.Context, runID string, op agentos.ControlOperation) error {
-	internalOp, err := controlOperationToEntity(op)
-	if err != nil {
-		return err
-	}
-
-	switch internalOp {
-	case entity.ControlPause:
-		return r.executor.Pause(ctx, runID)
-	case entity.ControlResume:
-		return r.executor.Resume(ctx, runID)
-	case entity.ControlCancel:
-		return r.executor.Cancel(ctx, runID)
-	default:
-		return fmt.Errorf("%w: %s", agentos.ErrInvalidControlOperation, op)
-	}
+	return r.router.Control(ctx, runID, op)
 }
 
 func (r *runtime) Subscribe(ctx context.Context, scope agentos.StreamScope) (agentos.Subscription, error) {
-	if r.subscriber == nil {
-		return nil, errors.New("agentos temporal runtime: redis subscriber is not configured")
+	return r.router.Subscribe(ctx, scope)
+}
+
+func (r *runtime) configureRouter(executor *temporalrepo.ExecutorTemporal, subscriber *repostream.RedisSubscriber) error {
+	registry := agentfwbackend.NewRegistry()
+	native := newTemporalNativeBackend(executor, subscriber)
+	if err := registry.Register(agentos.BackendRef{
+		Kind: agentos.BackendKindTemporalNative,
+		Name: agentos.BackendNameGoAgentNative,
+	}, native); err != nil {
+		return err
+	}
+	if err := registry.Register(agentos.BackendRef{
+		Kind: agentos.BackendKindNative,
+		Name: agentos.BackendNameGoAgentNative,
+	}, native); err != nil {
+		return err
 	}
 
-	sessionID := scope.ThreadID
-	if sessionID == "" {
-		sessionID = scope.RunID
-	}
-	if sessionID == "" {
-		return nil, fmt.Errorf("%w: run id or thread id is required", agentos.ErrInvalidStreamScope)
-	}
-
-	sub, err := r.subscriber.Subscribe(ctx, sessionID, scope.AfterSequence)
+	router, err := agentfwbackend.NewRouter(registry, agentfwbackend.NewMemoryRunBackendIndex())
 	if err != nil {
-		return nil, err
+		return err
 	}
+	r.router = router
 
-	return newSubscription(sub), nil
+	return nil
 }
 
 func (r *runtime) Close() error {
@@ -151,4 +151,105 @@ func (r *runtime) Close() error {
 	}
 
 	return errors.Join(errs...)
+}
+
+type temporalNativeBackend struct {
+	executor   *temporalrepo.ExecutorTemporal
+	subscriber *repostream.RedisSubscriber
+}
+
+func newTemporalNativeBackend(executor *temporalrepo.ExecutorTemporal, subscriber *repostream.RedisSubscriber) *temporalNativeBackend {
+	return &temporalNativeBackend{
+		executor:   executor,
+		subscriber: subscriber,
+	}
+}
+
+func (b *temporalNativeBackend) Start(ctx context.Context, spec agentos.RunSpec) (agentos.RunStatus, error) {
+	req, err := executionRequestFromRunSpec(spec)
+	if err != nil {
+		return agentos.RunStatus{}, err
+	}
+
+	status, err := b.executor.StartExecution(ctx, req)
+	if err != nil {
+		return agentos.RunStatus{}, err
+	}
+
+	return runStatusFromEntity(status), nil
+}
+
+func (b *temporalNativeBackend) Signal(ctx context.Context, runID string, signal agentos.Signal) error {
+	if signal.Type == "" {
+		return fmt.Errorf("%w: type is required", agentos.ErrInvalidSignal)
+	}
+
+	switch signal.Type {
+	case agentos.SignalControlPause:
+		return b.Control(ctx, runID, agentos.ControlPause)
+	case agentos.SignalControlResume:
+		return b.Control(ctx, runID, agentos.ControlResume)
+	case agentos.SignalControlCancel:
+		return b.Control(ctx, runID, agentos.ControlCancel)
+	default:
+		return fmt.Errorf("%w: unsupported by temporal native backend: %s", agentos.ErrInvalidSignal, signal.Type)
+	}
+}
+
+func (b *temporalNativeBackend) Control(ctx context.Context, runID string, op agentos.ControlOperation) error {
+	internalOp, err := controlOperationToEntity(op)
+	if err != nil {
+		return err
+	}
+
+	switch internalOp {
+	case entity.ControlPause:
+		return b.executor.Pause(ctx, runID)
+	case entity.ControlResume:
+		return b.executor.Resume(ctx, runID)
+	case entity.ControlCancel:
+		return b.executor.Cancel(ctx, runID)
+	default:
+		return fmt.Errorf("%w: %s", agentos.ErrInvalidControlOperation, op)
+	}
+}
+
+func (b *temporalNativeBackend) Status(ctx context.Context, runID string) (agentos.RunStatus, error) {
+	status, err := b.executor.GetStatus(ctx, runID)
+	if err != nil {
+		return agentos.RunStatus{}, err
+	}
+
+	return runStatusFromEntity(status), nil
+}
+
+func (b *temporalNativeBackend) Subscribe(ctx context.Context, scope agentos.StreamScope) (agentos.Subscription, error) {
+	if b.subscriber == nil {
+		return nil, errors.New("agentos temporal native backend: redis subscriber is not configured")
+	}
+
+	sessionID := scope.ThreadID
+	if sessionID == "" {
+		sessionID = scope.RunID
+	}
+	if sessionID == "" {
+		return nil, fmt.Errorf("%w: run id or thread id is required", agentos.ErrInvalidStreamScope)
+	}
+
+	sub, err := b.subscriber.Subscribe(ctx, sessionID, scope.AfterSequence)
+	if err != nil {
+		return nil, err
+	}
+
+	return newSubscription(sub), nil
+}
+
+func (b *temporalNativeBackend) Capabilities() agentfwbackend.BackendCapabilities {
+	return agentfwbackend.BackendCapabilities{
+		SupportsSignal:    true,
+		SupportsPause:     true,
+		SupportsResume:    true,
+		SupportsCancel:    true,
+		SupportsStreaming: true,
+	}
 }

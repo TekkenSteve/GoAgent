@@ -54,6 +54,7 @@ func eventFromStored(stored agentfwstream.StoredEvent) agentos.Event {
 		ThreadID:  base.SessionID,
 		Sequence:  stored.Sequence,
 		Timestamp: base.Timestamp,
+		Source:    string(base.Source),
 		Payload:   payloadFromStreamEvent(stored.Event),
 	}
 }

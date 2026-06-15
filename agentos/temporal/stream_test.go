@@ -16,6 +16,7 @@ func TestEventFromStored(t *testing.T) {
 			EventID:   "evt-1",
 			RunID:     "run-1",
 			SessionID: "thread-1",
+			Source:    entity.SourceLLM,
 			Timestamp: ts,
 		},
 		Content: "hello",
@@ -32,6 +33,7 @@ func TestEventFromStored(t *testing.T) {
 		got.EventType != "llm.text.delta" ||
 		got.RunID != "run-1" ||
 		got.ThreadID != "thread-1" ||
+		got.Source != "llm" ||
 		got.Sequence != 42 ||
 		!got.Timestamp.Equal(ts) {
 		t.Fatalf("unexpected event mapping: %#v", got)

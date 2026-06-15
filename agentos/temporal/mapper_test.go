@@ -22,6 +22,7 @@ func TestExecutionRequestFromRunSpec(t *testing.T) {
 		UserMessage:    "hello",
 		IdempotencyKey: "idem-1",
 		RequestedAt:    requestedAt,
+		Backend:        agentos.DefaultBackendRef(),
 	})
 	if err != nil {
 		t.Fatalf("executionRequestFromRunSpec: %v", err)

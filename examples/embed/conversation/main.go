@@ -39,6 +39,7 @@ func main() {
 		SystemPrompt: "You are a concise assistant.",
 		UserMessage:  "What is clean architecture?",
 		RequestedAt:  time.Now().UTC(),
+		Backend:      agentos.DefaultBackendRef(),
 	})
 	if err != nil {
 		log.Fatalf("start run: %v", err)
