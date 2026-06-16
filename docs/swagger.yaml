@@ -1,5 +1,114 @@
 basePath: /v1
 definitions:
+  agentos.BackendKind:
+    enum:
+    - native
+    - temporal_external
+    - http
+    - grpc
+    type: string
+    x-enum-varnames:
+    - BackendKindNative
+    - BackendKindTemporalExternal
+    - BackendKindHTTP
+    - BackendKindGRPC
+  agentos.BackendRef:
+    properties:
+      kind:
+        $ref: '#/definitions/agentos.BackendKind'
+      name:
+        type: string
+    type: object
+  agentos.ControlOperation:
+    enum:
+    - pause
+    - resume
+    - cancel
+    type: string
+    x-enum-varnames:
+    - ControlPause
+    - ControlResume
+    - ControlCancel
+  agentos.RunStatus:
+    properties:
+      lifecycleState:
+        type: string
+      reason:
+        type: string
+      runID:
+        type: string
+      step:
+        format: int32
+        type: integer
+      updatedAt:
+        type: string
+    type: object
+  agentos.SignalType:
+    enum:
+    - control.pause
+    - control.resume
+    - control.cancel
+    - user.message
+    - user.approval
+    - user.reject
+    - tool.result
+    - human.feedback
+    - config.patch
+    - memory.patch
+    type: string
+    x-enum-varnames:
+    - SignalControlPause
+    - SignalControlResume
+    - SignalControlCancel
+    - SignalUserMessage
+    - SignalUserApproval
+    - SignalUserReject
+    - SignalToolResult
+    - SignalHumanFeedback
+    - SignalConfigPatch
+    - SignalMemoryPatch
+  entity.AgentOSEventType:
+    enum:
+    - run.started
+    - run.completed
+    - run.failed
+    - run.cancelled
+    - run.paused
+    - run.resumed
+    - agent.step.started
+    - agent.step.completed
+    - agent.step.failed
+    - agent.message.delta
+    - agent.message.completed
+    - tool.call.started
+    - tool.call.delta
+    - tool.call.completed
+    - tool.call.failed
+    - approval.requested
+    - approval.resolved
+    - usage.reported
+    - checkpoint.created
+    type: string
+    x-enum-varnames:
+    - AgentOSEventRunStarted
+    - AgentOSEventRunCompleted
+    - AgentOSEventRunFailed
+    - AgentOSEventRunCancelled
+    - AgentOSEventRunPaused
+    - AgentOSEventRunResumed
+    - AgentOSEventAgentStepStarted
+    - AgentOSEventAgentStepCompleted
+    - AgentOSEventAgentStepFailed
+    - AgentOSEventAgentMessageDelta
+    - AgentOSEventAgentMessageCompleted
+    - AgentOSEventToolCallStarted
+    - AgentOSEventToolCallDelta
+    - AgentOSEventToolCallCompleted
+    - AgentOSEventToolCallFailed
+    - AgentOSEventApprovalRequested
+    - AgentOSEventApprovalResolved
+    - AgentOSEventUsageReported
+    - AgentOSEventCheckpointCreated
   entity.AgentSpec:
     properties:
       config:
@@ -39,26 +148,6 @@ definitions:
         type: string
       temperature:
         type: number
-    type: object
-  entity.MCPServerConfig:
-    properties:
-      args:
-        items:
-          type: string
-        type: array
-      command:
-        type: string
-      env:
-        additionalProperties:
-          type: string
-        type: object
-      name:
-        type: string
-      transport:
-        description: '"stdio" or "sse"'
-        type: string
-      url:
-        type: string
     type: object
   entity.Step:
     properties:
@@ -241,58 +330,88 @@ definitions:
         - $ref: '#/definitions/time.Duration'
         description: max wait duration
     type: object
-  request.Execute:
+  eventing.IngestEvent:
+    properties:
+      event_id:
+        type: string
+      event_type:
+        $ref: '#/definitions/entity.AgentOSEventType'
+      payload:
+        additionalProperties: {}
+        type: object
+      run_id:
+        type: string
+      sequence:
+        type: integer
+      source:
+        type: string
+      tags:
+        additionalProperties:
+          type: string
+        type: object
+      thread_id:
+        type: string
+      timestamp:
+        type: string
+      trace_id:
+        type: string
+    type: object
+  request.AgentOSControl:
+    properties:
+      operation:
+        $ref: '#/definitions/agentos.ControlOperation'
+    required:
+    - operation
+    type: object
+  request.AgentOSSignal:
+    properties:
+      idempotency_key:
+        type: string
+      payload:
+        additionalProperties: {}
+        type: object
+      sent_at:
+        type: string
+      type:
+        $ref: '#/definitions/agentos.SignalType'
+    required:
+    - type
+    type: object
+  request.AgentOSStart:
     properties:
       account_id:
-        example: acct-550e8400-e29b-41d4-a716-446655440000
         type: string
       agent_id:
-        example: agent-550e8400-e29b-41d4-a716-446655440000
         type: string
-      agent_version_id:
-        example: v1
-        type: string
-      bypass_admission:
-        example: false
-        type: boolean
-      event_schema_ver:
-        example: v1
-        type: string
+      backend:
+        $ref: '#/definitions/agentos.BackendRef'
       idempotency_key:
-        example: idem-550e8400-e29b-41d4-a716-446655440000
         type: string
-      is_new_thread:
-        example: false
-        type: boolean
-      mcp_server_configs:
-        items:
-          $ref: '#/definitions/entity.MCPServerConfig'
-        type: array
+      input:
+        additionalProperties: {}
+        type: object
+      metadata:
+        additionalProperties:
+          type: string
+        type: object
       model_ref:
-        example: gpt-4.1-mini
         type: string
       project_id:
-        example: proj-550e8400-e29b-41d4-a716-446655440000
+        type: string
+      requested_at:
         type: string
       run_id:
-        example: run-550e8400-e29b-41d4-a716-446655440000
+        type: string
+      system_prompt:
         type: string
       thread_id:
-        example: thread-550e8400-e29b-41d4-a716-446655440000
-        type: string
-      tool_schema_ver:
-        example: v1
         type: string
       user_message:
-        example: Hello, can you help me?
         type: string
-      workflow_version:
-        example: 1
-        type: integer
     required:
     - account_id
+    - backend
     - run_id
-    - user_message
     type: object
   request.Orchestrate:
     properties:
@@ -376,6 +495,17 @@ definitions:
     - Second
     - Minute
     - Hour
+  v1.ingestAgentOSEventResponse:
+    properties:
+      duplicate:
+        type: boolean
+      event_id:
+        type: string
+      run_id:
+        type: string
+      sequence:
+        type: integer
+    type: object
 host: localhost:8080
 info:
   contact: {}
@@ -383,43 +513,164 @@ info:
   title: GoAgent API
   version: "1.0"
 paths:
-  /agent/execute:
+  /agentos/runs:
     post:
       consumes:
       - application/json
-      description: Start a new agent workflow run
-      operationId: execute
+      description: Start a generic AgentOS run on the selected backend.
+      operationId: agentos-start-run
       parameters:
-      - description: Agent execution request
+      - description: AgentOS run request
         in: body
         name: request
         required: true
         schema:
-          $ref: '#/definitions/request.Execute'
+          $ref: '#/definitions/request.AgentOSStart'
       produces:
       - application/json
       responses:
-        "200":
-          description: OK
+        "202":
+          description: Accepted
           schema:
-            $ref: '#/definitions/response.RunStatus'
+            $ref: '#/definitions/agentos.RunStatus'
         "400":
           description: Bad Request
+          schema:
+            $ref: '#/definitions/response.Error'
+        "404":
+          description: Not Found
           schema:
             $ref: '#/definitions/response.Error'
         "500":
           description: Internal Server Error
           schema:
             $ref: '#/definitions/response.Error'
-      summary: Execute agent run
+      summary: Start AgentOS run
       tags:
-      - agent
-  /agent/status/{run_id}:
+      - agentos
+  /agentos/runs/{run_id}/control:
+    post:
+      consumes:
+      - application/json
+      description: Send lifecycle control such as pause, resume, or cancel to an AgentOS
+        run.
+      operationId: agentos-control-run
+      parameters:
+      - description: Run ID
+        in: path
+        name: run_id
+        required: true
+        type: string
+      - description: AgentOS control operation
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/request.AgentOSControl'
+      produces:
+      - application/json
+      responses:
+        "202":
+          description: Accepted
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/response.Error'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/response.Error'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/response.Error'
+      summary: Control AgentOS run
+      tags:
+      - agentos
+  /agentos/runs/{run_id}/events:
+    post:
+      consumes:
+      - application/json
+      description: Accept a normalized event from an external AgentOS backend.
+      operationId: agentos-ingest-event
+      parameters:
+      - description: Run ID
+        in: path
+        name: run_id
+        required: true
+        type: string
+      - description: AgentOS event
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/eventing.IngestEvent'
+      produces:
+      - application/json
+      responses:
+        "202":
+          description: Accepted
+          schema:
+            $ref: '#/definitions/v1.ingestAgentOSEventResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/response.Error'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/response.Error'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/response.Error'
+      summary: Ingest AgentOS event
+      tags:
+      - agentos
+  /agentos/runs/{run_id}/signals:
+    post:
+      consumes:
+      - application/json
+      description: Send business input such as user.message to an AgentOS run.
+      operationId: agentos-signal-run
+      parameters:
+      - description: Run ID
+        in: path
+        name: run_id
+        required: true
+        type: string
+      - description: AgentOS signal
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/request.AgentOSSignal'
+      produces:
+      - application/json
+      responses:
+        "202":
+          description: Accepted
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/response.Error'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/response.Error'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/response.Error'
+      summary: Signal AgentOS run
+      tags:
+      - agentos
+  /agentos/runs/{run_id}/status:
     get:
       consumes:
       - application/json
-      description: Get the current status of an agent run
-      operationId: status
+      description: Query the current status of an AgentOS run.
+      operationId: agentos-run-status
       parameters:
       - description: Run ID
         in: path
@@ -432,14 +683,18 @@ paths:
         "200":
           description: OK
           schema:
-            $ref: '#/definitions/response.RunStatus'
+            $ref: '#/definitions/agentos.RunStatus'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/response.Error'
         "500":
           description: Internal Server Error
           schema:
             $ref: '#/definitions/response.Error'
-      summary: Get run status
+      summary: Get AgentOS run status
       tags:
-      - agent
+      - agentos
   /orchestration/execute:
     post:
       consumes:

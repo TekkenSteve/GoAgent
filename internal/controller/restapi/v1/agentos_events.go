@@ -15,6 +15,19 @@ type ingestAgentOSEventResponse struct {
 	Duplicate bool   `json:"duplicate"`
 }
 
+// @Summary     Ingest AgentOS event
+// @Description Accept a normalized event from an external AgentOS backend.
+// @ID          agentos-ingest-event
+// @Tags        agentos
+// @Accept      json
+// @Produce     json
+// @Param       run_id path string true "Run ID"
+// @Param       request body eventing.IngestEvent true "AgentOS event"
+// @Success     202 {object} ingestAgentOSEventResponse
+// @Failure     400 {object} response.Error
+// @Failure     404 {object} response.Error
+// @Failure     500 {object} response.Error
+// @Router      /agentos/runs/{run_id}/events [post]
 func (r *V1) ingestAgentOSEvent(c *fiber.Ctx) error {
 	if r.eventIngest == nil {
 		return errorResponse(c, fiber.StatusNotFound, "agentos event ingest is not configured")

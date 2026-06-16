@@ -18,7 +18,6 @@ services:
       REDIS_URL: "redis://redis:6379"
       AGENTFW_ENABLED: "true"
       AGENTFW_TEMPORAL_ADDRESS: "temporal:7233"
-      AGENTFW_ROLLOUT_MODE: "enabled"
       AGENTFW_LLM_CONFIG_PATH: "/config/llm.yaml"
     volumes:
       - "./integration-test/mock-llm/llm-config.yaml:/config/llm.yaml"

@@ -9,6 +9,18 @@ import (
 	"github.com/gofiber/fiber/v2"
 )
 
+// @Summary     Start AgentOS run
+// @Description Start a generic AgentOS run on the selected backend.
+// @ID          agentos-start-run
+// @Tags        agentos
+// @Accept      json
+// @Produce     json
+// @Param       request body request.AgentOSStart true "AgentOS run request"
+// @Success     202 {object} agentos.RunStatus
+// @Failure     400 {object} response.Error
+// @Failure     404 {object} response.Error
+// @Failure     500 {object} response.Error
+// @Router      /agentos/runs [post]
 func (r *V1) startAgentOSRun(ctx *fiber.Ctx) error {
 	if r.agentOSRuntime == nil {
 		return errorResponse(ctx, http.StatusNotFound, "agentos runtime is not configured")
@@ -51,6 +63,19 @@ func isNativeAgentOSBackend(ref agentos.BackendRef) bool {
 	return ref.Kind == agentos.BackendKindNative
 }
 
+// @Summary     Signal AgentOS run
+// @Description Send business input such as user.message to an AgentOS run.
+// @ID          agentos-signal-run
+// @Tags        agentos
+// @Accept      json
+// @Produce     json
+// @Param       run_id path string true "Run ID"
+// @Param       request body request.AgentOSSignal true "AgentOS signal"
+// @Success     202
+// @Failure     400 {object} response.Error
+// @Failure     404 {object} response.Error
+// @Failure     500 {object} response.Error
+// @Router      /agentos/runs/{run_id}/signals [post]
 func (r *V1) signalAgentOSRun(ctx *fiber.Ctx) error {
 	if r.agentOSRuntime == nil {
 		return errorResponse(ctx, http.StatusNotFound, "agentos runtime is not configured")
@@ -77,6 +102,19 @@ func (r *V1) signalAgentOSRun(ctx *fiber.Ctx) error {
 	return ctx.SendStatus(http.StatusAccepted)
 }
 
+// @Summary     Control AgentOS run
+// @Description Send lifecycle control such as pause, resume, or cancel to an AgentOS run.
+// @ID          agentos-control-run
+// @Tags        agentos
+// @Accept      json
+// @Produce     json
+// @Param       run_id path string true "Run ID"
+// @Param       request body request.AgentOSControl true "AgentOS control operation"
+// @Success     202
+// @Failure     400 {object} response.Error
+// @Failure     404 {object} response.Error
+// @Failure     500 {object} response.Error
+// @Router      /agentos/runs/{run_id}/control [post]
 func (r *V1) controlAgentOSRun(ctx *fiber.Ctx) error {
 	if r.agentOSRuntime == nil {
 		return errorResponse(ctx, http.StatusNotFound, "agentos runtime is not configured")
@@ -97,6 +135,17 @@ func (r *V1) controlAgentOSRun(ctx *fiber.Ctx) error {
 	return ctx.SendStatus(http.StatusAccepted)
 }
 
+// @Summary     Get AgentOS run status
+// @Description Query the current status of an AgentOS run.
+// @ID          agentos-run-status
+// @Tags        agentos
+// @Accept      json
+// @Produce     json
+// @Param       run_id path string true "Run ID"
+// @Success     200 {object} agentos.RunStatus
+// @Failure     404 {object} response.Error
+// @Failure     500 {object} response.Error
+// @Router      /agentos/runs/{run_id}/status [get]
 func (r *V1) statusAgentOSRun(ctx *fiber.Ctx) error {
 	if r.agentOSRuntime == nil {
 		return errorResponse(ctx, http.StatusNotFound, "agentos runtime is not configured")

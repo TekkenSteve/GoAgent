@@ -3,7 +3,7 @@
 // Usage:
 //
 //	c := client.New("http://localhost:8080", "e2e-test-account")
-//	status, err := c.ExecuteAgent(ctx, client.ExecuteRequest{
+//	status, err := c.StartRun(ctx, client.AgentOSRunRequest{
 //	    RunID: "my-run", UserMessage: "Hello",
 //	})
 //	status, err = c.WaitForCompletion(ctx, "my-run", 2*time.Second, 4*time.Minute)
@@ -23,9 +23,10 @@ import (
 )
 
 const (
-	LifecycleStateCompleted = "completed"
-	LifecycleStateFailed    = "failed"
-	LifecycleStateCanceled  = "canceled"
+	LifecycleStateCompleted    = "completed"
+	LifecycleStateFailed       = "failed"
+	LifecycleStateCanceled     = "canceled"
+	LifecycleStateWaitingInput = "waiting_input"
 )
 
 var ErrWaitTimeout = errors.New("wait timeout")
@@ -51,7 +52,7 @@ func New(baseURL, accountID string) *Client {
 }
 
 // Do sends a JSON request and decodes the response into result (if non-nil).
-// path is a URL path like "/v1/agent/execute".
+// path is a URL path like "/v1/agentos/runs".
 func (c *Client) Do(ctx context.Context, method, path string, body, result any) error {
 	var bodyReader io.Reader
 
@@ -117,9 +118,7 @@ func (c *Client) pollStatus(ctx context.Context, runID, pathPrefix, desc string,
 		} else {
 			fmt.Fprintf(os.Stdout, "  lifecycle_state=%s step=%d\n", status.LifecycleState, status.Step)
 
-			if status.LifecycleState == LifecycleStateCompleted ||
-				status.LifecycleState == LifecycleStateFailed ||
-				status.LifecycleState == LifecycleStateCanceled {
+			if isStableRunState(status.LifecycleState) {
 				return &status, nil
 			}
 		}
@@ -142,8 +141,38 @@ func (c *Client) WaitForOrchestrationCompletion(ctx context.Context, runID strin
 	return c.pollStatus(ctx, runID, "/v1/orchestration/status/", "orchestration run", interval, timeout)
 }
 
-// WaitForCompletion polls GET /v1/agent/status/{runID} until a terminal state
-// (completed, failed, canceled) is reached, then returns the final status.
+// WaitForCompletion polls GET /v1/agentos/runs/{runID}/status until the run reaches
+// a stable state: completed, failed, canceled, or waiting_input.
 func (c *Client) WaitForCompletion(ctx context.Context, runID string, interval, timeout time.Duration) (*RunStatus, error) {
-	return c.pollStatus(ctx, runID, "/v1/agent/status/", "run", interval, timeout)
+	deadline := time.Now().Add(timeout)
+
+	for {
+		status, err := c.GetStatus(ctx, runID)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "  poll error: %v\n", err)
+		} else {
+			fmt.Fprintf(os.Stdout, "  lifecycle_state=%s step=%d\n", status.LifecycleState, status.Step)
+
+			if isStableRunState(status.LifecycleState) {
+				return status, nil
+			}
+		}
+
+		if time.Now().After(deadline) {
+			return nil, fmt.Errorf("%w: run %s after %v", ErrWaitTimeout, runID, timeout)
+		}
+
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		case <-time.After(interval):
+		}
+	}
+}
+
+func isStableRunState(state string) bool {
+	return state == LifecycleStateCompleted ||
+		state == LifecycleStateFailed ||
+		state == LifecycleStateCanceled ||
+		state == LifecycleStateWaitingInput
 }
