@@ -304,9 +304,11 @@ func initTemporalComponents(
 	l.Info("app - Run - agent framework worker started on task queue: %s", fwCfg.Temporal.TaskQueue)
 
 	agentOSRuntime, err := agentostemporal.NewRuntimeWithClient(context.Background(), agentostemporal.RuntimeConfig{
-		TemporalAddress:   fwCfg.Temporal.Address,
-		TemporalNamespace: fwCfg.Temporal.Namespace,
-		TemporalTaskQueue: fwCfg.Temporal.TaskQueue,
+		TemporalAddress:          fwCfg.Temporal.Address,
+		TemporalNamespace:        fwCfg.Temporal.Namespace,
+		TemporalTaskQueue:        fwCfg.Temporal.TaskQueue,
+		RedisURL:                 cfg.Redis.URL,
+		TemporalExternalBackends: temporalExternalBackends(l, cfg),
 	}, runtime.Client)
 	if err != nil {
 		l.Fatal(fmt.Errorf("app - Run - agentos temporal runtime: %w", err))
@@ -323,6 +325,36 @@ func initTemporalComponents(
 		signalWorkflow: signalWorkflow,
 		llmProvider:    comp.llmProvider,
 	}
+}
+
+func temporalExternalBackends(l logger.Interface, cfg *config.Config) []agentostemporal.ExternalBackendConfig {
+	backends, err := cfg.AgentFW.TemporalExternalBackends()
+	if err != nil {
+		l.Fatal(fmt.Errorf("app - Run - temporal external backends: %w", err))
+	}
+
+	result := make([]agentostemporal.ExternalBackendConfig, 0, len(backends))
+	for _, backend := range backends {
+		defaults := make(map[agentos.SignalType]string, len(backend.Signals.Defaults))
+		for signalType, signalName := range backend.Signals.Defaults {
+			defaults[agentos.SignalType(signalType)] = signalName
+		}
+
+		result = append(result, agentostemporal.ExternalBackendConfig{
+			Name:         backend.Name,
+			TaskQueue:    backend.TaskQueue,
+			WorkflowType: backend.WorkflowType,
+			QueryType:    backend.QueryType,
+			Signals: agentostemporal.ExternalSignalNames{
+				Pause:    backend.Signals.Pause,
+				Resume:   backend.Signals.Resume,
+				Cancel:   backend.Signals.Cancel,
+				Defaults: defaults,
+			},
+		})
+	}
+
+	return result
 }
 
 // initAgentComponentsResult holds the results of initAgentComponents.

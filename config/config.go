@@ -1,6 +1,7 @@
 package config
 
 import (
+	"encoding/json"
 	"fmt"
 
 	"github.com/caarlos0/env/v11"
@@ -85,6 +86,8 @@ type (
 		TemporalAddress   string `env:"AGENTFW_TEMPORAL_ADDRESS" envDefault:"127.0.0.1:7233"`
 		TemporalNamespace string `env:"AGENTFW_TEMPORAL_NAMESPACE" envDefault:"default"`
 		TemporalTaskQueue string `env:"AGENTFW_TEMPORAL_TASK_QUEUE" envDefault:"agent-framework"`
+		// TemporalExternalBackendsJSON is a JSON array of temporal_external backend configs.
+		TemporalExternalBackendsJSON string `env:"AGENTFW_TEMPORAL_EXTERNAL_BACKENDS_JSON" envDefault:"[]"`
 
 		MaxConcurrentWorkflowTaskPollers int   `env:"AGENTFW_MAX_CONCURRENT_WORKFLOW_TASK_POLLERS" envDefault:"2"`
 		MaxConcurrentActivityTaskPollers int   `env:"AGENTFW_MAX_CONCURRENT_ACTIVITY_TASK_POLLERS" envDefault:"2"`
@@ -109,6 +112,33 @@ type (
 		Enabled bool `env:"SWAGGER_ENABLED" envDefault:"false"`
 	}
 )
+
+// TemporalExternalBackend configures an external Temporal workflow backend.
+type TemporalExternalBackend struct {
+	Name         string              `json:"name"`
+	TaskQueue    string              `json:"task_queue"`
+	WorkflowType string              `json:"workflow_type"`
+	QueryType    string              `json:"query_type,omitempty"`
+	Signals      ExternalSignalNames `json:"signals,omitempty"`
+}
+
+// ExternalSignalNames maps AgentOS signals/control operations to external workflow signal names.
+type ExternalSignalNames struct {
+	Pause    string            `json:"pause,omitempty"`
+	Resume   string            `json:"resume,omitempty"`
+	Cancel   string            `json:"cancel,omitempty"`
+	Defaults map[string]string `json:"defaults,omitempty"`
+}
+
+// TemporalExternalBackends parses configured temporal_external backends.
+func (c AgentFW) TemporalExternalBackends() ([]TemporalExternalBackend, error) {
+	var backends []TemporalExternalBackend
+	if err := json.Unmarshal([]byte(c.TemporalExternalBackendsJSON), &backends); err != nil {
+		return nil, fmt.Errorf("parse AGENTFW_TEMPORAL_EXTERNAL_BACKENDS_JSON: %w", err)
+	}
+
+	return backends, nil
+}
 
 // NewConfig returns app config.
 func NewConfig() (*Config, error) {

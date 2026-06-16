@@ -40,8 +40,8 @@ const (
 
 // BackendRef selects the backend that owns a run.
 type BackendRef struct {
-	Kind BackendKind
-	Name string
+	Kind BackendKind `json:"kind"`
+	Name string      `json:"name"`
 }
 
 // DefaultBackendRef returns the built-in GoAgent backend reference.
