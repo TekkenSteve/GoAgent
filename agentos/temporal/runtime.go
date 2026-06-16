@@ -23,7 +23,7 @@ type runtime struct {
 }
 
 // NewRuntime creates the default Temporal/Redis implementation of agentos.Runtime.
-func NewRuntime(ctx context.Context, cfg RuntimeConfig) (agentos.Runtime, error) {
+func NewRuntime(ctx context.Context, cfg RuntimeConfig, options ...RuntimeOption) (agentos.Runtime, error) {
 	fwTemporal := temporalConfig(cfg)
 
 	c, err := client.Dial(client.Options{
@@ -51,7 +51,7 @@ func NewRuntime(ctx context.Context, cfg RuntimeConfig) (agentos.Runtime, error)
 		subscriber = repostream.NewRedisSubscriber(rdb.Hub())
 	}
 
-	if err := r.configureRouter(c, cfg, temporalrepo.NewExecutorTemporal(c, fwTemporal), subscriber); err != nil {
+	if err := r.configureRouter(c, cfg, buildRuntimeOptions(options), temporalrepo.NewExecutorTemporal(c, fwTemporal), subscriber); err != nil {
 		c.Close()
 		if r.redis != nil {
 			_ = r.redis.Close()
@@ -66,7 +66,7 @@ func NewRuntime(ctx context.Context, cfg RuntimeConfig) (agentos.Runtime, error)
 // NewRuntimeWithClient adapts an existing Temporal client to agentos.Runtime.
 // Hosts that already own worker/client lifecycle can use this without opening
 // another Temporal connection.
-func NewRuntimeWithClient(ctx context.Context, cfg RuntimeConfig, c client.Client) (agentos.Runtime, error) {
+func NewRuntimeWithClient(ctx context.Context, cfg RuntimeConfig, c client.Client, options ...RuntimeOption) (agentos.Runtime, error) {
 	if c == nil {
 		return nil, errors.New("agentos temporal runtime: nil temporal client")
 	}
@@ -86,7 +86,7 @@ func NewRuntimeWithClient(ctx context.Context, cfg RuntimeConfig, c client.Clien
 		subscriber = repostream.NewRedisSubscriber(rdb.Hub())
 	}
 
-	if err := r.configureRouter(c, cfg, temporalrepo.NewExecutorTemporal(c, fwTemporal), subscriber); err != nil {
+	if err := r.configureRouter(c, cfg, buildRuntimeOptions(options), temporalrepo.NewExecutorTemporal(c, fwTemporal), subscriber); err != nil {
 		if r.redis != nil {
 			_ = r.redis.Close()
 		}
@@ -117,7 +117,7 @@ func (r *runtime) Subscribe(ctx context.Context, scope agentos.StreamScope) (age
 	return r.router.Subscribe(ctx, scope)
 }
 
-func (r *runtime) configureRouter(temporalClient client.Client, cfg RuntimeConfig, executor *temporalrepo.ExecutorTemporal, subscriber *repostream.RedisSubscriber) error {
+func (r *runtime) configureRouter(temporalClient client.Client, cfg RuntimeConfig, opts runtimeOptions, executor *temporalrepo.ExecutorTemporal, subscriber *repostream.RedisSubscriber) error {
 	registry := agentfwbackend.NewRegistry()
 	agentosSubscriber := newAgentOSSubscriber(subscriber)
 	native := newTemporalNativeBackend(executor, agentosSubscriber)
@@ -144,13 +144,29 @@ func (r *runtime) configureRouter(temporalClient client.Client, cfg RuntimeConfi
 		}
 	}
 
-	router, err := agentfwbackend.NewRouter(registry, agentfwbackend.NewMemoryRunBackendIndex())
+	runIndex := agentfwbackend.RunBackendIndex(agentfwbackend.NewMemoryRunBackendIndex())
+	if opts.runBackendIndex != nil {
+		runIndex = opts.runBackendIndex
+	}
+
+	router, err := agentfwbackend.NewRouter(registry, runIndex)
 	if err != nil {
 		return err
 	}
 	r.router = router
 
 	return nil
+}
+
+func buildRuntimeOptions(options []RuntimeOption) runtimeOptions {
+	var opts runtimeOptions
+	for _, option := range options {
+		if option != nil {
+			option(&opts)
+		}
+	}
+
+	return opts
 }
 
 func temporalExternalConfig(cfg ExternalBackendConfig) temporalexternal.Config {

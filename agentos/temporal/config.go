@@ -1,6 +1,10 @@
 package temporal
 
-import "github.com/TekkenSteve/GoAgent/agentos"
+import (
+	"context"
+
+	"github.com/TekkenSteve/GoAgent/agentos"
+)
 
 // RuntimeConfig configures the default Temporal/Redis runtime implementation.
 type RuntimeConfig struct {
@@ -26,6 +30,26 @@ type ExternalSignalNames struct {
 	Resume   string
 	Cancel   string
 	Defaults map[agentos.SignalType]string
+}
+
+// RunBackendIndex persists run ownership for Signal/Control/Status routing.
+type RunBackendIndex interface {
+	Bind(ctx context.Context, spec agentos.RunSpec) error
+	Resolve(ctx context.Context, runID string) (agentos.BackendRef, error)
+}
+
+type runtimeOptions struct {
+	runBackendIndex RunBackendIndex
+}
+
+// RuntimeOption customizes runtime construction.
+type RuntimeOption func(*runtimeOptions)
+
+// WithRunBackendIndex provides a durable run -> backend route index.
+func WithRunBackendIndex(index RunBackendIndex) RuntimeOption {
+	return func(opts *runtimeOptions) {
+		opts.runBackendIndex = index
+	}
 }
 
 // WorkerConfig configures registration of GoAgent workflows and activities into

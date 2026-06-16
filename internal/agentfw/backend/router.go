@@ -10,7 +10,7 @@ import (
 
 // RunBackendIndex records which backend owns each run.
 type RunBackendIndex interface {
-	Bind(ctx context.Context, runID string, ref agentos.BackendRef) error
+	Bind(ctx context.Context, spec agentos.RunSpec) error
 	Resolve(ctx context.Context, runID string) (agentos.BackendRef, error)
 }
 
@@ -26,17 +26,17 @@ func NewMemoryRunBackendIndex() *MemoryRunBackendIndex {
 }
 
 // Bind stores the backend reference for a run.
-func (i *MemoryRunBackendIndex) Bind(_ context.Context, runID string, ref agentos.BackendRef) error {
-	if runID == "" {
+func (i *MemoryRunBackendIndex) Bind(_ context.Context, spec agentos.RunSpec) error {
+	if spec.RunID == "" {
 		return fmt.Errorf("%w: run id is required", agentos.ErrInvalidRunSpec)
 	}
-	if err := validateBackendRef(ref); err != nil {
+	if err := validateBackendRef(spec.Backend); err != nil {
 		return err
 	}
 
 	i.mu.Lock()
 	defer i.mu.Unlock()
-	i.routes[runID] = ref
+	i.routes[spec.RunID] = spec.Backend
 
 	return nil
 }
@@ -91,7 +91,7 @@ func (r *Router) Start(ctx context.Context, spec agentos.RunSpec) (agentos.RunSt
 	if err != nil {
 		return agentos.RunStatus{}, err
 	}
-	if err := r.index.Bind(ctx, spec.RunID, spec.Backend); err != nil {
+	if err := r.index.Bind(ctx, spec); err != nil {
 		return agentos.RunStatus{}, err
 	}
 

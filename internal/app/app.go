@@ -87,6 +87,7 @@ func Run(cfg *config.Config) { //nolint: gocyclo,cyclop,funlen,gocritic,nolintli
 	agentRepo := cached.NewAgentRepo(persistentAgentRepo)
 	templateRepo := temporalrepo.NewWorkflowTemplateRepo(pg)
 	triggerRepo := temporalrepo.NewTriggerRepo(pg)
+	agentOSRunRepo := temporalrepo.NewAgentOSRunRepo(pg)
 	templateUC = templatepkg.New(templateRepo)
 
 	ctx := context.Background()
@@ -115,7 +116,7 @@ func Run(cfg *config.Config) { //nolint: gocyclo,cyclop,funlen,gocritic,nolintli
 	if !controlDecision.UseTemporal {
 		l.Info("app - Run - agent framework temporal worker skipped: %s", controlDecision.Reason)
 	} else {
-		tc := initTemporalComponents(l, cfg, &fwCfg, pg, rdb, messageRepo, agentRepo, templateRepo, triggerRepo, templateUC, eventStore)
+		tc := initTemporalComponents(l, cfg, &fwCfg, pg, rdb, messageRepo, agentRepo, templateRepo, triggerRepo, agentOSRunRepo, templateUC, eventStore)
 		if tc != nil {
 			temporalRuntime = tc.runtime
 			agentOSRuntime = tc.agentOSRuntime
@@ -267,6 +268,7 @@ func initTemporalComponents(
 	agentRepo *cached.AgentRepo,
 	templateRepo *temporalrepo.WorkflowTemplateRepo,
 	triggerRepo *temporalrepo.TriggerRepo,
+	agentOSRunRepo *temporalrepo.AgentOSRunRepo,
 	templateUC *templatepkg.UseCase,
 	eventStore stream.EventStore,
 ) *temporalComponents {
@@ -309,7 +311,7 @@ func initTemporalComponents(
 		TemporalTaskQueue:        fwCfg.Temporal.TaskQueue,
 		RedisURL:                 cfg.Redis.URL,
 		TemporalExternalBackends: temporalExternalBackends(l, cfg),
-	}, runtime.Client)
+	}, runtime.Client, agentostemporal.WithRunBackendIndex(agentOSRunRepo))
 	if err != nil {
 		l.Fatal(fmt.Errorf("app - Run - agentos temporal runtime: %w", err))
 	}
