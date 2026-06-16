@@ -22,7 +22,7 @@ func TestExecutionRequestFromRunSpec(t *testing.T) {
 		UserMessage:    "hello",
 		IdempotencyKey: "idem-1",
 		RequestedAt:    requestedAt,
-		Backend:        agentos.DefaultBackendRef(),
+		Backend:        agentos.BackendRef{Kind: agentos.BackendKindNative, Name: agentos.BackendNameGoAgentNative},
 	})
 	if err != nil {
 		t.Fatalf("executionRequestFromRunSpec: %v", err)

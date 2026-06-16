@@ -29,7 +29,7 @@ func (e *agentOSExecutor) Execute(ctx context.Context, req *entity.ExecuteReques
 		UserMessage:    req.UserMessage,
 		IdempotencyKey: req.IdempotencyKey,
 		RequestedAt:    req.RequestedAt,
-		Backend:        agentos.DefaultBackendRef(),
+		Backend:        agentos.BackendRef{Kind: agentos.BackendKindNative, Name: agentos.BackendNameGoAgentNative},
 	})
 	if err != nil {
 		return entity.RunStatus{}, fmt.Errorf("agentos executor - execute: %w", err)

@@ -48,7 +48,7 @@ func (r *V1) startAgentOSRun(ctx *fiber.Ctx) error {
 }
 
 func isNativeAgentOSBackend(ref agentos.BackendRef) bool {
-	return ref.Kind == agentos.BackendKindNative || ref.Kind == agentos.BackendKindTemporalNative
+	return ref.Kind == agentos.BackendKindNative
 }
 
 func (r *V1) signalAgentOSRun(ctx *fiber.Ctx) error {

@@ -26,7 +26,7 @@ func main() {
 		SystemPrompt: "You are a concise assistant.",
 		UserMessage:  "Summarize AgentOS in one sentence.",
 		RequestedAt:  time.Now().UTC(),
-		Backend:      agentos.DefaultBackendRef(),
+		Backend:      agentos.BackendRef{Kind: agentos.BackendKindNative, Name: agentos.BackendNameGoAgentNative},
 		Metadata: map[string]string{
 			"source": "type-example",
 		},

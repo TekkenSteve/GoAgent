@@ -39,7 +39,7 @@ func main() {
 		SystemPrompt: "Use available tools when they are relevant.",
 		UserMessage:  "Search the web for the latest Go release and summarize it.",
 		RequestedAt:  time.Now().UTC(),
-		Backend:      agentos.DefaultBackendRef(),
+		Backend:      agentos.BackendRef{Kind: agentos.BackendKindNative, Name: agentos.BackendNameGoAgentNative},
 	})
 	if err != nil {
 		log.Fatalf("start run: %v", err)

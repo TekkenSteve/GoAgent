@@ -39,7 +39,7 @@ func main() {
 		SystemPrompt: "Show your reasoning briefly before answering.",
 		UserMessage:  "Calculate 25 * 4 + 10.",
 		RequestedAt:  time.Now().UTC(),
-		Backend:      agentos.DefaultBackendRef(),
+		Backend:      agentos.BackendRef{Kind: agentos.BackendKindNative, Name: agentos.BackendNameGoAgentNative},
 	})
 	if err != nil {
 		log.Fatalf("start run: %v", err)

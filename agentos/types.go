@@ -27,7 +27,6 @@ type BackendKind string
 
 const (
 	BackendKindNative           BackendKind = "native"
-	BackendKindTemporalNative   BackendKind = "temporal_native"
 	BackendKindTemporalExternal BackendKind = "temporal_external"
 	BackendKindHTTP             BackendKind = "http"
 	BackendKindGRPC             BackendKind = "grpc"
@@ -42,14 +41,6 @@ const (
 type BackendRef struct {
 	Kind BackendKind `json:"kind"`
 	Name string      `json:"name"`
-}
-
-// DefaultBackendRef returns the built-in GoAgent backend reference.
-func DefaultBackendRef() BackendRef {
-	return BackendRef{
-		Kind: BackendKindTemporalNative,
-		Name: BackendNameGoAgentNative,
-	}
 }
 
 // RunStatus is the public lifecycle view for a run.

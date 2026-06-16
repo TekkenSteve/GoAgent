@@ -194,7 +194,7 @@ func agentOSStartBody(runID, accountID, message string) string {
 		"account_id": "%s",
 		"user_message": "%s",
 		"backend": {
-			"kind": "temporal_native",
+			"kind": "native",
 			"name": "goagent-native"
 		}
 	}`, runID, accountID, message)

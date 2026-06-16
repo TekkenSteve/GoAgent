@@ -125,12 +125,6 @@ func (r *runtime) configureRouter(temporalClient client.Client, cfg RuntimeConfi
 	agentosSubscriber := newAgentOSSubscriber(subscriber)
 	native := newTemporalNativeBackend(executor, agentosSubscriber)
 	if err := registry.Register(agentos.BackendRef{
-		Kind: agentos.BackendKindTemporalNative,
-		Name: agentos.BackendNameGoAgentNative,
-	}, native); err != nil {
-		return err
-	}
-	if err := registry.Register(agentos.BackendRef{
 		Kind: agentos.BackendKindNative,
 		Name: agentos.BackendNameGoAgentNative,
 	}, native); err != nil {
