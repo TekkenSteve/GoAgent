@@ -6,12 +6,49 @@ import (
 	"time"
 
 	"github.com/TekkenSteve/GoAgent/agentos"
+	"github.com/TekkenSteve/GoAgent/internal/usecase/agentosruntime/agentosruntimetest"
 	enumspb "go.temporal.io/api/enums/v1"
 	workflowpb "go.temporal.io/api/workflow/v1"
 	workflowservicepb "go.temporal.io/api/workflowservice/v1"
 	"go.temporal.io/sdk/client"
 	"go.temporal.io/sdk/converter"
 )
+
+func TestBackendConformance(t *testing.T) {
+	probe := &agentosruntimetest.SubscriberProbe{}
+	temporalClient := &fakeTemporalClient{
+		runID: "temporal-run-1",
+		queryValue: encodedStatus{status: agentos.RunStatus{
+			RunID:          "agentos-conformance-run",
+			LifecycleState: "running",
+			UpdatedAt:      time.Date(2026, 6, 16, 12, 1, 0, 0, time.UTC),
+		}},
+	}
+	backend, err := NewBackend(temporalClient, probe, Config{
+		Name:         "langgraph-conformance",
+		TaskQueue:    "langgraph-queue",
+		WorkflowType: "langgraph.agent.v1",
+		QueryType:    "agentos_status",
+		Signals: SignalNames{
+			Cancel: "cancel",
+			Defaults: map[agentos.SignalType]string{
+				agentos.SignalUserMessage: "user_input",
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("NewBackend: %v", err)
+	}
+	backend.now = func() time.Time { return time.Date(2026, 6, 16, 12, 0, 0, 0, time.UTC) }
+
+	agentosruntimetest.RunBackendConformance(t, agentosruntimetest.BackendConformanceCase{
+		Name:            "temporal_external",
+		Backend:         backend,
+		Ref:             backend.config.Ref(),
+		StatusState:     "running",
+		SubscriberProbe: probe,
+	})
+}
 
 func TestBackendStartExecutesConfiguredWorkflow(t *testing.T) {
 	temporalClient := &fakeTemporalClient{runID: "temporal-run-1"}

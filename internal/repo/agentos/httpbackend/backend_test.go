@@ -5,11 +5,60 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/TekkenSteve/GoAgent/agentos"
+	"github.com/TekkenSteve/GoAgent/internal/usecase/agentosruntime/agentosruntimetest"
 )
+
+func TestBackendConformance(t *testing.T) {
+	probe := &agentosruntimetest.SubscriberProbe{}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodPost && r.URL.Path == "/runs":
+			var req startRequest
+			if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+				t.Fatalf("decode start: %v", err)
+			}
+			_ = json.NewEncoder(w).Encode(agentos.RunStatus{
+				RunID:          req.RunID,
+				LifecycleState: "created",
+				UpdatedAt:      time.Date(2026, 6, 16, 12, 0, 0, 0, time.UTC),
+			})
+		case r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/signals"):
+			w.WriteHeader(http.StatusNoContent)
+		case r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/control"):
+			w.WriteHeader(http.StatusNoContent)
+		case r.Method == http.MethodGet && strings.HasSuffix(r.URL.Path, "/status"):
+			_ = json.NewEncoder(w).Encode(agentos.RunStatus{
+				RunID:          "agentos-conformance-run",
+				LifecycleState: "running",
+				UpdatedAt:      time.Date(2026, 6, 16, 12, 1, 0, 0, time.UTC),
+			})
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+
+	backend, err := NewBackend(http.DefaultClient, probe, Config{
+		Name:     "http-conformance",
+		Endpoint: server.URL,
+	})
+	if err != nil {
+		t.Fatalf("NewBackend: %v", err)
+	}
+
+	agentosruntimetest.RunBackendConformance(t, agentosruntimetest.BackendConformanceCase{
+		Name:            "http",
+		Backend:         backend,
+		Ref:             backend.config.Ref(),
+		StatusState:     "running",
+		SubscriberProbe: probe,
+	})
+}
 
 func TestBackendStartPostsRunEnvelope(t *testing.T) {
 	var got startRequest
