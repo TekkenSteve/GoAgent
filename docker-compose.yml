@@ -30,15 +30,6 @@ x-backend-app-environment: &x-backend-app-environment
   # PG
   PG_POOL_MAX: "2"
   PG_URL: "postgres://user:myAwEsOm3pa55@w0rd@db:5432/db"
-  # gRPC
-  GRPC_PORT: "8081"
-  # RMQ
-  RMQ_RPC_SERVER: "rpc_server"
-  RMQ_RPC_CLIENT: "rpc_client"
-  RMQ_URL: "amqp://guest:guest@rabbitmq:5672/"
-  # NATS
-  NATS_RPC_SERVER: "rpc_server"
-  NATS_URL: "nats://guest:guest@nats:4222/"
   # Metrics
   METRICS_ENABLED: "true"
   # Swagger

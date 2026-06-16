@@ -11,7 +11,6 @@
 - **Потоковая передача** — SSE и WebSocket поддержка для вывода агента в реальном времени
 - **Учет и биллинг** — Отслеживание использования на основе кредитов с назначением тарифных планов
 - **Чистая архитектура** — Инверсия зависимостей, изоляция на основе интерфейсов, тестируемость
-- **Несколько типов серверов** — REST API, gRPC, AMQP RPC, NATS RPC
 - **Наблюдаемость** — Структурированное логирование (zerolog), метрики Prometheus, трассировка OpenTelemetry
 - **Миграции БД** — golang-migrate для управления схемой PostgreSQL
 
@@ -39,7 +38,7 @@
 ### Локальная разработка
 
 ```sh
-# Запуск зависимых сервисов (Postgres, RabbitMQ, NATS, Temporal)
+# Запуск зависимых сервисов (Postgres, Redis, Temporal)
 make compose-up
 
 # Запуск приложения (с миграциями базы данных)
@@ -65,13 +64,12 @@ make compose-up-all
   - `http://127.0.0.1:8080/healthz` — проверка здоровья
   - `http://127.0.0.1:8080/metrics` — метрики Prometheus
   - `http://127.0.0.1:8080/swagger` — документация API
-- **Agent API (v1)**:
-  - `POST /v1/agent/execute` — запуск одного агента (ReAct цикл)
-  - `GET /v1/agent/status/{run_id}` — проверка статуса агента
-  - `GET /v1/agent/{run_id}/messages` — просмотр сообщений
-  - `GET /v1/agent/{run_id}/tools` — просмотр результатов инструментов
-  - `GET /v1/agent/stream` — SSE поток вывода агента
-  - `GET /v1/agent/ws` — WebSocket для связи в реальном времени
+- **AgentOS API (v1)**:
+  - `POST /v1/agentos/runs` — запуск run на выбранном backend
+  - `GET /v1/agentos/runs/{run_id}/status` — проверка статуса run
+  - `POST /v1/agentos/runs/{run_id}/signals` — отправка бизнес-сигналов, например `user.message`
+  - `POST /v1/agentos/runs/{run_id}/control` — pause, resume или cancel
+  - `POST /v1/agentos/runs/{run_id}/events` — прием событий backend
 - **Оркестрация API**:
   - `POST /v1/orchestration/execute` — запуск многошагового рабочего процесса
   - `GET /v1/orchestration/status/{run_id}` — проверка статуса оркестрации
@@ -82,9 +80,6 @@ make compose-up-all
   - `DELETE /v1/templates/{template_id}` — удаление шаблона
 - **Триггеры API**:
   - `POST /v1/triggers/events` — запуск события вебхука
-- **gRPC**: `tcp://127.0.0.1:8081`
-- **AMQP RPC**: `amqp://guest:guest@127.0.0.1:5672/`
-- **NATS RPC**: `nats://guest:guest@127.0.0.1:4222/`
 - **PostgreSQL**: `postgres://user:myAwEsOm3pa55@w0rd@127.0.0.1:5432/db`
 
 ## Структура проекта
@@ -105,12 +100,12 @@ GoAgent организован вокруг небольшой публично�
 - `internal/app/` — внедрение зависимостей и инициализация приложения
 - `internal/agentfw/` — реализация agent workflow/runtime
 - `internal/entity/`, `internal/usecase/`, `internal/repo/`, `internal/state/` — внутренняя доменная и инфраструктурная реализация
-- `internal/controller/` — транспортный слой (REST, gRPC, AMQP RPC, NATS RPC)
+- `internal/controller/` — транспортный слой (REST AgentOS control plane)
 - `cmd/app/` — точка входа
 
 ### Прочие директории
 
-- `docs/` — Swagger документация и Proto файлы
+- `docs/` — Swagger документация
 - `examples/` — исполняемые примеры паттернов
 - `integration-test/` — интеграционные тесты (требуется Docker)
 - `migrations/` — миграции PostgreSQL
@@ -150,7 +145,7 @@ GoAgent организован вокруг небольшой публично�
 
 | Паттерн | Файл | Ключевые концепции |
 |---------|------|-------------|
-| [ReAct](examples/http/react/) | Один агент + цикл инструментов | `ExecuteRequest`, опрос |
+| [ReAct](examples/http/react/) | Один агент + цикл инструментов | `AgentOSRunRequest`, опрос |
 | [Pipeline](examples/http/pipeline/) | Последовательные этапы обработки | Цепочка `depends_on` |
 | [DAG](examples/http/dag/) | Направленный ациклический граф | Разрешение множественных зависимостей |
 | [Research](examples/http/research/) | Параллельное исследование + синтез | `split`/`join`, `wait` (HITL) |
@@ -184,14 +179,16 @@ GoAgent поддерживает три способа интеграции, о�
 
 ### Режим 1 — Автономный сервер (REST API)
 
-Запустите GoAgent как самостоятельный сервис. Приложение взаимодействует с ним через HTTP/gRPC.
+Запустите GoAgent как самостоятельный сервис. Приложение взаимодействует с ним через AgentOS REST control plane.
 
 ```go
 import "github.com/TekkenSteve/GoAgent/examples/client"
 
 c := client.New("http://localhost:8080", "my-account")
-status, _ := c.ExecuteAgent(ctx, client.ExecuteRequest{
-    RunID: "run-1", UserMessage: "Сколько будет 2+2?",
+status, _ := c.StartRun(ctx, client.AgentOSRunRequest{
+    RunID: "run-1",
+    UserMessage: "Сколько будет 2+2?",
+    Backend: client.BackendRef{Kind: "native", Name: "goagent-native"},
 })
 ```
 
@@ -287,8 +284,6 @@ func New(r Repository) *UseCase {
 Поддерживается простая стратегия версионирования, версии различаются структурой директорий:
 
 - REST API: `internal/controller/restapi/v1`, `v2`...
-- gRPC: `internal/controller/grpc/v1`, `v2`...
-- RPC: `internal/controller/amqp_rpc/v1`, `v2`...
 
 ## Руководство разработчика
 
@@ -307,9 +302,6 @@ make run
 ```sh
 # Генерация документации Swagger
 make swag-v1
-
-# Генерация кода gRPC
-make proto-v1
 
 # Генерация Mock
 make mock

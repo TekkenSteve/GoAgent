@@ -11,7 +11,6 @@ A Go microservices framework built on Clean Architecture principles, integrating
 - **Streaming** — Server-Sent Events (SSE) and WebSocket support for real-time agent output
 - **Account & Billing** — Credit-based usage tracking with plan assignment
 - **Clean Architecture** — Dependency inversion, interface-based isolation, testability
-- **Multiple Server Types** — REST API, gRPC, AMQP RPC, NATS RPC
 - **Observability** — Structured logging (zerolog), Prometheus metrics, OpenTelemetry tracing
 - **Database Migrations** — golang-migrate for PostgreSQL schema management
 
@@ -39,7 +38,7 @@ A Go microservices framework built on Clean Architecture principles, integrating
 ### Local Development
 
 ```sh
-# Start dependency services (Postgres, RabbitMQ, NATS, Temporal)
+# Start dependency services (Postgres, Redis, Temporal)
 make compose-up
 
 # Run the application (includes database migration)
@@ -65,13 +64,12 @@ make compose-up-all
   - `http://127.0.0.1:8080/healthz` — Health check
   - `http://127.0.0.1:8080/metrics` — Prometheus metrics
   - `http://127.0.0.1:8080/swagger` — API documentation
-- **Agent API** (v1):
-  - `POST /v1/agent/execute` — Execute a single agent run (ReAct loop)
-  - `GET /v1/agent/status/{run_id}` — Poll agent run status
-  - `GET /v1/agent/{run_id}/messages` — List conversation messages
-  - `GET /v1/agent/{run_id}/tools` — List tool execution results
-  - `GET /v1/agent/stream` — SSE stream of agent output
-  - `GET /v1/agent/ws` — WebSocket for real-time agent communication
+- **AgentOS API** (v1):
+  - `POST /v1/agentos/runs` — Start a run on a selected backend
+  - `GET /v1/agentos/runs/{run_id}/status` — Poll run status
+  - `POST /v1/agentos/runs/{run_id}/signals` — Send business input such as `user.message`
+  - `POST /v1/agentos/runs/{run_id}/control` — Send pause, resume, or cancel
+  - `POST /v1/agentos/runs/{run_id}/events` — Ingest backend events
 - **Orchestration API**:
   - `POST /v1/orchestration/execute` — Start multi-step orchestration workflow
   - `GET /v1/orchestration/status/{run_id}` — Poll orchestration status
@@ -82,9 +80,6 @@ make compose-up-all
   - `DELETE /v1/templates/{template_id}` — Delete template
 - **Triggers API**:
   - `POST /v1/triggers/events` — Fire trigger event webhook
-- **gRPC**: `tcp://127.0.0.1:8081`
-- **AMQP RPC**: `amqp://guest:guest@127.0.0.1:5672/`
-- **NATS RPC**: `nats://guest:guest@127.0.0.1:4222/`
 - **PostgreSQL**: `postgres://user:myAwEsOm3pa55@w0rd@127.0.0.1:5432/db`
 
 ## Project Structure
@@ -105,12 +100,12 @@ GoAgent is structured around a small public **AgentOS SDK boundary** plus an app
 - `internal/app/` — Dependency injection and application bootstrap
 - `internal/agentfw/` — Agent workflow/runtime implementation
 - `internal/entity/`, `internal/usecase/`, `internal/repo/`, `internal/state/` — Internal domain and infrastructure implementation
-- `internal/controller/` — Transport layer (REST, gRPC, AMQP RPC, NATS RPC)
+- `internal/controller/` — Transport layer (REST AgentOS control plane)
 - `cmd/app/` — Entry point
 
 ### Other Directories
 
-- `docs/` — Swagger docs and Proto files
+- `docs/` — Swagger docs
 - `examples/` — Runnable pattern examples
 - `integration-test/` — Integration tests (requires Docker)
 - `migrations/` — PostgreSQL migrations
@@ -150,7 +145,7 @@ The `examples/http/` directory contains runnable demonstrations using the HTTP c
 
 | Pattern | File | Key Concepts |
 |---------|------|-------------|
-| [ReAct](examples/http/react/) | Single agent + tool loop | `ExecuteRequest`, polling |
+| [ReAct](examples/http/react/) | Single agent + tool loop | `AgentOSRunRequest`, polling |
 | [Pipeline](examples/http/pipeline/) | Sequential processing stages | `depends_on` chain |
 | [DAG](examples/http/dag/) | Directed acyclic graph | Multi-dependency resolution |
 | [Research](examples/http/research/) | Parallel exploration + synthesis | `split`/`join`, `wait` (HITL) |
@@ -184,14 +179,16 @@ GoAgent can be consumed in three ways, from simple to deeply integrated:
 
 ### Mode 1 — Standalone Server (REST API)
 
-Run GoAgent as a standalone service. Your application talks to it via HTTP/gRPC.
+Run GoAgent as a standalone service. Your application talks to it through the AgentOS REST control plane.
 
 ```go
 import "github.com/TekkenSteve/GoAgent/examples/client"
 
 c := client.New("http://localhost:8080", "my-account")
-status, _ := c.ExecuteAgent(ctx, client.ExecuteRequest{
-    RunID: "run-1", UserMessage: "What is 2+2?",
+status, _ := c.StartRun(ctx, client.AgentOSRunRequest{
+    RunID: "run-1",
+    UserMessage: "What is 2+2?",
+    Backend: client.BackendRef{Kind: "native", Name: "goagent-native"},
 })
 ```
 
@@ -287,8 +284,6 @@ func New(r Repository) *UseCase {
 Supports a simple versioning strategy, with versions distinguished by directory structure:
 
 - REST API: `internal/controller/restapi/v1`, `v2`...
-- gRPC: `internal/controller/grpc/v1`, `v2`...
-- RPC: `internal/controller/amqp_rpc/v1`, `v2`...
 
 ## Development Guide
 
@@ -307,9 +302,6 @@ make run
 ```sh
 # Generate Swagger documentation
 make swag-v1
-
-# Generate gRPC code
-make proto-v1
 
 # Generate Mocks
 make mock

@@ -11,7 +11,6 @@
 - **流式输出** — 支持 SSE 和 WebSocket 的实时 Agent 输出
 - **账户与计费** — 基于信用额度的使用跟踪和套餐分配
 - **整洁架构** — 依赖反转、基于接口的隔离、可测试性
-- **多服务器类型** — REST API、gRPC、AMQP RPC、NATS RPC
 - **可观测性** — 结构化日志（zerolog）、Prometheus 指标、OpenTelemetry 追踪
 - **数据库迁移** — 使用 golang-migrate 管理 PostgreSQL 架构
 
@@ -39,7 +38,7 @@
 ### 本地开发
 
 ```sh
-# 启动依赖服务 (Postgres, RabbitMQ, NATS, Temporal)
+# 启动依赖服务 (Postgres, Redis, Temporal)
 make compose-up
 
 # 运行应用（包含数据库迁移）
@@ -65,13 +64,12 @@ make compose-up-all
   - `http://127.0.0.1:8080/healthz` — 健康检查
   - `http://127.0.0.1:8080/metrics` — Prometheus 指标
   - `http://127.0.0.1:8080/swagger` — API 文档
-- **Agent API (v1)**:
-  - `POST /v1/agent/execute` — 执行单 Agent 运行（ReAct 循环）
-  - `GET /v1/agent/status/{run_id}` — 轮询 Agent 运行状态
-  - `GET /v1/agent/{run_id}/messages` — 查看对话消息
-  - `GET /v1/agent/{run_id}/tools` — 查看工具执行结果
-  - `GET /v1/agent/stream` — SSE 流式 Agent 输出
-  - `GET /v1/agent/ws` — WebSocket 实时 Agent 通信
+- **AgentOS API (v1)**:
+  - `POST /v1/agentos/runs` — 在指定 backend 上启动 run
+  - `GET /v1/agentos/runs/{run_id}/status` — 轮询 run 状态
+  - `POST /v1/agentos/runs/{run_id}/signals` — 发送 `user.message` 等业务输入
+  - `POST /v1/agentos/runs/{run_id}/control` — 发送 pause、resume、cancel
+  - `POST /v1/agentos/runs/{run_id}/events` — 接收 backend 事件回写
 - **编排 API**:
   - `POST /v1/orchestration/execute` — 启动多步骤编排工作流
   - `GET /v1/orchestration/status/{run_id}` — 轮询编排状态
@@ -82,9 +80,6 @@ make compose-up-all
   - `DELETE /v1/templates/{template_id}` — 删除模板
 - **触发器 API**:
   - `POST /v1/triggers/events` — 触发事件 webhook
-- **gRPC**: `tcp://127.0.0.1:8081`
-- **AMQP RPC**: `amqp://guest:guest@127.0.0.1:5672/`
-- **NATS RPC**: `nats://guest:guest@127.0.0.1:4222/`
 - **PostgreSQL**: `postgres://user:myAwEsOm3pa55@w0rd@127.0.0.1:5432/db`
 
 ## 项目结构
@@ -105,12 +100,12 @@ GoAgent 围绕小而稳定的 **AgentOS SDK 边界** 和应用壳组织。实现
 - `internal/app/` — 依赖注入与应用引导
 - `internal/agentfw/` — Agent 工作流和运行时实现
 - `internal/entity/`、`internal/usecase/`、`internal/repo/`、`internal/state/` — 内部领域和基础设施实现
-- `internal/controller/` — 传输层（REST、gRPC、AMQP RPC、NATS RPC）
+- `internal/controller/` — 传输层（REST AgentOS 控制面）
 - `cmd/app/` — 入口点
 
 ### 其他目录
 
-- `docs/` — Swagger 文档和 Proto 文件
+- `docs/` — Swagger 文档
 - `examples/` — 可运行的模式示例
 - `integration-test/` — 集成测试（需要 Docker）
 - `migrations/` — PostgreSQL 迁移文件
@@ -150,7 +145,7 @@ Agent 框架由以下部分组成：
 
 | 模式 | 文件 | 关键概念 |
 |---------|------|---------|
-| [ReAct](examples/http/react/) | 单 Agent + 工具循环 | `ExecuteRequest`、轮询 |
+| [ReAct](examples/http/react/) | 单 Agent + 工具循环 | `AgentOSRunRequest`、轮询 |
 | [Pipeline](examples/http/pipeline/) | 顺序处理阶段 | `depends_on` 链 |
 | [DAG](examples/http/dag/) | 有向无环图 | 多依赖解析 |
 | [Research](examples/http/research/) | 并行探索 + 综合 | `split`/`join`、`wait`（HITL） |
@@ -184,14 +179,16 @@ GoAgent 支持三种集成方式，从简单到深度集成：
 
 ### 方式一 — 独立服务（REST API）
 
-将 GoAgent 作为独立服务运行，应用通过 HTTP/gRPC 与其交互。
+将 GoAgent 作为独立服务运行，应用通过 AgentOS REST 控制面与其交互。
 
 ```go
 import "github.com/TekkenSteve/GoAgent/examples/client"
 
 c := client.New("http://localhost:8080", "my-account")
-status, _ := c.ExecuteAgent(ctx, client.ExecuteRequest{
-    RunID: "run-1", UserMessage: "1+1 等于几？",
+status, _ := c.StartRun(ctx, client.AgentOSRunRequest{
+    RunID: "run-1",
+    UserMessage: "1+1 等于几？",
+    Backend: client.BackendRef{Kind: "native", Name: "goagent-native"},
 })
 ```
 
@@ -287,8 +284,6 @@ func New(r Repository) *UseCase {
 支持简单的版本管理策略，通过目录结构区分版本：
 
 - REST API: `internal/controller/restapi/v1`, `v2`...
-- gRPC: `internal/controller/grpc/v1`, `v2`...
-- RPC: `internal/controller/amqp_rpc/v1`, `v2`...
 
 ## 开发指南
 
@@ -307,9 +302,6 @@ make run
 ```sh
 # 生成 Swagger 文档
 make swag-v1
-
-# 生成 gRPC 代码
-make proto-v1
 
 # 生成 Mock
 make mock
