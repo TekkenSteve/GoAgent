@@ -1,7 +1,7 @@
 # LangGraph over Temporal Backend
 
-This example documents the AgentOS protocol expected from a LangGraph workflow
-running as an external Temporal worker.
+This example provides a Python LangGraph worker that implements the AgentOS
+protocol expected from an external Temporal backend.
 
 GoAgent does not import LangGraph. LangGraph is a `temporal_external` backend:
 
@@ -9,10 +9,13 @@ GoAgent does not import LangGraph. LangGraph is a `temporal_external` backend:
 GoAgent agentos.Runtime
   -> temporal_external backend
   -> Temporal StartWorkflow / SignalWorkflow / CancelWorkflow
-  -> LangGraph worker
+  -> worker-python LangGraph workflow
   -> POST /v1/agentos/runs/{run_id}/events
   -> GoAgent EventStore / Subscribe / SSE
 ```
+
+The example worker lives in `worker-python/` and registers Temporal workflow
+type `langgraph.agent.v1`.
 
 ## GoAgent Configuration
 
@@ -43,6 +46,40 @@ Set `AGENTFW_TEMPORAL_EXTERNAL_BACKENDS_JSON` to register the LangGraph backend:
 ]
 ```
 
+## Run The Worker
+
+Install dependencies and start the worker:
+
+```sh
+cd examples/langgraph-temporal/worker-python
+python -m venv .venv
+. .venv/bin/activate
+pip install -e .
+
+export TEMPORAL_ADDRESS=127.0.0.1:7233
+export TEMPORAL_NAMESPACE=default
+export LANGGRAPH_TASK_QUEUE=langgraph-agent-queue
+export GOAGENT_BASE_URL=http://127.0.0.1:8080
+
+goagent-langgraph-worker
+```
+
+The worker implements:
+
+```text
+Workflow type: langgraph.agent.v1
+Task queue:    langgraph-agent-queue
+Query:         agentos_status
+Signals:
+  user_input
+  pause
+  resume
+  cancel
+```
+
+The sample graph is intentionally small. Replace `worker-python/graph.py` with
+your real LangGraph graph; keep `workflow.py` as the AgentOS adapter.
+
 Start a run with:
 
 ```go
@@ -72,7 +109,14 @@ GoAgent starts Temporal workflow `langgraph.agent.v1` on task queue
     "kind": "temporal_external",
     "name": "langgraph-main"
   },
-  "input": {}
+  "input": {
+    "messages": [
+      {
+        "role": "user",
+        "content": "Plan the migration."
+      }
+    ]
+  }
 }
 ```
 
