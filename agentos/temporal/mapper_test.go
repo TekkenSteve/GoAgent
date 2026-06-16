@@ -110,3 +110,31 @@ func TestTemporalExternalConfig(t *testing.T) {
 		t.Fatalf("unexpected temporal external config: %#v", got)
 	}
 }
+
+func TestGRPCBackendConfig(t *testing.T) {
+	got := grpcBackendConfig(GRPCBackendConfig{
+		Name:      "opencode",
+		Target:    "opencode-runtime:9090",
+		Authority: "agentos.example",
+		Insecure:  true,
+		Service:   "agentos.v1.AgentBackend",
+		Methods: GRPCMethodNames{
+			Start:   "StartRun",
+			Signal:  "SignalRun",
+			Control: "ControlRun",
+			Status:  "StatusRun",
+		},
+	})
+
+	if got.Name != "opencode" ||
+		got.Target != "opencode-runtime:9090" ||
+		got.Authority != "agentos.example" ||
+		!got.Insecure ||
+		got.Service != "agentos.v1.AgentBackend" ||
+		got.Methods.Start != "StartRun" ||
+		got.Methods.Signal != "SignalRun" ||
+		got.Methods.Control != "ControlRun" ||
+		got.Methods.Status != "StatusRun" {
+		t.Fatalf("unexpected grpc backend config: %#v", got)
+	}
+}

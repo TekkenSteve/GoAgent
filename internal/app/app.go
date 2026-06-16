@@ -233,6 +233,7 @@ func initTemporalComponents(
 		RedisURL:                 cfg.Redis.URL,
 		TemporalExternalBackends: temporalExternalBackends(l, cfg),
 		HTTPBackends:             httpBackends(l, cfg),
+		GRPCBackends:             grpcBackends(l, cfg),
 	}, runtime.Client, agentostemporal.WithRunBackendIndex(agentOSRunRepo))
 	if err != nil {
 		l.Fatal(fmt.Errorf("app - Run - agentos temporal runtime: %w", err))
@@ -263,6 +264,32 @@ func httpBackends(l logger.Interface, cfg *config.Config) []agentostemporal.HTTP
 			Name:     backend.Name,
 			Endpoint: backend.Endpoint,
 			Headers:  backend.Headers,
+		})
+	}
+
+	return result
+}
+
+func grpcBackends(l logger.Interface, cfg *config.Config) []agentostemporal.GRPCBackendConfig {
+	backends, err := cfg.AgentFW.GRPCBackends()
+	if err != nil {
+		l.Fatal(fmt.Errorf("app - Run - grpc backends: %w", err))
+	}
+
+	result := make([]agentostemporal.GRPCBackendConfig, 0, len(backends))
+	for _, backend := range backends {
+		result = append(result, agentostemporal.GRPCBackendConfig{
+			Name:      backend.Name,
+			Target:    backend.Target,
+			Authority: backend.Authority,
+			Insecure:  backend.Insecure,
+			Service:   backend.Service,
+			Methods: agentostemporal.GRPCMethodNames{
+				Start:   backend.Methods.Start,
+				Signal:  backend.Methods.Signal,
+				Control: backend.Methods.Control,
+				Status:  backend.Methods.Status,
+			},
 		})
 	}
 

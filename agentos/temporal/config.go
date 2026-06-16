@@ -15,6 +15,7 @@ type RuntimeConfig struct {
 	RedisURL                 string
 	TemporalExternalBackends []ExternalBackendConfig
 	HTTPBackends             []HTTPBackendConfig
+	GRPCBackends             []GRPCBackendConfig
 }
 
 // ExternalBackendConfig configures a temporal_external AgentOS backend.
@@ -39,6 +40,24 @@ type HTTPBackendConfig struct {
 	Name     string
 	Endpoint string
 	Headers  map[string]string
+}
+
+// GRPCBackendConfig configures a gRPC AgentOS backend.
+type GRPCBackendConfig struct {
+	Name      string
+	Target    string
+	Authority string
+	Insecure  bool
+	Service   string
+	Methods   GRPCMethodNames
+}
+
+// GRPCMethodNames maps AgentOS operations to external gRPC unary method names.
+type GRPCMethodNames struct {
+	Start   string
+	Signal  string
+	Control string
+	Status  string
 }
 
 // RunBackendIndex persists run ownership for Signal/Control/Status routing.

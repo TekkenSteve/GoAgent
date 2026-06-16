@@ -10,6 +10,7 @@ import (
 	"github.com/TekkenSteve/GoAgent/internal/agentfw/orchestration"
 	"github.com/TekkenSteve/GoAgent/internal/entity"
 	goredis "github.com/TekkenSteve/GoAgent/internal/pkg/redis"
+	"github.com/TekkenSteve/GoAgent/internal/repo/agentos/grpcbackend"
 	"github.com/TekkenSteve/GoAgent/internal/repo/agentos/httpbackend"
 	"github.com/TekkenSteve/GoAgent/internal/repo/agentos/temporalexternal"
 	temporalrepo "github.com/TekkenSteve/GoAgent/internal/repo/persistent"
@@ -23,6 +24,7 @@ type runtime struct {
 	closeTemporal  bool
 	router         *agentosruntime.Router
 	redis          *goredis.Redis
+	closers        []func() error
 }
 
 // NewRuntime creates the default Temporal/Redis implementation of agentos.Runtime.
@@ -55,10 +57,7 @@ func NewRuntime(ctx context.Context, cfg RuntimeConfig, options ...RuntimeOption
 	}
 
 	if err := r.configureRouter(c, cfg, buildRuntimeOptions(options), temporalrepo.NewExecutorTemporal(c, fwTemporal), subscriber); err != nil {
-		c.Close()
-		if r.redis != nil {
-			_ = r.redis.Close()
-		}
+		_ = r.Close()
 
 		return nil, err
 	}
@@ -90,9 +89,7 @@ func NewRuntimeWithClient(ctx context.Context, cfg RuntimeConfig, c client.Clien
 	}
 
 	if err := r.configureRouter(c, cfg, buildRuntimeOptions(options), temporalrepo.NewExecutorTemporal(c, fwTemporal), subscriber); err != nil {
-		if r.redis != nil {
-			_ = r.redis.Close()
-		}
+		_ = r.Close()
 
 		return nil, err
 	}
@@ -150,6 +147,19 @@ func (r *runtime) configureRouter(temporalClient client.Client, cfg RuntimeConfi
 			return err
 		}
 	}
+	for _, backendConfig := range cfg.GRPCBackends {
+		internalConfig := grpcBackendConfig(backendConfig)
+		grpcBackend, err := grpcbackend.NewBackend(agentosSubscriber, internalConfig)
+		if err != nil {
+			return err
+		}
+		if err := registry.Register(internalConfig.Ref(), grpcBackend); err != nil {
+			_ = grpcBackend.Close()
+
+			return err
+		}
+		r.closers = append(r.closers, grpcBackend.Close)
+	}
 
 	if opts.runBackendIndex == nil {
 		return errors.New("agentos temporal runtime: run backend index is required")
@@ -183,6 +193,22 @@ func httpBackendConfig(cfg HTTPBackendConfig) httpbackend.Config {
 	}
 }
 
+func grpcBackendConfig(cfg GRPCBackendConfig) grpcbackend.Config {
+	return grpcbackend.Config{
+		Name:      cfg.Name,
+		Target:    cfg.Target,
+		Authority: cfg.Authority,
+		Insecure:  cfg.Insecure,
+		Service:   cfg.Service,
+		Methods: grpcbackend.MethodNames{
+			Start:   cfg.Methods.Start,
+			Signal:  cfg.Methods.Signal,
+			Control: cfg.Methods.Control,
+			Status:  cfg.Methods.Status,
+		},
+	}
+}
+
 func temporalExternalConfig(cfg ExternalBackendConfig) temporalexternal.Config {
 	return temporalexternal.Config{
 		Name:         cfg.Name,
@@ -205,6 +231,9 @@ func (r *runtime) Close() error {
 	}
 	if r.redis != nil {
 		errs = append(errs, r.redis.Close())
+	}
+	for _, closeFn := range r.closers {
+		errs = append(errs, closeFn())
 	}
 
 	return errors.Join(errs...)

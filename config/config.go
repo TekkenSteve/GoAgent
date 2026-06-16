@@ -59,6 +59,8 @@ type (
 		TemporalExternalBackendsJSON string `env:"AGENTFW_TEMPORAL_EXTERNAL_BACKENDS_JSON" envDefault:"[]"`
 		// HTTPBackendsJSON is a JSON array of HTTP backend configs.
 		HTTPBackendsJSON string `env:"AGENTFW_HTTP_BACKENDS_JSON" envDefault:"[]"`
+		// GRPCBackendsJSON is a JSON array of gRPC backend configs.
+		GRPCBackendsJSON string `env:"AGENTFW_GRPC_BACKENDS_JSON" envDefault:"[]"`
 
 		MaxConcurrentWorkflowTaskPollers int   `env:"AGENTFW_MAX_CONCURRENT_WORKFLOW_TASK_POLLERS" envDefault:"2"`
 		MaxConcurrentActivityTaskPollers int   `env:"AGENTFW_MAX_CONCURRENT_ACTIVITY_TASK_POLLERS" envDefault:"2"`
@@ -108,6 +110,24 @@ type HTTPBackend struct {
 	Headers  map[string]string `json:"headers,omitempty"`
 }
 
+// GRPCBackend configures a remote gRPC agent backend.
+type GRPCBackend struct {
+	Name      string          `json:"name"`
+	Target    string          `json:"target"`
+	Authority string          `json:"authority,omitempty"`
+	Insecure  bool            `json:"insecure,omitempty"`
+	Service   string          `json:"service,omitempty"`
+	Methods   GRPCMethodNames `json:"methods,omitempty"`
+}
+
+// GRPCMethodNames maps AgentOS operations to external gRPC unary method names.
+type GRPCMethodNames struct {
+	Start   string `json:"start,omitempty"`
+	Signal  string `json:"signal,omitempty"`
+	Control string `json:"control,omitempty"`
+	Status  string `json:"status,omitempty"`
+}
+
 // TemporalExternalBackends parses configured temporal_external backends.
 func (c AgentFW) TemporalExternalBackends() ([]TemporalExternalBackend, error) {
 	var backends []TemporalExternalBackend
@@ -123,6 +143,16 @@ func (c AgentFW) HTTPBackends() ([]HTTPBackend, error) {
 	var backends []HTTPBackend
 	if err := json.Unmarshal([]byte(c.HTTPBackendsJSON), &backends); err != nil {
 		return nil, fmt.Errorf("parse AGENTFW_HTTP_BACKENDS_JSON: %w", err)
+	}
+
+	return backends, nil
+}
+
+// GRPCBackends parses configured gRPC agent backends.
+func (c AgentFW) GRPCBackends() ([]GRPCBackend, error) {
+	var backends []GRPCBackend
+	if err := json.Unmarshal([]byte(c.GRPCBackendsJSON), &backends); err != nil {
+		return nil, fmt.Errorf("parse AGENTFW_GRPC_BACKENDS_JSON: %w", err)
 	}
 
 	return backends, nil

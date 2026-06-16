@@ -69,3 +69,41 @@ func TestHTTPBackends(t *testing.T) {
 		t.Fatalf("unexpected backend config: %#v", got)
 	}
 }
+
+func TestGRPCBackends(t *testing.T) {
+	backends, err := AgentFW{
+		GRPCBackendsJSON: `[
+			{
+				"name":"opencode",
+				"target":"opencode-runtime:9090",
+				"insecure":true,
+				"service":"agentos.v1.AgentBackend",
+				"methods":{
+					"start":"StartRun",
+					"signal":"SignalRun",
+					"control":"ControlRun",
+					"status":"StatusRun"
+				}
+			}
+		]`,
+	}.GRPCBackends()
+	if err != nil {
+		t.Fatalf("GRPCBackends: %v", err)
+	}
+
+	if len(backends) != 1 {
+		t.Fatalf("backend count = %d", len(backends))
+	}
+
+	got := backends[0]
+	if got.Name != "opencode" ||
+		got.Target != "opencode-runtime:9090" ||
+		!got.Insecure ||
+		got.Service != "agentos.v1.AgentBackend" ||
+		got.Methods.Start != "StartRun" ||
+		got.Methods.Signal != "SignalRun" ||
+		got.Methods.Control != "ControlRun" ||
+		got.Methods.Status != "StatusRun" {
+		t.Fatalf("unexpected backend config: %#v", got)
+	}
+}
