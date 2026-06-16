@@ -12,6 +12,7 @@ import (
 	agentostemporal "github.com/TekkenSteve/GoAgent/agentos/temporal"
 	"github.com/TekkenSteve/GoAgent/config"
 	agentfwconfig "github.com/TekkenSteve/GoAgent/internal/agentfw/config"
+	"github.com/TekkenSteve/GoAgent/internal/agentfw/eventing"
 	"github.com/TekkenSteve/GoAgent/internal/agentfw/orchestration"
 	agentfwruntime "github.com/TekkenSteve/GoAgent/internal/agentfw/runtime"
 	agentfwops "github.com/TekkenSteve/GoAgent/internal/agentfw/runtimeops"
@@ -100,6 +101,11 @@ func Run(cfg *config.Config) { //nolint: gocyclo,cyclop,funlen,gocritic,nolintli
 	// Event Store infrastructure for streaming
 	eventSequencer := repostream.NewRedisSequencer(rdb)
 	eventStore := repostream.NewRedisEventStore(rdb, eventSequencer)
+	eventDedupeStore := repostream.NewEventDedupeStore(rdb)
+	eventIngest, err := eventing.NewService(eventStore, eventDedupeStore)
+	if err != nil {
+		l.Fatal(fmt.Errorf("app - Run - eventing.NewService: %w", err))
+	}
 	streamSubscriber := repostream.NewRedisSubscriber(rdb.Hub())
 	sseGateway := repostream.NewSSEGateway()
 
@@ -187,7 +193,7 @@ func Run(cfg *config.Config) { //nolint: gocyclo,cyclop,funlen,gocritic,nolintli
 	// HTTP Server
 	httpServer := httpserver.New(l, httpserver.Port(cfg.HTTP.Port), httpserver.Prefork(cfg.HTTP.UsePreforkMode))
 	restapi.NewRouter(httpServer.App, cfg, agentExecutor, orchExecutor, historyUC, streamExecutor, l, rdb,
-		eventStore, streamSubscriber, sseGateway, wsHub, cancelWorkflow, signalWorkflow, templateUC, triggerUC)
+		eventStore, streamSubscriber, sseGateway, wsHub, cancelWorkflow, signalWorkflow, templateUC, triggerUC, eventIngest)
 
 	// Start servers
 	rmqServer.Start()

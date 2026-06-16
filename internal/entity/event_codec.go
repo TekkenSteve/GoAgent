@@ -57,6 +57,9 @@ func init() { //nolint:gochecknoinits // init registers default event types
 	RegisterEventType(&AgentErrorEvent{})
 	RegisterEventType(&UserCommandEvent{})
 	RegisterEventType(&UserFeedbackEvent{})
+	for _, eventType := range AgentOSStandardEventTypes() {
+		RegisterEventType(&AgentOSEvent{BaseEvent: BaseEvent{EventType: string(eventType)}})
+	}
 }
 
 // MarshalEvent serializes StreamEvent.

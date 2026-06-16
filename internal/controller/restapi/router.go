@@ -5,6 +5,7 @@ import (
 
 	"github.com/TekkenSteve/GoAgent/config"
 	_ "github.com/TekkenSteve/GoAgent/docs" // Swagger docs.
+	"github.com/TekkenSteve/GoAgent/internal/agentfw/eventing"
 	"github.com/TekkenSteve/GoAgent/internal/agentfw/stream"
 	"github.com/TekkenSteve/GoAgent/internal/controller/restapi/middleware"
 	v1 "github.com/TekkenSteve/GoAgent/internal/controller/restapi/v1"
@@ -29,6 +30,7 @@ func NewRouter(app *fiber.App, cfg *config.Config, t usecase.AgentExecutor, o us
 	wsHub *repostream.WebSocketHub,
 	cancelWorkflow v1.CancelWorkflowFn, signalWorkflow v1.SignalWorkflowFn,
 	m usecase.TemplateManager, eh usecase.TriggerEventHandler,
+	eventIngest *eventing.Service,
 ) {
 	// Options
 	app.Use(middleware.Logger(l))
@@ -52,6 +54,6 @@ func NewRouter(app *fiber.App, cfg *config.Config, t usecase.AgentExecutor, o us
 	// Routers
 	apiV1Group := app.Group("/v1")
 	{
-		v1.NewRoutes(apiV1Group, t, o, h, s, l, rdb, eventStore, subscriber, gateway, wsHub, cancelWorkflow, signalWorkflow, m, eh)
+		v1.NewRoutes(apiV1Group, t, o, h, s, l, rdb, eventStore, subscriber, gateway, wsHub, cancelWorkflow, signalWorkflow, m, eh, eventIngest)
 	}
 }

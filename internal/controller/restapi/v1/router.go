@@ -1,6 +1,7 @@
 package v1
 
 import (
+	"github.com/TekkenSteve/GoAgent/internal/agentfw/eventing"
 	"github.com/TekkenSteve/GoAgent/internal/agentfw/stream"
 	"github.com/TekkenSteve/GoAgent/internal/pkg/redis"
 	repostream "github.com/TekkenSteve/GoAgent/internal/repo/stream"
@@ -18,12 +19,14 @@ func NewRoutes(apiV1Group fiber.Router, t usecase.AgentExecutor, o usecase.Orche
 	wsHub *repostream.WebSocketHub,
 	cancelWorkflow CancelWorkflowFn, signalWorkflow SignalWorkflowFn,
 	m usecase.TemplateManager, eh usecase.TriggerEventHandler,
+	eventIngest *eventing.Service,
 ) {
 	r := &V1{
 		t: t, o: o, h: h, s: s, l: l, v: validator.New(validator.WithRequiredStructEnabled()), rdb: rdb,
 		eventStore: eventStore, subscriber: subscriber, gateway: gateway,
 		wsHub:          wsHub,
 		cancelWorkflow: cancelWorkflow, signalWorkflow: signalWorkflow,
+		eventIngest: eventIngest,
 	}
 
 	// Agent routes
@@ -59,5 +62,9 @@ func NewRoutes(apiV1Group fiber.Router, t usecase.AgentExecutor, o usecase.Orche
 	if o != nil {
 		apiV1Group.Post("/orchestration/execute", r.orchestrate)
 		apiV1Group.Get("/orchestration/status/:run_id", r.orchestrationStatus)
+	}
+
+	if eventIngest != nil {
+		apiV1Group.Post("/agentos/runs/:run_id/events", r.ingestAgentOSEvent)
 	}
 }

@@ -3,6 +3,7 @@ package v1
 import (
 	"context"
 
+	"github.com/TekkenSteve/GoAgent/internal/agentfw/eventing"
 	"github.com/TekkenSteve/GoAgent/internal/agentfw/stream"
 	"github.com/TekkenSteve/GoAgent/internal/pkg/redis"
 	repostream "github.com/TekkenSteve/GoAgent/internal/repo/stream"
@@ -30,9 +31,10 @@ type V1 struct {
 	rdb *redis.Redis
 
 	// Event Sourcing components (Phase 2+)
-	eventStore stream.EventStore
-	subscriber stream.Subscriber
-	gateway    stream.StatelessGateway
+	eventStore  stream.EventStore
+	subscriber  stream.Subscriber
+	gateway     stream.StatelessGateway
+	eventIngest *eventing.Service
 
 	// WebSocket Hub for connection tracking (Phase 4)
 	wsHub          *repostream.WebSocketHub
