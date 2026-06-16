@@ -16,6 +16,7 @@ type ExecuteRequest struct {
 	SystemPrompt     string            `json:"system_prompt"    example:"You are a helpful assistant."`
 	UserMessage      string            `json:"user_message"     example:"Hello, can you help me?"`
 	IsNewThread      bool              `json:"is_new_thread"    example:"false"`
+	AwaitUserInput   bool              `json:"await_user_input" example:"false"`
 	BypassAdmission  bool              `json:"bypass_admission" example:"false"`
 	IdempotencyKey   string            `json:"idempotency_key"  example:"idem-550e8400-e29b-41d4-a716-446655440000"`
 	EventSchemaVer   string            `json:"event_schema_ver"  example:"v1"`

@@ -70,7 +70,8 @@ func waitForRunCompletion(t *testing.T, runID string) runStatus {
 
 		resp.Body.Close()
 
-		if status.LifecycleState == string(entity.LifecycleCompleted) ||
+		if status.LifecycleState == "waiting_input" ||
+			status.LifecycleState == string(entity.LifecycleCompleted) ||
 			status.LifecycleState == string(entity.LifecycleFailed) ||
 			status.LifecycleState == string(entity.LifecycleCancelled) {
 			return status
@@ -175,13 +176,16 @@ func TestHTTPAgentOSStatusV1(t *testing.T) {
 
 	status = waitForRunCompletion(t, runID)
 
-	if status.LifecycleState != "completed" {
-		t.Errorf("Expected lifecycle_state completed, got %q", status.LifecycleState)
+	if status.LifecycleState != "waiting_input" {
+		t.Errorf("Expected lifecycle_state waiting_input, got %q", status.LifecycleState)
 	}
 
 	if status.Step == 0 {
 		t.Error("Expected non-zero step count")
 	}
+
+	signalAgentOSUserMessage(t, runID, "continue")
+	controlAgentOSRun(t, runID, "cancel")
 }
 
 func agentOSStartBody(runID, accountID, message string) string {
@@ -194,4 +198,48 @@ func agentOSStartBody(runID, accountID, message string) string {
 			"name": "goagent-native"
 		}
 	}`, runID, accountID, message)
+}
+
+func signalAgentOSUserMessage(t *testing.T, runID, content string) {
+	t.Helper()
+
+	body := fmt.Sprintf(`{
+		"type": "user.message",
+		"idempotency_key": "%s-message",
+		"payload": {
+			"content": "%s"
+		}
+	}`, runID, content)
+
+	ctx, cancel := context.WithTimeout(t.Context(), requestTimeout)
+	defer cancel()
+
+	resp, err := doWebRequestWithTimeout(ctx, http.MethodPost, basePathV1()+"/agentos/runs/"+runID+"/signals", bytes.NewBufferString(body))
+	if err != nil {
+		t.Fatalf("signalAgentOSUserMessage: request failed: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusAccepted {
+		t.Fatalf("signalAgentOSUserMessage: expected 202, got %d", resp.StatusCode)
+	}
+}
+
+func controlAgentOSRun(t *testing.T, runID, operation string) {
+	t.Helper()
+
+	body := fmt.Sprintf(`{"operation": "%s"}`, operation)
+
+	ctx, cancel := context.WithTimeout(t.Context(), requestTimeout)
+	defer cancel()
+
+	resp, err := doWebRequestWithTimeout(ctx, http.MethodPost, basePathV1()+"/agentos/runs/"+runID+"/control", bytes.NewBufferString(body))
+	if err != nil {
+		t.Fatalf("controlAgentOSRun: request failed: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusAccepted {
+		t.Fatalf("controlAgentOSRun: expected 202, got %d", resp.StatusCode)
+	}
 }

@@ -46,6 +46,7 @@ func executionRequestFromRunSpec(spec agentos.RunSpec) (*entity.ExecuteRequest, 
 		AgentID:        spec.AgentID,
 		SystemPrompt:   spec.SystemPrompt,
 		UserMessage:    spec.UserMessage,
+		AwaitUserInput: true,
 		IdempotencyKey: spec.IdempotencyKey,
 		RequestedAt:    requestedAt,
 	}, nil

@@ -4,8 +4,10 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"time"
 
 	"github.com/TekkenSteve/GoAgent/agentos"
+	"github.com/TekkenSteve/GoAgent/internal/agentfw/orchestration"
 	"github.com/TekkenSteve/GoAgent/internal/entity"
 	goredis "github.com/TekkenSteve/GoAgent/internal/pkg/redis"
 	"github.com/TekkenSteve/GoAgent/internal/repo/agentos/httpbackend"
@@ -215,11 +217,20 @@ func (r *runtime) Close() error {
 }
 
 type temporalNativeBackend struct {
-	executor   *temporalrepo.ExecutorTemporal
+	executor   nativeExecutor
 	subscriber agentosruntime.EventSubscriber
 }
 
-func newTemporalNativeBackend(executor *temporalrepo.ExecutorTemporal, subscriber agentosruntime.EventSubscriber) *temporalNativeBackend {
+type nativeExecutor interface {
+	StartExecution(ctx context.Context, req *entity.ExecuteRequest) (entity.RunStatus, error)
+	GetStatus(ctx context.Context, runID string) (entity.RunStatus, error)
+	Pause(ctx context.Context, runID string) error
+	Resume(ctx context.Context, runID string) error
+	Cancel(ctx context.Context, runID string) error
+	SignalUserMessage(ctx context.Context, runID string, message orchestration.UserMessageSignal) error
+}
+
+func newTemporalNativeBackend(executor nativeExecutor, subscriber agentosruntime.EventSubscriber) *temporalNativeBackend {
 	return &temporalNativeBackend{
 		executor:   executor,
 		subscriber: subscriber,
@@ -252,6 +263,13 @@ func (b *temporalNativeBackend) Signal(ctx context.Context, runID string, signal
 		return b.Control(ctx, runID, agentos.ControlResume)
 	case agentos.SignalControlCancel:
 		return b.Control(ctx, runID, agentos.ControlCancel)
+	case agentos.SignalUserMessage:
+		message, err := userMessageSignalToNative(signal)
+		if err != nil {
+			return err
+		}
+
+		return b.executor.SignalUserMessage(ctx, runID, message)
 	default:
 		return fmt.Errorf("%w: unsupported by temporal native backend: %s", agentos.ErrInvalidSignal, signal.Type)
 	}
@@ -295,10 +313,60 @@ func (b *temporalNativeBackend) Subscribe(ctx context.Context, scope agentos.Str
 func (b *temporalNativeBackend) Capabilities() agentosruntime.BackendCapabilities {
 	return agentosruntime.BackendCapabilities{
 		SupportsSignal:            true,
-		SupportsSignalUserMessage: false,
+		SupportsSignalUserMessage: true,
 		SupportsPause:             true,
 		SupportsResume:            true,
 		SupportsCancel:            true,
 		SupportsStreaming:         true,
 	}
+}
+
+func userMessageSignalToNative(signal agentos.Signal) (orchestration.UserMessageSignal, error) {
+	content, _ := signal.Payload["content"].(string)
+	if content == "" {
+		return orchestration.UserMessageSignal{}, fmt.Errorf("%w: payload.content is required", agentos.ErrInvalidSignal)
+	}
+
+	sentAt := signal.SentAt
+	if sentAt.IsZero() {
+		sentAt = time.Now().UTC()
+	}
+
+	messageID, _ := signal.Payload["message_id"].(string)
+
+	return orchestration.UserMessageSignal{
+		MessageID:      messageID,
+		IdempotencyKey: signal.IdempotencyKey,
+		Content:        content,
+		Attachments:    payloadMapSlice(signal.Payload, "attachments"),
+		Context:        payloadMap(signal.Payload, "context"),
+		ReceivedAtUnix: sentAt.Unix(),
+	}, nil
+}
+
+func payloadMap(payload map[string]any, key string) map[string]any {
+	value, ok := payload[key].(map[string]any)
+	if !ok {
+		return nil
+	}
+
+	return value
+}
+
+func payloadMapSlice(payload map[string]any, key string) []map[string]any {
+	rawItems, ok := payload[key].([]any)
+	if !ok {
+		return nil
+	}
+
+	items := make([]map[string]any, 0, len(rawItems))
+	for _, rawItem := range rawItems {
+		item, ok := rawItem.(map[string]any)
+		if !ok {
+			return nil
+		}
+		items = append(items, item)
+	}
+
+	return items
 }

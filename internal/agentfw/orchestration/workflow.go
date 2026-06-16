@@ -23,6 +23,7 @@ var ErrPrepChecksFailed = errors.New("agent workflow - prep checks failed")
 //   - "resume":  exits the pause loop
 func AgentWorkflow(ctx workflow.Context, input *AgentWorkflowInput) (WorkflowResult, error) {
 	signalCh := workflow.GetSignalChannel(ctx, AgentCommandSignal)
+	userMessageCh := workflow.GetSignalChannel(ctx, AgentMessageSignal)
 	ctx = setupAgentActivityOptions(ctx)
 
 	status := RunStatus{
@@ -55,7 +56,8 @@ func AgentWorkflow(ctx workflow.Context, input *AgentWorkflowInput) (WorkflowRes
 
 	// Agent loop
 	for round := range maxToolRounds {
-		done, err := agentWorkflowRound(ctx, signalCh, input, &status, messages, allTools, domainTools, baseRequestedAt, round)
+		done, updatedMessages, err := agentWorkflowRound(ctx, signalCh, userMessageCh, input, &status, messages, allTools, domainTools, baseRequestedAt, round)
+		messages = updatedMessages
 		if err != nil {
 			return makeWorkflowResult(ctx, &status), err
 		}
@@ -224,6 +226,7 @@ func buildContinueAsNewInput(input *AgentWorkflowInput, status *RunStatus, messa
 func agentWorkflowRound(
 	ctx workflow.Context,
 	signalCh workflow.ReceiveChannel,
+	userMessageCh workflow.ReceiveChannel,
 	input *AgentWorkflowInput,
 	status *RunStatus,
 	messages []entity.Message,
@@ -231,13 +234,13 @@ func agentWorkflowRound(
 	domainTools []entity.ToolDef,
 	baseRequestedAt time.Time,
 	round int,
-) (bool, error) {
+) (bool, []entity.Message, error) {
 	if canceled, err := checkStreamSignal(signalCh, ctx); err != nil {
-		return false, nil
+		return false, messages, nil
 	} else if canceled {
 		status.LifecycleState = string(entity.LifecycleCancelled)
 
-		return true, nil
+		return true, messages, nil
 	}
 
 	// Repair tool call pairing before LLM call — the workflow owns
@@ -256,11 +259,14 @@ func agentWorkflowRound(
 	}).Get(ctx, &llmResult); err != nil {
 		status.LifecycleState = string(entity.LifecycleFailed)
 
-		return true, fmt.Errorf("agent workflow - llm round %d: %w", round, err)
+		return true, messages, fmt.Errorf("agent workflow - llm round %d: %w", round, err)
 	}
 
 	// Track assistant message
-	assistantMsg := entity.Message{Role: entity.RoleAssistant}
+	assistantMsg := entity.Message{
+		Role:    entity.RoleAssistant,
+		Content: llmResult.Content,
+	}
 	if len(llmResult.ToolCalls) > 0 {
 		assistantMsg.ToolCalls = llmResult.ToolCalls
 	}
@@ -271,21 +277,99 @@ func agentWorkflowRound(
 	status.UpdatedAt = workflow.Now(ctx)
 
 	if len(llmResult.ToolCalls) == 0 {
-		status.LifecycleState = string(entity.LifecycleCompleted)
 		status.Output = llmResult.Content
+		if !input.AwaitUserInput {
+			status.LifecycleState = string(entity.LifecycleCompleted)
 
-		return true, nil
+			return true, messages, nil
+		}
+
+		nextMessages, canceled := waitForUserMessage(ctx, signalCh, userMessageCh, status, messages)
+		if canceled {
+			status.LifecycleState = string(entity.LifecycleCancelled)
+
+			return true, nextMessages, nil
+		}
+
+		return false, nextMessages, nil
 	}
 
 	// Execute each tool call
 	if done, err := executeAgentToolCalls(ctx, signalCh, input, status, &messages, llmResult.ToolCalls, domainTools); err != nil || done {
-		return true, err
+		return true, messages, err
 	}
 
 	// Evaluate Continue-As-New after each round
 	if nextInput, ok := buildContinueAsNewInput(input, status, messages, baseRequestedAt, ctx); ok {
-		return true, workflow.NewContinueAsNewError(ctx, AgentWorkflow, nextInput)
+		return true, messages, workflow.NewContinueAsNewError(ctx, AgentWorkflow, nextInput)
 	}
 
-	return false, nil
+	return false, messages, nil
+}
+
+func waitForUserMessage(
+	ctx workflow.Context,
+	signalCh workflow.ReceiveChannel,
+	userMessageCh workflow.ReceiveChannel,
+	status *RunStatus,
+	messages []entity.Message,
+) ([]entity.Message, bool) {
+	status.LifecycleState = "waiting_input"
+	status.UpdatedAt = workflow.Now(ctx)
+
+	selector := workflow.NewSelector(ctx)
+	var nextMessages []entity.Message
+	var canceled bool
+	var received bool
+
+	selector.AddReceive(userMessageCh, func(c workflow.ReceiveChannel, _ bool) {
+		var signal UserMessageSignal
+		c.Receive(ctx, &signal)
+		nextMessages = append(messages, entity.Message{
+			Role:    entity.RoleUser,
+			Content: signal.Content,
+		})
+		status.LifecycleState = string(entity.LifecycleRunning)
+		status.UpdatedAt = workflow.Now(ctx)
+		received = true
+	})
+	selector.AddReceive(signalCh, func(c workflow.ReceiveChannel, _ bool) {
+		if handleNativeWaitControlSignal(c, ctx, status) {
+			canceled = true
+			received = true
+		}
+	})
+
+	for !received {
+		selector.Select(ctx)
+	}
+	if nextMessages == nil {
+		nextMessages = messages
+	}
+
+	return nextMessages, canceled
+}
+
+func handleNativeWaitControlSignal(signalCh workflow.ReceiveChannel, ctx workflow.Context, status *RunStatus) bool {
+	var signal string
+	signalCh.Receive(ctx, &signal)
+
+	switch signal {
+	case AgentCmdCancel:
+		return true
+	case AgentCmdPause:
+		status.LifecycleState = string(entity.LifecyclePaused)
+		status.UpdatedAt = workflow.Now(ctx)
+		canceled, err := waitForResume(signalCh, ctx)
+		if err != nil {
+			return false
+		}
+		if canceled {
+			return true
+		}
+		status.LifecycleState = "waiting_input"
+		status.UpdatedAt = workflow.Now(ctx)
+	}
+
+	return false
 }

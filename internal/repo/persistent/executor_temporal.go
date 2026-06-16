@@ -43,6 +43,7 @@ func (r *ExecutorTemporal) StartExecution(ctx context.Context, req *entity.Execu
 		Message:          req.UserMessage,
 		Config:           entity.LLMConfig{Model: req.ModelRef},
 		MCPServerConfigs: req.MCPServerConfigs,
+		AwaitUserInput:   req.AwaitUserInput,
 	}
 
 	opts := client.StartWorkflowOptions{
@@ -154,6 +155,16 @@ func (r *ExecutorTemporal) Cancel(ctx context.Context, runID string) error {
 
 	if err := r.client.SignalWorkflow(ctx, workflowID, "", orchestration.AgentCommandSignal, "cancel"); err != nil {
 		return fmt.Errorf("ExecutorTemporal - Cancel - r.client.SignalWorkflow: %w", err)
+	}
+
+	return nil
+}
+
+func (r *ExecutorTemporal) SignalUserMessage(ctx context.Context, runID string, message orchestration.UserMessageSignal) error {
+	workflowID := r.opts.workflowIDPrefix + runID
+
+	if err := r.client.SignalWorkflow(ctx, workflowID, "", orchestration.AgentMessageSignal, message); err != nil {
+		return fmt.Errorf("ExecutorTemporal - SignalUserMessage - r.client.SignalWorkflow: %w", err)
 	}
 
 	return nil

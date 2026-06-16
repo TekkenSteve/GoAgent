@@ -12,6 +12,7 @@ const (
 	AgentWorkflowName  = "agentfw.agent-workflow.v1"
 	StreamWorkflowName = "agentfw.stream-workflow.v1"
 	AgentCommandSignal = "agent-command"
+	AgentMessageSignal = "agent-user-message"
 	AgentCmdCancel     = "cancel"
 	AgentCmdPause      = "pause"
 	AgentCmdResume     = "resume"
@@ -210,6 +211,16 @@ type RunStatus struct {
 	Output         string // final assistant text output; carried for delegation
 }
 
+// UserMessageSignal carries a user turn into a running native agent workflow.
+type UserMessageSignal struct {
+	MessageID      string
+	IdempotencyKey string
+	Content        string
+	Attachments    []map[string]any
+	Context        map[string]any
+	ReceivedAtUnix int64
+}
+
 // WorkflowResult is the deterministic workflow output payload.
 type WorkflowResult struct {
 	RunID          string
@@ -231,4 +242,5 @@ type AgentWorkflowInput struct {
 	MCPServerConfigs []entity.MCPServerConfig
 	ContinuePolicy   ContinueAsNewPolicy
 	Continuation     ContinuationPayload
+	AwaitUserInput   bool
 }
