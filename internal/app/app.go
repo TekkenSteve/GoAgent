@@ -39,7 +39,6 @@ import (
 	"github.com/TekkenSteve/GoAgent/internal/usecase/agent"
 	billingpkg "github.com/TekkenSteve/GoAgent/internal/usecase/billing"
 	agentfwusecase "github.com/TekkenSteve/GoAgent/internal/usecase/executor"
-	"github.com/TekkenSteve/GoAgent/internal/usecase/history"
 	templatepkg "github.com/TekkenSteve/GoAgent/internal/usecase/template"
 	triggerpkg "github.com/TekkenSteve/GoAgent/internal/usecase/trigger"
 	"github.com/TekkenSteve/GoAgent/pkg/grpcserver"
@@ -58,7 +57,6 @@ func Run(cfg *config.Config) { //nolint: gocyclo,cyclop,funlen,gocritic,nolintli
 		agentOSRuntime  agentos.Runtime
 		batchWriter     *pipelinepkg.BatchWriter
 		agentUC         *agent.UseCase
-		wsHub           *repostream.WebSocketHub
 		cancelWorkflow  restapiv1.CancelWorkflowFn
 		signalWorkflow  restapiv1.SignalWorkflowFn
 		templateUC      *templatepkg.UseCase
@@ -107,11 +105,6 @@ func Run(cfg *config.Config) { //nolint: gocyclo,cyclop,funlen,gocritic,nolintli
 	if err != nil {
 		l.Fatal(fmt.Errorf("app - Run - eventing.NewService: %w", err))
 	}
-	streamSubscriber := repostream.NewRedisSubscriber(rdb.Hub())
-	sseGateway := repostream.NewSSEGateway()
-
-	// WebSocket Hub for bidirectional streaming (Phase 4)
-	wsHub = repostream.NewWebSocketHub()
 
 	if !controlDecision.UseTemporal {
 		l.Info("app - Run - agent framework temporal worker skipped: %s", controlDecision.Reason)
@@ -154,19 +147,11 @@ func Run(cfg *config.Config) { //nolint: gocyclo,cyclop,funlen,gocritic,nolintli
 		l.Warn("app - Run - agent executor is nil, agent endpoints will be unavailable")
 	}
 
-	historyUC := history.New(messageRepo)
-
-	var streamExecutor usecase.StreamExecutor
-
 	switch {
 	case temporalRuntime != nil:
-		streamExecutor = temporalrepo.NewTemporalStreamExecutor(temporalRuntime.Client, fwCfg.Temporal.TaskQueue)
-
-		l.Info("app - Run - stream executor: temporal")
+		l.Info("app - Run - runtime: temporal")
 	case agentUC != nil:
-		streamExecutor = agentUC
-
-		l.Info("app - Run - stream executor: in-process")
+		l.Info("app - Run - runtime: in-process")
 	default:
 		l.Warn("app - Run - stream executor unavailable (agent usecase not initialized)")
 	}
@@ -193,8 +178,8 @@ func Run(cfg *config.Config) { //nolint: gocyclo,cyclop,funlen,gocritic,nolintli
 
 	// HTTP Server
 	httpServer := httpserver.New(l, httpserver.Port(cfg.HTTP.Port), httpserver.Prefork(cfg.HTTP.UsePreforkMode))
-	restapi.NewRouter(httpServer.App, cfg, agentExecutor, orchExecutor, historyUC, streamExecutor, l, rdb,
-		eventStore, streamSubscriber, sseGateway, wsHub, cancelWorkflow, signalWorkflow, templateUC, triggerUC, eventIngest)
+	restapi.NewRouter(httpServer.App, cfg, agentExecutor, orchExecutor, l,
+		cancelWorkflow, signalWorkflow, templateUC, triggerUC, eventIngest, agentOSRuntime)
 
 	// Start servers
 	rmqServer.Start()

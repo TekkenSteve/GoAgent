@@ -3,14 +3,12 @@ package restapi
 import (
 	"net/http"
 
+	"github.com/TekkenSteve/GoAgent/agentos"
 	"github.com/TekkenSteve/GoAgent/config"
 	_ "github.com/TekkenSteve/GoAgent/docs" // Swagger docs.
 	"github.com/TekkenSteve/GoAgent/internal/agentfw/eventing"
-	"github.com/TekkenSteve/GoAgent/internal/agentfw/stream"
 	"github.com/TekkenSteve/GoAgent/internal/controller/restapi/middleware"
 	v1 "github.com/TekkenSteve/GoAgent/internal/controller/restapi/v1"
-	"github.com/TekkenSteve/GoAgent/internal/pkg/redis"
-	repostream "github.com/TekkenSteve/GoAgent/internal/repo/stream"
 	"github.com/TekkenSteve/GoAgent/internal/usecase"
 	"github.com/TekkenSteve/GoAgent/pkg/logger"
 	"github.com/ansrivas/fiberprometheus/v2"
@@ -25,12 +23,11 @@ import (
 // @version     1.0
 // @host        localhost:8080
 // @BasePath    /v1
-func NewRouter(app *fiber.App, cfg *config.Config, t usecase.AgentExecutor, o usecase.OrchestrationExecutor, h usecase.HistoryQuery, s usecase.StreamExecutor, l logger.Interface, rdb *redis.Redis,
-	eventStore stream.EventStore, subscriber stream.Subscriber, gateway stream.StatelessGateway,
-	wsHub *repostream.WebSocketHub,
+func NewRouter(app *fiber.App, cfg *config.Config, t usecase.AgentExecutor, o usecase.OrchestrationExecutor, l logger.Interface,
 	cancelWorkflow v1.CancelWorkflowFn, signalWorkflow v1.SignalWorkflowFn,
 	m usecase.TemplateManager, eh usecase.TriggerEventHandler,
 	eventIngest *eventing.Service,
+	agentOSRuntime agentos.Runtime,
 ) {
 	// Options
 	app.Use(middleware.Logger(l))
@@ -54,6 +51,6 @@ func NewRouter(app *fiber.App, cfg *config.Config, t usecase.AgentExecutor, o us
 	// Routers
 	apiV1Group := app.Group("/v1")
 	{
-		v1.NewRoutes(apiV1Group, t, o, h, s, l, rdb, eventStore, subscriber, gateway, wsHub, cancelWorkflow, signalWorkflow, m, eh, eventIngest)
+		v1.NewRoutes(apiV1Group, t, o, l, cancelWorkflow, signalWorkflow, m, eh, eventIngest, agentOSRuntime)
 	}
 }
