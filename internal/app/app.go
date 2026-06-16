@@ -15,7 +15,6 @@ import (
 	"github.com/TekkenSteve/GoAgent/internal/agentfw/eventing"
 	"github.com/TekkenSteve/GoAgent/internal/agentfw/orchestration"
 	agentfwruntime "github.com/TekkenSteve/GoAgent/internal/agentfw/runtime"
-	agentfwops "github.com/TekkenSteve/GoAgent/internal/agentfw/runtimeops"
 	"github.com/TekkenSteve/GoAgent/internal/agentfw/stream"
 	"github.com/TekkenSteve/GoAgent/internal/agentfw/tool"
 	amqp_rpc "github.com/TekkenSteve/GoAgent/internal/controller/amqp_rpc"
@@ -64,14 +63,6 @@ func Run(cfg *config.Config) { //nolint: gocyclo,cyclop,funlen,gocritic,nolintli
 	)
 
 	fwCfg := agentfwconfig.FromAppConfig(cfg)
-	selector := agentfwops.NewRolloutSelector(agentfwops.RolloutConfig{
-		Mode:                agentfwops.RolloutMode(fwCfg.Rollout.Mode),
-		Percent:             fwCfg.Rollout.Percent,
-		AllowlistAccounts:   fwCfg.Rollout.AllowlistAccounts,
-		RollbackForceLegacy: fwCfg.Rollout.RollbackForceLegacy,
-		HashSalt:            fwCfg.Rollout.HashSalt,
-	})
-	controlDecision := selector.Decide("", "bootstrap")
 
 	// Repository — created early for agent components below
 	pg, err := postgres.New(cfg.PG.URL, postgres.MaxPoolSize(cfg.PG.PoolMax))
@@ -106,19 +97,15 @@ func Run(cfg *config.Config) { //nolint: gocyclo,cyclop,funlen,gocritic,nolintli
 		l.Fatal(fmt.Errorf("app - Run - eventing.NewService: %w", err))
 	}
 
-	if !controlDecision.UseTemporal {
-		l.Info("app - Run - agent framework temporal worker skipped: %s", controlDecision.Reason)
-	} else {
-		tc := initTemporalComponents(l, cfg, &fwCfg, pg, rdb, messageRepo, agentRepo, templateRepo, triggerRepo, agentOSRunRepo, templateUC, eventStore)
-		if tc != nil {
-			temporalRuntime = tc.runtime
-			agentOSRuntime = tc.agentOSRuntime
-			batchWriter = tc.batchWriter
-			agentUC = tc.agentUC
-			triggerUC = tc.triggerUC
-			cancelWorkflow = tc.cancelWorkflow
-			signalWorkflow = tc.signalWorkflow
-		}
+	tc := initTemporalComponents(l, cfg, &fwCfg, pg, rdb, messageRepo, agentRepo, templateRepo, triggerRepo, agentOSRunRepo, templateUC, eventStore)
+	if tc != nil {
+		temporalRuntime = tc.runtime
+		agentOSRuntime = tc.agentOSRuntime
+		batchWriter = tc.batchWriter
+		agentUC = tc.agentUC
+		triggerUC = tc.triggerUC
+		cancelWorkflow = tc.cancelWorkflow
+		signalWorkflow = tc.signalWorkflow
 	}
 
 	if temporalRuntime != nil {
@@ -140,11 +127,10 @@ func Run(cfg *config.Config) { //nolint: gocyclo,cyclop,funlen,gocritic,nolintli
 		orchExecutor = agentfwusecase.New(temporalRepo)
 		if agentOSRuntime != nil {
 			agentExecutor = newAgentOSExecutor(agentOSRuntime)
-		} else {
-			agentExecutor = agentfwusecase.New(temporalRepo)
 		}
-	} else {
-		l.Warn("app - Run - agent executor is nil, agent endpoints will be unavailable")
+	}
+	if agentExecutor == nil {
+		l.Fatal(fmt.Errorf("app - Run - agentos runtime is required for agent execution"))
 	}
 
 	switch {

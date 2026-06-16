@@ -19,7 +19,6 @@ type Config struct {
 	Enabled bool
 
 	Temporal Temporal
-	Rollout  Rollout
 	Runtime  Runtime
 }
 
@@ -32,15 +31,6 @@ type Temporal struct {
 	MaxConcurrentWorkflowTaskPollers int
 	MaxConcurrentActivityTaskPollers int
 	MaxConcurrentActivityExecution   int
-}
-
-// Rollout controls gradual enablement and rollback between legacy and Temporal paths.
-type Rollout struct {
-	Mode                string
-	Percent             int
-	AllowlistAccounts   []string
-	RollbackForceLegacy bool
-	HashSalt            string
 }
 
 // Runtime config controls orchestration behavior outside Temporal server settings.
@@ -74,13 +64,6 @@ func Default() Config {
 			MaxConcurrentWorkflowTaskPollers: defaultMaxConcurrentWorkflowTaskPollers,
 			MaxConcurrentActivityTaskPollers: defaultMaxConcurrentActivityTaskPollers,
 			MaxConcurrentActivityExecution:   defaultMaxConcurrentActivityExecution,
-		},
-		Rollout: Rollout{
-			Mode:                "disabled",
-			Percent:             0,
-			AllowlistAccounts:   nil,
-			RollbackForceLegacy: false,
-			HashSalt:            "agentfw-v1",
 		},
 		Runtime: Runtime{
 			DefaultModelRef: "gpt-4.1-mini",
