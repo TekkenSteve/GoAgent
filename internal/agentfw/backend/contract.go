@@ -15,6 +15,11 @@ type AgentBackend interface {
 	Subscribe(ctx context.Context, scope agentos.StreamScope) (agentos.Subscription, error)
 }
 
+// EventSubscriber exposes the normalized AgentOS event stream shared by backends.
+type EventSubscriber interface {
+	SubscribeAgentOS(ctx context.Context, scope agentos.StreamScope) (agentos.Subscription, error)
+}
+
 // BackendCapabilities exposes optional backend features without forcing every
 // implementation to support every advanced AgentOS operation.
 type BackendCapabilities struct {

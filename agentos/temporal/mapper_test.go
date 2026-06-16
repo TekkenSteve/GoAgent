@@ -82,3 +82,31 @@ func TestControlOperationToEntity(t *testing.T) {
 		}
 	}
 }
+
+func TestTemporalExternalConfig(t *testing.T) {
+	got := temporalExternalConfig(ExternalBackendConfig{
+		Name:         "langgraph-main",
+		TaskQueue:    "langgraph-queue",
+		WorkflowType: "langgraph.agent.v1",
+		QueryType:    "agentos_status",
+		Signals: ExternalSignalNames{
+			Pause:  "pause",
+			Resume: "resume",
+			Cancel: "cancel",
+			Defaults: map[agentos.SignalType]string{
+				agentos.SignalUserMessage: "user_input",
+			},
+		},
+	})
+
+	if got.Name != "langgraph-main" ||
+		got.TaskQueue != "langgraph-queue" ||
+		got.WorkflowType != "langgraph.agent.v1" ||
+		got.QueryType != "agentos_status" ||
+		got.Signals.Pause != "pause" ||
+		got.Signals.Resume != "resume" ||
+		got.Signals.Cancel != "cancel" ||
+		got.Signals.Defaults[agentos.SignalUserMessage] != "user_input" {
+		t.Fatalf("unexpected temporal external config: %#v", got)
+	}
+}

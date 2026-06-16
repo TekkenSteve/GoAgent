@@ -7,6 +7,7 @@ import (
 
 	"github.com/TekkenSteve/GoAgent/agentos"
 	agentfwbackend "github.com/TekkenSteve/GoAgent/internal/agentfw/backend"
+	"github.com/TekkenSteve/GoAgent/internal/agentfw/backend/temporalexternal"
 	"github.com/TekkenSteve/GoAgent/internal/entity"
 	goredis "github.com/TekkenSteve/GoAgent/internal/pkg/redis"
 	temporalrepo "github.com/TekkenSteve/GoAgent/internal/repo/persistent"
@@ -50,7 +51,7 @@ func NewRuntime(ctx context.Context, cfg RuntimeConfig) (agentos.Runtime, error)
 		subscriber = repostream.NewRedisSubscriber(rdb.Hub())
 	}
 
-	if err := r.configureRouter(temporalrepo.NewExecutorTemporal(c, fwTemporal), subscriber); err != nil {
+	if err := r.configureRouter(c, cfg, temporalrepo.NewExecutorTemporal(c, fwTemporal), subscriber); err != nil {
 		c.Close()
 		if r.redis != nil {
 			_ = r.redis.Close()
@@ -85,7 +86,7 @@ func NewRuntimeWithClient(ctx context.Context, cfg RuntimeConfig, c client.Clien
 		subscriber = repostream.NewRedisSubscriber(rdb.Hub())
 	}
 
-	if err := r.configureRouter(temporalrepo.NewExecutorTemporal(c, fwTemporal), subscriber); err != nil {
+	if err := r.configureRouter(c, cfg, temporalrepo.NewExecutorTemporal(c, fwTemporal), subscriber); err != nil {
 		if r.redis != nil {
 			_ = r.redis.Close()
 		}
@@ -116,9 +117,10 @@ func (r *runtime) Subscribe(ctx context.Context, scope agentos.StreamScope) (age
 	return r.router.Subscribe(ctx, scope)
 }
 
-func (r *runtime) configureRouter(executor *temporalrepo.ExecutorTemporal, subscriber *repostream.RedisSubscriber) error {
+func (r *runtime) configureRouter(temporalClient client.Client, cfg RuntimeConfig, executor *temporalrepo.ExecutorTemporal, subscriber *repostream.RedisSubscriber) error {
 	registry := agentfwbackend.NewRegistry()
-	native := newTemporalNativeBackend(executor, subscriber)
+	agentosSubscriber := newAgentOSSubscriber(subscriber)
+	native := newTemporalNativeBackend(executor, agentosSubscriber)
 	if err := registry.Register(agentos.BackendRef{
 		Kind: agentos.BackendKindTemporalNative,
 		Name: agentos.BackendNameGoAgentNative,
@@ -131,6 +133,16 @@ func (r *runtime) configureRouter(executor *temporalrepo.ExecutorTemporal, subsc
 	}, native); err != nil {
 		return err
 	}
+	for _, backendConfig := range cfg.TemporalExternalBackends {
+		internalConfig := temporalExternalConfig(backendConfig)
+		external, err := temporalexternal.NewBackend(temporalClient, agentosSubscriber, internalConfig)
+		if err != nil {
+			return err
+		}
+		if err := registry.Register(internalConfig.Ref(), external); err != nil {
+			return err
+		}
+	}
 
 	router, err := agentfwbackend.NewRouter(registry, agentfwbackend.NewMemoryRunBackendIndex())
 	if err != nil {
@@ -139,6 +151,21 @@ func (r *runtime) configureRouter(executor *temporalrepo.ExecutorTemporal, subsc
 	r.router = router
 
 	return nil
+}
+
+func temporalExternalConfig(cfg ExternalBackendConfig) temporalexternal.Config {
+	return temporalexternal.Config{
+		Name:         cfg.Name,
+		TaskQueue:    cfg.TaskQueue,
+		WorkflowType: cfg.WorkflowType,
+		QueryType:    cfg.QueryType,
+		Signals: temporalexternal.SignalNames{
+			Pause:    cfg.Signals.Pause,
+			Resume:   cfg.Signals.Resume,
+			Cancel:   cfg.Signals.Cancel,
+			Defaults: cfg.Signals.Defaults,
+		},
+	}
 }
 
 func (r *runtime) Close() error {
@@ -155,10 +182,10 @@ func (r *runtime) Close() error {
 
 type temporalNativeBackend struct {
 	executor   *temporalrepo.ExecutorTemporal
-	subscriber *repostream.RedisSubscriber
+	subscriber agentfwbackend.EventSubscriber
 }
 
-func newTemporalNativeBackend(executor *temporalrepo.ExecutorTemporal, subscriber *repostream.RedisSubscriber) *temporalNativeBackend {
+func newTemporalNativeBackend(executor *temporalrepo.ExecutorTemporal, subscriber agentfwbackend.EventSubscriber) *temporalNativeBackend {
 	return &temporalNativeBackend{
 		executor:   executor,
 		subscriber: subscriber,
@@ -228,20 +255,7 @@ func (b *temporalNativeBackend) Subscribe(ctx context.Context, scope agentos.Str
 		return nil, errors.New("agentos temporal native backend: redis subscriber is not configured")
 	}
 
-	sessionID := scope.ThreadID
-	if sessionID == "" {
-		sessionID = scope.RunID
-	}
-	if sessionID == "" {
-		return nil, fmt.Errorf("%w: run id or thread id is required", agentos.ErrInvalidStreamScope)
-	}
-
-	sub, err := b.subscriber.Subscribe(ctx, sessionID, scope.AfterSequence)
-	if err != nil {
-		return nil, err
-	}
-
-	return newSubscription(sub), nil
+	return b.subscriber.SubscribeAgentOS(ctx, scope)
 }
 
 func (b *temporalNativeBackend) Capabilities() agentfwbackend.BackendCapabilities {
