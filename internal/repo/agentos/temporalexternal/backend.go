@@ -7,7 +7,7 @@ import (
 	"time"
 
 	"github.com/TekkenSteve/GoAgent/agentos"
-	agentfwbackend "github.com/TekkenSteve/GoAgent/internal/agentfw/backend"
+	agentosruntime "github.com/TekkenSteve/GoAgent/internal/usecase/agentosruntime"
 	enumspb "go.temporal.io/api/enums/v1"
 	workflowservicepb "go.temporal.io/api/workflowservice/v1"
 	"go.temporal.io/sdk/client"
@@ -26,13 +26,13 @@ type TemporalClient interface {
 // Backend starts and controls external Temporal workflows that implement AgentOS protocol.
 type Backend struct {
 	client     TemporalClient
-	subscriber agentfwbackend.EventSubscriber
+	subscriber agentosruntime.EventSubscriber
 	config     Config
 	now        func() time.Time
 }
 
 // NewBackend creates a temporal_external backend.
-func NewBackend(temporalClient TemporalClient, subscriber agentfwbackend.EventSubscriber, config Config) (*Backend, error) {
+func NewBackend(temporalClient TemporalClient, subscriber agentosruntime.EventSubscriber, config Config) (*Backend, error) {
 	if temporalClient == nil {
 		return nil, errors.New("temporal external backend: nil temporal client")
 	}
@@ -145,13 +145,14 @@ func (b *Backend) Subscribe(ctx context.Context, scope agentos.StreamScope) (age
 }
 
 // Capabilities reports the baseline temporal_external backend features.
-func (b *Backend) Capabilities() agentfwbackend.BackendCapabilities {
-	return agentfwbackend.BackendCapabilities{
-		SupportsSignal:    true,
-		SupportsPause:     b.config.Signals.Pause != "",
-		SupportsResume:    b.config.Signals.Resume != "",
-		SupportsCancel:    true,
-		SupportsStreaming: b.subscriber != nil,
+func (b *Backend) Capabilities() agentosruntime.BackendCapabilities {
+	return agentosruntime.BackendCapabilities{
+		SupportsSignal:            true,
+		SupportsSignalUserMessage: b.config.Signals.Defaults[agentos.SignalUserMessage] != "",
+		SupportsPause:             b.config.Signals.Pause != "",
+		SupportsResume:            b.config.Signals.Resume != "",
+		SupportsCancel:            true,
+		SupportsStreaming:         b.subscriber != nil,
 	}
 }
 

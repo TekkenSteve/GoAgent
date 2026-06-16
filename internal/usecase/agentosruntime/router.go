@@ -1,9 +1,8 @@
-package backend
+package agentosruntime
 
 import (
 	"context"
 	"fmt"
-	"sync"
 
 	"github.com/TekkenSteve/GoAgent/agentos"
 )
@@ -12,50 +11,6 @@ import (
 type RunBackendIndex interface {
 	Bind(ctx context.Context, spec agentos.RunSpec) error
 	Resolve(ctx context.Context, runID string) (agentos.BackendRef, error)
-}
-
-// MemoryRunBackendIndex is a process-local run route index.
-type MemoryRunBackendIndex struct {
-	mu     sync.RWMutex
-	routes map[string]agentos.BackendRef
-}
-
-// NewMemoryRunBackendIndex creates an empty in-memory route index.
-func NewMemoryRunBackendIndex() *MemoryRunBackendIndex {
-	return &MemoryRunBackendIndex{routes: make(map[string]agentos.BackendRef)}
-}
-
-// Bind stores the backend reference for a run.
-func (i *MemoryRunBackendIndex) Bind(_ context.Context, spec agentos.RunSpec) error {
-	if spec.RunID == "" {
-		return fmt.Errorf("%w: run id is required", agentos.ErrInvalidRunSpec)
-	}
-	if err := validateBackendRef(spec.Backend); err != nil {
-		return err
-	}
-
-	i.mu.Lock()
-	defer i.mu.Unlock()
-	i.routes[spec.RunID] = spec.Backend
-
-	return nil
-}
-
-// Resolve returns the backend reference that owns a run.
-func (i *MemoryRunBackendIndex) Resolve(_ context.Context, runID string) (agentos.BackendRef, error) {
-	if runID == "" {
-		return agentos.BackendRef{}, fmt.Errorf("%w: run id is required", agentos.ErrInvalidRunSpec)
-	}
-
-	i.mu.RLock()
-	defer i.mu.RUnlock()
-
-	ref, ok := i.routes[runID]
-	if !ok {
-		return agentos.BackendRef{}, fmt.Errorf("%w: %s", agentos.ErrRunRouteNotFound, runID)
-	}
-
-	return ref, nil
 }
 
 // Router directs AgentOS operations to the backend that owns the run.

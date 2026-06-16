@@ -1,4 +1,4 @@
-package backend
+package agentosruntime
 
 import (
 	"context"
@@ -23,12 +23,15 @@ type EventSubscriber interface {
 // BackendCapabilities exposes optional backend features without forcing every
 // implementation to support every advanced AgentOS operation.
 type BackendCapabilities struct {
-	SupportsSignal     bool
-	SupportsPause      bool
-	SupportsResume     bool
-	SupportsCancel     bool
-	SupportsStreaming  bool
-	SupportsCheckpoint bool
+	SupportsSignal               bool
+	SupportsSignalUserMessage    bool
+	SupportsPause                bool
+	SupportsResume               bool
+	SupportsCancel               bool
+	SupportsStreaming            bool
+	SupportsArtifacts            bool
+	SupportsCheckpoint           bool
+	SupportsResumeFromCheckpoint bool
 }
 
 // CapableBackend is implemented by backends that can describe their optional features.

@@ -24,7 +24,7 @@ func main() {
 		TemporalNamespace: env("AGENTFW_TEMPORAL_NAMESPACE", "default"),
 		TemporalTaskQueue: env("AGENTFW_TEMPORAL_TASK_QUEUE", "agent-framework"),
 		RedisURL:          os.Getenv("REDIS_URL"),
-	})
+	}, agentostemporal.WithRunBackendIndex(agentostemporal.NewEphemeralRunBackendIndex()))
 	if err != nil {
 		log.Fatalf("new runtime: %v", err)
 	}

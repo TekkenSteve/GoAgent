@@ -6,20 +6,20 @@ import (
 	"fmt"
 
 	"github.com/TekkenSteve/GoAgent/agentos"
-	agentfwbackend "github.com/TekkenSteve/GoAgent/internal/agentfw/backend"
-	"github.com/TekkenSteve/GoAgent/internal/agentfw/backend/httpbackend"
-	"github.com/TekkenSteve/GoAgent/internal/agentfw/backend/temporalexternal"
 	"github.com/TekkenSteve/GoAgent/internal/entity"
 	goredis "github.com/TekkenSteve/GoAgent/internal/pkg/redis"
+	"github.com/TekkenSteve/GoAgent/internal/repo/agentos/httpbackend"
+	"github.com/TekkenSteve/GoAgent/internal/repo/agentos/temporalexternal"
 	temporalrepo "github.com/TekkenSteve/GoAgent/internal/repo/persistent"
 	repostream "github.com/TekkenSteve/GoAgent/internal/repo/stream"
+	agentosruntime "github.com/TekkenSteve/GoAgent/internal/usecase/agentosruntime"
 	"go.temporal.io/sdk/client"
 )
 
 type runtime struct {
 	temporalClient client.Client
 	closeTemporal  bool
-	router         *agentfwbackend.Router
+	router         *agentosruntime.Router
 	redis          *goredis.Redis
 }
 
@@ -119,7 +119,7 @@ func (r *runtime) Subscribe(ctx context.Context, scope agentos.StreamScope) (age
 }
 
 func (r *runtime) configureRouter(temporalClient client.Client, cfg RuntimeConfig, opts runtimeOptions, executor *temporalrepo.ExecutorTemporal, subscriber *repostream.RedisSubscriber) error {
-	registry := agentfwbackend.NewRegistry()
+	registry := agentosruntime.NewRegistry()
 	agentosSubscriber := newAgentOSSubscriber(subscriber)
 	native := newTemporalNativeBackend(executor, agentosSubscriber)
 	if err := registry.Register(agentos.BackendRef{
@@ -155,12 +155,11 @@ func (r *runtime) configureRouter(temporalClient client.Client, cfg RuntimeConfi
 		}
 	}
 
-	runIndex := agentfwbackend.RunBackendIndex(agentfwbackend.NewMemoryRunBackendIndex())
-	if opts.runBackendIndex != nil {
-		runIndex = opts.runBackendIndex
+	if opts.runBackendIndex == nil {
+		return errors.New("agentos temporal runtime: run backend index is required")
 	}
 
-	router, err := agentfwbackend.NewRouter(registry, runIndex)
+	router, err := agentosruntime.NewRouter(registry, opts.runBackendIndex)
 	if err != nil {
 		return err
 	}
@@ -217,10 +216,10 @@ func (r *runtime) Close() error {
 
 type temporalNativeBackend struct {
 	executor   *temporalrepo.ExecutorTemporal
-	subscriber agentfwbackend.EventSubscriber
+	subscriber agentosruntime.EventSubscriber
 }
 
-func newTemporalNativeBackend(executor *temporalrepo.ExecutorTemporal, subscriber agentfwbackend.EventSubscriber) *temporalNativeBackend {
+func newTemporalNativeBackend(executor *temporalrepo.ExecutorTemporal, subscriber agentosruntime.EventSubscriber) *temporalNativeBackend {
 	return &temporalNativeBackend{
 		executor:   executor,
 		subscriber: subscriber,
@@ -293,12 +292,13 @@ func (b *temporalNativeBackend) Subscribe(ctx context.Context, scope agentos.Str
 	return b.subscriber.SubscribeAgentOS(ctx, scope)
 }
 
-func (b *temporalNativeBackend) Capabilities() agentfwbackend.BackendCapabilities {
-	return agentfwbackend.BackendCapabilities{
-		SupportsSignal:    true,
-		SupportsPause:     true,
-		SupportsResume:    true,
-		SupportsCancel:    true,
-		SupportsStreaming: true,
+func (b *temporalNativeBackend) Capabilities() agentosruntime.BackendCapabilities {
+	return agentosruntime.BackendCapabilities{
+		SupportsSignal:            true,
+		SupportsSignalUserMessage: false,
+		SupportsPause:             true,
+		SupportsResume:            true,
+		SupportsCancel:            true,
+		SupportsStreaming:         true,
 	}
 }

@@ -19,3 +19,15 @@ if rg 'github\.com/TekkenSteve/GoAgent/internal/' "$ROOT_DIR/examples" "$ROOT_DI
   echo "public examples/docs must not import GoAgent internal packages" >&2
   exit 1
 fi
+
+if rg 'github\.com/TekkenSteve/GoAgent/internal/(repo|agentfw)(/|")' \
+  "$ROOT_DIR/internal/usecase/agentosruntime"; then
+  echo "AgentOS runtime usecase must not import repo or agentfw infrastructure packages" >&2
+  exit 1
+fi
+
+if rg 'github\.com/TekkenSteve/GoAgent/internal/agentfw/(backend|eventing)(/|")' \
+  "$ROOT_DIR/internal/repo/agentos"; then
+  echo "AgentOS backend adapters must depend on usecase ports, not agentfw implementation packages" >&2
+  exit 1
+fi

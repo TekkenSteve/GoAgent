@@ -10,18 +10,18 @@ import (
 	"net/http"
 
 	"github.com/TekkenSteve/GoAgent/agentos"
-	agentfwbackend "github.com/TekkenSteve/GoAgent/internal/agentfw/backend"
+	agentosruntime "github.com/TekkenSteve/GoAgent/internal/usecase/agentosruntime"
 )
 
 // Backend adapts a remote HTTP agent runtime to AgentOS.
 type Backend struct {
 	client     *http.Client
-	subscriber agentfwbackend.EventSubscriber
+	subscriber agentosruntime.EventSubscriber
 	config     Config
 }
 
 // NewBackend creates an HTTP backend.
-func NewBackend(client *http.Client, subscriber agentfwbackend.EventSubscriber, config Config) (*Backend, error) {
+func NewBackend(client *http.Client, subscriber agentosruntime.EventSubscriber, config Config) (*Backend, error) {
 	if err := config.validate(); err != nil {
 		return nil, err
 	}
@@ -123,13 +123,14 @@ func (b *Backend) Subscribe(ctx context.Context, scope agentos.StreamScope) (age
 }
 
 // Capabilities reports baseline HTTP backend features.
-func (b *Backend) Capabilities() agentfwbackend.BackendCapabilities {
-	return agentfwbackend.BackendCapabilities{
-		SupportsSignal:    true,
-		SupportsPause:     true,
-		SupportsResume:    true,
-		SupportsCancel:    true,
-		SupportsStreaming: b.subscriber != nil,
+func (b *Backend) Capabilities() agentosruntime.BackendCapabilities {
+	return agentosruntime.BackendCapabilities{
+		SupportsSignal:            true,
+		SupportsSignalUserMessage: true,
+		SupportsPause:             true,
+		SupportsResume:            true,
+		SupportsCancel:            true,
+		SupportsStreaming:         b.subscriber != nil,
 	}
 }
 

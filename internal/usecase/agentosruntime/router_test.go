@@ -1,4 +1,4 @@
-package backend
+package agentosruntime
 
 import (
 	"context"
@@ -16,7 +16,7 @@ func TestRouterRoutesRunOperationsToRegisteredBackend(t *testing.T) {
 	if err := registry.Register(ref, stub); err != nil {
 		t.Fatalf("register backend: %v", err)
 	}
-	router, err := NewRouter(registry, NewMemoryRunBackendIndex())
+	router, err := NewRouter(registry, newStubRunIndex())
 	if err != nil {
 		t.Fatalf("new router: %v", err)
 	}
@@ -49,7 +49,7 @@ func TestRouterRoutesRunOperationsToRegisteredBackend(t *testing.T) {
 }
 
 func TestRouterRequiresExplicitBackendRef(t *testing.T) {
-	router, err := NewRouter(NewRegistry(), NewMemoryRunBackendIndex())
+	router, err := NewRouter(NewRegistry(), newStubRunIndex())
 	if err != nil {
 		t.Fatalf("new router: %v", err)
 	}
@@ -64,6 +64,24 @@ type stubBackend struct {
 	statusRunID  string
 	controlRunID string
 	signalRunID  string
+}
+
+type stubRunIndex struct {
+	routes map[string]agentos.BackendRef
+}
+
+func newStubRunIndex() *stubRunIndex {
+	return &stubRunIndex{routes: make(map[string]agentos.BackendRef)}
+}
+
+func (i *stubRunIndex) Bind(_ context.Context, spec agentos.RunSpec) error {
+	i.routes[spec.RunID] = spec.Backend
+
+	return nil
+}
+
+func (i *stubRunIndex) Resolve(_ context.Context, runID string) (agentos.BackendRef, error) {
+	return i.routes[runID], nil
 }
 
 func (b *stubBackend) Start(_ context.Context, spec agentos.RunSpec) (agentos.RunStatus, error) {
