@@ -311,6 +311,7 @@ func initTemporalComponents(
 		TemporalTaskQueue:        fwCfg.Temporal.TaskQueue,
 		RedisURL:                 cfg.Redis.URL,
 		TemporalExternalBackends: temporalExternalBackends(l, cfg),
+		HTTPBackends:             httpBackends(l, cfg),
 	}, runtime.Client, agentostemporal.WithRunBackendIndex(agentOSRunRepo))
 	if err != nil {
 		l.Fatal(fmt.Errorf("app - Run - agentos temporal runtime: %w", err))
@@ -327,6 +328,24 @@ func initTemporalComponents(
 		signalWorkflow: signalWorkflow,
 		llmProvider:    comp.llmProvider,
 	}
+}
+
+func httpBackends(l logger.Interface, cfg *config.Config) []agentostemporal.HTTPBackendConfig {
+	backends, err := cfg.AgentFW.HTTPBackends()
+	if err != nil {
+		l.Fatal(fmt.Errorf("app - Run - http backends: %w", err))
+	}
+
+	result := make([]agentostemporal.HTTPBackendConfig, 0, len(backends))
+	for _, backend := range backends {
+		result = append(result, agentostemporal.HTTPBackendConfig{
+			Name:     backend.Name,
+			Endpoint: backend.Endpoint,
+			Headers:  backend.Headers,
+		})
+	}
+
+	return result
 }
 
 func temporalExternalBackends(l logger.Interface, cfg *config.Config) []agentostemporal.ExternalBackendConfig {

@@ -7,6 +7,7 @@ import (
 
 	"github.com/TekkenSteve/GoAgent/agentos"
 	agentfwbackend "github.com/TekkenSteve/GoAgent/internal/agentfw/backend"
+	"github.com/TekkenSteve/GoAgent/internal/agentfw/backend/httpbackend"
 	"github.com/TekkenSteve/GoAgent/internal/agentfw/backend/temporalexternal"
 	"github.com/TekkenSteve/GoAgent/internal/entity"
 	goredis "github.com/TekkenSteve/GoAgent/internal/pkg/redis"
@@ -143,6 +144,16 @@ func (r *runtime) configureRouter(temporalClient client.Client, cfg RuntimeConfi
 			return err
 		}
 	}
+	for _, backendConfig := range cfg.HTTPBackends {
+		internalConfig := httpBackendConfig(backendConfig)
+		httpBackend, err := httpbackend.NewBackend(nil, agentosSubscriber, internalConfig)
+		if err != nil {
+			return err
+		}
+		if err := registry.Register(internalConfig.Ref(), httpBackend); err != nil {
+			return err
+		}
+	}
 
 	runIndex := agentfwbackend.RunBackendIndex(agentfwbackend.NewMemoryRunBackendIndex())
 	if opts.runBackendIndex != nil {
@@ -167,6 +178,14 @@ func buildRuntimeOptions(options []RuntimeOption) runtimeOptions {
 	}
 
 	return opts
+}
+
+func httpBackendConfig(cfg HTTPBackendConfig) httpbackend.Config {
+	return httpbackend.Config{
+		Name:     cfg.Name,
+		Endpoint: cfg.Endpoint,
+		Headers:  cfg.Headers,
+	}
 }
 
 func temporalExternalConfig(cfg ExternalBackendConfig) temporalexternal.Config {

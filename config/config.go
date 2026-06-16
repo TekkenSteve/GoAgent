@@ -88,6 +88,8 @@ type (
 		TemporalTaskQueue string `env:"AGENTFW_TEMPORAL_TASK_QUEUE" envDefault:"agent-framework"`
 		// TemporalExternalBackendsJSON is a JSON array of temporal_external backend configs.
 		TemporalExternalBackendsJSON string `env:"AGENTFW_TEMPORAL_EXTERNAL_BACKENDS_JSON" envDefault:"[]"`
+		// HTTPBackendsJSON is a JSON array of HTTP backend configs.
+		HTTPBackendsJSON string `env:"AGENTFW_HTTP_BACKENDS_JSON" envDefault:"[]"`
 
 		MaxConcurrentWorkflowTaskPollers int   `env:"AGENTFW_MAX_CONCURRENT_WORKFLOW_TASK_POLLERS" envDefault:"2"`
 		MaxConcurrentActivityTaskPollers int   `env:"AGENTFW_MAX_CONCURRENT_ACTIVITY_TASK_POLLERS" envDefault:"2"`
@@ -130,11 +132,28 @@ type ExternalSignalNames struct {
 	Defaults map[string]string `json:"defaults,omitempty"`
 }
 
+// HTTPBackend configures a remote HTTP agent backend.
+type HTTPBackend struct {
+	Name     string            `json:"name"`
+	Endpoint string            `json:"endpoint"`
+	Headers  map[string]string `json:"headers,omitempty"`
+}
+
 // TemporalExternalBackends parses configured temporal_external backends.
 func (c AgentFW) TemporalExternalBackends() ([]TemporalExternalBackend, error) {
 	var backends []TemporalExternalBackend
 	if err := json.Unmarshal([]byte(c.TemporalExternalBackendsJSON), &backends); err != nil {
 		return nil, fmt.Errorf("parse AGENTFW_TEMPORAL_EXTERNAL_BACKENDS_JSON: %w", err)
+	}
+
+	return backends, nil
+}
+
+// HTTPBackends parses configured HTTP agent backends.
+func (c AgentFW) HTTPBackends() ([]HTTPBackend, error) {
+	var backends []HTTPBackend
+	if err := json.Unmarshal([]byte(c.HTTPBackendsJSON), &backends); err != nil {
+		return nil, fmt.Errorf("parse AGENTFW_HTTP_BACKENDS_JSON: %w", err)
 	}
 
 	return backends, nil

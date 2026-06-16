@@ -13,6 +13,7 @@ type RuntimeConfig struct {
 	TemporalTaskQueue        string
 	RedisURL                 string
 	TemporalExternalBackends []ExternalBackendConfig
+	HTTPBackends             []HTTPBackendConfig
 }
 
 // ExternalBackendConfig configures a temporal_external AgentOS backend.
@@ -30,6 +31,13 @@ type ExternalSignalNames struct {
 	Resume   string
 	Cancel   string
 	Defaults map[agentos.SignalType]string
+}
+
+// HTTPBackendConfig configures an HTTP AgentOS backend.
+type HTTPBackendConfig struct {
+	Name     string
+	Endpoint string
+	Headers  map[string]string
 }
 
 // RunBackendIndex persists run ownership for Signal/Control/Status routing.

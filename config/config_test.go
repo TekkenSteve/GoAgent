@@ -43,3 +43,29 @@ func TestTemporalExternalBackends(t *testing.T) {
 		t.Fatalf("unexpected backend config: %#v", got)
 	}
 }
+
+func TestHTTPBackends(t *testing.T) {
+	backends, err := AgentFW{
+		HTTPBackendsJSON: `[
+			{
+				"name":"claude-code",
+				"endpoint":"http://claude-code-runtime:8080",
+				"headers":{"Authorization":"Bearer token"}
+			}
+		]`,
+	}.HTTPBackends()
+	if err != nil {
+		t.Fatalf("HTTPBackends: %v", err)
+	}
+
+	if len(backends) != 1 {
+		t.Fatalf("backend count = %d", len(backends))
+	}
+
+	got := backends[0]
+	if got.Name != "claude-code" ||
+		got.Endpoint != "http://claude-code-runtime:8080" ||
+		got.Headers["Authorization"] != "Bearer token" {
+		t.Fatalf("unexpected backend config: %#v", got)
+	}
+}
