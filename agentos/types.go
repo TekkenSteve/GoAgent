@@ -7,19 +7,19 @@ import (
 
 // RunSpec describes a generic agent run without binding callers to GoAgent internals.
 type RunSpec struct {
-	RunID          string
-	ThreadID       string
-	AccountID      string
-	ProjectID      string
-	AgentID        string
-	ModelRef       string
-	SystemPrompt   string
-	UserMessage    string
-	IdempotencyKey string
-	RequestedAt    time.Time
-	Metadata       map[string]string
-	Backend        BackendRef
-	Input          map[string]any
+	RunID          string            `json:"run_id"`
+	ThreadID       string            `json:"thread_id,omitempty"`
+	AccountID      string            `json:"account_id,omitempty"`
+	ProjectID      string            `json:"project_id,omitempty"`
+	AgentID        string            `json:"agent_id,omitempty"`
+	ModelRef       string            `json:"model_ref,omitempty"`
+	SystemPrompt   string            `json:"system_prompt,omitempty"`
+	UserMessage    string            `json:"user_message,omitempty"`
+	IdempotencyKey string            `json:"idempotency_key,omitempty"`
+	RequestedAt    time.Time         `json:"requested_at,omitempty"`
+	Metadata       map[string]string `json:"metadata,omitempty"`
+	Backend        BackendRef        `json:"backend"`
+	Input          map[string]any    `json:"input,omitempty"`
 }
 
 // BackendKind identifies the execution substrate used by an agent backend.
@@ -45,24 +45,63 @@ type BackendRef struct {
 
 // RunStatus is the public lifecycle view for a run.
 type RunStatus struct {
-	RunID          string
-	LifecycleState string
-	Step           int32
-	Reason         string
-	UpdatedAt      time.Time
+	RunID          string        `json:"run_id"`
+	LifecycleState string        `json:"lifecycle_state"`
+	Step           int32         `json:"step,omitempty"`
+	Progress       *RunProgress  `json:"progress,omitempty"`
+	Artifacts      []ArtifactRef `json:"artifacts,omitempty"`
+	Reason         string        `json:"reason,omitempty"`
+	UpdatedAt      time.Time     `json:"updated_at,omitempty"`
+}
+
+// RunProgress is a generic public progress view. Backend-specific details
+// should be emitted as events or artifacts.
+type RunProgress struct {
+	Current int32  `json:"current,omitempty"`
+	Total   int32  `json:"total,omitempty"`
+	Label   string `json:"label,omitempty"`
 }
 
 // Event is the public stream event envelope.
 type Event struct {
-	EventID   string
-	EventType string
-	RunID     string
-	ThreadID  string
-	Sequence  int64
-	Timestamp time.Time
-	Source    string
-	Payload   map[string]any
+	EventID   string         `json:"event_id"`
+	EventType EventType      `json:"event_type"`
+	RunID     string         `json:"run_id,omitempty"`
+	ThreadID  string         `json:"thread_id,omitempty"`
+	Sequence  int64          `json:"sequence,omitempty"`
+	Timestamp time.Time      `json:"timestamp,omitempty"`
+	Source    string         `json:"source,omitempty"`
+	Payload   map[string]any `json:"payload,omitempty"`
 }
+
+// EventType identifies standard AgentOS public stream events.
+type EventType string
+
+const (
+	EventRunStarted            EventType = "run.started"
+	EventRunCompleted          EventType = "run.completed"
+	EventRunFailed             EventType = "run.failed"
+	EventRunCancelled          EventType = "run.cancelled"
+	EventRunPaused             EventType = "run.paused"
+	EventRunResumed            EventType = "run.resumed"
+	EventAgentStepStarted      EventType = "agent.step.started"
+	EventAgentStepCompleted    EventType = "agent.step.completed"
+	EventAgentStepFailed       EventType = "agent.step.failed"
+	EventAgentMessageDelta     EventType = "agent.message.delta"
+	EventAgentMessageCompleted EventType = "agent.message.completed"
+	EventToolCallStarted       EventType = "tool.call.started"
+	EventToolCallDelta         EventType = "tool.call.delta"
+	EventToolCallCompleted     EventType = "tool.call.completed"
+	EventToolCallFailed        EventType = "tool.call.failed"
+	EventApprovalRequested     EventType = "approval.requested"
+	EventApprovalResolved      EventType = "approval.resolved"
+	EventUsageReported         EventType = "usage.reported"
+	EventCheckpointCreated     EventType = "checkpoint.created"
+	EventArtifactCreated       EventType = "artifact.created"
+	EventNodeInputResolved     EventType = "node.input.resolved"
+	EventNodeOutputPublished   EventType = "node.output.published"
+	EventCapabilitySelected    EventType = "capability.selected"
+)
 
 // Message is a public conversation message.
 type Message struct {
@@ -100,7 +139,7 @@ type ToolFuncDef struct {
 
 // StreamScope selects events for a run/thread.
 type StreamScope struct {
-	RunID         string
-	ThreadID      string
-	AfterSequence int64
+	RunID         string `json:"run_id,omitempty"`
+	ThreadID      string `json:"thread_id,omitempty"`
+	AfterSequence int64  `json:"after_sequence,omitempty"`
 }
