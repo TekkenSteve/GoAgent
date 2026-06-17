@@ -2,9 +2,11 @@ package agentos
 
 import (
 	"encoding/json"
+	"errors"
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestRunPlanSpecJSONSchema(t *testing.T) {
@@ -32,6 +34,40 @@ func TestRunPlanPublicTypesDoNotExposeInternalEntity(t *testing.T) {
 	}
 	for _, typ := range publicTypes {
 		assertNoInternalEntity(t, typ, map[reflect.Type]bool{})
+	}
+}
+
+func TestPlanEventCodecRoundTrip(t *testing.T) {
+	event := PlanEvent{
+		Event: Event{
+			EventID:   "evt-1",
+			EventType: EventPlanStarted,
+			Sequence:  7,
+			Timestamp: time.Date(2026, 6, 17, 12, 0, 0, 0, time.UTC),
+			Payload: map[string]any{
+				"reason": "started",
+			},
+		},
+		PlanID: "plan-1",
+	}
+
+	data, err := MarshalPlanEvent(event)
+	if err != nil {
+		t.Fatalf("MarshalPlanEvent: %v", err)
+	}
+	got, err := UnmarshalPlanEvent(data)
+	if err != nil {
+		t.Fatalf("UnmarshalPlanEvent: %v", err)
+	}
+	if got.PlanID != event.PlanID || got.EventType != event.EventType || got.Sequence != event.Sequence {
+		t.Fatalf("event = %#v", got)
+	}
+}
+
+func TestPlanEventCodecRejectsMissingPlanID(t *testing.T) {
+	_, err := MarshalPlanEvent(PlanEvent{Event: Event{EventType: EventPlanStarted}})
+	if !errors.Is(err, ErrInvalidPlanEvent) {
+		t.Fatalf("error = %v, want ErrInvalidPlanEvent", err)
 	}
 }
 

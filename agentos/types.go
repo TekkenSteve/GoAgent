@@ -101,6 +101,17 @@ const (
 	EventNodeInputResolved     EventType = "node.input.resolved"
 	EventNodeOutputPublished   EventType = "node.output.published"
 	EventCapabilitySelected    EventType = "capability.selected"
+	EventPlanStarted           EventType = "plan.started"
+	EventPlanBlocked           EventType = "plan.blocked"
+	EventPlanSucceeded         EventType = "plan.succeeded"
+	EventPlanFailed            EventType = "plan.failed"
+	EventPlanCanceled          EventType = "plan.canceled"
+	EventPlanNodeReady         EventType = "plan.node.ready"
+	EventPlanNodeStarted       EventType = "plan.node.started"
+	EventPlanNodeSucceeded     EventType = "plan.node.succeeded"
+	EventPlanNodeFailed        EventType = "plan.node.failed"
+	EventPlanNodeSkipped       EventType = "plan.node.skipped"
+	EventPlanNodeCanceled      EventType = "plan.node.canceled"
 )
 
 // Message is a public conversation message.

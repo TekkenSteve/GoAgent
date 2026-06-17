@@ -16,4 +16,5 @@ var (
 	ErrArtifactNotFound        = errors.New("agentos: artifact not found")
 	ErrInvalidArtifact         = errors.New("agentos: invalid artifact")
 	ErrInvalidExpression       = errors.New("agentos: invalid expression")
+	ErrInvalidPlanEvent        = errors.New("agentos: invalid plan event")
 )
