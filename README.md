@@ -90,8 +90,8 @@ GoAgent is structured around a small public **AgentOS SDK boundary** plus an app
 
 | Package | Layer | Description |
 |---------|-------|-------------|
-| `agentos/` | Public SDK | Stable runtime interface, run specs, statuses, events, messages, and tool definitions |
-| `agentos/temporal/` | Public implementation | Default Temporal/Redis runtime and worker registration kit |
+| `agentos/` | Public SDK | Stable runtime and plan interfaces, run specs, RunPlan specs, statuses, events, artifacts, capabilities, messages, and tool definitions |
+| `agentos/temporal/` | Public implementation | Default Temporal/Redis runtime, PlanRuntime, and worker registration kit |
 | `config/` | Outer | Application configuration (env-based) |
 | `pkg/` | Generic utilities | Infrastructure wrappers that are not GoAgent implementation contracts |
 
@@ -172,6 +172,25 @@ The `examples/embed/` directory shows how to embed GoAgent through the public Ag
 ### Type-Only Usage (Mode 3)
 
 The `examples/types/` directory shows importing only `agentos/` for shared public type definitions.
+
+### Cross-Backend Plans (AgentOS RunPlan)
+
+AgentOS supports durable cross-backend orchestration through `agentos.PlanRuntime`.
+
+`RunPlan` is the public control-plane model for coordinating backend-owned child runs. A `PlanNodeSpec` is a full `agentos.RunSpec` plus backend, capability, input, output, condition, and policy contracts. It is not a native GoAgent step, not a Temporal activity, and not a LangGraph node.
+
+Native GoAgent `entity.Step` remains an internal detail of the GoAgent native backend. Backend-specific step, graph, loop, and tool execution details should be emitted through events or artifacts, not promoted into the public AgentOS API.
+
+External Go projects should import only:
+
+```go
+import (
+    "github.com/TekkenSteve/GoAgent/agentos"
+    agentostemporal "github.com/TekkenSteve/GoAgent/agentos/temporal"
+)
+```
+
+Do not import implementation packages such as `internal/entity`, `internal/repo`, `internal/usecase`, or old root-level implementation packages. Public examples and docs are guarded by tests to keep that boundary intact.
 
 ## Three Usage Modes
 
