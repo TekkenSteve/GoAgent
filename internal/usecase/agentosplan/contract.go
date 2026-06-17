@@ -28,6 +28,32 @@ type ArtifactStore interface {
 	List(ctx context.Context, planID string) ([]agentos.ArtifactRef, error)
 }
 
+// PlanIndex stores durable plan identity and the latest aggregate status.
+type PlanIndex interface {
+	CreatePlan(ctx context.Context, spec agentos.RunPlanSpec, status agentos.RunPlanStatus) (agentos.RunPlanStatus, error)
+	GetPlan(ctx context.Context, planID string) (agentos.RunPlanSpec, agentos.RunPlanStatus, bool, error)
+	UpdatePlanStatus(ctx context.Context, status agentos.RunPlanStatus, idempotencyKey string) error
+}
+
+// PlanStateSnapshot is the durable replay/audit snapshot written by plan activities.
+type PlanStateSnapshot struct {
+	Spec           agentos.RunPlanSpec
+	Status         agentos.RunPlanStatus
+	IdempotencyKey string
+}
+
+// PlanStateStore persists the latest deterministic reducer snapshot.
+type PlanStateStore interface {
+	SavePlanState(ctx context.Context, snapshot PlanStateSnapshot) error
+	LoadPlanState(ctx context.Context, planID string) (PlanStateSnapshot, bool, error)
+}
+
+// PlanEventStore is the durable event source for RunPlan timelines.
+type PlanEventStore interface {
+	AppendPlanEvent(ctx context.Context, event agentos.PlanEvent, idempotencyKey string) (agentos.PlanEvent, error)
+	ListPlanEvents(ctx context.Context, scope agentos.PlanStreamScope, limit int) ([]agentos.PlanEvent, error)
+}
+
 // Runner starts and controls backend-owned child runs.
 type Runner interface {
 	Start(ctx context.Context, spec agentos.RunSpec) (agentos.RunStatus, error)

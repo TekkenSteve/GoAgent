@@ -58,12 +58,12 @@ const (
 
 // StateEvent transitions plan state.
 type StateEvent struct {
-	Kind      EventKind
-	NodeID    string
-	RunID     string
-	Reason    string
-	Artifacts []agentos.ArtifactRef
-	At        time.Time
+	Kind      EventKind             `json:"kind"`
+	NodeID    string                `json:"node_id,omitempty"`
+	RunID     string                `json:"run_id,omitempty"`
+	Reason    string                `json:"reason,omitempty"`
+	Artifacts []agentos.ArtifactRef `json:"artifacts,omitempty"`
+	At        time.Time             `json:"at,omitempty"`
 }
 
 // Apply applies one deterministic state transition.

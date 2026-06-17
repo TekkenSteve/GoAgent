@@ -1,0 +1,166 @@
+package agentosplan
+
+import (
+	"context"
+	"fmt"
+	"sort"
+	"sync"
+	"time"
+
+	"github.com/TekkenSteve/GoAgent/agentos"
+)
+
+// MemoryPlanStore is an explicit in-process PlanIndex, PlanStateStore, and
+// PlanEventStore for unit tests and embedded demos.
+type MemoryPlanStore struct {
+	mu        sync.RWMutex
+	specs     map[string]agentos.RunPlanSpec
+	statuses  map[string]agentos.RunPlanStatus
+	events    map[string][]agentos.PlanEvent
+	eventKeys map[string]agentos.PlanEvent
+}
+
+// NewMemoryPlanStore creates an empty in-memory plan store.
+func NewMemoryPlanStore() *MemoryPlanStore {
+	return &MemoryPlanStore{
+		specs:     make(map[string]agentos.RunPlanSpec),
+		statuses:  make(map[string]agentos.RunPlanStatus),
+		events:    make(map[string][]agentos.PlanEvent),
+		eventKeys: make(map[string]agentos.PlanEvent),
+	}
+}
+
+func (s *MemoryPlanStore) CreatePlan(ctx context.Context, spec agentos.RunPlanSpec, status agentos.RunPlanStatus) (agentos.RunPlanStatus, error) {
+	snapshot := PlanStateSnapshot{
+		Spec:           spec,
+		Status:         status,
+		IdempotencyKey: spec.IdempotencyKey,
+	}
+	if err := s.SavePlanState(ctx, snapshot); err != nil {
+		return agentos.RunPlanStatus{}, err
+	}
+
+	return status, nil
+}
+
+func (s *MemoryPlanStore) GetPlan(_ context.Context, planID string) (agentos.RunPlanSpec, agentos.RunPlanStatus, bool, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	spec, ok := s.specs[planID]
+	if !ok {
+		return agentos.RunPlanSpec{}, agentos.RunPlanStatus{}, false, nil
+	}
+
+	return spec, s.statuses[planID], true, nil
+}
+
+func (s *MemoryPlanStore) UpdatePlanStatus(_ context.Context, status agentos.RunPlanStatus, _ string) error {
+	if status.PlanID == "" {
+		return fmt.Errorf("%w: plan id is required", agentos.ErrInvalidRunPlan)
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.statuses[status.PlanID] = status
+
+	return nil
+}
+
+func (s *MemoryPlanStore) SavePlanState(_ context.Context, snapshot PlanStateSnapshot) error {
+	if snapshot.Spec.PlanID == "" {
+		return fmt.Errorf("%w: plan id is required", agentos.ErrInvalidRunPlan)
+	}
+	if snapshot.Status.PlanID == "" {
+		snapshot.Status.PlanID = snapshot.Spec.PlanID
+	}
+	if snapshot.Status.UpdatedAt.IsZero() {
+		snapshot.Status.UpdatedAt = time.Now().UTC()
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.specs[snapshot.Spec.PlanID] = snapshot.Spec
+	s.statuses[snapshot.Spec.PlanID] = snapshot.Status
+
+	return nil
+}
+
+func (s *MemoryPlanStore) LoadPlanState(_ context.Context, planID string) (PlanStateSnapshot, bool, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	spec, ok := s.specs[planID]
+	if !ok {
+		return PlanStateSnapshot{}, false, nil
+	}
+
+	return PlanStateSnapshot{
+		Spec:   spec,
+		Status: s.statuses[planID],
+	}, true, nil
+}
+
+func (s *MemoryPlanStore) AppendPlanEvent(_ context.Context, event agentos.PlanEvent, idempotencyKey string) (agentos.PlanEvent, error) {
+	if event.PlanID == "" {
+		return agentos.PlanEvent{}, fmt.Errorf("%w: plan id is required", agentos.ErrInvalidPlanEvent)
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if idempotencyKey != "" {
+		if existing, ok := s.eventKeys[idempotencyKey]; ok {
+			return existing, nil
+		}
+	}
+	if event.Sequence == 0 {
+		event.Sequence = int64(len(s.events[event.PlanID]) + 1)
+	}
+	if event.EventID == "" {
+		event.EventID = fmt.Sprintf("%s:%d", event.PlanID, event.Sequence)
+	}
+	s.events[event.PlanID] = append(s.events[event.PlanID], event)
+	if idempotencyKey != "" {
+		s.eventKeys[idempotencyKey] = event
+	}
+
+	return event, nil
+}
+
+func (s *MemoryPlanStore) ListPlanEvents(_ context.Context, scope agentos.PlanStreamScope, limit int) ([]agentos.PlanEvent, error) {
+	if scope.PlanID == "" {
+		return nil, fmt.Errorf("%w: plan id is required", agentos.ErrInvalidStreamScope)
+	}
+
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	events := append([]agentos.PlanEvent(nil), s.events[scope.PlanID]...)
+	sort.SliceStable(events, func(i, j int) bool {
+		return events[i].Sequence < events[j].Sequence
+	})
+
+	filtered := make([]agentos.PlanEvent, 0, len(events))
+	for _, event := range events {
+		if event.Sequence <= scope.AfterSequence {
+			continue
+		}
+		if scope.NodeID != "" && event.NodeID != scope.NodeID {
+			continue
+		}
+		if scope.RunID != "" && event.RunID != scope.RunID {
+			continue
+		}
+		filtered = append(filtered, event)
+		if limit > 0 && len(filtered) >= limit {
+			break
+		}
+	}
+
+	return filtered, nil
+}
+
+var (
+	_ PlanIndex      = (*MemoryPlanStore)(nil)
+	_ PlanStateStore = (*MemoryPlanStore)(nil)
+	_ PlanEventStore = (*MemoryPlanStore)(nil)
+)
