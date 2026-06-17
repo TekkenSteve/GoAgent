@@ -38,6 +38,15 @@ func (i *AgentOSRunIndex) Bind(_ context.Context, spec agentos.RunSpec) error {
 	return nil
 }
 
+// BindPlanNode stores the backend reference for a plan-owned child run.
+func (i *AgentOSRunIndex) BindPlanNode(ctx context.Context, _ string, _ string, spec agentos.RunSpec, status agentos.RunStatus) error {
+	if status.RunID != "" {
+		spec.RunID = status.RunID
+	}
+
+	return i.Bind(ctx, spec)
+}
+
 // Resolve returns the backend reference that owns a run.
 func (i *AgentOSRunIndex) Resolve(_ context.Context, runID string) (agentos.BackendRef, error) {
 	if runID == "" {
