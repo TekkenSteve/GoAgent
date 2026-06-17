@@ -12,8 +12,9 @@ import (
 
 // WorkerKit registers GoAgent workflows and activities into an existing worker.
 type WorkerKit struct {
-	activities *orchestration.AgentActivities
-	closeFns   []func() error
+	activities     *orchestration.AgentActivities
+	planActivities *PlanActivities
+	closeFns       []func() error
 }
 
 // NewWorkerKit creates a worker registration kit backed by the default
@@ -36,9 +37,12 @@ func (k *WorkerKit) Register(w worker.Worker) error {
 	w.RegisterWorkflowWithOptions(orchestration.TriggerFireWorkflow, workflow.RegisterOptions{
 		Name: orchestration.TriggerFireWorkflowName,
 	})
+	w.RegisterWorkflowWithOptions(PlanWorkflow, workflow.RegisterOptions{
+		Name: PlanWorkflowName,
+	})
 
 	if k.activities == nil {
-		return nil
+		return k.registerPlanActivities(w)
 	}
 
 	w.RegisterActivityWithOptions(k.activities.PrepareActivity, activity.RegisterOptions{
@@ -64,6 +68,27 @@ func (k *WorkerKit) Register(w worker.Worker) error {
 	})
 	w.RegisterActivityWithOptions(k.activities.FireTriggerActivity, activity.RegisterOptions{
 		Name: orchestration.FireTriggerActivityName,
+	})
+
+	return k.registerPlanActivities(w)
+}
+
+func (k *WorkerKit) registerPlanActivities(w worker.Worker) error {
+	if k.planActivities == nil {
+		return nil
+	}
+
+	w.RegisterActivityWithOptions(k.planActivities.ValidatePlanActivity, activity.RegisterOptions{
+		Name: ValidatePlanActivityName,
+	})
+	w.RegisterActivityWithOptions(k.planActivities.StartPlanNodeActivity, activity.RegisterOptions{
+		Name: StartPlanNodeActivityName,
+	})
+	w.RegisterActivityWithOptions(k.planActivities.StatusPlanNodeActivity, activity.RegisterOptions{
+		Name: StatusPlanNodeActivityName,
+	})
+	w.RegisterActivityWithOptions(k.planActivities.ControlPlanNodeActivity, activity.RegisterOptions{
+		Name: ControlPlanNodeActivityName,
 	})
 
 	return nil

@@ -86,7 +86,7 @@ func eventFromStored(stored agentfwstream.StoredEvent) agentos.Event {
 
 	return agentos.Event{
 		EventID:   base.EventID,
-		EventType: stored.Event.EventType(),
+		EventType: agentos.EventType(stored.Event.EventType()),
 		RunID:     base.RunID,
 		ThreadID:  base.SessionID,
 		Sequence:  stored.Sequence,

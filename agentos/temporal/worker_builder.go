@@ -86,6 +86,32 @@ func newWorkerKit(ctx context.Context, cfg WorkerConfig) (*WorkerKit, error) {
 		return nil, err
 	}
 
+	agentOSRunRepo := temporalrepo.NewAgentOSRunRepo(pg)
+	planRuntime, err := NewRuntimeWithClient(ctx, RuntimeConfig{
+		TemporalAddress:          cfg.TemporalAddress,
+		TemporalNamespace:        cfg.TemporalNamespace,
+		TemporalTaskQueue:        cfg.TemporalTaskQueue,
+		TemporalExternalBackends: cfg.TemporalExternalBackends,
+		HTTPBackends:             cfg.HTTPBackends,
+		GRPCBackends:             cfg.GRPCBackends,
+	}, temporalClient, WithRunBackendIndex(agentOSRunRepo))
+	if err != nil {
+		temporalClient.Close()
+		_ = rdb.Close()
+		pg.Close()
+
+		return nil, fmt.Errorf("agentos temporal worker - plan runtime: %w", err)
+	}
+	planActivities, err := NewPlanActivitiesWithCapabilities(planRuntime, cfg.Capabilities)
+	if err != nil {
+		temporalClient.Close()
+		_ = rdb.Close()
+		pg.Close()
+
+		return nil, fmt.Errorf("agentos temporal worker - plan activities: %w", err)
+	}
+	kit.planActivities = planActivities
+
 	kit.closeFns = append(kit.closeFns,
 		func() error {
 			if batchWriter != nil {
@@ -99,6 +125,7 @@ func newWorkerKit(ctx context.Context, cfg WorkerConfig) (*WorkerKit, error) {
 
 			return nil
 		},
+		planRuntime.Close,
 		rdb.Close,
 		func() error {
 			pg.Close()

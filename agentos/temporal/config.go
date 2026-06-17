@@ -111,6 +111,11 @@ type WorkerConfig struct {
 	LLMConfigPath     string
 	LogLevel          string
 
+	TemporalExternalBackends []ExternalBackendConfig
+	HTTPBackends             []HTTPBackendConfig
+	GRPCBackends             []GRPCBackendConfig
+	Capabilities             []agentos.Capability
+
 	RegisterEnvTools      bool
 	EnsureDefaultTemplate bool
 }

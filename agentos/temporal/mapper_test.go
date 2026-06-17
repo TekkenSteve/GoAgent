@@ -1,6 +1,7 @@
 package temporal
 
 import (
+	"reflect"
 	"testing"
 	"time"
 
@@ -60,7 +61,7 @@ func TestRunStatusFromEntity(t *testing.T) {
 		Reason:         "waiting",
 		UpdatedAt:      updatedAt,
 	}
-	if got != want {
+	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("status mismatch: got %#v want %#v", got, want)
 	}
 }
