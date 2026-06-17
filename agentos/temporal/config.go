@@ -12,6 +12,8 @@ type RuntimeConfig struct {
 	TemporalAddress          string
 	TemporalNamespace        string
 	TemporalTaskQueue        string
+	PostgresURL              string
+	PostgresPoolMax          int
 	RedisURL                 string
 	TemporalExternalBackends []ExternalBackendConfig
 	HTTPBackends             []HTTPBackendConfig

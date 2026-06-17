@@ -48,6 +48,24 @@ func newSubscription(internalSub *agentfwstream.Subscription) agentos.Subscripti
 	}
 }
 
+func newPlanReplaySubscription(planEvents []agentos.PlanEvent) agentos.Subscription {
+	out := make(chan agentos.Event, len(planEvents))
+	for _, planEvent := range planEvents {
+		event := planEvent.Event
+		if event.Payload == nil {
+			event.Payload = map[string]any{}
+		}
+		event.Payload["plan_id"] = planEvent.PlanID
+		if planEvent.NodeID != "" {
+			event.Payload["node_id"] = planEvent.NodeID
+		}
+		out <- event
+	}
+	close(out)
+
+	return &subscription{events: out}
+}
+
 type agentOSSubscriber struct {
 	subscriber *repostream.RedisSubscriber
 }

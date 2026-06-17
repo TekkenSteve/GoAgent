@@ -10,8 +10,16 @@ import (
 
 // PlanActivities bridge Temporal PlanWorkflow decisions to AgentOS runtime calls.
 type PlanActivities struct {
-	Runtime   agentos.Runtime
-	Validator agentosplan.Validator
+	Runtime          agentos.Runtime
+	Validator        agentosplan.Validator
+	PlanStateStore   agentosplan.PlanStateStore
+	PlanEventStore   agentosplan.PlanEventStore
+	RunBackendBinder PlanRunBackendBinder
+}
+
+// PlanRunBackendBinder records plan-node ownership into the run route index.
+type PlanRunBackendBinder interface {
+	BindPlanNode(ctx context.Context, planID, nodeID string, spec agentos.RunSpec, status agentos.RunStatus) error
 }
 
 // NewPlanActivities creates plan activities backed by an AgentOS runtime.
@@ -27,6 +35,20 @@ func NewPlanActivities(runtime agentos.Runtime) *PlanActivities {
 // NewPlanActivitiesWithCapabilities creates plan activities with a static
 // capability catalog used by RunPlan validation.
 func NewPlanActivitiesWithCapabilities(runtime agentos.Runtime, capabilities []agentos.Capability) (*PlanActivities, error) {
+	store := agentosplan.NewMemoryPlanStore()
+
+	return NewPlanActivitiesWithStores(runtime, capabilities, store, store, nil)
+}
+
+// NewPlanActivitiesWithStores creates plan activities with explicit durable
+// state and event stores.
+func NewPlanActivitiesWithStores(
+	runtime agentos.Runtime,
+	capabilities []agentos.Capability,
+	stateStore agentosplan.PlanStateStore,
+	eventStore agentosplan.PlanEventStore,
+	runBackendBinder PlanRunBackendBinder,
+) (*PlanActivities, error) {
 	compiler, err := agentosplan.NewCELCompiler()
 	if err != nil {
 		return nil, err
@@ -42,6 +64,9 @@ func NewPlanActivitiesWithCapabilities(runtime agentos.Runtime, capabilities []a
 			Expressions:  compiler,
 			Capabilities: catalog,
 		},
+		PlanStateStore:   stateStore,
+		PlanEventStore:   eventStore,
+		RunBackendBinder: runBackendBinder,
 	}, nil
 }
 
@@ -103,12 +128,59 @@ func (a *PlanActivities) StartPlanNodeActivity(ctx context.Context, input startP
 	if a.Runtime == nil {
 		return startPlanNodeOutput{}, fmt.Errorf("%w: plan activity runtime is required", agentos.ErrInvalidRunPlan)
 	}
+	if input.Node.Run.IdempotencyKey == "" {
+		key, err := agentosplan.NodeStartIdempotencyKey(input.PlanID, input.Node.NodeID)
+		if err != nil {
+			return startPlanNodeOutput{}, err
+		}
+		input.Node.Run.IdempotencyKey = key
+	}
 	status, err := a.Runtime.Start(ctx, input.Node.Run)
 	if err != nil {
 		return startPlanNodeOutput{}, err
 	}
+	if a.RunBackendBinder != nil {
+		if err := a.RunBackendBinder.BindPlanNode(ctx, input.PlanID, input.Node.NodeID, input.Node.Run, status); err != nil {
+			return startPlanNodeOutput{}, err
+		}
+	}
 
 	return startPlanNodeOutput{Status: status}, nil
+}
+
+type persistPlanStateInput struct {
+	Spec           agentos.RunPlanSpec
+	Status         agentos.RunPlanStatus
+	Event          agentos.PlanEvent
+	IdempotencyKey string
+}
+
+type persistPlanStateOutput struct {
+	Event agentos.PlanEvent
+}
+
+// PersistPlanStateActivity writes the latest reducer snapshot and appends the
+// corresponding public PlanEvent to the durable event source.
+func (a *PlanActivities) PersistPlanStateActivity(ctx context.Context, input persistPlanStateInput) (persistPlanStateOutput, error) {
+	if a.PlanStateStore == nil {
+		return persistPlanStateOutput{}, fmt.Errorf("%w: plan state store is required", agentos.ErrInvalidRunPlan)
+	}
+	if a.PlanEventStore == nil {
+		return persistPlanStateOutput{}, fmt.Errorf("%w: plan event store is required", agentos.ErrInvalidRunPlan)
+	}
+	if err := a.PlanStateStore.SavePlanState(ctx, agentosplan.PlanStateSnapshot{
+		Spec:           input.Spec,
+		Status:         input.Status,
+		IdempotencyKey: input.IdempotencyKey,
+	}); err != nil {
+		return persistPlanStateOutput{}, err
+	}
+	event, err := a.PlanEventStore.AppendPlanEvent(ctx, input.Event, input.IdempotencyKey)
+	if err != nil {
+		return persistPlanStateOutput{}, err
+	}
+
+	return persistPlanStateOutput{Event: event}, nil
 }
 
 type statusPlanNodeInput struct {

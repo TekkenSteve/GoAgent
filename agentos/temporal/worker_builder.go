@@ -86,7 +86,8 @@ func newWorkerKit(ctx context.Context, cfg WorkerConfig) (*WorkerKit, error) {
 		return nil, err
 	}
 
-	agentOSRunRepo := temporalrepo.NewAgentOSRunRepo(pg)
+	runBackendIndex := temporalrepo.NewRunBackendIndexRepo(pg)
+	planStore := temporalrepo.NewAgentOSPlanRepo(pg)
 	planRuntime, err := NewRuntimeWithClient(ctx, RuntimeConfig{
 		TemporalAddress:          cfg.TemporalAddress,
 		TemporalNamespace:        cfg.TemporalNamespace,
@@ -94,7 +95,7 @@ func newWorkerKit(ctx context.Context, cfg WorkerConfig) (*WorkerKit, error) {
 		TemporalExternalBackends: cfg.TemporalExternalBackends,
 		HTTPBackends:             cfg.HTTPBackends,
 		GRPCBackends:             cfg.GRPCBackends,
-	}, temporalClient, WithRunBackendIndex(agentOSRunRepo))
+	}, temporalClient, WithRunBackendIndex(runBackendIndex))
 	if err != nil {
 		temporalClient.Close()
 		_ = rdb.Close()
@@ -102,7 +103,7 @@ func newWorkerKit(ctx context.Context, cfg WorkerConfig) (*WorkerKit, error) {
 
 		return nil, fmt.Errorf("agentos temporal worker - plan runtime: %w", err)
 	}
-	planActivities, err := NewPlanActivitiesWithCapabilities(planRuntime, cfg.Capabilities)
+	planActivities, err := NewPlanActivitiesWithStores(planRuntime, cfg.Capabilities, planStore, planStore, runBackendIndex)
 	if err != nil {
 		temporalClient.Close()
 		_ = rdb.Close()

@@ -46,6 +46,7 @@ func TestWorkerKitRegistersPlanWorkflowAndActivities(t *testing.T) {
 		StartPlanNodeActivityName,
 		StatusPlanNodeActivityName,
 		ControlPlanNodeActivityName,
+		PersistPlanStateActivityName,
 	} {
 		if !worker.activityRegistered(name) {
 			t.Fatalf("activity %q was not registered; got %#v", name, worker.activities)

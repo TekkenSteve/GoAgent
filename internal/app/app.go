@@ -71,7 +71,7 @@ func Run(cfg *config.Config) { //nolint: gocyclo,cyclop,funlen,gocritic,nolintli
 	agentRepo := cached.NewAgentRepo(persistentAgentRepo)
 	templateRepo := temporalrepo.NewWorkflowTemplateRepo(pg)
 	triggerRepo := temporalrepo.NewTriggerRepo(pg)
-	agentOSRunRepo := temporalrepo.NewAgentOSRunRepo(pg)
+	runBackendIndex := temporalrepo.NewRunBackendIndexRepo(pg)
 	templateUC = templatepkg.New(templateRepo)
 
 	ctx := context.Background()
@@ -92,7 +92,7 @@ func Run(cfg *config.Config) { //nolint: gocyclo,cyclop,funlen,gocritic,nolintli
 		l.Fatal(fmt.Errorf("app - Run - eventing.NewService: %w", err))
 	}
 
-	tc := initTemporalComponents(l, cfg, &fwCfg, pg, rdb, messageRepo, agentRepo, templateRepo, triggerRepo, agentOSRunRepo, templateUC, eventStore)
+	tc := initTemporalComponents(l, cfg, &fwCfg, pg, rdb, messageRepo, agentRepo, templateRepo, triggerRepo, runBackendIndex, templateUC, eventStore)
 	if tc != nil {
 		temporalRuntime = tc.runtime
 		agentOSRuntime = tc.agentOSRuntime
@@ -190,7 +190,7 @@ func initTemporalComponents(
 	agentRepo *cached.AgentRepo,
 	templateRepo *temporalrepo.WorkflowTemplateRepo,
 	triggerRepo *temporalrepo.TriggerRepo,
-	agentOSRunRepo *temporalrepo.AgentOSRunRepo,
+	runBackendIndex *temporalrepo.RunBackendIndexRepo,
 	templateUC *templatepkg.UseCase,
 	eventStore stream.EventStore,
 ) *temporalComponents {
@@ -236,7 +236,7 @@ func initTemporalComponents(
 		HTTPBackends:             httpBackends(l, cfg),
 		GRPCBackends:             grpcBackends(l, cfg),
 	}, runtime.Client,
-		agentostemporal.WithRunBackendIndex(agentOSRunRepo),
+		agentostemporal.WithRunBackendIndex(runBackendIndex),
 		agentostemporal.WithRunBackendSelector(backendSelector(l, cfg)),
 	)
 	if err != nil {

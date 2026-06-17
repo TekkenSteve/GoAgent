@@ -6,8 +6,11 @@ import (
 	"fmt"
 
 	"github.com/TekkenSteve/GoAgent/agentos"
+	"github.com/TekkenSteve/GoAgent/internal/pkg/postgres"
 	goredis "github.com/TekkenSteve/GoAgent/internal/pkg/redis"
+	temporalrepo "github.com/TekkenSteve/GoAgent/internal/repo/persistent"
 	repostream "github.com/TekkenSteve/GoAgent/internal/repo/stream"
+	"github.com/TekkenSteve/GoAgent/internal/usecase/agentosplan"
 	"go.temporal.io/sdk/client"
 )
 
@@ -16,6 +19,8 @@ type planRuntime struct {
 	closeTemporal  bool
 	redis          *goredis.Redis
 	subscriber     *repostream.RedisSubscriber
+	postgres       *postgres.Postgres
+	planEvents     agentosplan.PlanEventStore
 	taskQueue      string
 }
 
@@ -63,6 +68,16 @@ func newPlanRuntimeWithClient(ctx context.Context, cfg RuntimeConfig, c client.C
 		}
 		rt.redis = rdb
 		rt.subscriber = repostream.NewRedisSubscriber(rdb.Hub())
+	}
+	if cfg.PostgresURL != "" {
+		pg, err := newRuntimePostgres(cfg)
+		if err != nil {
+			_ = rt.Close()
+
+			return nil, fmt.Errorf("agentos temporal plan runtime postgres: %w", err)
+		}
+		rt.postgres = pg
+		rt.planEvents = temporalrepo.NewAgentOSPlanRepo(pg)
 	}
 
 	return rt, nil
@@ -135,19 +150,19 @@ func (r *planRuntime) ControlPlan(ctx context.Context, planID string, op agentos
 }
 
 func (r *planRuntime) SubscribePlan(ctx context.Context, scope agentos.PlanStreamScope) (agentos.Subscription, error) {
-	if r.subscriber == nil {
-		return nil, errors.New("agentos temporal plan runtime: redis subscriber is not configured")
+	if r.planEvents == nil {
+		return nil, errors.New("agentos temporal plan runtime: plan event store is not configured")
 	}
 	if scope.PlanID == "" {
 		return nil, fmt.Errorf("%w: plan id is required", agentos.ErrInvalidStreamScope)
 	}
 
-	sub, err := r.subscriber.Subscribe(ctx, scope.PlanID, scope.AfterSequence)
+	events, err := r.planEvents.ListPlanEvents(ctx, scope, 0)
 	if err != nil {
 		return nil, err
 	}
 
-	return newSubscription(sub), nil
+	return newPlanReplaySubscription(events), nil
 }
 
 func (r *planRuntime) Close() error {
@@ -158,10 +173,21 @@ func (r *planRuntime) Close() error {
 	if r.redis != nil {
 		errs = append(errs, r.redis.Close())
 	}
+	if r.postgres != nil {
+		r.postgres.Close()
+	}
 
 	return errors.Join(errs...)
 }
 
 func planWorkflowID(planID string) string {
 	return "agentos-plan-" + planID
+}
+
+func newRuntimePostgres(cfg RuntimeConfig) (*postgres.Postgres, error) {
+	if cfg.PostgresPoolMax > 0 {
+		return postgres.New(cfg.PostgresURL, postgres.MaxPoolSize(cfg.PostgresPoolMax))
+	}
+
+	return postgres.New(cfg.PostgresURL)
 }

@@ -90,6 +90,9 @@ func (k *WorkerKit) registerPlanActivities(w worker.Worker) error {
 	w.RegisterActivityWithOptions(k.planActivities.ControlPlanNodeActivity, activity.RegisterOptions{
 		Name: ControlPlanNodeActivityName,
 	})
+	w.RegisterActivityWithOptions(k.planActivities.PersistPlanStateActivity, activity.RegisterOptions{
+		Name: PersistPlanStateActivityName,
+	})
 
 	return nil
 }
