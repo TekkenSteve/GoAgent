@@ -35,3 +35,17 @@ type AgentOSSignal struct {
 type AgentOSControl struct {
 	Operation agentos.ControlOperation `json:"operation" validate:"required"`
 }
+
+// AgentOSEvent is the public REST envelope for external backend event ingest.
+type AgentOSEvent struct {
+	EventID   string            `json:"event_id" validate:"required"`
+	RunID     string            `json:"run_id,omitempty"`
+	ThreadID  string            `json:"thread_id,omitempty"`
+	Sequence  int64             `json:"sequence,omitempty"`
+	EventType agentos.EventType `json:"event_type" validate:"required"`
+	Source    string            `json:"source" validate:"required"`
+	Timestamp time.Time         `json:"timestamp,omitempty"`
+	TraceID   string            `json:"trace_id,omitempty"`
+	Tags      map[string]string `json:"tags,omitempty"`
+	Payload   map[string]any    `json:"payload,omitempty"`
+}

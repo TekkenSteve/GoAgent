@@ -147,7 +147,7 @@
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/eventing.IngestEvent"
+                            "$ref": "#/definitions/request.AgentOSEvent"
                         }
                     }
                 ],
@@ -366,6 +366,69 @@
         }
     },
     "definitions": {
+        "agentos.ArtifactKind": {
+            "type": "string",
+            "enum": [
+                "object",
+                "text",
+                "file",
+                "patch",
+                "report",
+                "reference"
+            ],
+            "x-enum-varnames": [
+                "ArtifactKindObject",
+                "ArtifactKindText",
+                "ArtifactKindFile",
+                "ArtifactKindPatch",
+                "ArtifactKindReport",
+                "ArtifactKindReference"
+            ]
+        },
+        "agentos.ArtifactRef": {
+            "type": "object",
+            "properties": {
+                "artifact_id": {
+                    "type": "string"
+                },
+                "created_at": {
+                    "type": "string"
+                },
+                "digest": {
+                    "type": "string"
+                },
+                "kind": {
+                    "$ref": "#/definitions/agentos.ArtifactKind"
+                },
+                "media_type": {
+                    "type": "string"
+                },
+                "metadata": {
+                    "type": "object",
+                    "additionalProperties": {
+                        "type": "string"
+                    }
+                },
+                "name": {
+                    "type": "string"
+                },
+                "node_id": {
+                    "type": "string"
+                },
+                "plan_id": {
+                    "type": "string"
+                },
+                "run_id": {
+                    "type": "string"
+                },
+                "size_bytes": {
+                    "type": "integer"
+                },
+                "uri": {
+                    "type": "string"
+                }
+            }
+        },
         "agentos.BackendKind": {
             "type": "string",
             "enum": [
@@ -405,23 +468,98 @@
                 "ControlCancel"
             ]
         },
+        "agentos.EventType": {
+            "type": "string",
+            "enum": [
+                "run.started",
+                "run.completed",
+                "run.failed",
+                "run.cancelled",
+                "run.paused",
+                "run.resumed",
+                "agent.step.started",
+                "agent.step.completed",
+                "agent.step.failed",
+                "agent.message.delta",
+                "agent.message.completed",
+                "tool.call.started",
+                "tool.call.delta",
+                "tool.call.completed",
+                "tool.call.failed",
+                "approval.requested",
+                "approval.resolved",
+                "usage.reported",
+                "checkpoint.created",
+                "artifact.created",
+                "node.input.resolved",
+                "node.output.published",
+                "capability.selected"
+            ],
+            "x-enum-varnames": [
+                "EventRunStarted",
+                "EventRunCompleted",
+                "EventRunFailed",
+                "EventRunCancelled",
+                "EventRunPaused",
+                "EventRunResumed",
+                "EventAgentStepStarted",
+                "EventAgentStepCompleted",
+                "EventAgentStepFailed",
+                "EventAgentMessageDelta",
+                "EventAgentMessageCompleted",
+                "EventToolCallStarted",
+                "EventToolCallDelta",
+                "EventToolCallCompleted",
+                "EventToolCallFailed",
+                "EventApprovalRequested",
+                "EventApprovalResolved",
+                "EventUsageReported",
+                "EventCheckpointCreated",
+                "EventArtifactCreated",
+                "EventNodeInputResolved",
+                "EventNodeOutputPublished",
+                "EventCapabilitySelected"
+            ]
+        },
+        "agentos.RunProgress": {
+            "type": "object",
+            "properties": {
+                "current": {
+                    "type": "integer"
+                },
+                "label": {
+                    "type": "string"
+                },
+                "total": {
+                    "type": "integer"
+                }
+            }
+        },
         "agentos.RunStatus": {
             "type": "object",
             "properties": {
-                "lifecycleState": {
+                "artifacts": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/agentos.ArtifactRef"
+                    }
+                },
+                "lifecycle_state": {
                     "type": "string"
+                },
+                "progress": {
+                    "$ref": "#/definitions/agentos.RunProgress"
                 },
                 "reason": {
                     "type": "string"
                 },
-                "runID": {
+                "run_id": {
                     "type": "string"
                 },
                 "step": {
-                    "type": "integer",
-                    "format": "int32"
+                    "type": "integer"
                 },
-                "updatedAt": {
+                "updated_at": {
                     "type": "string"
                 }
             }
@@ -451,51 +589,6 @@
                 "SignalHumanFeedback",
                 "SignalConfigPatch",
                 "SignalMemoryPatch"
-            ]
-        },
-        "entity.AgentOSEventType": {
-            "type": "string",
-            "enum": [
-                "run.started",
-                "run.completed",
-                "run.failed",
-                "run.cancelled",
-                "run.paused",
-                "run.resumed",
-                "agent.step.started",
-                "agent.step.completed",
-                "agent.step.failed",
-                "agent.message.delta",
-                "agent.message.completed",
-                "tool.call.started",
-                "tool.call.delta",
-                "tool.call.completed",
-                "tool.call.failed",
-                "approval.requested",
-                "approval.resolved",
-                "usage.reported",
-                "checkpoint.created"
-            ],
-            "x-enum-varnames": [
-                "AgentOSEventRunStarted",
-                "AgentOSEventRunCompleted",
-                "AgentOSEventRunFailed",
-                "AgentOSEventRunCancelled",
-                "AgentOSEventRunPaused",
-                "AgentOSEventRunResumed",
-                "AgentOSEventAgentStepStarted",
-                "AgentOSEventAgentStepCompleted",
-                "AgentOSEventAgentStepFailed",
-                "AgentOSEventAgentMessageDelta",
-                "AgentOSEventAgentMessageCompleted",
-                "AgentOSEventToolCallStarted",
-                "AgentOSEventToolCallDelta",
-                "AgentOSEventToolCallCompleted",
-                "AgentOSEventToolCallFailed",
-                "AgentOSEventApprovalRequested",
-                "AgentOSEventApprovalResolved",
-                "AgentOSEventUsageReported",
-                "AgentOSEventCheckpointCreated"
             ]
         },
         "entity.AgentSpec": {
@@ -812,14 +905,30 @@
                 }
             }
         },
-        "eventing.IngestEvent": {
+        "request.AgentOSControl": {
             "type": "object",
+            "required": [
+                "operation"
+            ],
+            "properties": {
+                "operation": {
+                    "$ref": "#/definitions/agentos.ControlOperation"
+                }
+            }
+        },
+        "request.AgentOSEvent": {
+            "type": "object",
+            "required": [
+                "event_id",
+                "event_type",
+                "source"
+            ],
             "properties": {
                 "event_id": {
                     "type": "string"
                 },
                 "event_type": {
-                    "$ref": "#/definitions/entity.AgentOSEventType"
+                    "$ref": "#/definitions/agentos.EventType"
                 },
                 "payload": {
                     "type": "object",
@@ -848,17 +957,6 @@
                 },
                 "trace_id": {
                     "type": "string"
-                }
-            }
-        },
-        "request.AgentOSControl": {
-            "type": "object",
-            "required": [
-                "operation"
-            ],
-            "properties": {
-                "operation": {
-                    "$ref": "#/definitions/agentos.ControlOperation"
                 }
             }
         },

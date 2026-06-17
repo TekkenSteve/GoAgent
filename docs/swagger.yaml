@@ -1,5 +1,50 @@
 basePath: /v1
 definitions:
+  agentos.ArtifactKind:
+    enum:
+    - object
+    - text
+    - file
+    - patch
+    - report
+    - reference
+    type: string
+    x-enum-varnames:
+    - ArtifactKindObject
+    - ArtifactKindText
+    - ArtifactKindFile
+    - ArtifactKindPatch
+    - ArtifactKindReport
+    - ArtifactKindReference
+  agentos.ArtifactRef:
+    properties:
+      artifact_id:
+        type: string
+      created_at:
+        type: string
+      digest:
+        type: string
+      kind:
+        $ref: '#/definitions/agentos.ArtifactKind'
+      media_type:
+        type: string
+      metadata:
+        additionalProperties:
+          type: string
+        type: object
+      name:
+        type: string
+      node_id:
+        type: string
+      plan_id:
+        type: string
+      run_id:
+        type: string
+      size_bytes:
+        type: integer
+      uri:
+        type: string
+    type: object
   agentos.BackendKind:
     enum:
     - native
@@ -29,18 +74,82 @@ definitions:
     - ControlPause
     - ControlResume
     - ControlCancel
+  agentos.EventType:
+    enum:
+    - run.started
+    - run.completed
+    - run.failed
+    - run.cancelled
+    - run.paused
+    - run.resumed
+    - agent.step.started
+    - agent.step.completed
+    - agent.step.failed
+    - agent.message.delta
+    - agent.message.completed
+    - tool.call.started
+    - tool.call.delta
+    - tool.call.completed
+    - tool.call.failed
+    - approval.requested
+    - approval.resolved
+    - usage.reported
+    - checkpoint.created
+    - artifact.created
+    - node.input.resolved
+    - node.output.published
+    - capability.selected
+    type: string
+    x-enum-varnames:
+    - EventRunStarted
+    - EventRunCompleted
+    - EventRunFailed
+    - EventRunCancelled
+    - EventRunPaused
+    - EventRunResumed
+    - EventAgentStepStarted
+    - EventAgentStepCompleted
+    - EventAgentStepFailed
+    - EventAgentMessageDelta
+    - EventAgentMessageCompleted
+    - EventToolCallStarted
+    - EventToolCallDelta
+    - EventToolCallCompleted
+    - EventToolCallFailed
+    - EventApprovalRequested
+    - EventApprovalResolved
+    - EventUsageReported
+    - EventCheckpointCreated
+    - EventArtifactCreated
+    - EventNodeInputResolved
+    - EventNodeOutputPublished
+    - EventCapabilitySelected
+  agentos.RunProgress:
+    properties:
+      current:
+        type: integer
+      label:
+        type: string
+      total:
+        type: integer
+    type: object
   agentos.RunStatus:
     properties:
-      lifecycleState:
+      artifacts:
+        items:
+          $ref: '#/definitions/agentos.ArtifactRef'
+        type: array
+      lifecycle_state:
         type: string
+      progress:
+        $ref: '#/definitions/agentos.RunProgress'
       reason:
         type: string
-      runID:
+      run_id:
         type: string
       step:
-        format: int32
         type: integer
-      updatedAt:
+      updated_at:
         type: string
     type: object
   agentos.SignalType:
@@ -67,48 +176,6 @@ definitions:
     - SignalHumanFeedback
     - SignalConfigPatch
     - SignalMemoryPatch
-  entity.AgentOSEventType:
-    enum:
-    - run.started
-    - run.completed
-    - run.failed
-    - run.cancelled
-    - run.paused
-    - run.resumed
-    - agent.step.started
-    - agent.step.completed
-    - agent.step.failed
-    - agent.message.delta
-    - agent.message.completed
-    - tool.call.started
-    - tool.call.delta
-    - tool.call.completed
-    - tool.call.failed
-    - approval.requested
-    - approval.resolved
-    - usage.reported
-    - checkpoint.created
-    type: string
-    x-enum-varnames:
-    - AgentOSEventRunStarted
-    - AgentOSEventRunCompleted
-    - AgentOSEventRunFailed
-    - AgentOSEventRunCancelled
-    - AgentOSEventRunPaused
-    - AgentOSEventRunResumed
-    - AgentOSEventAgentStepStarted
-    - AgentOSEventAgentStepCompleted
-    - AgentOSEventAgentStepFailed
-    - AgentOSEventAgentMessageDelta
-    - AgentOSEventAgentMessageCompleted
-    - AgentOSEventToolCallStarted
-    - AgentOSEventToolCallDelta
-    - AgentOSEventToolCallCompleted
-    - AgentOSEventToolCallFailed
-    - AgentOSEventApprovalRequested
-    - AgentOSEventApprovalResolved
-    - AgentOSEventUsageReported
-    - AgentOSEventCheckpointCreated
   entity.AgentSpec:
     properties:
       config:
@@ -330,12 +397,19 @@ definitions:
         - $ref: '#/definitions/time.Duration'
         description: max wait duration
     type: object
-  eventing.IngestEvent:
+  request.AgentOSControl:
+    properties:
+      operation:
+        $ref: '#/definitions/agentos.ControlOperation'
+    required:
+    - operation
+    type: object
+  request.AgentOSEvent:
     properties:
       event_id:
         type: string
       event_type:
-        $ref: '#/definitions/entity.AgentOSEventType'
+        $ref: '#/definitions/agentos.EventType'
       payload:
         additionalProperties: {}
         type: object
@@ -355,13 +429,10 @@ definitions:
         type: string
       trace_id:
         type: string
-    type: object
-  request.AgentOSControl:
-    properties:
-      operation:
-        $ref: '#/definitions/agentos.ControlOperation'
     required:
-    - operation
+    - event_id
+    - event_type
+    - source
     type: object
   request.AgentOSSignal:
     properties:
@@ -604,7 +675,7 @@ paths:
         name: request
         required: true
         schema:
-          $ref: '#/definitions/eventing.IngestEvent'
+          $ref: '#/definitions/request.AgentOSEvent'
       produces:
       - application/json
       responses:

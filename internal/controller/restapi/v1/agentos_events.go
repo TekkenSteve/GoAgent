@@ -5,6 +5,7 @@ import (
 	"fmt"
 
 	"github.com/TekkenSteve/GoAgent/internal/agentfw/eventing"
+	"github.com/TekkenSteve/GoAgent/internal/controller/restapi/v1/request"
 	"github.com/gofiber/fiber/v2"
 )
 
@@ -22,7 +23,7 @@ type ingestAgentOSEventResponse struct {
 // @Accept      json
 // @Produce     json
 // @Param       run_id path string true "Run ID"
-// @Param       request body eventing.IngestEvent true "AgentOS event"
+// @Param       request body request.AgentOSEvent true "AgentOS event"
 // @Success     202 {object} ingestAgentOSEventResponse
 // @Failure     400 {object} response.Error
 // @Failure     404 {object} response.Error
@@ -34,7 +35,7 @@ func (r *V1) ingestAgentOSEvent(c *fiber.Ctx) error {
 	}
 
 	runID := c.Params("run_id")
-	var req eventing.IngestEvent
+	var req request.AgentOSEvent
 	if err := c.BodyParser(&req); err != nil {
 		return errorResponse(c, fiber.StatusBadRequest, "invalid event body")
 	}
@@ -45,7 +46,18 @@ func (r *V1) ingestAgentOSEvent(c *fiber.Ctx) error {
 		return errorResponse(c, fiber.StatusBadRequest, "run_id in path and body must match")
 	}
 
-	result, err := r.eventIngest.Ingest(c.UserContext(), req)
+	result, err := r.eventIngest.Ingest(c.UserContext(), eventing.IngestEvent{
+		EventID:   req.EventID,
+		RunID:     req.RunID,
+		ThreadID:  req.ThreadID,
+		Sequence:  req.Sequence,
+		EventType: req.EventType,
+		Source:    req.Source,
+		Timestamp: req.Timestamp,
+		TraceID:   req.TraceID,
+		Tags:      req.Tags,
+		Payload:   req.Payload,
+	})
 	if err != nil {
 		if errors.Is(err, eventing.ErrInvalidEvent) {
 			return errorResponse(c, fiber.StatusBadRequest, err.Error())
