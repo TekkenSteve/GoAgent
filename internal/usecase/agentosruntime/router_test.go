@@ -60,10 +60,94 @@ func TestRouterRequiresExplicitBackendRef(t *testing.T) {
 	}
 }
 
+func TestRouterSelectsBackendWhenSpecOmitsBackend(t *testing.T) {
+	ctx := context.Background()
+	ref := agentos.BackendRef{Kind: agentos.BackendKindHTTP, Name: "card-template"}
+	stub := &stubBackend{}
+	registry := NewRegistry()
+	if err := registry.Register(ref, stub); err != nil {
+		t.Fatalf("register backend: %v", err)
+	}
+	selector, err := NewRuleBackendSelector([]BackendSelectionRule{
+		{
+			Backend: ref,
+			Input: map[string]any{
+				"task_type": "card_template",
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("new selector: %v", err)
+	}
+	index := newStubRunIndex()
+	router, err := NewRouter(registry, index)
+	if err != nil {
+		t.Fatalf("new router: %v", err)
+	}
+	router.WithBackendSelector(selector)
+
+	status, err := router.Start(ctx, agentos.RunSpec{
+		RunID: "run-1",
+		Input: map[string]any{
+			"task_type": "card_template",
+		},
+	})
+	if err != nil {
+		t.Fatalf("start: %v", err)
+	}
+
+	if status.RunID != "run-1" {
+		t.Fatalf("status run id = %q", status.RunID)
+	}
+	if got := index.routes["run-1"]; got != ref {
+		t.Fatalf("route = %#v, want %#v", got, ref)
+	}
+	if stub.startBackend != ref {
+		t.Fatalf("backend passed to start = %#v, want %#v", stub.startBackend, ref)
+	}
+}
+
+func TestRuleBackendSelectorRequiresMatchingRule(t *testing.T) {
+	selector, err := NewRuleBackendSelector([]BackendSelectionRule{
+		{
+			Backend: agentos.BackendRef{Kind: agentos.BackendKindHTTP, Name: "card-template"},
+			Input: map[string]any{
+				"task_type": "card_template",
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("new selector: %v", err)
+	}
+
+	_, err = selector.Select(context.Background(), agentos.RunSpec{
+		RunID: "run-1",
+		Input: map[string]any{
+			"task_type": "main",
+		},
+	})
+	if err == nil {
+		t.Fatal("expected error")
+	}
+}
+
+func TestRuleBackendSelectorRejectsRuleWithoutCriteria(t *testing.T) {
+	_, err := NewRuleBackendSelector([]BackendSelectionRule{
+		{
+			Name:    "default",
+			Backend: agentos.BackendRef{Kind: agentos.BackendKindNative, Name: agentos.BackendNameGoAgentNative},
+		},
+	})
+	if err == nil {
+		t.Fatal("expected error")
+	}
+}
+
 type stubBackend struct {
 	statusRunID  string
 	controlRunID string
 	signalRunID  string
+	startBackend agentos.BackendRef
 }
 
 type stubRunIndex struct {
@@ -85,6 +169,8 @@ func (i *stubRunIndex) Resolve(_ context.Context, runID string) (agentos.Backend
 }
 
 func (b *stubBackend) Start(_ context.Context, spec agentos.RunSpec) (agentos.RunStatus, error) {
+	b.startBackend = spec.Backend
+
 	return agentos.RunStatus{RunID: spec.RunID, LifecycleState: "created", UpdatedAt: time.Now()}, nil
 }
 

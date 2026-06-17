@@ -33,6 +33,7 @@ import (
 	"github.com/TekkenSteve/GoAgent/internal/repo/webapi"
 	"github.com/TekkenSteve/GoAgent/internal/usecase"
 	"github.com/TekkenSteve/GoAgent/internal/usecase/agent"
+	agentosruntime "github.com/TekkenSteve/GoAgent/internal/usecase/agentosruntime"
 	billingpkg "github.com/TekkenSteve/GoAgent/internal/usecase/billing"
 	agentfwusecase "github.com/TekkenSteve/GoAgent/internal/usecase/executor"
 	templatepkg "github.com/TekkenSteve/GoAgent/internal/usecase/template"
@@ -234,7 +235,10 @@ func initTemporalComponents(
 		TemporalExternalBackends: temporalExternalBackends(l, cfg),
 		HTTPBackends:             httpBackends(l, cfg),
 		GRPCBackends:             grpcBackends(l, cfg),
-	}, runtime.Client, agentostemporal.WithRunBackendIndex(agentOSRunRepo))
+	}, runtime.Client,
+		agentostemporal.WithRunBackendIndex(agentOSRunRepo),
+		agentostemporal.WithRunBackendSelector(backendSelector(l, cfg)),
+	)
 	if err != nil {
 		l.Fatal(fmt.Errorf("app - Run - agentos temporal runtime: %w", err))
 	}
@@ -294,6 +298,34 @@ func grpcBackends(l logger.Interface, cfg *config.Config) []agentostemporal.GRPC
 	}
 
 	return result
+}
+
+func backendSelector(l logger.Interface, cfg *config.Config) agentostemporal.RunBackendSelector {
+	rules, err := cfg.AgentFW.BackendSelectionRules()
+	if err != nil {
+		l.Fatal(fmt.Errorf("app - Run - backend selection rules: %w", err))
+	}
+	if len(rules) == 0 {
+		return nil
+	}
+
+	usecaseRules := make([]agentosruntime.BackendSelectionRule, 0, len(rules))
+	for _, rule := range rules {
+		usecaseRules = append(usecaseRules, agentosruntime.BackendSelectionRule{
+			Name:     rule.Name,
+			Backend:  rule.Backend,
+			AgentID:  rule.AgentID,
+			Metadata: rule.Metadata,
+			Input:    rule.Input,
+		})
+	}
+
+	selector, err := agentosruntime.NewRuleBackendSelector(usecaseRules)
+	if err != nil {
+		l.Fatal(fmt.Errorf("app - Run - backend selector: %w", err))
+	}
+
+	return selector
 }
 
 func temporalExternalBackends(l logger.Interface, cfg *config.Config) []agentostemporal.ExternalBackendConfig {

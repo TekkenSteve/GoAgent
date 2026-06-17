@@ -1,6 +1,10 @@
 package config
 
-import "testing"
+import (
+	"testing"
+
+	"github.com/TekkenSteve/GoAgent/agentos"
+)
 
 func TestTemporalExternalBackends(t *testing.T) {
 	backends, err := AgentFW{
@@ -105,5 +109,34 @@ func TestGRPCBackends(t *testing.T) {
 		got.Methods.Control != "ControlRun" ||
 		got.Methods.Status != "StatusRun" {
 		t.Fatalf("unexpected backend config: %#v", got)
+	}
+}
+
+func TestBackendSelectionRules(t *testing.T) {
+	rules, err := AgentFW{
+		BackendSelectionRulesJSON: `[
+			{
+				"name":"card-template",
+				"backend":{"kind":"temporal_external","name":"kardcraft-agent-workflow"},
+				"input":{"task_type":"card_template"},
+				"metadata":{"product":"kardcraft"}
+			}
+		]`,
+	}.BackendSelectionRules()
+	if err != nil {
+		t.Fatalf("BackendSelectionRules: %v", err)
+	}
+
+	if len(rules) != 1 {
+		t.Fatalf("rule count = %d", len(rules))
+	}
+
+	got := rules[0]
+	if got.Name != "card-template" ||
+		got.Backend.Kind != agentos.BackendKindTemporalExternal ||
+		got.Backend.Name != "kardcraft-agent-workflow" ||
+		got.Input["task_type"] != "card_template" ||
+		got.Metadata["product"] != "kardcraft" {
+		t.Fatalf("unexpected rule config: %#v", got)
 	}
 }

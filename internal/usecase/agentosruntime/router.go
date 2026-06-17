@@ -13,10 +13,16 @@ type RunBackendIndex interface {
 	Resolve(ctx context.Context, runID string) (agentos.BackendRef, error)
 }
 
+// BackendSelector resolves a backend for runs that do not specify one directly.
+type BackendSelector interface {
+	Select(ctx context.Context, spec agentos.RunSpec) (agentos.BackendRef, error)
+}
+
 // Router directs AgentOS operations to the backend that owns the run.
 type Router struct {
-	registry *Registry
-	index    RunBackendIndex
+	registry        *Registry
+	index           RunBackendIndex
+	backendSelector BackendSelector
 }
 
 // NewRouter creates a backend router.
@@ -31,11 +37,20 @@ func NewRouter(registry *Registry, index RunBackendIndex) (*Router, error) {
 	return &Router{registry: registry, index: index}, nil
 }
 
+// WithBackendSelector installs an optional backend policy resolver.
+func (r *Router) WithBackendSelector(selector BackendSelector) *Router {
+	r.backendSelector = selector
+
+	return r
+}
+
 // Start routes a new run to the selected backend and records run ownership.
 func (r *Router) Start(ctx context.Context, spec agentos.RunSpec) (agentos.RunStatus, error) {
-	if err := validateBackendRef(spec.Backend); err != nil {
+	selectedBackend, err := r.selectBackend(ctx, spec)
+	if err != nil {
 		return agentos.RunStatus{}, err
 	}
+	spec.Backend = selectedBackend
 
 	backend, err := r.registry.Get(spec.Backend)
 	if err != nil {
@@ -51,6 +66,29 @@ func (r *Router) Start(ctx context.Context, spec agentos.RunSpec) (agentos.RunSt
 	}
 
 	return status, nil
+}
+
+func (r *Router) selectBackend(ctx context.Context, spec agentos.RunSpec) (agentos.BackendRef, error) {
+	if spec.Backend.Kind != "" || spec.Backend.Name != "" {
+		if err := validateBackendRef(spec.Backend); err != nil {
+			return agentos.BackendRef{}, err
+		}
+
+		return spec.Backend, nil
+	}
+	if r.backendSelector == nil {
+		return agentos.BackendRef{}, fmt.Errorf("%w: backend is required", agentos.ErrInvalidBackendRef)
+	}
+
+	ref, err := r.backendSelector.Select(ctx, spec)
+	if err != nil {
+		return agentos.BackendRef{}, err
+	}
+	if err := validateBackendRef(ref); err != nil {
+		return agentos.BackendRef{}, err
+	}
+
+	return ref, nil
 }
 
 // Signal sends a business signal to the backend that owns the run.

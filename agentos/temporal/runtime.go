@@ -169,6 +169,9 @@ func (r *runtime) configureRouter(temporalClient client.Client, cfg RuntimeConfi
 	if err != nil {
 		return err
 	}
+	if opts.backendSelector != nil {
+		router.WithBackendSelector(opts.backendSelector)
+	}
 	r.router = router
 
 	return nil

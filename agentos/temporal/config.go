@@ -68,6 +68,12 @@ type RunBackendIndex interface {
 
 type runtimeOptions struct {
 	runBackendIndex RunBackendIndex
+	backendSelector RunBackendSelector
+}
+
+// RunBackendSelector resolves a backend when RunSpec.Backend is intentionally empty.
+type RunBackendSelector interface {
+	Select(ctx context.Context, spec agentos.RunSpec) (agentos.BackendRef, error)
 }
 
 // RuntimeOption customizes runtime construction.
@@ -77,6 +83,13 @@ type RuntimeOption func(*runtimeOptions)
 func WithRunBackendIndex(index RunBackendIndex) RuntimeOption {
 	return func(opts *runtimeOptions) {
 		opts.runBackendIndex = index
+	}
+}
+
+// WithRunBackendSelector installs an optional backend policy resolver.
+func WithRunBackendSelector(selector RunBackendSelector) RuntimeOption {
+	return func(opts *runtimeOptions) {
+		opts.backendSelector = selector
 	}
 }
 

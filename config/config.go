@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 
+	"github.com/TekkenSteve/GoAgent/agentos"
 	"github.com/caarlos0/env/v11"
 )
 
@@ -61,6 +62,8 @@ type (
 		HTTPBackendsJSON string `env:"AGENTFW_HTTP_BACKENDS_JSON" envDefault:"[]"`
 		// GRPCBackendsJSON is a JSON array of gRPC backend configs.
 		GRPCBackendsJSON string `env:"AGENTFW_GRPC_BACKENDS_JSON" envDefault:"[]"`
+		// BackendSelectionRulesJSON is an ordered JSON array of backend selection rules.
+		BackendSelectionRulesJSON string `env:"AGENTFW_BACKEND_SELECTION_RULES_JSON" envDefault:"[]"`
 
 		MaxConcurrentWorkflowTaskPollers int   `env:"AGENTFW_MAX_CONCURRENT_WORKFLOW_TASK_POLLERS" envDefault:"2"`
 		MaxConcurrentActivityTaskPollers int   `env:"AGENTFW_MAX_CONCURRENT_ACTIVITY_TASK_POLLERS" envDefault:"2"`
@@ -128,6 +131,15 @@ type GRPCMethodNames struct {
 	Status  string `json:"status,omitempty"`
 }
 
+// BackendSelectionRule maps generic run attributes to a backend.
+type BackendSelectionRule struct {
+	Name     string             `json:"name,omitempty"`
+	Backend  agentos.BackendRef `json:"backend"`
+	AgentID  string             `json:"agent_id,omitempty"`
+	Metadata map[string]string  `json:"metadata,omitempty"`
+	Input    map[string]any     `json:"input,omitempty"`
+}
+
 // TemporalExternalBackends parses configured temporal_external backends.
 func (c AgentFW) TemporalExternalBackends() ([]TemporalExternalBackend, error) {
 	var backends []TemporalExternalBackend
@@ -156,6 +168,16 @@ func (c AgentFW) GRPCBackends() ([]GRPCBackend, error) {
 	}
 
 	return backends, nil
+}
+
+// BackendSelectionRules parses ordered backend selection rules.
+func (c AgentFW) BackendSelectionRules() ([]BackendSelectionRule, error) {
+	var rules []BackendSelectionRule
+	if err := json.Unmarshal([]byte(c.BackendSelectionRulesJSON), &rules); err != nil {
+		return nil, fmt.Errorf("parse AGENTFW_BACKEND_SELECTION_RULES_JSON: %w", err)
+	}
+
+	return rules, nil
 }
 
 // NewConfig returns app config.
