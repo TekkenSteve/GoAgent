@@ -109,8 +109,8 @@ func (r *runtime) Status(ctx context.Context, runID string) (agentos.RunStatus, 
 	return r.router.Status(ctx, runID)
 }
 
-func (r *runtime) Control(ctx context.Context, runID string, op agentos.ControlOperation) error {
-	return r.router.Control(ctx, runID, op)
+func (r *runtime) Control(ctx context.Context, runID string, control agentos.ControlRequest) error {
+	return r.router.Control(ctx, runID, control)
 }
 
 func (r *runtime) Subscribe(ctx context.Context, scope agentos.StreamScope) (agentos.Subscription, error) {
@@ -284,11 +284,11 @@ func (b *temporalNativeBackend) Signal(ctx context.Context, runID string, signal
 
 	switch signal.Type {
 	case agentos.SignalControlPause:
-		return b.Control(ctx, runID, agentos.ControlPause)
+		return b.Control(ctx, runID, controlRequestFromSignal(agentos.ControlPause, signal))
 	case agentos.SignalControlResume:
-		return b.Control(ctx, runID, agentos.ControlResume)
+		return b.Control(ctx, runID, controlRequestFromSignal(agentos.ControlResume, signal))
 	case agentos.SignalControlCancel:
-		return b.Control(ctx, runID, agentos.ControlCancel)
+		return b.Control(ctx, runID, controlRequestFromSignal(agentos.ControlCancel, signal))
 	case agentos.SignalUserMessage:
 		message, err := userMessageSignalToNative(signal)
 		if err != nil {
@@ -301,8 +301,11 @@ func (b *temporalNativeBackend) Signal(ctx context.Context, runID string, signal
 	}
 }
 
-func (b *temporalNativeBackend) Control(ctx context.Context, runID string, op agentos.ControlOperation) error {
-	internalOp, err := controlOperationToEntity(op)
+func (b *temporalNativeBackend) Control(ctx context.Context, runID string, control agentos.ControlRequest) error {
+	if err := agentos.ValidateControlRequest(control); err != nil {
+		return err
+	}
+	internalOp, err := controlOperationToEntity(control.Operation)
 	if err != nil {
 		return err
 	}
@@ -315,7 +318,7 @@ func (b *temporalNativeBackend) Control(ctx context.Context, runID string, op ag
 	case entity.ControlCancel:
 		return b.executor.Cancel(ctx, runID)
 	default:
-		return fmt.Errorf("%w: %s", agentos.ErrInvalidControlOperation, op)
+		return fmt.Errorf("%w: %s", agentos.ErrInvalidControlOperation, control.Operation)
 	}
 }
 
@@ -344,6 +347,14 @@ func (b *temporalNativeBackend) Capabilities() agentosruntime.BackendCapabilitie
 		SupportsResume:            true,
 		SupportsCancel:            true,
 		SupportsStreaming:         true,
+	}
+}
+
+func controlRequestFromSignal(operation agentos.ControlOperation, signal agentos.Signal) agentos.ControlRequest {
+	return agentos.ControlRequest{
+		Operation:      operation,
+		IdempotencyKey: signal.IdempotencyKey,
+		RequestedAt:    signal.SentAt,
 	}
 }
 

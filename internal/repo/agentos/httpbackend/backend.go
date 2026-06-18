@@ -79,17 +79,15 @@ func (b *Backend) Signal(ctx context.Context, runID string, signal agentos.Signa
 }
 
 // Control sends a lifecycle control operation to a remote HTTP agent run.
-func (b *Backend) Control(ctx context.Context, runID string, op agentos.ControlOperation) error {
+func (b *Backend) Control(ctx context.Context, runID string, control agentos.ControlRequest) error {
 	if runID == "" {
 		return fmt.Errorf("%w: run id is required", agentos.ErrInvalidRunSpec)
 	}
-	switch op {
-	case agentos.ControlPause, agentos.ControlResume, agentos.ControlCancel:
-	default:
-		return fmt.Errorf("%w: %s", agentos.ErrInvalidControlOperation, op)
+	if err := agentos.ValidateControlRequest(control); err != nil {
+		return err
 	}
 
-	if err := b.doJSON(ctx, http.MethodPost, "/runs/"+runID+"/control", controlRequest{Operation: op}, nil); err != nil {
+	if err := b.doJSON(ctx, http.MethodPost, "/runs/"+runID+"/control", controlRequestFromControl(control), nil); err != nil {
 		return fmt.Errorf("http backend - control: %w", err)
 	}
 

@@ -98,15 +98,18 @@ func (b *Backend) Signal(ctx context.Context, runID string, signal agentos.Signa
 }
 
 // Control translates lifecycle operations to external workflow signal/cancel operations.
-func (b *Backend) Control(ctx context.Context, runID string, op agentos.ControlOperation) error {
-	switch op {
+func (b *Backend) Control(ctx context.Context, runID string, control agentos.ControlRequest) error {
+	if err := agentos.ValidateControlRequest(control); err != nil {
+		return err
+	}
+	switch control.Operation {
 	case agentos.ControlPause:
-		return b.controlBySignal(ctx, runID, agentos.SignalControlPause)
+		return b.controlBySignal(ctx, runID, agentos.SignalControlPause, control)
 	case agentos.ControlResume:
-		return b.controlBySignal(ctx, runID, agentos.SignalControlResume)
+		return b.controlBySignal(ctx, runID, agentos.SignalControlResume, control)
 	case agentos.ControlCancel:
 		if b.config.Signals.Cancel != "" {
-			return b.controlBySignal(ctx, runID, agentos.SignalControlCancel)
+			return b.controlBySignal(ctx, runID, agentos.SignalControlCancel, control)
 		}
 		if err := b.client.CancelWorkflow(ctx, workflowID(runID), ""); err != nil {
 			return fmt.Errorf("temporal external backend - cancel workflow: %w", err)
@@ -114,7 +117,7 @@ func (b *Backend) Control(ctx context.Context, runID string, op agentos.ControlO
 
 		return nil
 	default:
-		return fmt.Errorf("%w: %s", agentos.ErrInvalidControlOperation, op)
+		return fmt.Errorf("%w: %s", agentos.ErrInvalidControlOperation, control.Operation)
 	}
 }
 
@@ -156,12 +159,16 @@ func (b *Backend) Capabilities() agentosruntime.BackendCapabilities {
 	}
 }
 
-func (b *Backend) controlBySignal(ctx context.Context, runID string, signalType agentos.SignalType) error {
+func (b *Backend) controlBySignal(ctx context.Context, runID string, signalType agentos.SignalType, control agentos.ControlRequest) error {
 	if _, err := b.signalName(signalType); err != nil {
 		return fmt.Errorf("%w: control %s is not mapped for backend %s", agentos.ErrInvalidControlOperation, signalType, b.config.Name)
 	}
 
-	return b.Signal(ctx, runID, agentos.Signal{Type: signalType})
+	return b.Signal(ctx, runID, agentos.Signal{
+		Type:           signalType,
+		IdempotencyKey: control.IdempotencyKey,
+		SentAt:         control.RequestedAt,
+	})
 }
 
 func (b *Backend) signalName(signalType agentos.SignalType) (string, error) {

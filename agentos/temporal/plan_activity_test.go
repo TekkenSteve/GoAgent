@@ -39,7 +39,7 @@ func TestPlanActivitiesStartStatusControl(t *testing.T) {
 		t.Fatalf("status = %#v", status)
 	}
 
-	if err := activities.ControlPlanNodeActivity(context.Background(), controlPlanNodeInput{RunID: "run-1", Operation: agentos.ControlCancel}); err != nil {
+	if err := activities.ControlPlanNodeActivity(context.Background(), controlPlanNodeInput{RunID: "run-1", Control: agentos.ControlRequest{Operation: agentos.ControlCancel}}); err != nil {
 		t.Fatalf("ControlPlanNodeActivity: %v", err)
 	}
 	if runtime.control != agentos.ControlCancel {
@@ -149,8 +149,8 @@ func (r *fakePlanRuntime) Status(context.Context, string) (agentos.RunStatus, er
 	return agentos.RunStatus{RunID: "run-1", LifecycleState: "completed", UpdatedAt: time.Now()}, nil
 }
 
-func (r *fakePlanRuntime) Control(_ context.Context, _ string, op agentos.ControlOperation) error {
-	r.control = op
+func (r *fakePlanRuntime) Control(_ context.Context, _ string, control agentos.ControlRequest) error {
+	r.control = control.Operation
 
 	return nil
 }

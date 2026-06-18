@@ -10,7 +10,10 @@ import (
 	"github.com/TekkenSteve/GoAgent/agentos"
 )
 
-const idempotencyOperationNodeStart = "node_start"
+const (
+	idempotencyOperationNodeStart   = "node_start"
+	idempotencyOperationNodeControl = "node_control"
+)
 
 // PlanEventFromStateEvent maps a deterministic reducer transition to the public
 // PlanEvent envelope used by durable event stores and UI timelines.
@@ -101,6 +104,39 @@ func NodeStartIdempotencyKey(planID, nodeID string) (string, error) {
 	})
 	if err != nil {
 		return "", fmt.Errorf("%w: marshal node start key: %s", agentos.ErrInvalidPlanEvent, err)
+	}
+	sum := sha256.Sum256(data)
+
+	return planID + ":" + hex.EncodeToString(sum[:]), nil
+}
+
+// NodeControlIdempotencyKey creates the stable idempotency key for propagating
+// one plan-level control operation to one backend-owned child run.
+func NodeControlIdempotencyKey(planID, nodeID string, operation agentos.ControlOperation, parentKey string) (string, error) {
+	if planID == "" {
+		return "", fmt.Errorf("%w: plan id is required", agentos.ErrInvalidRunPlan)
+	}
+	if nodeID == "" {
+		return "", fmt.Errorf("%w: node id is required", agentos.ErrInvalidRunPlan)
+	}
+	if err := agentos.ValidateControlRequest(agentos.ControlRequest{Operation: operation}); err != nil {
+		return "", err
+	}
+	data, err := json.Marshal(struct {
+		Operation string                   `json:"operation"`
+		PlanID    string                   `json:"plan_id"`
+		NodeID    string                   `json:"node_id"`
+		Control   agentos.ControlOperation `json:"control"`
+		ParentKey string                   `json:"parent_key,omitempty"`
+	}{
+		Operation: idempotencyOperationNodeControl,
+		PlanID:    planID,
+		NodeID:    nodeID,
+		Control:   operation,
+		ParentKey: parentKey,
+	})
+	if err != nil {
+		return "", fmt.Errorf("%w: marshal node control key: %s", agentos.ErrInvalidPlanEvent, err)
 	}
 	sum := sha256.Sum256(data)
 

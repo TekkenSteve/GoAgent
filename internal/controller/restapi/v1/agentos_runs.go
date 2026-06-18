@@ -128,7 +128,13 @@ func (r *V1) controlAgentOSRun(ctx *fiber.Ctx) error {
 		return errorResponse(ctx, http.StatusBadRequest, err.Error())
 	}
 
-	if err := r.agentOSRuntime.Control(ctx.UserContext(), ctx.Params("run_id"), req.Operation); err != nil {
+	if err := r.agentOSRuntime.Control(ctx.UserContext(), ctx.Params("run_id"), agentos.ControlRequest{
+		Operation:      req.Operation,
+		IdempotencyKey: req.IdempotencyKey,
+		RequestedAt:    req.RequestedAt,
+		ActorID:        req.ActorID,
+		Metadata:       req.Metadata,
+	}); err != nil {
 		return agentOSError(ctx, err)
 	}
 

@@ -33,7 +33,11 @@ type AgentOSSignal struct {
 
 // AgentOSControl sends a lifecycle control operation to a generic AgentOS run.
 type AgentOSControl struct {
-	Operation agentos.ControlOperation `json:"operation" validate:"required"`
+	Operation      agentos.ControlOperation `json:"operation" validate:"required"`
+	IdempotencyKey string                   `json:"idempotency_key,omitempty"`
+	RequestedAt    time.Time                `json:"requested_at,omitempty"`
+	ActorID        string                   `json:"actor_id,omitempty"`
+	Metadata       map[string]string        `json:"metadata,omitempty"`
 }
 
 // AgentOSEvent is the public REST envelope for external backend event ingest.

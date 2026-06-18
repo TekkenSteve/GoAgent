@@ -144,12 +144,15 @@ func TestBackendControlPostsOperation(t *testing.T) {
 	defer server.Close()
 
 	backend := newTestBackend(t, server.URL)
-	if err := backend.Control(context.Background(), "run-1", agentos.ControlCancel); err != nil {
+	if err := backend.Control(context.Background(), "run-1", agentos.ControlRequest{Operation: agentos.ControlCancel, IdempotencyKey: "control-1"}); err != nil {
 		t.Fatalf("Control: %v", err)
 	}
 
 	if got.Operation != agentos.ControlCancel {
 		t.Fatalf("operation = %q", got.Operation)
+	}
+	if got.IdempotencyKey != "control-1" {
+		t.Fatalf("idempotency_key = %q", got.IdempotencyKey)
 	}
 }
 

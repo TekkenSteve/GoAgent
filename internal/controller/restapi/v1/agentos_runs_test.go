@@ -119,9 +119,9 @@ func (r *fakeAgentOSRuntime) Status(_ context.Context, runID string) (agentos.Ru
 	return agentos.RunStatus{RunID: runID, LifecycleState: "running", UpdatedAt: time.Now()}, nil
 }
 
-func (r *fakeAgentOSRuntime) Control(_ context.Context, runID string, op agentos.ControlOperation) error {
+func (r *fakeAgentOSRuntime) Control(_ context.Context, runID string, control agentos.ControlRequest) error {
 	r.controlRunID = runID
-	r.control = op
+	r.control = control.Operation
 
 	return nil
 }

@@ -36,7 +36,7 @@ func TestRouterRoutesRunOperationsToRegisteredBackend(t *testing.T) {
 	if _, err := router.Status(ctx, "run-1"); err != nil {
 		t.Fatalf("status: %v", err)
 	}
-	if err := router.Control(ctx, "run-1", agentos.ControlPause); err != nil {
+	if err := router.Control(ctx, "run-1", agentos.ControlRequest{Operation: agentos.ControlPause}); err != nil {
 		t.Fatalf("control: %v", err)
 	}
 	if err := router.Signal(ctx, "run-1", agentos.Signal{Type: agentos.SignalUserMessage}); err != nil {
@@ -180,7 +180,7 @@ func (b *stubBackend) Signal(_ context.Context, runID string, _ agentos.Signal) 
 	return nil
 }
 
-func (b *stubBackend) Control(_ context.Context, runID string, _ agentos.ControlOperation) error {
+func (b *stubBackend) Control(_ context.Context, runID string, _ agentos.ControlRequest) error {
 	b.controlRunID = runID
 
 	return nil

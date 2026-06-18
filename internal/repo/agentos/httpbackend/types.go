@@ -30,7 +30,9 @@ type signalRequest struct {
 }
 
 type controlRequest struct {
-	Operation agentos.ControlOperation `json:"operation"`
+	Operation      agentos.ControlOperation `json:"operation"`
+	IdempotencyKey string                   `json:"idempotency_key,omitempty"`
+	RequestedAt    time.Time                `json:"requested_at"`
 }
 
 func startRequestFromSpec(spec agentos.RunSpec) startRequest {
@@ -67,5 +69,18 @@ func signalRequestFromSignal(signal agentos.Signal) signalRequest {
 		IdempotencyKey: signal.IdempotencyKey,
 		Payload:        signal.Payload,
 		SentAt:         sentAt,
+	}
+}
+
+func controlRequestFromControl(control agentos.ControlRequest) controlRequest {
+	requestedAt := control.RequestedAt
+	if requestedAt.IsZero() {
+		requestedAt = time.Now().UTC()
+	}
+
+	return controlRequest{
+		Operation:      control.Operation,
+		IdempotencyKey: control.IdempotencyKey,
+		RequestedAt:    requestedAt,
 	}
 }

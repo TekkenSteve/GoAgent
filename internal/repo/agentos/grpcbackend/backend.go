@@ -94,18 +94,16 @@ func (b *Backend) Signal(ctx context.Context, runID string, signal agentos.Signa
 }
 
 // Control sends a lifecycle control operation to a remote gRPC agent run.
-func (b *Backend) Control(ctx context.Context, runID string, op agentos.ControlOperation) error {
+func (b *Backend) Control(ctx context.Context, runID string, control agentos.ControlRequest) error {
 	if runID == "" {
 		return fmt.Errorf("%w: run id is required", agentos.ErrInvalidRunSpec)
 	}
-	switch op {
-	case agentos.ControlPause, agentos.ControlResume, agentos.ControlCancel:
-	default:
-		return fmt.Errorf("%w: %s", agentos.ErrInvalidControlOperation, op)
+	if err := agentos.ValidateControlRequest(control); err != nil {
+		return err
 	}
 
 	var response emptyResponse
-	if err := b.invoke(ctx, b.config.Methods.Control, controlRequest{RunID: runID, Operation: op}, &response); err != nil {
+	if err := b.invoke(ctx, b.config.Methods.Control, controlRequestFromControl(runID, control), &response); err != nil {
 		return fmt.Errorf("grpc backend - control: %w", err)
 	}
 

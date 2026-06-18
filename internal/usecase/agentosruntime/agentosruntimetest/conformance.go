@@ -66,7 +66,7 @@ func RunBackendConformance(t *testing.T, tc BackendConformanceCase) {
 			t.Fatalf("Signal user.message: %v", err)
 		}
 
-		if err := tc.Backend.Control(ctx, tc.RunID, agentos.ControlCancel); err != nil {
+		if err := tc.Backend.Control(ctx, tc.RunID, agentos.ControlRequest{Operation: agentos.ControlCancel}); err != nil {
 			t.Fatalf("Control cancel: %v", err)
 		}
 

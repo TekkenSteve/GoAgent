@@ -205,8 +205,8 @@ func (a *PlanActivities) StatusPlanNodeActivity(ctx context.Context, input statu
 }
 
 type controlPlanNodeInput struct {
-	RunID     string
-	Operation agentos.ControlOperation
+	RunID   string
+	Control agentos.ControlRequest
 }
 
 // ControlPlanNodeActivity sends lifecycle control to one child run.
@@ -215,5 +215,5 @@ func (a *PlanActivities) ControlPlanNodeActivity(ctx context.Context, input cont
 		return fmt.Errorf("%w: plan activity runtime is required", agentos.ErrInvalidRunPlan)
 	}
 
-	return a.Runtime.Control(ctx, input.RunID, input.Operation)
+	return a.Runtime.Control(ctx, input.RunID, input.Control)
 }

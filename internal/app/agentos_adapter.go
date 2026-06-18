@@ -53,7 +53,7 @@ func (e *agentOSExecutor) Control(ctx context.Context, runID string, op entity.C
 		return err
 	}
 
-	if err := e.runtime.Control(ctx, runID, agentOSOp); err != nil {
+	if err := e.runtime.Control(ctx, runID, agentos.ControlRequest{Operation: agentOSOp}); err != nil {
 		return fmt.Errorf("agentos executor - control: %w", err)
 	}
 

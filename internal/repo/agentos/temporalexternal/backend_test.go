@@ -137,7 +137,7 @@ func TestBackendControlCancelFallsBackToTemporalCancel(t *testing.T) {
 		WorkflowType: "python.agent.v1",
 	})
 
-	if err := backend.Control(context.Background(), "run-1", agentos.ControlCancel); err != nil {
+	if err := backend.Control(context.Background(), "run-1", agentos.ControlRequest{Operation: agentos.ControlCancel}); err != nil {
 		t.Fatalf("Control cancel: %v", err)
 	}
 

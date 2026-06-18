@@ -10,7 +10,7 @@ import (
 type AgentBackend interface {
 	Start(ctx context.Context, spec agentos.RunSpec) (agentos.RunStatus, error)
 	Signal(ctx context.Context, runID string, signal agentos.Signal) error
-	Control(ctx context.Context, runID string, op agentos.ControlOperation) error
+	Control(ctx context.Context, runID string, control agentos.ControlRequest) error
 	Status(ctx context.Context, runID string) (agentos.RunStatus, error)
 	Subscribe(ctx context.Context, scope agentos.StreamScope) (agentos.Subscription, error)
 }

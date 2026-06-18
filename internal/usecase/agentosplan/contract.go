@@ -2,6 +2,7 @@ package agentosplan
 
 import (
 	"context"
+	"time"
 
 	"github.com/TekkenSteve/GoAgent/agentos"
 )
@@ -30,7 +31,7 @@ type ArtifactStore interface {
 
 // PlanIndex stores durable plan identity and the latest aggregate status.
 type PlanIndex interface {
-	CreatePlan(ctx context.Context, spec agentos.RunPlanSpec, status agentos.RunPlanStatus) (agentos.RunPlanStatus, error)
+	CreatePlan(ctx context.Context, spec agentos.RunPlanSpec, status agentos.RunPlanStatus) (agentos.RunPlanStatus, bool, error)
 	GetPlan(ctx context.Context, planID string) (agentos.RunPlanSpec, agentos.RunPlanStatus, bool, error)
 	UpdatePlanStatus(ctx context.Context, status agentos.RunPlanStatus, idempotencyKey string) error
 }
@@ -54,11 +55,38 @@ type PlanEventStore interface {
 	ListPlanEvents(ctx context.Context, scope agentos.PlanStreamScope, limit int) ([]agentos.PlanEvent, error)
 }
 
+// AuditAction identifies durable control-plane actions.
+type AuditAction string
+
+const (
+	AuditActionPlanStart   AuditAction = "plan.start"
+	AuditActionPlanSignal  AuditAction = "plan.signal"
+	AuditActionPlanControl AuditAction = "plan.control"
+)
+
+// AuditRecord is a durable control-plane audit entry.
+type AuditRecord struct {
+	AuditID        string
+	PlanID         string
+	RunID          string
+	NodeID         string
+	ActorID        string
+	Action         AuditAction
+	IdempotencyKey string
+	Payload        map[string]any
+	CreatedAt      time.Time
+}
+
+// AuditStore persists idempotent control-plane audit records.
+type AuditStore interface {
+	RecordAudit(ctx context.Context, record AuditRecord) (AuditRecord, bool, error)
+}
+
 // Runner starts and controls backend-owned child runs.
 type Runner interface {
 	Start(ctx context.Context, spec agentos.RunSpec) (agentos.RunStatus, error)
 	Signal(ctx context.Context, runID string, signal agentos.Signal) error
 	Status(ctx context.Context, runID string) (agentos.RunStatus, error)
-	Control(ctx context.Context, runID string, op agentos.ControlOperation) error
+	Control(ctx context.Context, runID string, control agentos.ControlRequest) error
 	Subscribe(ctx context.Context, scope agentos.StreamScope) (agentos.Subscription, error)
 }

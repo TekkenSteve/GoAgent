@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"time"
 
 	"github.com/TekkenSteve/GoAgent/agentos"
 	"github.com/TekkenSteve/GoAgent/internal/pkg/postgres"
@@ -12,6 +13,7 @@ import (
 	repostream "github.com/TekkenSteve/GoAgent/internal/repo/stream"
 	"github.com/TekkenSteve/GoAgent/internal/usecase/agentosplan"
 	"go.temporal.io/sdk/client"
+	sdktemporal "go.temporal.io/sdk/temporal"
 )
 
 type planRuntime struct {
@@ -21,6 +23,8 @@ type planRuntime struct {
 	subscriber     *repostream.RedisSubscriber
 	postgres       *postgres.Postgres
 	planEvents     agentosplan.PlanEventStore
+	planIndex      agentosplan.PlanIndex
+	auditStore     agentosplan.AuditStore
 	taskQueue      string
 }
 
@@ -77,7 +81,10 @@ func newPlanRuntimeWithClient(ctx context.Context, cfg RuntimeConfig, c client.C
 			return nil, fmt.Errorf("agentos temporal plan runtime postgres: %w", err)
 		}
 		rt.postgres = pg
-		rt.planEvents = temporalrepo.NewAgentOSPlanRepo(pg)
+		planStore := temporalrepo.NewAgentOSPlanRepo(pg)
+		rt.planEvents = planStore
+		rt.planIndex = planStore
+		rt.auditStore = planStore
 	}
 
 	return rt, nil
@@ -87,18 +94,48 @@ func (r *planRuntime) StartPlan(ctx context.Context, spec agentos.RunPlanSpec) (
 	if spec.PlanID == "" {
 		return agentos.RunPlanStatus{}, fmt.Errorf("%w: plan id is required", agentos.ErrInvalidRunPlan)
 	}
-	_, err := r.temporalClient.ExecuteWorkflow(ctx, client.StartWorkflowOptions{
+	if spec.IdempotencyKey == "" {
+		return agentos.RunPlanStatus{}, fmt.Errorf("%w: plan idempotency key is required", agentos.ErrInvalidRunPlan)
+	}
+	if r.planIndex == nil {
+		return agentos.RunPlanStatus{}, errors.New("agentos temporal plan runtime: plan index is not configured")
+	}
+
+	status := agentosplan.NewState(spec, time.Now().UTC()).Status
+	status, created, err := r.planIndex.CreatePlan(ctx, spec, status)
+	if err != nil {
+		return agentos.RunPlanStatus{}, err
+	}
+	if !created && status.LifecycleState != agentos.PlanLifecyclePending {
+		return status, nil
+	}
+	if created {
+		if _, err := r.recordPlanAudit(ctx, agentosplan.AuditRecord{
+			PlanID:         spec.PlanID,
+			Action:         agentosplan.AuditActionPlanStart,
+			IdempotencyKey: spec.IdempotencyKey,
+			Payload: map[string]any{
+				"thread_id":  spec.ThreadID,
+				"account_id": spec.AccountID,
+				"project_id": spec.ProjectID,
+			},
+		}); err != nil {
+			return agentos.RunPlanStatus{}, err
+		}
+	}
+
+	_, err = r.temporalClient.ExecuteWorkflow(ctx, client.StartWorkflowOptions{
 		ID:        planWorkflowID(spec.PlanID),
 		TaskQueue: r.taskQueue,
 	}, PlanWorkflowName, spec)
-	if err != nil {
+	if err != nil && !sdktemporal.IsWorkflowExecutionAlreadyStartedError(err) {
 		return agentos.RunPlanStatus{}, fmt.Errorf("agentos temporal plan runtime - start plan workflow: %w", err)
 	}
 
-	return agentos.RunPlanStatus{
-		PlanID:         spec.PlanID,
-		LifecycleState: agentos.PlanLifecycleRunning,
-	}, nil
+	status.LifecycleState = agentos.PlanLifecycleRunning
+	status.UpdatedAt = time.Now().UTC()
+
+	return status, nil
 }
 
 func (r *planRuntime) StatusPlan(ctx context.Context, planID string) (agentos.RunPlanStatus, error) {
@@ -125,6 +162,23 @@ func (r *planRuntime) SignalPlan(ctx context.Context, planID string, signal agen
 	if signal.Type == "" {
 		return fmt.Errorf("%w: type is required", agentos.ErrInvalidSignal)
 	}
+	if signal.IdempotencyKey == "" {
+		return fmt.Errorf("%w: signal idempotency key is required", agentos.ErrInvalidSignal)
+	}
+	created, err := r.recordPlanAudit(ctx, agentosplan.AuditRecord{
+		PlanID:         planID,
+		Action:         agentosplan.AuditActionPlanSignal,
+		IdempotencyKey: signal.IdempotencyKey,
+		Payload: map[string]any{
+			"type": signal.Type,
+		},
+	})
+	if err != nil {
+		return err
+	}
+	if !created {
+		return nil
+	}
 
 	if err := r.temporalClient.SignalWorkflow(ctx, planWorkflowID(planID), "", PlanSignalName, signal); err != nil {
 		return fmt.Errorf("agentos temporal plan runtime - signal plan workflow: %w", err)
@@ -133,16 +187,34 @@ func (r *planRuntime) SignalPlan(ctx context.Context, planID string, signal agen
 	return nil
 }
 
-func (r *planRuntime) ControlPlan(ctx context.Context, planID string, op agentos.ControlOperation) error {
+func (r *planRuntime) ControlPlan(ctx context.Context, planID string, control agentos.ControlRequest) error {
 	if planID == "" {
 		return fmt.Errorf("%w: plan id is required", agentos.ErrInvalidRunPlan)
 	}
-	switch op {
-	case agentos.ControlPause, agentos.ControlResume, agentos.ControlCancel:
-	default:
-		return fmt.Errorf("%w: %s", agentos.ErrInvalidControlOperation, op)
+	if err := agentos.ValidateControlRequest(control); err != nil {
+		return err
 	}
-	if err := r.temporalClient.SignalWorkflow(ctx, planWorkflowID(planID), "", PlanControlSignalName, op); err != nil {
+	if control.IdempotencyKey == "" {
+		return fmt.Errorf("%w: control idempotency key is required", agentos.ErrInvalidControlOperation)
+	}
+	created, err := r.recordPlanAudit(ctx, agentosplan.AuditRecord{
+		PlanID:         planID,
+		ActorID:        control.ActorID,
+		Action:         agentosplan.AuditActionPlanControl,
+		IdempotencyKey: control.IdempotencyKey,
+		Payload: map[string]any{
+			"operation": control.Operation,
+			"metadata":  control.Metadata,
+		},
+	})
+	if err != nil {
+		return err
+	}
+	if !created {
+		return nil
+	}
+
+	if err := r.temporalClient.SignalWorkflow(ctx, planWorkflowID(planID), "", PlanControlSignalName, control); err != nil {
 		return fmt.Errorf("agentos temporal plan runtime - control plan workflow: %w", err)
 	}
 
@@ -178,6 +250,15 @@ func (r *planRuntime) Close() error {
 	}
 
 	return errors.Join(errs...)
+}
+
+func (r *planRuntime) recordPlanAudit(ctx context.Context, record agentosplan.AuditRecord) (bool, error) {
+	if r.auditStore == nil {
+		return false, errors.New("agentos temporal plan runtime: audit store is not configured")
+	}
+	_, created, err := r.auditStore.RecordAudit(ctx, record)
+
+	return created, err
 }
 
 func planWorkflowID(planID string) string {

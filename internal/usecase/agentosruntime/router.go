@@ -102,13 +102,16 @@ func (r *Router) Signal(ctx context.Context, runID string, signal agentos.Signal
 }
 
 // Control sends a lifecycle operation to the backend that owns the run.
-func (r *Router) Control(ctx context.Context, runID string, op agentos.ControlOperation) error {
+func (r *Router) Control(ctx context.Context, runID string, control agentos.ControlRequest) error {
+	if err := agentos.ValidateControlRequest(control); err != nil {
+		return err
+	}
 	backend, err := r.backendForRun(ctx, runID)
 	if err != nil {
 		return err
 	}
 
-	return backend.Control(ctx, runID, op)
+	return backend.Control(ctx, runID, control)
 }
 
 // Status queries the backend that owns the run.

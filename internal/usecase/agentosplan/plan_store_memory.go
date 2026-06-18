@@ -18,6 +18,7 @@ type MemoryPlanStore struct {
 	statuses  map[string]agentos.RunPlanStatus
 	events    map[string][]agentos.PlanEvent
 	eventKeys map[string]agentos.PlanEvent
+	auditKeys map[string]AuditRecord
 }
 
 // NewMemoryPlanStore creates an empty in-memory plan store.
@@ -27,20 +28,31 @@ func NewMemoryPlanStore() *MemoryPlanStore {
 		statuses:  make(map[string]agentos.RunPlanStatus),
 		events:    make(map[string][]agentos.PlanEvent),
 		eventKeys: make(map[string]agentos.PlanEvent),
+		auditKeys: make(map[string]AuditRecord),
 	}
 }
 
-func (s *MemoryPlanStore) CreatePlan(ctx context.Context, spec agentos.RunPlanSpec, status agentos.RunPlanStatus) (agentos.RunPlanStatus, error) {
+func (s *MemoryPlanStore) CreatePlan(ctx context.Context, spec agentos.RunPlanSpec, status agentos.RunPlanStatus) (agentos.RunPlanStatus, bool, error) {
+	if spec.PlanID == "" {
+		return agentos.RunPlanStatus{}, false, fmt.Errorf("%w: plan id is required", agentos.ErrInvalidRunPlan)
+	}
+	s.mu.RLock()
+	existing, exists := s.statuses[spec.PlanID]
+	s.mu.RUnlock()
+	if exists {
+		return existing, false, nil
+	}
+
 	snapshot := PlanStateSnapshot{
 		Spec:           spec,
 		Status:         status,
 		IdempotencyKey: spec.IdempotencyKey,
 	}
 	if err := s.SavePlanState(ctx, snapshot); err != nil {
-		return agentos.RunPlanStatus{}, err
+		return agentos.RunPlanStatus{}, false, err
 	}
 
-	return status, nil
+	return status, true, nil
 }
 
 func (s *MemoryPlanStore) GetPlan(_ context.Context, planID string) (agentos.RunPlanSpec, agentos.RunPlanStatus, bool, error) {
@@ -159,8 +171,33 @@ func (s *MemoryPlanStore) ListPlanEvents(_ context.Context, scope agentos.PlanSt
 	return filtered, nil
 }
 
+func (s *MemoryPlanStore) RecordAudit(_ context.Context, record AuditRecord) (AuditRecord, bool, error) {
+	if record.PlanID == "" {
+		return AuditRecord{}, false, fmt.Errorf("%w: plan id is required", agentos.ErrInvalidRunPlan)
+	}
+	if record.IdempotencyKey == "" {
+		return AuditRecord{}, false, fmt.Errorf("%w: audit idempotency key is required", agentos.ErrInvalidRunPlan)
+	}
+	if record.CreatedAt.IsZero() {
+		record.CreatedAt = time.Now().UTC()
+	}
+	if record.AuditID == "" {
+		record.AuditID = record.PlanID + ":" + record.IdempotencyKey
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if existing, ok := s.auditKeys[record.IdempotencyKey]; ok {
+		return existing, false, nil
+	}
+	s.auditKeys[record.IdempotencyKey] = record
+
+	return record, true, nil
+}
+
 var (
 	_ PlanIndex      = (*MemoryPlanStore)(nil)
 	_ PlanStateStore = (*MemoryPlanStore)(nil)
 	_ PlanEventStore = (*MemoryPlanStore)(nil)
+	_ AuditStore     = (*MemoryPlanStore)(nil)
 )

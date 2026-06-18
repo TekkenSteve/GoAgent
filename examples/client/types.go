@@ -33,7 +33,10 @@ type AgentOSSignalRequest struct {
 
 // AgentOSControlRequest is the payload for POST /v1/agentos/runs/{run_id}/control.
 type AgentOSControlRequest struct {
-	Operation string `json:"operation"`
+	Operation      string            `json:"operation"`
+	IdempotencyKey string            `json:"idempotency_key,omitempty"`
+	ActorID        string            `json:"actor_id,omitempty"`
+	Metadata       map[string]string `json:"metadata,omitempty"`
 }
 
 // OrchestrationRequest is the payload for POST /v1/orchestration/execute.

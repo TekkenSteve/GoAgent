@@ -65,9 +65,11 @@ func PlanWorkflow(ctx workflow.Context, spec agentos.RunPlanSpec) (agentos.RunPl
 	scheduler := agentosplan.Scheduler{Expressions: compiler}
 	maxParallel := normalizePlanParallelism(spec.Policy.MaxParallelNodes)
 	paused := false
+	processedControls := make(map[string]bool)
+	processedSignals := make(map[string]bool)
 
 	for {
-		canceled, nextPaused, err := drainPlanControl(activityCtx, ctx, spec, controlCh, &state, paused, validation.ControlsByNode)
+		canceled, nextPaused, err := drainPlanControl(activityCtx, ctx, spec, controlCh, &state, paused, validation.ControlsByNode, processedControls)
 		paused = nextPaused
 		if err != nil {
 			persistErr := applyPlanStateEvent(activityCtx, ctx, spec, &state, agentosplan.StateEvent{Kind: agentosplan.EventPlanFailed, Reason: err.Error()})
@@ -77,7 +79,11 @@ func PlanWorkflow(ctx workflow.Context, spec agentos.RunPlanSpec) (agentos.RunPl
 		if canceled {
 			return state.Status, nil
 		}
-		drainPlanSignals(signalCh)
+		if err := drainPlanSignals(signalCh, processedSignals); err != nil {
+			persistErr := applyPlanStateEvent(activityCtx, ctx, spec, &state, agentosplan.StateEvent{Kind: agentosplan.EventPlanFailed, Reason: err.Error()})
+
+			return state.Status, errors.Join(err, persistErr)
+		}
 
 		if planNodesTerminal(state.Status) {
 			if err := applyTerminalPlanState(activityCtx, ctx, spec, &state); err != nil {
@@ -275,12 +281,22 @@ func applyNodeRunTerminal(activityCtx workflow.Context, workflowCtx workflow.Con
 	return nil
 }
 
-func drainPlanControl(activityCtx workflow.Context, workflowCtx workflow.Context, spec agentos.RunPlanSpec, ch workflow.ReceiveChannel, state *agentosplan.State, paused bool, controlsByNode map[string][]agentos.ControlOperation) (bool, bool, error) {
-	var op agentos.ControlOperation
-	for ch.ReceiveAsync(&op) {
-		switch op {
+func drainPlanControl(activityCtx workflow.Context, workflowCtx workflow.Context, spec agentos.RunPlanSpec, ch workflow.ReceiveChannel, state *agentosplan.State, paused bool, controlsByNode map[string][]agentos.ControlOperation, processed map[string]bool) (bool, bool, error) {
+	var control agentos.ControlRequest
+	for ch.ReceiveAsync(&control) {
+		if err := agentos.ValidateControlRequest(control); err != nil {
+			return false, paused, err
+		}
+		if control.IdempotencyKey == "" {
+			return false, paused, fmt.Errorf("%w: control idempotency key is required", agentos.ErrInvalidControlOperation)
+		}
+		if processed[control.IdempotencyKey] {
+			continue
+		}
+		processed[control.IdempotencyKey] = true
+		switch control.Operation {
 		case agentos.ControlCancel:
-			if err := controlActivePlanNodes(activityCtx, state.Status, op, controlsByNode); err != nil {
+			if err := controlActivePlanNodes(activityCtx, spec.PlanID, state.Status, control, controlsByNode); err != nil {
 				return false, paused, err
 			}
 			for _, node := range state.Status.Nodes {
@@ -296,7 +312,7 @@ func drainPlanControl(activityCtx workflow.Context, workflowCtx workflow.Context
 
 			return true, paused, nil
 		case agentos.ControlPause:
-			if err := controlActivePlanNodes(activityCtx, state.Status, op, controlsByNode); err != nil {
+			if err := controlActivePlanNodes(activityCtx, spec.PlanID, state.Status, control, controlsByNode); err != nil {
 				if persistErr := applyPlanStateEvent(activityCtx, workflowCtx, spec, state, agentosplan.StateEvent{Kind: agentosplan.EventPlanBlocked, Reason: err.Error()}); persistErr != nil {
 					return false, true, persistErr
 				}
@@ -308,7 +324,7 @@ func drainPlanControl(activityCtx workflow.Context, workflowCtx workflow.Context
 			}
 			paused = true
 		case agentos.ControlResume:
-			if err := controlActivePlanNodes(activityCtx, state.Status, op, controlsByNode); err != nil {
+			if err := controlActivePlanNodes(activityCtx, spec.PlanID, state.Status, control, controlsByNode); err != nil {
 				if persistErr := applyPlanStateEvent(activityCtx, workflowCtx, spec, state, agentosplan.StateEvent{Kind: agentosplan.EventPlanBlocked, Reason: err.Error()}); persistErr != nil {
 					return false, true, persistErr
 				}
@@ -319,23 +335,27 @@ func drainPlanControl(activityCtx workflow.Context, workflowCtx workflow.Context
 				return false, paused, err
 			}
 			paused = false
-		default:
-			return false, paused, fmt.Errorf("%w: %s", agentos.ErrInvalidControlOperation, op)
 		}
 	}
 
 	return false, paused, nil
 }
 
-func controlActivePlanNodes(activityCtx workflow.Context, status agentos.RunPlanStatus, op agentos.ControlOperation, controlsByNode map[string][]agentos.ControlOperation) error {
+func controlActivePlanNodes(activityCtx workflow.Context, planID string, status agentos.RunPlanStatus, control agentos.ControlRequest, controlsByNode map[string][]agentos.ControlOperation) error {
 	for _, node := range status.Nodes {
 		if node.LifecycleState != agentos.PlanNodeRunning || node.RunID == "" {
 			continue
 		}
-		if op != agentos.ControlCancel && !nodeSupportsControl(controlsByNode, node.NodeID, op) {
-			return fmt.Errorf("%w: node %q does not declare support for %s", agentos.ErrInvalidControlOperation, node.NodeID, op)
+		if control.Operation != agentos.ControlCancel && !nodeSupportsControl(controlsByNode, node.NodeID, control.Operation) {
+			return fmt.Errorf("%w: node %q does not declare support for %s", agentos.ErrInvalidControlOperation, node.NodeID, control.Operation)
 		}
-		if err := workflow.ExecuteActivity(activityCtx, ControlPlanNodeActivityName, controlPlanNodeInput{RunID: node.RunID, Operation: op}).Get(activityCtx, nil); err != nil {
+		childControl := control
+		key, err := agentosplan.NodeControlIdempotencyKey(planID, node.NodeID, control.Operation, control.IdempotencyKey)
+		if err != nil {
+			return err
+		}
+		childControl.IdempotencyKey = key
+		if err := workflow.ExecuteActivity(activityCtx, ControlPlanNodeActivityName, controlPlanNodeInput{RunID: node.RunID, Control: childControl}).Get(activityCtx, nil); err != nil {
 			return err
 		}
 	}
@@ -353,10 +373,22 @@ func nodeSupportsControl(controlsByNode map[string][]agentos.ControlOperation, n
 	return false
 }
 
-func drainPlanSignals(ch workflow.ReceiveChannel) {
+func drainPlanSignals(ch workflow.ReceiveChannel, processed map[string]bool) error {
 	var signal agentos.Signal
 	for ch.ReceiveAsync(&signal) {
+		if signal.Type == "" {
+			return fmt.Errorf("%w: type is required", agentos.ErrInvalidSignal)
+		}
+		if signal.IdempotencyKey == "" {
+			return fmt.Errorf("%w: signal idempotency key is required", agentos.ErrInvalidSignal)
+		}
+		if processed[signal.IdempotencyKey] {
+			continue
+		}
+		processed[signal.IdempotencyKey] = true
 	}
+
+	return nil
 }
 
 func normalizePlanParallelism(maxParallel int32) int {

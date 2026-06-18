@@ -2,6 +2,8 @@ package persistent
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -24,19 +26,26 @@ func NewAgentOSPlanRepo(pg *postgres.Postgres) *AgentOSPlanRepo {
 	return &AgentOSPlanRepo{pg}
 }
 
-func (r *AgentOSPlanRepo) CreatePlan(ctx context.Context, spec agentos.RunPlanSpec, status agentos.RunPlanStatus) (agentos.RunPlanStatus, error) {
+func (r *AgentOSPlanRepo) CreatePlan(ctx context.Context, spec agentos.RunPlanSpec, status agentos.RunPlanStatus) (agentos.RunPlanStatus, bool, error) {
 	if status.PlanID == "" {
 		status.PlanID = spec.PlanID
+	}
+	_, existing, exists, err := r.GetPlan(ctx, spec.PlanID)
+	if err != nil {
+		return agentos.RunPlanStatus{}, false, err
+	}
+	if exists {
+		return existing, false, nil
 	}
 	if err := r.SavePlanState(ctx, agentosplan.PlanStateSnapshot{
 		Spec:           spec,
 		Status:         status,
 		IdempotencyKey: spec.IdempotencyKey,
 	}); err != nil {
-		return agentos.RunPlanStatus{}, err
+		return agentos.RunPlanStatus{}, false, err
 	}
 
-	return status, nil
+	return status, true, nil
 }
 
 func (r *AgentOSPlanRepo) GetPlan(ctx context.Context, planID string) (agentos.RunPlanSpec, agentos.RunPlanStatus, bool, error) {
@@ -96,10 +105,7 @@ func (r *AgentOSPlanRepo) SavePlanState(ctx context.Context, snapshot agentospla
 		_ = tx.Rollback(ctx)
 	}()
 
-	idempotencyKey := snapshot.IdempotencyKey
-	if idempotencyKey == "" {
-		idempotencyKey = snapshot.Spec.IdempotencyKey
-	}
+	idempotencyKey := snapshot.Spec.IdempotencyKey
 	sql, args, err := r.Builder.
 		Insert("plans").
 		Columns(
@@ -131,7 +137,6 @@ ON CONFLICT (plan_id) DO UPDATE SET
     thread_id = EXCLUDED.thread_id,
     account_id = EXCLUDED.account_id,
     project_id = EXCLUDED.project_id,
-    idempotency_key = EXCLUDED.idempotency_key,
     lifecycle_state = EXCLUDED.lifecycle_state,
     reason = EXCLUDED.reason,
     spec_json = EXCLUDED.spec_json,
@@ -453,6 +458,110 @@ func (r *AgentOSPlanRepo) ListPlanEvents(ctx context.Context, scope agentos.Plan
 	return events, nil
 }
 
+func (r *AgentOSPlanRepo) RecordAudit(ctx context.Context, record agentosplan.AuditRecord) (agentosplan.AuditRecord, bool, error) {
+	if record.PlanID == "" {
+		return agentosplan.AuditRecord{}, false, fmt.Errorf("%w: plan id is required", agentos.ErrInvalidRunPlan)
+	}
+	if record.Action == "" {
+		return agentosplan.AuditRecord{}, false, fmt.Errorf("%w: audit action is required", agentos.ErrInvalidRunPlan)
+	}
+	if record.IdempotencyKey == "" {
+		return agentosplan.AuditRecord{}, false, fmt.Errorf("%w: audit idempotency key is required", agentos.ErrInvalidRunPlan)
+	}
+	existing, exists, err := r.auditRecordByIdempotencyKey(ctx, record.IdempotencyKey)
+	if err != nil || exists {
+		return existing, false, err
+	}
+	if record.AuditID == "" {
+		record.AuditID = auditIDFromIdempotencyKey(record.IdempotencyKey)
+	}
+	if record.CreatedAt.IsZero() {
+		record.CreatedAt = time.Now().UTC()
+	}
+	if record.Payload == nil {
+		record.Payload = map[string]any{}
+	}
+	payloadJSON, err := json.Marshal(record.Payload)
+	if err != nil {
+		return agentosplan.AuditRecord{}, false, fmt.Errorf("AgentOSPlanRepo - RecordAudit - marshal payload: %w", err)
+	}
+
+	_, err = r.Pool.Exec(ctx, `
+INSERT INTO audit_logs (
+    audit_id,
+    plan_id,
+    run_id,
+    node_id,
+    actor_id,
+    action,
+    idempotency_key,
+    payload_json,
+    created_at
+) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)`,
+		record.AuditID,
+		record.PlanID,
+		record.RunID,
+		record.NodeID,
+		record.ActorID,
+		string(record.Action),
+		record.IdempotencyKey,
+		payloadJSON,
+		record.CreatedAt,
+	)
+	if err != nil {
+		return agentosplan.AuditRecord{}, false, fmt.Errorf("AgentOSPlanRepo - RecordAudit - insert: %w", err)
+	}
+
+	return record, true, nil
+}
+
+func (r *AgentOSPlanRepo) auditRecordByIdempotencyKey(ctx context.Context, idempotencyKey string) (agentosplan.AuditRecord, bool, error) {
+	sql, args, err := r.Builder.
+		Select("audit_id", "plan_id", "run_id", "node_id", "actor_id", "action", "idempotency_key", "payload_json", "created_at").
+		From("audit_logs").
+		Where(sq.Eq{"idempotency_key": idempotencyKey}).
+		ToSql()
+	if err != nil {
+		return agentosplan.AuditRecord{}, false, fmt.Errorf("AgentOSPlanRepo - auditRecordByIdempotencyKey - builder: %w", err)
+	}
+
+	var record agentosplan.AuditRecord
+	var action string
+	var payloadJSON []byte
+	err = r.Pool.QueryRow(ctx, sql, args...).Scan(
+		&record.AuditID,
+		&record.PlanID,
+		&record.RunID,
+		&record.NodeID,
+		&record.ActorID,
+		&action,
+		&record.IdempotencyKey,
+		&payloadJSON,
+		&record.CreatedAt,
+	)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return agentosplan.AuditRecord{}, false, nil
+		}
+
+		return agentosplan.AuditRecord{}, false, fmt.Errorf("AgentOSPlanRepo - auditRecordByIdempotencyKey - query: %w", err)
+	}
+	if len(payloadJSON) > 0 {
+		if err := json.Unmarshal(payloadJSON, &record.Payload); err != nil {
+			return agentosplan.AuditRecord{}, false, fmt.Errorf("AgentOSPlanRepo - auditRecordByIdempotencyKey - decode payload: %w", err)
+		}
+	}
+	record.Action = agentosplan.AuditAction(action)
+
+	return record, true, nil
+}
+
+func auditIDFromIdempotencyKey(idempotencyKey string) string {
+	sum := sha256.Sum256([]byte(idempotencyKey))
+
+	return "audit:" + hex.EncodeToString(sum[:])
+}
+
 func nullableTime(value time.Time) any {
 	if value.IsZero() {
 		return nil
@@ -465,4 +574,5 @@ var (
 	_ agentosplan.PlanIndex      = (*AgentOSPlanRepo)(nil)
 	_ agentosplan.PlanStateStore = (*AgentOSPlanRepo)(nil)
 	_ agentosplan.PlanEventStore = (*AgentOSPlanRepo)(nil)
+	_ agentosplan.AuditStore     = (*AgentOSPlanRepo)(nil)
 )
