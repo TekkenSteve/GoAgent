@@ -3,6 +3,7 @@ package v1
 import (
 	"context"
 	"encoding/json"
+	"io"
 	"net/http"
 	"strings"
 	"testing"
@@ -218,8 +219,70 @@ func TestAgentOSPlanEventRouteStreamsSSE(t *testing.T) {
 	}
 }
 
+func TestAgentOSPlanConsoleRendersRuntimeData(t *testing.T) {
+	planRuntime := newFakePlanRuntime()
+	app := fiber.New()
+	NewRoutes(app.Group("/v1"), nil, nil, logger.New("error"), nil, nil, nil, nil, nil, nil, planRuntime)
+
+	resp := doAgentOSRouteRequest(t, app, http.MethodGet, "/v1/agentos/plans/plan-1/console?account_id=acct-1&project_id=proj-1", "")
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("console status = %d", resp.StatusCode)
+	}
+	if contentType := resp.Header.Get("Content-Type"); !strings.Contains(contentType, "text/html") {
+		t.Fatalf("content type = %q", contentType)
+	}
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatalf("read console: %v", err)
+	}
+	html := string(body)
+	for _, want := range []string{
+		"AgentOS Plan Console",
+		"plan-1",
+		"research",
+		"http:research-http",
+		"run-research",
+		"artifact-1",
+		"plan.node.started",
+		"plan.control",
+		`data-control-endpoint="control"`,
+		`data-signal-endpoint="signals"`,
+		`data-signal="plan.node.retry"`,
+	} {
+		if !strings.Contains(html, want) {
+			t.Fatalf("console body missing %q:\n%s", want, html)
+		}
+	}
+
+	if planRuntime.statusRef.PlanID != "plan-1" ||
+		planRuntime.statusRef.AccountID != "acct-1" ||
+		planRuntime.statusRef.ProjectID != "proj-1" {
+		t.Fatalf("unexpected status ref: %#v", planRuntime.statusRef)
+	}
+	if planRuntime.eventScope.Limit != agentOSPlanConsoleDefaultEventLimit ||
+		planRuntime.artifactScope.Limit != agentOSPlanConsoleDefaultArtifactLimit ||
+		planRuntime.auditScope.Limit != agentOSPlanConsoleDefaultAuditLimit {
+		t.Fatalf("unexpected console limits: events=%d artifacts=%d audits=%d", planRuntime.eventScope.Limit, planRuntime.artifactScope.Limit, planRuntime.auditScope.Limit)
+	}
+}
+
+func TestAgentOSPlanConsoleRequiresAccountScope(t *testing.T) {
+	planRuntime := newFakePlanRuntime()
+	app := fiber.New()
+	NewRoutes(app.Group("/v1"), nil, nil, logger.New("error"), nil, nil, nil, nil, nil, nil, planRuntime)
+
+	resp := doAgentOSRouteRequest(t, app, http.MethodGet, "/v1/agentos/plans/plan-1/console", "")
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("console status = %d", resp.StatusCode)
+	}
+}
+
 type fakePlanRuntime struct {
 	started          agentos.RunPlanSpec
+	statusRef        agentos.PlanRef
 	signalRef        agentos.PlanRef
 	signal           agentos.Signal
 	controlRef       agentos.PlanRef
@@ -242,7 +305,29 @@ func (r *fakePlanRuntime) StartPlan(_ context.Context, spec agentos.RunPlanSpec)
 }
 
 func (r *fakePlanRuntime) StatusPlan(_ context.Context, ref agentos.PlanRef) (agentos.RunPlanStatus, error) {
-	return agentos.RunPlanStatus{PlanID: ref.PlanID, LifecycleState: agentos.PlanLifecycleRunning, UpdatedAt: time.Now()}, nil
+	r.statusRef = ref
+
+	return agentos.RunPlanStatus{
+		PlanID:         ref.PlanID,
+		LifecycleState: agentos.PlanLifecycleRunning,
+		Nodes: []agentos.PlanNodeStatus{
+			{
+				NodeID:         "research",
+				RunID:          "run-research",
+				Backend:        agentos.BackendRef{Kind: agentos.BackendKindHTTP, Name: "research-http"},
+				LifecycleState: agentos.PlanNodeFailed,
+				Attempts:       1,
+				Reason:         "needs manual retry",
+				UpdatedAt:      time.Now(),
+			},
+		},
+		ActiveRunIDs: []string{"run-research"},
+		Artifacts: []agentos.ArtifactRef{
+			{ArtifactID: "artifact-1", PlanID: ref.PlanID, NodeID: "research", RunID: "run-research", Name: "summary", Kind: agentos.ArtifactKindObject},
+		},
+		BudgetUsage: agentos.PlanBudgetUsage{SpentCents: 7},
+		UpdatedAt:   time.Now(),
+	}, nil
 }
 
 func (r *fakePlanRuntime) SignalPlan(_ context.Context, ref agentos.PlanRef, signal agentos.Signal) error {
@@ -287,6 +372,8 @@ func (r *fakePlanRuntime) ListPlanEvents(_ context.Context, scope agentos.PlanEv
 				RunID:     "run-research",
 				Sequence:  8,
 				Timestamp: time.Now(),
+				Source:    "agentos.plan",
+				Payload:   map[string]any{"node_id": "research"},
 			},
 			PlanID: scope.PlanID,
 			NodeID: "research",
@@ -302,6 +389,7 @@ func (r *fakePlanRuntime) ListPlanAudits(_ context.Context, scope agentos.PlanAu
 			AuditID:        "audit-1",
 			PlanID:         scope.PlanID,
 			Action:         agentos.PlanAuditActionControl,
+			ActorID:        "operator-1",
 			IdempotencyKey: "control-1",
 			Payload:        map[string]any{"operation": string(agentos.ControlPause)},
 			CreatedAt:      time.Now(),
@@ -320,6 +408,9 @@ func (r *fakePlanRuntime) ListPlanArtifacts(_ context.Context, scope agentos.Pla
 			RunID:      "run-research",
 			Name:       "summary",
 			Kind:       agentos.ArtifactKindObject,
+			MediaType:  "application/json",
+			SizeBytes:  128,
+			Digest:     "sha256:artifact",
 		},
 	}, nil
 }

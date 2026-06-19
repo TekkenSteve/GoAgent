@@ -107,6 +107,15 @@ type AgentOSPlanScope struct {
 	ProjectID string `query:"project_id"`
 }
 
+// AgentOSPlanConsoleScope selects plan data for the operator console.
+type AgentOSPlanConsoleScope struct {
+	AccountID     string `query:"account_id" validate:"required"`
+	ProjectID     string `query:"project_id"`
+	EventLimit    int    `query:"event_limit"`
+	AuditLimit    int    `query:"audit_limit"`
+	ArtifactLimit int    `query:"artifact_limit"`
+}
+
 // AgentOSEvent is the public REST envelope for external backend event ingest.
 type AgentOSEvent struct {
 	EventID   string            `json:"event_id" validate:"required"`

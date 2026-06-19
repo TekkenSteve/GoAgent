@@ -29,3 +29,10 @@ const (
 	SignalConfigPatch   SignalType = "config.patch"
 	SignalMemoryPatch   SignalType = "memory.patch"
 )
+
+const (
+	// SignalPayloadNodeID is the node identifier key for node-scoped plan signals.
+	SignalPayloadNodeID = "node_id"
+	// SignalPayloadReason is the human/system reason key for plan signals.
+	SignalPayloadReason = "reason"
+)

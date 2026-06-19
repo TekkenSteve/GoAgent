@@ -7,8 +7,8 @@ import (
 )
 
 const (
-	SignalPayloadNodeID = "node_id"
-	SignalPayloadReason = "reason"
+	SignalPayloadNodeID = agentos.SignalPayloadNodeID
+	SignalPayloadReason = agentos.SignalPayloadReason
 )
 
 // ValidatePlanSignal validates signals owned by the RunPlan control plane.
