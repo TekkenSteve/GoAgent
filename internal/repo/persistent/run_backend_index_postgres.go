@@ -32,7 +32,7 @@ func (r *RunBackendIndexRepo) Bind(ctx context.Context, spec agentos.RunSpec) er
 		BackendName:    spec.Backend.Name,
 		IdempotencyKey: spec.IdempotencyKey,
 		LifecycleState: "created",
-	})
+	}, false)
 }
 
 func (r *RunBackendIndexRepo) BindPlanNode(ctx context.Context, planID, nodeID string, spec agentos.RunSpec, status agentos.RunStatus) error {
@@ -56,7 +56,7 @@ func (r *RunBackendIndexRepo) BindPlanNode(ctx context.Context, planID, nodeID s
 		BackendName:    spec.Backend.Name,
 		IdempotencyKey: spec.IdempotencyKey,
 		LifecycleState: lifecycle,
-	})
+	}, true)
 }
 
 func (r *RunBackendIndexRepo) Resolve(ctx context.Context, runID string) (agentos.BackendRef, error) {
@@ -76,20 +76,7 @@ func (r *RunBackendIndexRepo) Resolve(ctx context.Context, runID string) (agento
 
 func (r *RunBackendIndexRepo) Get(ctx context.Context, runID string) (entity.RunBackendIndexRecord, bool, error) {
 	sql, args, err := r.Builder.
-		Select(
-			"run_id",
-			"plan_id",
-			"node_id",
-			"thread_id",
-			"account_id",
-			"project_id",
-			"backend_kind",
-			"backend_name",
-			"idempotency_key",
-			"lifecycle_state",
-			"created_at",
-			"updated_at",
-		).
+		Select(runBackendIndexColumns()...).
 		From("run_backend_index").
 		Where(sq.Eq{"run_id": runID}).
 		ToSql()
@@ -97,41 +84,56 @@ func (r *RunBackendIndexRepo) Get(ctx context.Context, runID string) (entity.Run
 		return entity.RunBackendIndexRecord{}, false, fmt.Errorf("RunBackendIndexRepo - Get - builder: %w", err)
 	}
 
-	var record entity.RunBackendIndexRecord
-	err = r.Pool.QueryRow(ctx, sql, args...).Scan(
-		&record.RunID,
-		&record.PlanID,
-		&record.NodeID,
-		&record.ThreadID,
-		&record.AccountID,
-		&record.ProjectID,
-		&record.BackendKind,
-		&record.BackendName,
-		&record.IdempotencyKey,
-		&record.LifecycleState,
-		&record.CreatedAt,
-		&record.UpdatedAt,
-	)
+	record, exists, err := scanRunBackendIndexRecord(r.Pool.QueryRow(ctx, sql, args...))
 	if err != nil {
-		if errors.Is(err, pgx.ErrNoRows) {
-			return entity.RunBackendIndexRecord{}, false, nil
-		}
-
 		return entity.RunBackendIndexRecord{}, false, fmt.Errorf("RunBackendIndexRepo - Get - query: %w", err)
 	}
 
-	return record, true, nil
+	return record, exists, nil
 }
 
-func (r *RunBackendIndexRepo) upsert(ctx context.Context, record entity.RunBackendIndexRecord) error {
+func (r *RunBackendIndexRepo) runByIdempotencyKey(ctx context.Context, idempotencyKey string) (entity.RunBackendIndexRecord, bool, error) {
+	if idempotencyKey == "" {
+		return entity.RunBackendIndexRecord{}, false, fmt.Errorf("%w: run backend idempotency key is required", agentos.ErrInvalidRunSpec)
+	}
+	sql, args, err := r.Builder.
+		Select(runBackendIndexColumns()...).
+		From("run_backend_index").
+		Where(sq.Eq{"idempotency_key": idempotencyKey}).
+		ToSql()
+	if err != nil {
+		return entity.RunBackendIndexRecord{}, false, fmt.Errorf("RunBackendIndexRepo - runByIdempotencyKey - builder: %w", err)
+	}
+
+	record, exists, err := scanRunBackendIndexRecord(r.Pool.QueryRow(ctx, sql, args...))
+	if err != nil {
+		return entity.RunBackendIndexRecord{}, false, fmt.Errorf("RunBackendIndexRepo - runByIdempotencyKey - query: %w", err)
+	}
+
+	return record, exists, nil
+}
+
+func (r *RunBackendIndexRepo) upsert(ctx context.Context, record entity.RunBackendIndexRecord, requireIdempotencyKey bool) error {
 	if record.RunID == "" {
 		return fmt.Errorf("%w: run id is required", agentos.ErrInvalidRunSpec)
 	}
 	if record.BackendKind == "" || record.BackendName == "" {
 		return fmt.Errorf("%w: kind and name are required", agentos.ErrInvalidBackendRef)
 	}
+	if requireIdempotencyKey && record.IdempotencyKey == "" {
+		return fmt.Errorf("%w: run backend idempotency key is required", agentos.ErrInvalidRunSpec)
+	}
 	if record.LifecycleState == "" {
 		record.LifecycleState = "created"
+	}
+	if record.IdempotencyKey != "" {
+		existing, exists, err := r.runByIdempotencyKey(ctx, record.IdempotencyKey)
+		if err != nil {
+			return err
+		}
+		if exists {
+			return validateRunBackendIndexIdempotency(existing, record)
+		}
 	}
 
 	sql, args, err := r.Builder.
@@ -177,7 +179,82 @@ ON CONFLICT (run_id) DO UPDATE SET
 		return fmt.Errorf("RunBackendIndexRepo - upsert - builder: %w", err)
 	}
 	if _, err := r.Pool.Exec(ctx, sql, args...); err != nil {
+		if isPostgresUniqueViolation(err) && record.IdempotencyKey != "" {
+			existing, exists, lookupErr := r.runByIdempotencyKey(ctx, record.IdempotencyKey)
+			if lookupErr != nil {
+				return lookupErr
+			}
+			if exists {
+				return validateRunBackendIndexIdempotency(existing, record)
+			}
+		}
+
 		return fmt.Errorf("RunBackendIndexRepo - upsert - exec: %w", err)
+	}
+
+	return nil
+}
+
+func runBackendIndexColumns() []string {
+	return []string{
+		"run_id",
+		"plan_id",
+		"node_id",
+		"thread_id",
+		"account_id",
+		"project_id",
+		"backend_kind",
+		"backend_name",
+		"idempotency_key",
+		"lifecycle_state",
+		"created_at",
+		"updated_at",
+	}
+}
+
+type runBackendIndexScanner interface {
+	Scan(dest ...any) error
+}
+
+func scanRunBackendIndexRecord(scanner runBackendIndexScanner) (entity.RunBackendIndexRecord, bool, error) {
+	var record entity.RunBackendIndexRecord
+	err := scanner.Scan(
+		&record.RunID,
+		&record.PlanID,
+		&record.NodeID,
+		&record.ThreadID,
+		&record.AccountID,
+		&record.ProjectID,
+		&record.BackendKind,
+		&record.BackendName,
+		&record.IdempotencyKey,
+		&record.LifecycleState,
+		&record.CreatedAt,
+		&record.UpdatedAt,
+	)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return entity.RunBackendIndexRecord{}, false, nil
+		}
+
+		return entity.RunBackendIndexRecord{}, false, err
+	}
+
+	return record, true, nil
+}
+
+func validateRunBackendIndexIdempotency(existing entity.RunBackendIndexRecord, requested entity.RunBackendIndexRecord) error {
+	if existing.RunID != requested.RunID {
+		return fmt.Errorf("%w: run backend idempotency key belongs to run %q", agentos.ErrInvalidRunSpec, existing.RunID)
+	}
+	if existing.PlanID != requested.PlanID || existing.NodeID != requested.NodeID {
+		return fmt.Errorf("%w: run %q idempotency key was reused for a different plan node", agentos.ErrInvalidRunPlan, existing.RunID)
+	}
+	if existing.ThreadID != requested.ThreadID || existing.AccountID != requested.AccountID || existing.ProjectID != requested.ProjectID {
+		return fmt.Errorf("%w: run %q idempotency key was reused for a different scope", agentos.ErrInvalidRunSpec, existing.RunID)
+	}
+	if existing.BackendKind != requested.BackendKind || existing.BackendName != requested.BackendName {
+		return fmt.Errorf("%w: run %q idempotency key was reused for a different backend", agentos.ErrInvalidBackendRef, existing.RunID)
 	}
 
 	return nil
