@@ -165,6 +165,9 @@ RETURNING `+strings.Join(artifactColumns(), ", "),
 }
 
 func (r *AgentOSArtifactRepo) Get(ctx context.Context, scope agentos.PlanArtifactScope) (agentos.ArtifactRef, any, error) {
+	if err := agentosplan.ValidatePlanArtifactScope(scope); err != nil {
+		return agentos.ArtifactRef{}, nil, err
+	}
 	if scope.ArtifactID == "" {
 		return agentos.ArtifactRef{}, nil, fmt.Errorf("%w: artifact id is required", agentos.ErrInvalidArtifact)
 	}
@@ -192,8 +195,8 @@ func (r *AgentOSArtifactRepo) Get(ctx context.Context, scope agentos.PlanArtifac
 }
 
 func (r *AgentOSArtifactRepo) List(ctx context.Context, scope agentos.PlanArtifactScope) ([]agentos.ArtifactRef, error) {
-	if scope.PlanID == "" {
-		return nil, fmt.Errorf("%w: plan id is required", agentos.ErrInvalidArtifact)
+	if err := agentosplan.ValidatePlanArtifactScope(scope); err != nil {
+		return nil, err
 	}
 	builder := r.Builder.
 		Select(artifactColumns()...).
@@ -233,12 +236,10 @@ func (r *AgentOSArtifactRepo) artifactByIdempotencyKey(ctx context.Context, key 
 }
 
 func artifactScopeWhere(scope agentos.PlanArtifactScope) sq.Eq {
-	where := sq.Eq{"plan_id": scope.PlanID}
-	if scope.AccountID != "" {
-		where["account_id"] = scope.AccountID
-	}
-	if scope.ProjectID != "" {
-		where["project_id"] = scope.ProjectID
+	where := sq.Eq{
+		"plan_id":    scope.PlanID,
+		"account_id": scope.AccountID,
+		"project_id": scope.ProjectID,
 	}
 	if scope.ArtifactID != "" {
 		where["artifact_id"] = scope.ArtifactID

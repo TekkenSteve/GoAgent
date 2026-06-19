@@ -325,10 +325,10 @@ func startPlanNode(activityCtx workflow.Context, workflowCtx workflow.Context, s
 	}
 	var resolved resolvePlanNodeInputOutput
 	if err := workflow.ExecuteActivity(activityCtx, ResolvePlanNodeInputActivityName, resolvePlanNodeInputInput{
-		PlanInputs: spec.Inputs,
-		Status:     state.Status,
-		Node:       attemptNode,
-		Edges:      incomingEdges,
+		Spec:   *spec,
+		Status: state.Status,
+		Node:   attemptNode,
+		Edges:  incomingEdges,
 	}).Get(activityCtx, &resolved); err != nil {
 		return applyNodeAttemptFailure(activityCtx, workflowCtx, *spec, state, node, attemptNode.Run.RunID, fmt.Sprintf("resolve input for attempt %d failed: %s", attempt, err))
 	}

@@ -117,6 +117,8 @@ func TestPlanWorkflowRunsThroughMixedBackendAdapters(t *testing.T) {
 
 	spec := agentos.RunPlanSpec{
 		PlanID:         planID,
+		AccountID:      "acct-" + planID,
+		ProjectID:      "proj-" + planID,
 		IdempotencyKey: "plan-start-" + planID,
 		Nodes: []agentos.PlanNodeSpec{
 			{NodeID: "native", Capability: "run", Run: agentos.RunSpec{RunID: "run-native", Backend: nativeRef}},

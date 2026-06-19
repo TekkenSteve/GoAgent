@@ -55,8 +55,13 @@ func TestPlanActivitiesResolvePlanNodeInputMapsInput(t *testing.T) {
 	ref := agentos.BackendRef{Kind: agentos.BackendKindNative, Name: agentos.BackendNameGoAgentNative}
 
 	resolved, err := activities.ResolvePlanNodeInputActivity(context.Background(), resolvePlanNodeInputInput{
-		PlanInputs: map[string]any{
-			"task": map[string]any{"topic": "artifact routing"},
+		Spec: agentos.RunPlanSpec{
+			PlanID:    "plan-1",
+			AccountID: "acct-1",
+			ProjectID: "proj-1",
+			Inputs: map[string]any{
+				"task": map[string]any{"topic": "artifact routing"},
+			},
 		},
 		Node: agentos.PlanNodeSpec{
 			NodeID: "node-1",
@@ -102,6 +107,11 @@ func TestPlanActivitiesResolvePlanNodeInputDereferencesArtifactPayload(t *testin
 	}
 
 	resolved, err := activities.ResolvePlanNodeInputActivity(ctx, resolvePlanNodeInputInput{
+		Spec: agentos.RunPlanSpec{
+			PlanID:    "plan-1",
+			AccountID: "acct-1",
+			ProjectID: "proj-1",
+		},
 		Status: agentos.RunPlanStatus{
 			PlanID:    "plan-1",
 			Artifacts: []agentos.ArtifactRef{ref},
@@ -198,6 +208,8 @@ func TestPlanActivitiesPublishArtifactsRetainsStoredPayload(t *testing.T) {
 	}
 	_, payload, err := activities.ArtifactStore.Get(ctx, agentos.PlanArtifactScope{
 		PlanID:     "plan-1",
+		AccountID:  "acct-1",
+		ProjectID:  "proj-1",
 		ArtifactID: ref.ArtifactID,
 	})
 	if err != nil {
@@ -360,7 +372,9 @@ func TestPlanActivitiesEvaluatePlanExpansionValidatesDelta(t *testing.T) {
 
 	output, err := activities.EvaluatePlanExpansionActivity(context.Background(), evaluatePlanExpansionInput{
 		Spec: agentos.RunPlanSpec{
-			PlanID: "plan-expand",
+			PlanID:    "plan-expand",
+			AccountID: "acct-expand",
+			ProjectID: "proj-expand",
 			Policy: agentos.PlanPolicy{
 				MaxNodes: 2,
 			},

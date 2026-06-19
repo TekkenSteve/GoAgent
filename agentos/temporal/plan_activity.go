@@ -175,10 +175,10 @@ func (a *PlanActivities) capabilitiesByNode(ctx context.Context, plan agentospla
 }
 
 type resolvePlanNodeInputInput struct {
-	PlanInputs map[string]any
-	Status     agentos.RunPlanStatus
-	Node       agentos.PlanNodeSpec
-	Edges      []agentos.PlanEdgeSpec
+	Spec   agentos.RunPlanSpec
+	Status agentos.RunPlanStatus
+	Node   agentos.PlanNodeSpec
+	Edges  []agentos.PlanEdgeSpec
 }
 
 type resolvePlanNodeInputOutput struct {
@@ -188,7 +188,7 @@ type resolvePlanNodeInputOutput struct {
 
 // ResolvePlanNodeInputActivity resolves node input mapping before a child run starts.
 func (a *PlanActivities) ResolvePlanNodeInputActivity(ctx context.Context, input resolvePlanNodeInputInput) (resolvePlanNodeInputOutput, error) {
-	resolvedInput, err := agentosplan.ResolveRunInput(ctx, a.ArtifactStore, a.Expressions, input.PlanInputs, input.Status, input.Node, input.Edges)
+	resolvedInput, err := agentosplan.ResolveRunInput(ctx, a.ArtifactStore, a.Expressions, input.Spec, input.Status, input.Node, input.Edges)
 	if err != nil {
 		return resolvePlanNodeInputOutput{}, err
 	}

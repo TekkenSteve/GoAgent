@@ -90,6 +90,9 @@ func (s *MemoryArtifactStore) Put(_ context.Context, artifact agentos.ArtifactRe
 
 // Get retrieves one artifact inside a plan scope.
 func (s *MemoryArtifactStore) Get(_ context.Context, scope agentos.PlanArtifactScope) (agentos.ArtifactRef, any, error) {
+	if err := ValidatePlanArtifactScope(scope); err != nil {
+		return agentos.ArtifactRef{}, nil, err
+	}
 	if scope.ArtifactID == "" {
 		return agentos.ArtifactRef{}, nil, fmt.Errorf("%w: artifact id is required", agentos.ErrInvalidArtifact)
 	}
@@ -105,8 +108,8 @@ func (s *MemoryArtifactStore) Get(_ context.Context, scope agentos.PlanArtifactS
 
 // List returns artifacts associated with a plan scope.
 func (s *MemoryArtifactStore) List(_ context.Context, scope agentos.PlanArtifactScope) ([]agentos.ArtifactRef, error) {
-	if scope.PlanID == "" {
-		return nil, fmt.Errorf("%w: plan id is required", agentos.ErrInvalidArtifact)
+	if err := ValidatePlanArtifactScope(scope); err != nil {
+		return nil, err
 	}
 	s.mu.RLock()
 	defer s.mu.RUnlock()

@@ -37,7 +37,9 @@ type CapabilityRegistry interface {
 	RegisterCapability(ctx context.Context, capability agentos.Capability, idempotencyKey string) (agentos.Capability, bool, error)
 }
 
-// ArtifactStore stores artifacts outside workflow history.
+// ArtifactStore stores artifacts outside workflow history. Reads must carry the
+// full account/project plan scope because artifact IDs are not a tenant
+// boundary.
 type ArtifactStore interface {
 	Put(ctx context.Context, artifact agentos.ArtifactRef, payload any, idempotencyKey string) (agentos.ArtifactRef, error)
 	Get(ctx context.Context, scope agentos.PlanArtifactScope) (agentos.ArtifactRef, any, error)

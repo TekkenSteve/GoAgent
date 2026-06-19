@@ -60,6 +60,8 @@ func TestMemoryArtifactStorePutIsIdempotent(t *testing.T) {
 
 	_, payload, err := store.Get(context.Background(), agentos.PlanArtifactScope{
 		PlanID:     "plan-1",
+		AccountID:  "acct-1",
+		ProjectID:  "proj-1",
 		ArtifactID: first.ArtifactID,
 	})
 	if err != nil {
@@ -127,6 +129,8 @@ func TestMemoryArtifactStoreIdempotentRefPublishKeepsPayload(t *testing.T) {
 
 	_, payload, err := store.Get(ctx, agentos.PlanArtifactScope{
 		PlanID:     first.PlanID,
+		AccountID:  "acct-1",
+		ProjectID:  "proj-1",
 		ArtifactID: first.ArtifactID,
 	})
 	if err != nil {
@@ -154,5 +158,36 @@ func TestMemoryArtifactStoreRejectsArtifactIDReuseWithDifferentKey(t *testing.T)
 	_, err = store.Put(ctx, first, nil, "plan-1:other-key")
 	if !errors.Is(err, agentos.ErrInvalidArtifact) {
 		t.Fatalf("artifact id reuse error = %v, want ErrInvalidArtifact", err)
+	}
+}
+
+func TestMemoryArtifactStoreRequiresScopedReads(t *testing.T) {
+	ctx := context.Background()
+	store := NewMemoryArtifactStore()
+	ref, err := store.Put(ctx, agentos.ArtifactRef{
+		ArtifactID: "artifact-1",
+		PlanID:     "plan-1",
+		Name:       "summary",
+		Kind:       agentos.ArtifactKindObject,
+	}, map[string]any{"value": "first"}, "plan-1:key")
+	if err != nil {
+		t.Fatalf("Put: %v", err)
+	}
+
+	for _, scope := range []agentos.PlanArtifactScope{
+		{PlanID: "plan-1", ArtifactID: ref.ArtifactID},
+		{PlanID: "plan-1", AccountID: "acct-1", ArtifactID: ref.ArtifactID},
+		{PlanID: "plan-1", ProjectID: "proj-1", ArtifactID: ref.ArtifactID},
+	} {
+		if _, _, err := store.Get(ctx, scope); !errors.Is(err, agentos.ErrInvalidPlanScope) {
+			t.Fatalf("Get scope %#v error = %v, want ErrInvalidPlanScope", scope, err)
+		}
+		if _, err := store.List(ctx, agentos.PlanArtifactScope{
+			PlanID:    scope.PlanID,
+			AccountID: scope.AccountID,
+			ProjectID: scope.ProjectID,
+		}); !errors.Is(err, agentos.ErrInvalidPlanScope) {
+			t.Fatalf("List scope %#v error = %v, want ErrInvalidPlanScope", scope, err)
+		}
 	}
 }

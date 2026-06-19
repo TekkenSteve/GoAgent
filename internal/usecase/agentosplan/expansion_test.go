@@ -40,7 +40,7 @@ func TestArtifactPlanDeltaProviderDecodesPlanDeltaArtifact(t *testing.T) {
 	}
 
 	delta, ok, err := NewArtifactPlanDeltaProvider(store).NextPlanDelta(context.Background(), PlanDeltaInput{
-		Spec:      agentos.RunPlanSpec{PlanID: "plan-1"},
+		Spec:      agentos.RunPlanSpec{PlanID: "plan-1", AccountID: "acct-1", ProjectID: "proj-1"},
 		Artifacts: []agentos.ArtifactRef{ref},
 	})
 	if err != nil {
@@ -113,6 +113,11 @@ func TestArtifactPlanDeltaProviderFailsWhenPayloadMissing(t *testing.T) {
 	}
 
 	_, _, err = NewArtifactPlanDeltaProvider(store).NextPlanDelta(context.Background(), PlanDeltaInput{
+		Spec: agentos.RunPlanSpec{
+			PlanID:    "plan-1",
+			AccountID: "acct-1",
+			ProjectID: "proj-1",
+		},
 		Artifacts: []agentos.ArtifactRef{ref},
 	})
 	if !errors.Is(err, agentos.ErrArtifactNotFound) {

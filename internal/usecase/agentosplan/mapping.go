@@ -12,7 +12,7 @@ import (
 
 // ResolveRunInput applies plan/node input mappings and dereferences artifact refs
 // before a backend-owned child run starts.
-func ResolveRunInput(ctx context.Context, store ArtifactStore, expressions ValueExpressionCompiler, planInputs map[string]any, status agentos.RunPlanStatus, node agentos.PlanNodeSpec, edges []agentos.PlanEdgeSpec) (map[string]any, error) {
+func ResolveRunInput(ctx context.Context, store ArtifactStore, expressions ValueExpressionCompiler, spec agentos.RunPlanSpec, status agentos.RunPlanStatus, node agentos.PlanNodeSpec, edges []agentos.PlanEdgeSpec) (map[string]any, error) {
 	resolved := cloneMap(node.Run.Input)
 	mappings := make([]agentos.InputMapping, 0, len(node.Inputs)+len(edges))
 	mappings = append(mappings, node.Inputs...)
@@ -28,7 +28,7 @@ func ResolveRunInput(ctx context.Context, store ArtifactStore, expressions Value
 		return nil, fmt.Errorf("%w: encode node input: %s", agentos.ErrInvalidRunPlan, err)
 	}
 	for _, mapping := range mappings {
-		value, err := resolveMappingValue(ctx, store, expressions, planInputs, status, node, mapping)
+		value, err := resolveMappingValue(ctx, store, expressions, spec, status, node, mapping)
 		if err != nil {
 			return nil, err
 		}
@@ -49,7 +49,7 @@ func ResolveRunInput(ctx context.Context, store ArtifactStore, expressions Value
 	return output, nil
 }
 
-func resolveMappingValue(ctx context.Context, store ArtifactStore, expressions ValueExpressionCompiler, planInputs map[string]any, status agentos.RunPlanStatus, node agentos.PlanNodeSpec, mapping agentos.InputMapping) (any, error) {
+func resolveMappingValue(ctx context.Context, store ArtifactStore, expressions ValueExpressionCompiler, spec agentos.RunPlanSpec, status agentos.RunPlanStatus, node agentos.PlanNodeSpec, mapping agentos.InputMapping) (any, error) {
 	if mapping.Expression != "" {
 		if expressions == nil {
 			return nil, fmt.Errorf("%w: expression compiler is required for mapping %q", agentos.ErrInvalidExpression, mapping.Target)
@@ -59,7 +59,7 @@ func resolveMappingValue(ctx context.Context, store ArtifactStore, expressions V
 			return nil, err
 		}
 
-		return compiled.EvaluateValue(ctx, mappingVariables(planInputs, status, node))
+		return compiled.EvaluateValue(ctx, mappingVariables(spec, status, node))
 	}
 	if mapping.SourceArtifact != "" {
 		if store == nil {
@@ -74,7 +74,9 @@ func resolveMappingValue(ctx context.Context, store ArtifactStore, expressions V
 			return nil, nil
 		}
 		_, payload, err := store.Get(ctx, agentos.PlanArtifactScope{
-			PlanID:     status.PlanID,
+			PlanID:     spec.PlanID,
+			AccountID:  spec.AccountID,
+			ProjectID:  spec.ProjectID,
 			ArtifactID: ref.ArtifactID,
 		})
 		if err != nil {
@@ -87,18 +89,14 @@ func resolveMappingValue(ctx context.Context, store ArtifactStore, expressions V
 		return selectSourcePath(payload, mapping.SourcePath, mapping.Required)
 	}
 	if mapping.SourcePath != "" {
-		return selectSourcePath(planInputs, mapping.SourcePath, mapping.Required)
+		return selectSourcePath(spec.Inputs, mapping.SourcePath, mapping.Required)
 	}
 
 	return nil, nil
 }
 
-func mappingVariables(planInputs map[string]any, status agentos.RunPlanStatus, node agentos.PlanNodeSpec) map[string]any {
-	vars := Variables(agentos.RunPlanSpec{
-		PlanID:   status.PlanID,
-		Inputs:   planInputs,
-		Metadata: status.Metadata,
-	}, status)
+func mappingVariables(spec agentos.RunPlanSpec, status agentos.RunPlanStatus, node agentos.PlanNodeSpec) map[string]any {
+	vars := Variables(spec, status)
 	vars["node"] = node
 
 	return vars

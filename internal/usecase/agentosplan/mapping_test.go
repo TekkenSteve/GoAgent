@@ -38,6 +38,17 @@ func TestResolveRunInputMapsPlanInputsArtifactsAndExpressions(t *testing.T) {
 			ref,
 		},
 	}
+	spec := agentos.RunPlanSpec{
+		PlanID:    "plan-1",
+		AccountID: "acct-1",
+		ProjectID: "proj-1",
+		Inputs: map[string]any{
+			"task": map[string]any{
+				"topic": "orchestration",
+			},
+			"priority": 2,
+		},
+	}
 	node := agentos.PlanNodeSpec{
 		NodeID: "verify",
 		Run: agentos.RunSpec{
@@ -67,12 +78,7 @@ func TestResolveRunInputMapsPlanInputsArtifactsAndExpressions(t *testing.T) {
 		},
 	}
 
-	resolved, err := ResolveRunInput(ctx, store, compiler, map[string]any{
-		"task": map[string]any{
-			"topic": "orchestration",
-		},
-		"priority": 2,
-	}, status, node, edges)
+	resolved, err := ResolveRunInput(ctx, store, compiler, spec, status, node, edges)
 	if err != nil {
 		t.Fatalf("ResolveRunInput: %v", err)
 	}
@@ -96,7 +102,7 @@ func TestResolveRunInputFailsWhenRequiredArtifactIsMissing(t *testing.T) {
 		context.Background(),
 		NewMemoryArtifactStore(),
 		nil,
-		nil,
+		agentos.RunPlanSpec{PlanID: "plan-1", AccountID: "acct-1", ProjectID: "proj-1"},
 		agentos.RunPlanStatus{PlanID: "plan-1"},
 		agentos.PlanNodeSpec{
 			NodeID: "verify",
@@ -117,7 +123,7 @@ func TestResolveRunInputSkipsOptionalMissingArtifact(t *testing.T) {
 		context.Background(),
 		NewMemoryArtifactStore(),
 		nil,
-		nil,
+		agentos.RunPlanSpec{PlanID: "plan-1", AccountID: "acct-1", ProjectID: "proj-1"},
 		agentos.RunPlanStatus{PlanID: "plan-1"},
 		agentos.PlanNodeSpec{
 			NodeID: "verify",
@@ -163,7 +169,7 @@ func TestResolveRunInputFailsWhenArtifactPayloadIsMissing(t *testing.T) {
 		ctx,
 		store,
 		nil,
-		nil,
+		agentos.RunPlanSpec{PlanID: "plan-1", AccountID: "acct-1", ProjectID: "proj-1"},
 		agentos.RunPlanStatus{
 			PlanID:    "plan-1",
 			Artifacts: []agentos.ArtifactRef{ref},
