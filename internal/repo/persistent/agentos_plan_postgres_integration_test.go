@@ -437,6 +437,78 @@ func TestAgentOSPlanPostgresAppendPlanEventRequiresIdempotencyKey(t *testing.T) 
 	}
 }
 
+func TestAgentOSPlanPostgresPlanRefsAndMetricCheckpoints(t *testing.T) {
+	ctx, pg, suffix := newAgentOSPlanPostgresIntegrationDB(t)
+	planRepo := NewAgentOSPlanRepo(pg)
+
+	spec := postgresIntegrationPlanSpec("plan-metrics-"+suffix, "plan-metrics-start-"+suffix)
+	status := agentosplan.NewState(spec, time.Date(2026, 6, 19, 12, 0, 0, 0, time.UTC)).Status
+	status.UpdatedAt = time.Date(2026, 6, 19, 12, 1, 0, 0, time.UTC)
+	if _, _, err := planRepo.CreatePlan(ctx, spec, status); err != nil {
+		t.Fatalf("CreatePlan: %v", err)
+	}
+
+	refs, err := planRepo.ListPlanRefs(ctx, agentosplan.PlanRefScope{
+		AccountID:       spec.AccountID,
+		ProjectID:       spec.ProjectID,
+		LifecycleStates: []string{agentos.PlanLifecyclePending},
+		Limit:           10,
+	})
+	if err != nil {
+		t.Fatalf("ListPlanRefs: %v", err)
+	}
+	if len(refs) != 1 || refs[0].PlanID != spec.PlanID || refs[0].AccountID != spec.AccountID || refs[0].ProjectID != spec.ProjectID {
+		t.Fatalf("ListPlanRefs = %#v, want created plan ref", refs)
+	}
+	if _, err := planRepo.ListPlanRefs(ctx, agentosplan.PlanRefScope{LifecycleStates: []string{""}}); !errors.Is(err, agentos.ErrInvalidPlanScope) {
+		t.Fatalf("ListPlanRefs empty lifecycle error = %v, want ErrInvalidPlanScope", err)
+	}
+
+	ref := agentos.PlanRef{PlanID: spec.PlanID, AccountID: spec.AccountID, ProjectID: spec.ProjectID}
+	checkpoint := agentosplan.PlanMetricCheckpoint{
+		ExporterID: "exporter-" + suffix,
+		PlanID:     spec.PlanID,
+		AccountID:  spec.AccountID,
+		ProjectID:  spec.ProjectID,
+		Sequence:   3,
+		Projection: agentosplan.PlanMetricProjectionState{
+			PlanStartedAt: time.Date(2026, 6, 19, 12, 0, 0, 0, time.UTC),
+			NodeStartedAt: []agentosplan.PlanMetricNodeStartState{
+				{
+					NodeID:    "node-1",
+					RunID:     spec.Nodes[0].Run.RunID,
+					StartedAt: time.Date(2026, 6, 19, 12, 0, 10, 0, time.UTC),
+				},
+			},
+		},
+	}
+	if err := planRepo.SavePlanMetricCheckpoint(ctx, checkpoint); err != nil {
+		t.Fatalf("SavePlanMetricCheckpoint: %v", err)
+	}
+	loaded, exists, err := planRepo.GetPlanMetricCheckpoint(ctx, checkpoint.ExporterID, ref)
+	if err != nil {
+		t.Fatalf("GetPlanMetricCheckpoint: %v", err)
+	}
+	if !exists || loaded.Sequence != checkpoint.Sequence || !loaded.Projection.PlanStartedAt.Equal(checkpoint.Projection.PlanStartedAt) || len(loaded.Projection.NodeStartedAt) != 1 {
+		t.Fatalf("loaded checkpoint = %#v exists=%v, want %#v", loaded, exists, checkpoint)
+	}
+
+	advanced := checkpoint
+	advanced.Sequence = 5
+	advanced.Projection.NodeStartedAt = nil
+	if err := planRepo.SavePlanMetricCheckpoint(ctx, advanced); err != nil {
+		t.Fatalf("SavePlanMetricCheckpoint advanced: %v", err)
+	}
+	if err := planRepo.SavePlanMetricCheckpoint(ctx, checkpoint); !errors.Is(err, agentos.ErrInvalidRunPlan) {
+		t.Fatalf("SavePlanMetricCheckpoint rewind error = %v, want ErrInvalidRunPlan", err)
+	}
+	tenantMismatch := advanced
+	tenantMismatch.AccountID = "acct-other"
+	if err := planRepo.SavePlanMetricCheckpoint(ctx, tenantMismatch); !errors.Is(err, agentos.ErrPlanRouteNotFound) {
+		t.Fatalf("SavePlanMetricCheckpoint tenant mismatch error = %v, want ErrPlanRouteNotFound", err)
+	}
+}
+
 func TestAgentOSArtifactPostgresRejectsDifferentIdempotencyReplay(t *testing.T) {
 	ctx, pg, suffix := newAgentOSPlanPostgresIntegrationDB(t)
 	blobStore, err := artifactblob.NewLocalBlobStore(t.TempDir())
@@ -577,6 +649,7 @@ func applyAgentOSPlanMigrations(t *testing.T, pg *postgres.Postgres) {
 		"20260619000003_require_control_plane_idempotency.up.sql",
 		"20260619000004_create_plan_commands.up.sql",
 		"20260619000005_scope_plan_control_plane_records.up.sql",
+		"20260619000006_create_plan_metric_checkpoints.up.sql",
 	} {
 		path := filepath.Join("..", "..", "..", "migrations", migration)
 		data, err := os.ReadFile(path)
