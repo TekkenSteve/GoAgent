@@ -6,6 +6,7 @@ import "time"
 type Signal struct {
 	Type           SignalType
 	IdempotencyKey string
+	ActorID        string
 	Payload        map[string]any
 	SentAt         time.Time
 }

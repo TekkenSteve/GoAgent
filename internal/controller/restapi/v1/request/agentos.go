@@ -27,6 +27,7 @@ type AgentOSStart struct {
 type AgentOSSignal struct {
 	Type           agentos.SignalType `json:"type" validate:"required"`
 	IdempotencyKey string             `json:"idempotency_key,omitempty"`
+	ActorID        string             `json:"actor_id,omitempty"`
 	Payload        map[string]any     `json:"payload,omitempty"`
 	SentAt         time.Time          `json:"sent_at,omitempty"`
 }

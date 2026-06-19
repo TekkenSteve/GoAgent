@@ -661,7 +661,8 @@ const docTemplate = `{
                 "file",
                 "patch",
                 "report",
-                "reference"
+                "reference",
+                "plan_delta"
             ],
             "x-enum-varnames": [
                 "ArtifactKindObject",
@@ -669,7 +670,8 @@ const docTemplate = `{
                 "ArtifactKindFile",
                 "ArtifactKindPatch",
                 "ArtifactKindReport",
-                "ArtifactKindReference"
+                "ArtifactKindReference",
+                "ArtifactKindPlanDelta"
             ]
         },
         "agentos.ArtifactRef": {
@@ -818,6 +820,7 @@ const docTemplate = `{
                 "capability.selected",
                 "plan.started",
                 "plan.blocked",
+                "plan.expanded",
                 "plan.approved",
                 "plan.rejected",
                 "plan.succeeded",
@@ -857,6 +860,7 @@ const docTemplate = `{
                 "EventCapabilitySelected",
                 "EventPlanStarted",
                 "EventPlanBlocked",
+                "EventPlanExpanded",
                 "EventPlanApproved",
                 "EventPlanRejected",
                 "EventPlanSucceeded",
@@ -1672,6 +1676,9 @@ const docTemplate = `{
                 "type"
             ],
             "properties": {
+                "actor_id": {
+                    "type": "string"
+                },
                 "idempotency_key": {
                     "type": "string"
                 },

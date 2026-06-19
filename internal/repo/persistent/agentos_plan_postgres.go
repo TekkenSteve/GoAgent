@@ -574,8 +574,15 @@ func (r *AgentOSPlanRepo) RecordAudit(ctx context.Context, record agentosplan.Au
 		return agentosplan.AuditRecord{}, false, fmt.Errorf("%w: audit idempotency key is required", agentos.ErrInvalidRunPlan)
 	}
 	existing, exists, err := r.GetAuditRecord(ctx, record.IdempotencyKey)
-	if err != nil || exists {
-		return existing, false, err
+	if err != nil {
+		return agentosplan.AuditRecord{}, false, err
+	}
+	if exists {
+		if err := agentosplan.ValidateAuditIdempotency(existing, record); err != nil {
+			return agentosplan.AuditRecord{}, false, err
+		}
+
+		return existing, false, nil
 	}
 	if record.AuditID == "" {
 		record.AuditID = auditIDFromIdempotencyKey(record.IdempotencyKey)
@@ -620,6 +627,10 @@ INSERT INTO audit_logs (
 				return agentosplan.AuditRecord{}, false, lookupErr
 			}
 			if exists {
+				if err := agentosplan.ValidateAuditIdempotency(existing, record); err != nil {
+					return agentosplan.AuditRecord{}, false, err
+				}
+
 				return existing, false, nil
 			}
 		}

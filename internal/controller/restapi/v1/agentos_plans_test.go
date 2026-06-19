@@ -51,6 +51,7 @@ func TestAgentOSPlanRoutesUsePlanRuntime(t *testing.T) {
 	signalBody := `{
 		"type": "plan.node.retry",
 		"idempotency_key": "retry-1",
+		"actor_id": "operator-1",
 		"payload": {"node_id": "research"}
 	}`
 	resp = doAgentOSRouteRequest(t, app, http.MethodPost, "/v1/agentos/plans/plan-1/signals", signalBody)
@@ -59,6 +60,7 @@ func TestAgentOSPlanRoutesUsePlanRuntime(t *testing.T) {
 	}
 	if planRuntime.signalPlanID != "plan-1" ||
 		planRuntime.signal.Type != agentos.SignalPlanNodeRetry ||
+		planRuntime.signal.ActorID != "operator-1" ||
 		planRuntime.signal.Payload["node_id"] != "research" {
 		t.Fatalf("unexpected signal: plan=%q signal=%#v", planRuntime.signalPlanID, planRuntime.signal)
 	}

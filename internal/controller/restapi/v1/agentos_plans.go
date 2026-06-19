@@ -100,6 +100,7 @@ func (r *V1) signalAgentOSPlan(ctx *fiber.Ctx) error {
 	if err := r.planRuntime.SignalPlan(ctx.UserContext(), ctx.Params("plan_id"), agentos.Signal{
 		Type:           req.Type,
 		IdempotencyKey: req.IdempotencyKey,
+		ActorID:        req.ActorID,
 		Payload:        req.Payload,
 		SentAt:         req.SentAt,
 	}); err != nil {

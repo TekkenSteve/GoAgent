@@ -92,6 +92,7 @@ func (r *V1) signalAgentOSRun(ctx *fiber.Ctx) error {
 	err := r.agentOSRuntime.Signal(ctx.UserContext(), ctx.Params("run_id"), agentos.Signal{
 		Type:           req.Type,
 		IdempotencyKey: req.IdempotencyKey,
+		ActorID:        req.ActorID,
 		Payload:        req.Payload,
 		SentAt:         req.SentAt,
 	})

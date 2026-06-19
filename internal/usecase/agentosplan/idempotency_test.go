@@ -36,3 +36,19 @@ func TestValidatePlanStartIdempotencyRejectsDifferentRequest(t *testing.T) {
 		t.Fatalf("error = %v, want ErrInvalidRunPlan", err)
 	}
 }
+
+func TestValidateAuditIdempotencyRejectsDifferentPayload(t *testing.T) {
+	existing := AuditRecord{
+		PlanID:         "plan-1",
+		Action:         AuditActionPlanSignal,
+		IdempotencyKey: "signal-key",
+		Payload:        map[string]any{"type": string(agentos.SignalPlanApprove)},
+	}
+	requested := existing
+	requested.Payload = map[string]any{"type": string(agentos.SignalPlanReject)}
+
+	err := ValidateAuditIdempotency(existing, requested)
+	if !errors.Is(err, agentos.ErrInvalidRunPlan) {
+		t.Fatalf("error = %v, want ErrInvalidRunPlan", err)
+	}
+}

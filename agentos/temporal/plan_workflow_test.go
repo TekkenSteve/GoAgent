@@ -383,6 +383,7 @@ func TestPlanWorkflowRetriesFailedNodeFromSignal(t *testing.T) {
 		env.SignalWorkflow(PlanSignalName, agentos.Signal{
 			Type:           agentos.SignalPlanNodeRetry,
 			IdempotencyKey: "retry-flaky",
+			ActorID:        "operator-1",
 			Payload: map[string]any{
 				agentosplan.SignalPayloadNodeID: "flaky",
 			},
@@ -426,6 +427,7 @@ func TestPlanWorkflowRejectSignalFailsRunningPlan(t *testing.T) {
 		env.SignalWorkflow(PlanSignalName, agentos.Signal{
 			Type:           agentos.SignalPlanReject,
 			IdempotencyKey: "reject-plan",
+			ActorID:        "operator-1",
 			Payload: map[string]any{
 				agentosplan.SignalPayloadReason: "operator rejected",
 			},
@@ -476,6 +478,7 @@ func TestPlanWorkflowApproveSignalUnblocksPausedPlan(t *testing.T) {
 		env.SignalWorkflow(PlanSignalName, agentos.Signal{
 			Type:           agentos.SignalPlanApprove,
 			IdempotencyKey: "approve-plan",
+			ActorID:        "operator-1",
 		})
 	}, 2*time.Second)
 

@@ -19,6 +19,9 @@ func ValidatePlanSignal(signal agentos.Signal) error {
 	if signal.IdempotencyKey == "" {
 		return fmt.Errorf("%w: signal idempotency key is required", agentos.ErrInvalidSignal)
 	}
+	if signal.ActorID == "" {
+		return fmt.Errorf("%w: signal actor id is required", agentos.ErrInvalidSignal)
+	}
 	switch signal.Type {
 	case agentos.SignalPlanNodeRetry:
 		if _, err := PlanSignalNodeID(signal); err != nil {

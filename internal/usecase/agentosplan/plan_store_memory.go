@@ -207,6 +207,9 @@ func (s *MemoryPlanStore) RecordAudit(_ context.Context, record AuditRecord) (Au
 	if record.PlanID == "" {
 		return AuditRecord{}, false, fmt.Errorf("%w: plan id is required", agentos.ErrInvalidRunPlan)
 	}
+	if record.Action == "" {
+		return AuditRecord{}, false, fmt.Errorf("%w: audit action is required", agentos.ErrInvalidRunPlan)
+	}
 	if record.IdempotencyKey == "" {
 		return AuditRecord{}, false, fmt.Errorf("%w: audit idempotency key is required", agentos.ErrInvalidRunPlan)
 	}
@@ -220,6 +223,10 @@ func (s *MemoryPlanStore) RecordAudit(_ context.Context, record AuditRecord) (Au
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if existing, ok := s.auditKeys[record.IdempotencyKey]; ok {
+		if err := ValidateAuditIdempotency(existing, record); err != nil {
+			return AuditRecord{}, false, err
+		}
+
 		return existing, false, nil
 	}
 	s.auditKeys[record.IdempotencyKey] = record

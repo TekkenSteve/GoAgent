@@ -655,7 +655,8 @@
                 "file",
                 "patch",
                 "report",
-                "reference"
+                "reference",
+                "plan_delta"
             ],
             "x-enum-varnames": [
                 "ArtifactKindObject",
@@ -663,7 +664,8 @@
                 "ArtifactKindFile",
                 "ArtifactKindPatch",
                 "ArtifactKindReport",
-                "ArtifactKindReference"
+                "ArtifactKindReference",
+                "ArtifactKindPlanDelta"
             ]
         },
         "agentos.ArtifactRef": {
@@ -812,6 +814,7 @@
                 "capability.selected",
                 "plan.started",
                 "plan.blocked",
+                "plan.expanded",
                 "plan.approved",
                 "plan.rejected",
                 "plan.succeeded",
@@ -851,6 +854,7 @@
                 "EventCapabilitySelected",
                 "EventPlanStarted",
                 "EventPlanBlocked",
+                "EventPlanExpanded",
                 "EventPlanApproved",
                 "EventPlanRejected",
                 "EventPlanSucceeded",
@@ -1666,6 +1670,9 @@
                 "type"
             ],
             "properties": {
+                "actor_id": {
+                    "type": "string"
+                },
                 "idempotency_key": {
                     "type": "string"
                 },

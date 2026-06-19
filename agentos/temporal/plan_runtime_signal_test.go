@@ -82,6 +82,7 @@ func TestPlanRuntimeSignalPlanDoesNotAuditFailedDelivery(t *testing.T) {
 	err := rt.SignalPlan(t.Context(), "plan-1", agentos.Signal{
 		Type:           agentos.SignalPlanApprove,
 		IdempotencyKey: "approve-1",
+		ActorID:        "operator-1",
 	})
 	if err == nil {
 		t.Fatal("SignalPlan succeeded, want delivery error")
@@ -96,21 +97,44 @@ func TestPlanRuntimeSignalPlanDoesNotAuditFailedDelivery(t *testing.T) {
 
 func TestPlanRuntimeSignalPlanSkipsDeliveryWhenAuditExists(t *testing.T) {
 	store := agentosplan.NewMemoryPlanStore()
-	if _, _, err := store.RecordAudit(t.Context(), agentosplan.AuditRecord{
-		PlanID:         "plan-1",
-		Action:         agentosplan.AuditActionPlanSignal,
+	signal := agentos.Signal{
+		Type:           agentos.SignalPlanApprove,
 		IdempotencyKey: "approve-1",
-	}); err != nil {
+		ActorID:        "operator-1",
+	}
+	if _, _, err := store.RecordAudit(t.Context(), planSignalAuditRecord("plan-1", signal)); err != nil {
 		t.Fatalf("RecordAudit: %v", err)
 	}
 	temporalClient := &fakePlanTemporalClient{signalErr: errors.New("should not signal")}
 	rt := &planRuntime{temporalClient: temporalClient, auditStore: store}
 
-	if err := rt.SignalPlan(t.Context(), "plan-1", agentos.Signal{
-		Type:           agentos.SignalPlanApprove,
-		IdempotencyKey: "approve-1",
-	}); err != nil {
+	if err := rt.SignalPlan(t.Context(), "plan-1", signal); err != nil {
 		t.Fatalf("SignalPlan: %v", err)
+	}
+	if temporalClient.signalCount != 0 {
+		t.Fatalf("signal count = %d, want 0", temporalClient.signalCount)
+	}
+}
+
+func TestPlanRuntimeSignalPlanRejectsAuditKeyReuseWithDifferentSignal(t *testing.T) {
+	store := agentosplan.NewMemoryPlanStore()
+	if _, _, err := store.RecordAudit(t.Context(), planSignalAuditRecord("plan-1", agentos.Signal{
+		Type:           agentos.SignalPlanApprove,
+		IdempotencyKey: "signal-1",
+		ActorID:        "operator-1",
+	})); err != nil {
+		t.Fatalf("RecordAudit: %v", err)
+	}
+	temporalClient := &fakePlanTemporalClient{signalErr: errors.New("should not signal")}
+	rt := &planRuntime{temporalClient: temporalClient, auditStore: store}
+
+	err := rt.SignalPlan(t.Context(), "plan-1", agentos.Signal{
+		Type:           agentos.SignalPlanReject,
+		IdempotencyKey: "signal-1",
+		ActorID:        "operator-1",
+	})
+	if !errors.Is(err, agentos.ErrInvalidRunPlan) {
+		t.Fatalf("SignalPlan error = %v, want ErrInvalidRunPlan", err)
 	}
 	if temporalClient.signalCount != 0 {
 		t.Fatalf("signal count = %d, want 0", temporalClient.signalCount)
@@ -139,6 +163,36 @@ func TestPlanRuntimeControlPlanAuditsAfterDelivery(t *testing.T) {
 	}
 	if record.ActorID != "operator-1" || record.Action != agentosplan.AuditActionPlanControl {
 		t.Fatalf("audit = %#v", record)
+	}
+}
+
+func TestPlanRuntimeControlPlanRejectsAuditKeyReuseWithDifferentControl(t *testing.T) {
+	store := agentosplan.NewMemoryPlanStore()
+	if _, _, err := store.RecordAudit(t.Context(), agentosplan.AuditRecord{
+		PlanID:         "plan-1",
+		ActorID:        "operator-1",
+		Action:         agentosplan.AuditActionPlanControl,
+		IdempotencyKey: "control-1",
+		Payload: map[string]any{
+			"operation": agentos.ControlCancel,
+			"metadata":  map[string]string(nil),
+		},
+	}); err != nil {
+		t.Fatalf("RecordAudit: %v", err)
+	}
+	temporalClient := &fakePlanTemporalClient{signalErr: errors.New("should not signal")}
+	rt := &planRuntime{temporalClient: temporalClient, auditStore: store}
+
+	err := rt.ControlPlan(t.Context(), "plan-1", agentos.ControlRequest{
+		Operation:      agentos.ControlPause,
+		IdempotencyKey: "control-1",
+		ActorID:        "operator-1",
+	})
+	if !errors.Is(err, agentos.ErrInvalidRunPlan) {
+		t.Fatalf("ControlPlan error = %v, want ErrInvalidRunPlan", err)
+	}
+	if temporalClient.signalCount != 0 {
+		t.Fatalf("signal count = %d, want 0", temporalClient.signalCount)
 	}
 }
 

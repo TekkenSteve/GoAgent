@@ -173,13 +173,8 @@ func (r *planRuntime) SignalPlan(ctx context.Context, planID string, signal agen
 	if err := agentosplan.ValidatePlanSignal(signal); err != nil {
 		return err
 	}
-	record := agentosplan.AuditRecord{
-		PlanID:         planID,
-		Action:         agentosplan.AuditActionPlanSignal,
-		IdempotencyKey: signal.IdempotencyKey,
-		Payload:        map[string]any{"type": signal.Type},
-	}
-	exists, err := r.planAuditRecorded(ctx, signal.IdempotencyKey)
+	record := planSignalAuditRecord(planID, signal)
+	exists, err := r.planAuditRecorded(ctx, record)
 	if err != nil {
 		return err
 	}
@@ -207,6 +202,9 @@ func (r *planRuntime) ControlPlan(ctx context.Context, planID string, control ag
 	if control.IdempotencyKey == "" {
 		return fmt.Errorf("%w: control idempotency key is required", agentos.ErrInvalidControlOperation)
 	}
+	if control.ActorID == "" {
+		return fmt.Errorf("%w: control actor id is required", agentos.ErrInvalidControlOperation)
+	}
 	record := agentosplan.AuditRecord{
 		PlanID:         planID,
 		ActorID:        control.ActorID,
@@ -217,7 +215,7 @@ func (r *planRuntime) ControlPlan(ctx context.Context, planID string, control ag
 			"metadata":  control.Metadata,
 		},
 	}
-	exists, err := r.planAuditRecorded(ctx, control.IdempotencyKey)
+	exists, err := r.planAuditRecorded(ctx, record)
 	if err != nil {
 		return err
 	}
@@ -285,17 +283,36 @@ func (r *planRuntime) recordPlanAudit(ctx context.Context, record agentosplan.Au
 	return created, err
 }
 
-func (r *planRuntime) planAuditRecorded(ctx context.Context, idempotencyKey string) (bool, error) {
+func (r *planRuntime) planAuditRecorded(ctx context.Context, record agentosplan.AuditRecord) (bool, error) {
 	if r.auditStore == nil {
 		return false, errors.New("agentos temporal plan runtime: audit store is not configured")
 	}
-	_, exists, err := r.auditStore.GetAuditRecord(ctx, idempotencyKey)
+	existing, exists, err := r.auditStore.GetAuditRecord(ctx, record.IdempotencyKey)
+	if err != nil || !exists {
+		return exists, err
+	}
+	if err := agentosplan.ValidateAuditIdempotency(existing, record); err != nil {
+		return false, err
+	}
 
-	return exists, err
+	return true, nil
 }
 
 func planWorkflowID(planID string) string {
 	return "agentos-plan-" + planID
+}
+
+func planSignalAuditRecord(planID string, signal agentos.Signal) agentosplan.AuditRecord {
+	return agentosplan.AuditRecord{
+		PlanID:         planID,
+		ActorID:        signal.ActorID,
+		Action:         agentosplan.AuditActionPlanSignal,
+		IdempotencyKey: signal.IdempotencyKey,
+		Payload: map[string]any{
+			"type":    signal.Type,
+			"payload": signal.Payload,
+		},
+	}
 }
 
 func newRuntimePostgres(cfg RuntimeConfig) (*postgres.Postgres, error) {

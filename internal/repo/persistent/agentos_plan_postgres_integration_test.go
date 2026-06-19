@@ -110,6 +110,7 @@ func TestAgentOSPlanPostgresDurablePersistence(t *testing.T) {
 		PlanID:         spec.PlanID,
 		Action:         agentosplan.AuditActionPlanControl,
 		IdempotencyKey: "audit-" + suffix,
+		Payload:        map[string]any{"operation": string(agentos.ControlCancel)},
 	})
 	if err != nil {
 		t.Fatalf("RecordAudit replay: %v", err)

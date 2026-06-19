@@ -99,6 +99,26 @@ func TestMemoryPlanStoreGetAuditRecord(t *testing.T) {
 	}
 }
 
+func TestMemoryPlanStoreRejectsAuditKeyReuseWithDifferentRequest(t *testing.T) {
+	store := NewMemoryPlanStore()
+	record := AuditRecord{
+		PlanID:         "plan-1",
+		Action:         AuditActionPlanSignal,
+		IdempotencyKey: "signal-1",
+		Payload:        map[string]any{"type": string(agentos.SignalPlanApprove)},
+	}
+	if _, _, err := store.RecordAudit(context.Background(), record); err != nil {
+		t.Fatalf("RecordAudit first: %v", err)
+	}
+
+	changed := record
+	changed.Payload = map[string]any{"type": string(agentos.SignalPlanReject)}
+	_, _, err := store.RecordAudit(context.Background(), changed)
+	if !errors.Is(err, agentos.ErrInvalidRunPlan) {
+		t.Fatalf("error = %v, want ErrInvalidRunPlan", err)
+	}
+}
+
 func testRunPlanSpec(planID, idempotencyKey string) agentos.RunPlanSpec {
 	ref := agentos.BackendRef{Kind: agentos.BackendKindNative, Name: agentos.BackendNameGoAgentNative}
 
