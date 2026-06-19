@@ -189,6 +189,43 @@ func TestPlanRuntimeSubscribePlanEnforcesTenantScope(t *testing.T) {
 	}
 }
 
+func TestPlanRuntimeSubscribePlanCatchesUpDurableEventsAfterLiveSubscribe(t *testing.T) {
+	store, ref := newPlanRuntimeTestStore(t)
+	if _, err := store.AppendPlanEvent(t.Context(), agentos.PlanEvent{
+		Event:  agentos.Event{EventType: agentos.EventPlanStarted},
+		PlanID: ref.PlanID,
+	}, "event-1"); err != nil {
+		t.Fatalf("AppendPlanEvent initial: %v", err)
+	}
+	live := &catchUpPlanEventSubscriber{
+		append: func(ctx context.Context, scope agentos.PlanStreamScope) error {
+			_, err := store.AppendPlanEvent(ctx, agentos.PlanEvent{
+				Event:  agentos.Event{EventType: agentos.EventPlanNodeStarted, RunID: "run-draft"},
+				PlanID: scope.PlanID,
+				NodeID: "draft",
+			}, "event-2")
+
+			return err
+		},
+	}
+	rt := &planRuntime{planIndex: store, planEvents: store, planLiveEvents: live}
+
+	sub, err := rt.SubscribePlan(t.Context(), agentos.PlanStreamScope{PlanID: ref.PlanID, AccountID: ref.AccountID, ProjectID: ref.ProjectID})
+	if err != nil {
+		t.Fatalf("SubscribePlan: %v", err)
+	}
+	defer sub.Close()
+
+	first := <-sub.Events()
+	second := <-sub.Events()
+	if first.EventType != agentos.EventPlanStarted || second.EventType != agentos.EventPlanNodeStarted {
+		t.Fatalf("events = %#v, %#v", first, second)
+	}
+	if live.scope.AfterSequence != 1 {
+		t.Fatalf("live after sequence = %d, want 1", live.scope.AfterSequence)
+	}
+}
+
 func TestPlanRuntimeListPlanEventsEnforcesTenantScopeAndFilters(t *testing.T) {
 	store, ref := newPlanRuntimeTestStore(t)
 	events := []agentos.PlanEvent{
@@ -671,3 +708,19 @@ func (c *fakePlanTemporalClient) SignalWorkflow(_ context.Context, workflowID st
 }
 
 func (c *fakePlanTemporalClient) Close() {}
+
+type catchUpPlanEventSubscriber struct {
+	scope  agentos.PlanStreamScope
+	append func(context.Context, agentos.PlanStreamScope) error
+}
+
+func (s *catchUpPlanEventSubscriber) SubscribePlanEvents(ctx context.Context, scope agentos.PlanStreamScope) (agentos.Subscription, error) {
+	s.scope = scope
+	if s.append != nil {
+		if err := s.append(ctx, scope); err != nil {
+			return nil, err
+		}
+	}
+
+	return &fakeAgentOSSubscription{events: make(chan agentos.Event)}, nil
+}

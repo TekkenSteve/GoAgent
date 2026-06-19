@@ -329,13 +329,25 @@ func (r *planRuntime) SubscribePlan(ctx context.Context, scope agentos.PlanStrea
 	}
 
 	liveScope := scope
-	liveScope.AfterSequence = lastPlanEventSequence(scope.AfterSequence, events)
+	replaySequence := lastPlanEventSequence(scope.AfterSequence, events)
+	liveScope.AfterSequence = replaySequence
 	live, err := r.planLiveEvents.SubscribePlanEvents(ctx, liveScope)
 	if err != nil {
 		return nil, err
 	}
 
-	return newPlanReplayThenLiveSubscription(events, live), nil
+	catchUpScope := scope
+	catchUpScope.AfterSequence = replaySequence
+	catchUpEvents, err := r.planEvents.ListPlanEvents(ctx, catchUpScope, 0)
+	if err != nil {
+		_ = live.Close()
+
+		return nil, err
+	}
+	replayEvents := append(append([]agentos.PlanEvent(nil), events...), catchUpEvents...)
+	liveAfterSequence := lastPlanEventSequence(replaySequence, catchUpEvents)
+
+	return newPlanReplayThenLiveSubscriptionAfter(replayEvents, live, liveAfterSequence), nil
 }
 
 func (r *planRuntime) ListPlanEvents(ctx context.Context, scope agentos.PlanEventScope) ([]agentos.PlanEvent, error) {

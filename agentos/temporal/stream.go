@@ -60,6 +60,10 @@ func newPlanReplaySubscription(planEvents []agentos.PlanEvent) agentos.Subscript
 }
 
 func newPlanReplayThenLiveSubscription(planEvents []agentos.PlanEvent, live agentos.Subscription) agentos.Subscription {
+	return newPlanReplayThenLiveSubscriptionAfter(planEvents, live, 0)
+}
+
+func newPlanReplayThenLiveSubscriptionAfter(planEvents []agentos.PlanEvent, live agentos.Subscription, liveAfterSequence int64) agentos.Subscription {
 	if live == nil {
 		return newPlanReplaySubscription(planEvents)
 	}
@@ -83,6 +87,9 @@ func newPlanReplayThenLiveSubscription(planEvents []agentos.PlanEvent, live agen
 			case event, ok := <-live.Events():
 				if !ok {
 					return
+				}
+				if event.Sequence <= liveAfterSequence {
+					continue
 				}
 				select {
 				case <-done:

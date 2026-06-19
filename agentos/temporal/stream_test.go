@@ -105,6 +105,33 @@ func TestNewPlanReplayThenLiveSubscription(t *testing.T) {
 	}
 }
 
+func TestNewPlanReplayThenLiveSubscriptionAfterFiltersCoveredLiveEvents(t *testing.T) {
+	liveEvents := make(chan agentos.Event, 2)
+	live := &fakeAgentOSSubscription{events: liveEvents}
+	sub := newPlanReplayThenLiveSubscriptionAfter([]agentos.PlanEvent{
+		{
+			Event: agentos.Event{
+				EventID:   "evt-catch-up",
+				EventType: agentos.EventPlanNodeStarted,
+				Sequence:  2,
+			},
+			PlanID: "plan-1",
+		},
+	}, live, 2)
+
+	replay := <-sub.Events()
+	if replay.EventID != "evt-catch-up" {
+		t.Fatalf("replay event = %#v", replay)
+	}
+	liveEvents <- agentos.Event{EventID: "evt-duplicate", EventType: agentos.EventPlanNodeStarted, Sequence: 2}
+	liveEvents <- agentos.Event{EventID: "evt-live", EventType: agentos.EventPlanNodeSucceeded, Sequence: 3}
+
+	gotLive := <-sub.Events()
+	if gotLive.EventID != "evt-live" {
+		t.Fatalf("live event = %#v", gotLive)
+	}
+}
+
 func TestLastPlanEventSequence(t *testing.T) {
 	last := lastPlanEventSequence(3, []agentos.PlanEvent{
 		{Event: agentos.Event{Sequence: 2}},
