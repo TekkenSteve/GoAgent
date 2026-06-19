@@ -52,16 +52,20 @@ type (
 
 	// AgentOS -.
 	AgentOS struct {
-		ArtifactStoreBackend          string `env:"AGENTOS_ARTIFACT_STORE_BACKEND,required"`
-		ArtifactStoreLocalRoot        string `env:"AGENTOS_ARTIFACT_STORE_LOCAL_ROOT"`
-		ArtifactStoreS3Bucket         string `env:"AGENTOS_ARTIFACT_STORE_S3_BUCKET"`
-		ArtifactStoreS3Region         string `env:"AGENTOS_ARTIFACT_STORE_S3_REGION"`
-		ArtifactStoreS3Endpoint       string `env:"AGENTOS_ARTIFACT_STORE_S3_ENDPOINT"`
-		ArtifactStoreS3AccessKeyID    string `env:"AGENTOS_ARTIFACT_STORE_S3_ACCESS_KEY_ID"`
-		ArtifactStoreS3SecretKey      string `env:"AGENTOS_ARTIFACT_STORE_S3_SECRET_ACCESS_KEY"`
-		ArtifactStoreS3SessionToken   string `env:"AGENTOS_ARTIFACT_STORE_S3_SESSION_TOKEN"`
-		ArtifactStoreS3ForcePathStyle bool   `env:"AGENTOS_ARTIFACT_STORE_S3_FORCE_PATH_STYLE" envDefault:"false"`
-		CapabilitiesJSON              string `env:"AGENTOS_CAPABILITIES_JSON" envDefault:"[]"`
+		ArtifactStoreBackend                    string `env:"AGENTOS_ARTIFACT_STORE_BACKEND,required"`
+		ArtifactStoreLocalRoot                  string `env:"AGENTOS_ARTIFACT_STORE_LOCAL_ROOT"`
+		ArtifactStoreS3Bucket                   string `env:"AGENTOS_ARTIFACT_STORE_S3_BUCKET"`
+		ArtifactStoreS3Region                   string `env:"AGENTOS_ARTIFACT_STORE_S3_REGION"`
+		ArtifactStoreS3Endpoint                 string `env:"AGENTOS_ARTIFACT_STORE_S3_ENDPOINT"`
+		ArtifactStoreS3AccessKeyID              string `env:"AGENTOS_ARTIFACT_STORE_S3_ACCESS_KEY_ID"`
+		ArtifactStoreS3SecretKey                string `env:"AGENTOS_ARTIFACT_STORE_S3_SECRET_ACCESS_KEY"`
+		ArtifactStoreS3SessionToken             string `env:"AGENTOS_ARTIFACT_STORE_S3_SESSION_TOKEN"`
+		ArtifactStoreS3ForcePathStyle           bool   `env:"AGENTOS_ARTIFACT_STORE_S3_FORCE_PATH_STYLE" envDefault:"false"`
+		CapabilitiesJSON                        string `env:"AGENTOS_CAPABILITIES_JSON" envDefault:"[]"`
+		PlanCommandRecoveryEnabled              bool   `env:"AGENTOS_PLAN_COMMAND_RECOVERY_ENABLED" envDefault:"true"`
+		PlanCommandRecoveryIntervalSeconds      int    `env:"AGENTOS_PLAN_COMMAND_RECOVERY_INTERVAL_SECONDS" envDefault:"30"`
+		PlanCommandRecoveryLimit                int    `env:"AGENTOS_PLAN_COMMAND_RECOVERY_LIMIT" envDefault:"100"`
+		PlanCommandRecoveryImmediateOnWorkerRun bool   `env:"AGENTOS_PLAN_COMMAND_RECOVERY_IMMEDIATE_ON_WORKER_RUN" envDefault:"true"`
 	}
 
 	// AgentFW -.

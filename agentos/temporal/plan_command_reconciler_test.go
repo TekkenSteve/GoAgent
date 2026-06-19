@@ -112,3 +112,28 @@ func TestWorkerKitRecoverPlanCommandsUsesReconciler(t *testing.T) {
 		t.Fatalf("result = %#v", result)
 	}
 }
+
+func TestPlanRuntimeRecoverPlanCommandsUsesReconciler(t *testing.T) {
+	store, ref := newPlanRuntimeTestStore(t)
+	signal := agentos.Signal{
+		Type:           agentos.SignalPlanApprove,
+		IdempotencyKey: "approve-runtime-1",
+		ActorID:        "operator-1",
+	}
+	if _, _, err := store.RecordPlanCommand(t.Context(), planCommandFromAuditRecord(planSignalAuditRecord(ref.PlanID, signal))); err != nil {
+		t.Fatalf("RecordPlanCommand: %v", err)
+	}
+
+	temporalClient := &fakePlanTemporalClient{}
+	rt := &planRuntime{temporalClient: temporalClient, commandStore: store, auditStore: store}
+	result, err := rt.RecoverPlanCommands(t.Context(), 1)
+	if err != nil {
+		t.Fatalf("RecoverPlanCommands: %v", err)
+	}
+	if result.Scanned != 1 || result.Delivered != 1 || result.Failed != 0 {
+		t.Fatalf("result = %#v", result)
+	}
+	if temporalClient.signalCount != 1 {
+		t.Fatalf("signal count = %d, want 1", temporalClient.signalCount)
+	}
+}

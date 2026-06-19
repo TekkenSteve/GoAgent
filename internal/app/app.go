@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/signal"
 	"syscall"
+	"time"
 
 	"github.com/TekkenSteve/GoAgent/agentos"
 	agentostemporal "github.com/TekkenSteve/GoAgent/agentos/temporal"
@@ -53,6 +54,7 @@ func Run(cfg *config.Config) { //nolint: gocyclo,cyclop,funlen,gocritic,nolintli
 		agentOSRuntime   agentos.Runtime
 		planRuntime      agentos.PlanRuntime
 		closePlanRuntime func() error
+		planRecovery     *agentostemporal.PlanCommandRecoveryLoop
 		batchWriter      *pipelinepkg.BatchWriter
 		agentUC          *agent.UseCase
 		cancelWorkflow   restapiv1.CancelWorkflowFn
@@ -102,6 +104,7 @@ func Run(cfg *config.Config) { //nolint: gocyclo,cyclop,funlen,gocritic,nolintli
 		agentOSRuntime = tc.agentOSRuntime
 		planRuntime = tc.planRuntime
 		closePlanRuntime = tc.closePlanRuntime
+		planRecovery = tc.planRecovery
 		batchWriter = tc.batchWriter
 		agentUC = tc.agentUC
 		triggerUC = tc.triggerUC
@@ -119,6 +122,10 @@ func Run(cfg *config.Config) { //nolint: gocyclo,cyclop,funlen,gocritic,nolintli
 				l.Error(fmt.Errorf("app - Run - close plan runtime: %w", err))
 			}
 		}()
+	}
+
+	if planRecovery != nil {
+		defer planRecovery.Stop()
 	}
 
 	if batchWriter != nil {
@@ -187,6 +194,7 @@ type temporalComponents struct {
 	agentOSRuntime   agentos.Runtime
 	planRuntime      agentos.PlanRuntime
 	closePlanRuntime func() error
+	planRecovery     *agentostemporal.PlanCommandRecoveryLoop
 	batchWriter      *pipelinepkg.BatchWriter
 	agentUC          *agent.UseCase
 	triggerUC        *triggerpkg.UseCase
@@ -302,11 +310,14 @@ func initTemporalComponents(
 	}
 	l.Info("app - Run - agent framework worker started on task queue: %s", fwCfg.Temporal.TaskQueue)
 
+	planRecovery := startAgentOSPlanCommandRecovery(l, cfg.AgentOS, planRuntime)
+
 	return &temporalComponents{
 		runtime:          runtime,
 		agentOSRuntime:   agentOSRuntime,
 		planRuntime:      planRuntime,
 		closePlanRuntime: closeAgentOSPlanRuntime(planRuntime),
+		planRecovery:     planRecovery,
 		batchWriter:      comp.batchWriter,
 		agentUC:          comp.agentUC,
 		triggerUC:        comp.triggerUC,
@@ -315,6 +326,49 @@ func initTemporalComponents(
 		signalWorkflow:   signalWorkflow,
 		llmProvider:      comp.llmProvider,
 	}
+}
+
+func startAgentOSPlanCommandRecovery(l logger.Interface, cfg config.AgentOS, planRuntime agentos.PlanRuntime) *agentostemporal.PlanCommandRecoveryLoop {
+	if !cfg.PlanCommandRecoveryEnabled {
+		return nil
+	}
+	recoverer, ok := planRuntime.(agentostemporal.PlanCommandRecoverer)
+	if !ok {
+		l.Fatal(fmt.Errorf("app - Run - agentos plan command recovery: plan runtime does not implement recovery"))
+	}
+
+	loop, err := agentostemporal.StartPlanCommandRecovery(
+		context.Background(),
+		recoverer,
+		agentostemporal.PlanCommandRecoveryLoopConfig{
+			Interval:           time.Duration(cfg.PlanCommandRecoveryIntervalSeconds) * time.Second,
+			Limit:              cfg.PlanCommandRecoveryLimit,
+			RecoverImmediately: cfg.PlanCommandRecoveryImmediateOnWorkerRun,
+		},
+		planCommandRecoveryLogger{logger: l},
+	)
+	if err != nil {
+		l.Fatal(fmt.Errorf("app - Run - agentos plan command recovery: %w", err))
+	}
+
+	return loop
+}
+
+type planCommandRecoveryLogger struct {
+	logger logger.Interface
+}
+
+func (l planCommandRecoveryLogger) PlanCommandRecoverySucceeded(result agentostemporal.PlanCommandRecoveryResult) {
+	if result.Scanned == 0 {
+		l.logger.Debug("app - Run - agentos plan command recovery: no recoverable commands")
+
+		return
+	}
+	l.logger.Info("app - Run - agentos plan command recovery: scanned=%d delivered=%d failed=%d", result.Scanned, result.Delivered, result.Failed)
+}
+
+func (l planCommandRecoveryLogger) PlanCommandRecoveryFailed(err error) {
+	l.logger.Error(fmt.Errorf("app - Run - agentos plan command recovery: %w", err))
 }
 
 type agentOSRegistrar struct {

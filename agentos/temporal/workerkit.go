@@ -158,6 +158,12 @@ func (k *WorkerKit) RecoverPlanCommands(ctx context.Context, limit int) (PlanCom
 	return k.planCommandReconciler.Recover(ctx, limit)
 }
 
+// StartPlanCommandRecovery starts periodic durable command outbox recovery for
+// this worker kit.
+func (k *WorkerKit) StartPlanCommandRecovery(ctx context.Context, cfg PlanCommandRecoveryLoopConfig, observer PlanCommandRecoveryObserver) (*PlanCommandRecoveryLoop, error) {
+	return StartPlanCommandRecovery(ctx, k, cfg, observer)
+}
+
 // Close releases resources owned by the kit.
 func (k *WorkerKit) Close() error {
 	var err error

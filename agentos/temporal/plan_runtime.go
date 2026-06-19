@@ -399,6 +399,14 @@ func (r *planRuntime) GetPlanArtifact(ctx context.Context, scope agentos.PlanArt
 	return agentos.Artifact{Ref: ref, Payload: payload}, nil
 }
 
+// RecoverPlanCommands redelivers recoverable RunPlan control-plane commands
+// from the durable outbox.
+func (r *planRuntime) RecoverPlanCommands(ctx context.Context, limit int) (PlanCommandRecoveryResult, error) {
+	reconciler := newPlanCommandReconciler(r.temporalClient, r.commandStore, r.auditStore)
+
+	return reconciler.Recover(ctx, limit)
+}
+
 func (r *planRuntime) Close() error {
 	var errs []error
 	if r.closeTemporal && r.temporalClient != nil {
