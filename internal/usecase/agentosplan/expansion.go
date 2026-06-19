@@ -50,6 +50,8 @@ func (p ArtifactPlanDeltaProvider) NextPlanDelta(ctx context.Context, input Plan
 		}
 		_, payload, err := p.Store.Get(ctx, agentos.PlanArtifactScope{
 			PlanID:     input.Spec.PlanID,
+			AccountID:  input.Spec.AccountID,
+			ProjectID:  input.Spec.ProjectID,
 			ArtifactID: ref.ArtifactID,
 		})
 		if err != nil {

@@ -57,6 +57,49 @@ func TestArtifactPlanDeltaProviderDecodesPlanDeltaArtifact(t *testing.T) {
 	}
 }
 
+func TestArtifactPlanDeltaProviderReadsArtifactWithTenantScope(t *testing.T) {
+	store := &recordingPlanDeltaArtifactStore{
+		ref: agentos.ArtifactRef{
+			ArtifactID: "delta-1",
+			PlanID:     "plan-1",
+			Name:       "expand",
+			Kind:       agentos.ArtifactKindPlanDelta,
+		},
+		payload: PlanDelta{
+			Nodes: []agentos.PlanNodeSpec{
+				{
+					NodeID: "expanded",
+					Run: agentos.RunSpec{
+						RunID: "run-expanded",
+						Backend: agentos.BackendRef{
+							Kind: agentos.BackendKindNative,
+							Name: agentos.BackendNameGoAgentNative,
+						},
+					},
+				},
+			},
+		},
+	}
+
+	_, ok, err := NewArtifactPlanDeltaProvider(store).NextPlanDelta(context.Background(), PlanDeltaInput{
+		Spec: agentos.RunPlanSpec{
+			PlanID:    "plan-1",
+			AccountID: "acct-1",
+			ProjectID: "proj-1",
+		},
+		Artifacts: []agentos.ArtifactRef{store.ref},
+	})
+	if err != nil {
+		t.Fatalf("NextPlanDelta: %v", err)
+	}
+	if !ok {
+		t.Fatal("NextPlanDelta did not detect plan_delta artifact")
+	}
+	if store.scope.PlanID != "plan-1" || store.scope.AccountID != "acct-1" || store.scope.ProjectID != "proj-1" || store.scope.ArtifactID != "delta-1" {
+		t.Fatalf("artifact scope = %#v", store.scope)
+	}
+}
+
 func TestArtifactPlanDeltaProviderFailsWhenPayloadMissing(t *testing.T) {
 	store := NewMemoryArtifactStore()
 	ref, err := store.Put(context.Background(), agentos.ArtifactRef{
@@ -75,6 +118,26 @@ func TestArtifactPlanDeltaProviderFailsWhenPayloadMissing(t *testing.T) {
 	if !errors.Is(err, agentos.ErrArtifactNotFound) {
 		t.Fatalf("error = %v, want ErrArtifactNotFound", err)
 	}
+}
+
+type recordingPlanDeltaArtifactStore struct {
+	scope   agentos.PlanArtifactScope
+	ref     agentos.ArtifactRef
+	payload any
+}
+
+func (s *recordingPlanDeltaArtifactStore) Put(context.Context, agentos.ArtifactRef, any, string) (agentos.ArtifactRef, error) {
+	return agentos.ArtifactRef{}, nil
+}
+
+func (s *recordingPlanDeltaArtifactStore) Get(_ context.Context, scope agentos.PlanArtifactScope) (agentos.ArtifactRef, any, error) {
+	s.scope = scope
+
+	return s.ref, s.payload, nil
+}
+
+func (s *recordingPlanDeltaArtifactStore) List(context.Context, agentos.PlanArtifactScope) ([]agentos.ArtifactRef, error) {
+	return nil, nil
 }
 
 func TestStateReducerAppliesPlanExpansion(t *testing.T) {
