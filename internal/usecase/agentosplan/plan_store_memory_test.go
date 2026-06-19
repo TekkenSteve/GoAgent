@@ -63,6 +63,38 @@ func TestMemoryPlanStoreRecordPlanCommandRejectsMissingPlan(t *testing.T) {
 	}
 }
 
+func TestMemoryPlanStoreSavePlanMetricCheckpointRejectsMissingPlan(t *testing.T) {
+	store := NewMemoryPlanStore()
+
+	err := store.SavePlanMetricCheckpoint(context.Background(), PlanMetricCheckpoint{
+		ExporterID: "exporter-1",
+		PlanID:     "missing-plan",
+		AccountID:  "acct-1",
+		ProjectID:  "proj-1",
+		Sequence:   1,
+	})
+	if !errors.Is(err, agentos.ErrPlanRouteNotFound) {
+		t.Fatalf("SavePlanMetricCheckpoint missing plan error = %v, want ErrPlanRouteNotFound", err)
+	}
+}
+
+func TestMemoryPlanStoreSavePlanMetricCheckpointRejectsTenantMismatch(t *testing.T) {
+	ctx := context.Background()
+	store := NewMemoryPlanStore()
+	spec := createMemoryPlanForTest(t, ctx, store, "plan-1")
+
+	err := store.SavePlanMetricCheckpoint(ctx, PlanMetricCheckpoint{
+		ExporterID: "exporter-1",
+		PlanID:     spec.PlanID,
+		AccountID:  "acct-other",
+		ProjectID:  spec.ProjectID,
+		Sequence:   1,
+	})
+	if !errors.Is(err, agentos.ErrPlanRouteNotFound) {
+		t.Fatalf("SavePlanMetricCheckpoint tenant mismatch error = %v, want ErrPlanRouteNotFound", err)
+	}
+}
+
 func TestMemoryPlanStoreCreatePlanIsIdempotentForSameRequest(t *testing.T) {
 	store := NewMemoryPlanStore()
 	spec := testRunPlanSpec("plan-1", "start-key")

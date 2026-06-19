@@ -325,6 +325,13 @@ func (s *MemoryPlanStore) SavePlanMetricCheckpoint(_ context.Context, checkpoint
 
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	spec, ok := s.specs[checkpoint.PlanID]
+	if !ok {
+		return fmt.Errorf("%w: %s", agentos.ErrPlanRouteNotFound, checkpoint.PlanID)
+	}
+	if spec.AccountID != checkpoint.AccountID || spec.ProjectID != checkpoint.ProjectID {
+		return fmt.Errorf("%w: %s", agentos.ErrPlanRouteNotFound, checkpoint.PlanID)
+	}
 	key := planMetricCheckpointKeyFromRef(checkpoint.ExporterID, ref)
 	if existing, ok := s.metrics[key]; ok {
 		if checkpoint.Sequence < existing.Sequence {
