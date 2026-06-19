@@ -349,21 +349,29 @@ func (s *MemoryPlanStore) RecordAudit(_ context.Context, record AuditRecord) (Au
 	if record.IdempotencyKey == "" {
 		return AuditRecord{}, false, fmt.Errorf("%w: audit idempotency key is required", agentos.ErrInvalidRunPlan)
 	}
-	if record.CreatedAt.IsZero() {
-		record.CreatedAt = time.Now().UTC()
-	}
-	if record.AuditID == "" {
-		record.AuditID = record.PlanID + ":" + record.IdempotencyKey
-	}
-
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	spec, ok := s.specs[record.PlanID]
+	if !ok {
+		return AuditRecord{}, false, fmt.Errorf("%w: %s", agentos.ErrPlanRouteNotFound, record.PlanID)
+	}
+	record.AccountID = spec.AccountID
+	record.ProjectID = spec.ProjectID
 	if existing, ok := s.auditKeys[record.IdempotencyKey]; ok {
 		if err := ValidateAuditIdempotency(existing, record); err != nil {
 			return AuditRecord{}, false, err
 		}
 
 		return existing, false, nil
+	}
+	if record.AuditID == "" {
+		record.AuditID = AuditIDFromIdempotencyKey(record.IdempotencyKey)
+	}
+	if record.CreatedAt.IsZero() {
+		record.CreatedAt = time.Now().UTC()
+	}
+	if record.Payload == nil {
+		record.Payload = map[string]any{}
 	}
 	s.auditKeys[record.IdempotencyKey] = record
 
@@ -380,6 +388,24 @@ func (s *MemoryPlanStore) RecordPlanCommand(_ context.Context, command PlanComma
 	if command.IdempotencyKey == "" {
 		return PlanCommandRecord{}, false, fmt.Errorf("%w: command idempotency key is required", agentos.ErrInvalidRunPlan)
 	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	spec, ok := s.specs[command.PlanID]
+	if !ok {
+		return PlanCommandRecord{}, false, fmt.Errorf("%w: %s", agentos.ErrPlanRouteNotFound, command.PlanID)
+	}
+	command.AccountID = spec.AccountID
+	command.ProjectID = spec.ProjectID
+	if existing, ok := s.commands[command.IdempotencyKey]; ok {
+		if err := ValidatePlanCommandIdempotency(existing, command); err != nil {
+			return PlanCommandRecord{}, false, err
+		}
+
+		return existing, false, nil
+	}
+	if command.CommandID == "" {
+		command.CommandID = PlanCommandIDFromIdempotencyKey(command.IdempotencyKey)
+	}
 	if command.Status == "" {
 		command.Status = PlanCommandPending
 	}
@@ -389,21 +415,8 @@ func (s *MemoryPlanStore) RecordPlanCommand(_ context.Context, command PlanComma
 	if command.UpdatedAt.IsZero() {
 		command.UpdatedAt = command.CreatedAt
 	}
-	if command.CommandID == "" {
-		command.CommandID = command.PlanID + ":" + command.IdempotencyKey
-	}
 	if command.Payload == nil {
 		command.Payload = map[string]any{}
-	}
-
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if existing, ok := s.commands[command.IdempotencyKey]; ok {
-		if err := ValidatePlanCommandIdempotency(existing, command); err != nil {
-			return PlanCommandRecord{}, false, err
-		}
-
-		return existing, false, nil
 	}
 	s.commands[command.IdempotencyKey] = command
 

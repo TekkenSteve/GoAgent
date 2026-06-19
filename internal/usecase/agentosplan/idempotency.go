@@ -185,6 +185,22 @@ func ArtifactIDFromIdempotencyKey(idempotencyKey string) string {
 	return hex.EncodeToString(sum[:])
 }
 
+// PlanCommandIDFromIdempotencyKey creates the stable command identity used when
+// callers do not provide one explicitly.
+func PlanCommandIDFromIdempotencyKey(idempotencyKey string) string {
+	sum := sha256.Sum256([]byte(idempotencyKey))
+
+	return "command:" + hex.EncodeToString(sum[:])
+}
+
+// AuditIDFromIdempotencyKey creates the stable audit identity used when callers
+// do not provide one explicitly.
+func AuditIDFromIdempotencyKey(idempotencyKey string) string {
+	sum := sha256.Sum256([]byte(idempotencyKey))
+
+	return "audit:" + hex.EncodeToString(sum[:])
+}
+
 // ValidatePlanEventIdempotency verifies that a repeated event append request
 // is the same durable event request that originally claimed the key. Store-
 // assigned identity fields are only compared when the replay explicitly sets

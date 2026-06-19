@@ -2,8 +2,6 @@ package persistent
 
 import (
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -902,7 +900,7 @@ func (r *AgentOSPlanRepo) RecordAudit(ctx context.Context, record agentosplan.Au
 		return existing, false, nil
 	}
 	if record.AuditID == "" {
-		record.AuditID = auditIDFromIdempotencyKey(record.IdempotencyKey)
+		record.AuditID = agentosplan.AuditIDFromIdempotencyKey(record.IdempotencyKey)
 	}
 	if record.CreatedAt.IsZero() {
 		record.CreatedAt = time.Now().UTC()
@@ -1133,7 +1131,7 @@ func (r *AgentOSPlanRepo) RecordPlanCommand(ctx context.Context, command agentos
 		return existing, false, nil
 	}
 	if command.CommandID == "" {
-		command.CommandID = commandIDFromIdempotencyKey(command.IdempotencyKey)
+		command.CommandID = agentosplan.PlanCommandIDFromIdempotencyKey(command.IdempotencyKey)
 	}
 	if command.Status == "" {
 		command.Status = agentosplan.PlanCommandPending
@@ -1343,18 +1341,6 @@ func (r *AgentOSPlanRepo) scanPlanCommandRow(_ context.Context, scanner interfac
 	command.Status = agentosplan.PlanCommandStatus(status)
 
 	return command, nil
-}
-
-func commandIDFromIdempotencyKey(idempotencyKey string) string {
-	sum := sha256.Sum256([]byte(idempotencyKey))
-
-	return "command:" + hex.EncodeToString(sum[:])
-}
-
-func auditIDFromIdempotencyKey(idempotencyKey string) string {
-	sum := sha256.Sum256([]byte(idempotencyKey))
-
-	return "audit:" + hex.EncodeToString(sum[:])
 }
 
 func nullableTime(value time.Time) any {

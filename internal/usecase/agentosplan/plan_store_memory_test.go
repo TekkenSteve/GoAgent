@@ -37,6 +37,32 @@ func TestMemoryPlanStoreUpdatePlanStatusRejectsMissingPlan(t *testing.T) {
 	}
 }
 
+func TestMemoryPlanStoreRecordAuditRejectsMissingPlan(t *testing.T) {
+	store := NewMemoryPlanStore()
+
+	_, _, err := store.RecordAudit(context.Background(), AuditRecord{
+		PlanID:         "missing-plan",
+		Action:         AuditActionPlanControl,
+		IdempotencyKey: "control-1",
+	})
+	if !errors.Is(err, agentos.ErrPlanRouteNotFound) {
+		t.Fatalf("RecordAudit missing plan error = %v, want ErrPlanRouteNotFound", err)
+	}
+}
+
+func TestMemoryPlanStoreRecordPlanCommandRejectsMissingPlan(t *testing.T) {
+	store := NewMemoryPlanStore()
+
+	_, _, err := store.RecordPlanCommand(context.Background(), PlanCommandRecord{
+		PlanID:         "missing-plan",
+		Action:         AuditActionPlanControl,
+		IdempotencyKey: "control-1",
+	})
+	if !errors.Is(err, agentos.ErrPlanRouteNotFound) {
+		t.Fatalf("RecordPlanCommand missing plan error = %v, want ErrPlanRouteNotFound", err)
+	}
+}
+
 func TestMemoryPlanStoreCreatePlanIsIdempotentForSameRequest(t *testing.T) {
 	store := NewMemoryPlanStore()
 	spec := testRunPlanSpec("plan-1", "start-key")
@@ -102,8 +128,9 @@ func TestMemoryPlanStoreCreatePlanRejectsPlanIDWithDifferentKey(t *testing.T) {
 
 func TestMemoryPlanStoreGetAuditRecord(t *testing.T) {
 	store := NewMemoryPlanStore()
+	spec := createMemoryPlanForTest(t, context.Background(), store, "plan-1")
 	record := AuditRecord{
-		PlanID:         "plan-1",
+		PlanID:         spec.PlanID,
 		Action:         AuditActionPlanControl,
 		IdempotencyKey: "control-1",
 	}
@@ -115,15 +142,20 @@ func TestMemoryPlanStoreGetAuditRecord(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GetAuditRecord: %v", err)
 	}
-	if !exists || got.PlanID != record.PlanID || got.Action != record.Action {
+	if !exists ||
+		got.PlanID != record.PlanID ||
+		got.AccountID != spec.AccountID ||
+		got.ProjectID != spec.ProjectID ||
+		got.Action != record.Action {
 		t.Fatalf("audit = %#v exists=%v", got, exists)
 	}
 }
 
 func TestMemoryPlanStoreRejectsAuditKeyReuseWithDifferentRequest(t *testing.T) {
 	store := NewMemoryPlanStore()
+	spec := createMemoryPlanForTest(t, context.Background(), store, "plan-1")
 	record := AuditRecord{
-		PlanID:         "plan-1",
+		PlanID:         spec.PlanID,
 		Action:         AuditActionPlanSignal,
 		IdempotencyKey: "signal-1",
 		Payload:        map[string]any{"type": string(agentos.SignalPlanApprove)},
@@ -142,8 +174,9 @@ func TestMemoryPlanStoreRejectsAuditKeyReuseWithDifferentRequest(t *testing.T) {
 
 func TestMemoryPlanStorePlanCommandLifecycleIsIdempotent(t *testing.T) {
 	store := NewMemoryPlanStore()
+	spec := createMemoryPlanForTest(t, context.Background(), store, "plan-1")
 	command := PlanCommandRecord{
-		PlanID:         "plan-1",
+		PlanID:         spec.PlanID,
 		ActorID:        "operator-1",
 		Action:         AuditActionPlanControl,
 		IdempotencyKey: "control-1",
@@ -155,6 +188,9 @@ func TestMemoryPlanStorePlanCommandLifecycleIsIdempotent(t *testing.T) {
 	}
 	if !created || first.Status != PlanCommandPending {
 		t.Fatalf("first command = %#v created=%v", first, created)
+	}
+	if first.AccountID != spec.AccountID || first.ProjectID != spec.ProjectID {
+		t.Fatalf("first command scope = %s/%s, want %s/%s", first.AccountID, first.ProjectID, spec.AccountID, spec.ProjectID)
 	}
 	replay, created, err := store.RecordPlanCommand(context.Background(), command)
 	if err != nil {
@@ -176,10 +212,11 @@ func TestMemoryPlanStorePlanCommandLifecycleIsIdempotent(t *testing.T) {
 func TestMemoryPlanStoreListRecoverablePlanCommands(t *testing.T) {
 	ctx := context.Background()
 	store := NewMemoryPlanStore()
+	spec := createMemoryPlanForTest(t, ctx, store, "plan-1")
 	commands := []PlanCommandRecord{
 		{
 			CommandID:      "command-delivered",
-			PlanID:         "plan-1",
+			PlanID:         spec.PlanID,
 			Action:         AuditActionPlanControl,
 			IdempotencyKey: "command-delivered",
 			Payload:        map[string]any{"operation": string(agentos.ControlCancel)},
@@ -188,7 +225,7 @@ func TestMemoryPlanStoreListRecoverablePlanCommands(t *testing.T) {
 		},
 		{
 			CommandID:      "command-pending",
-			PlanID:         "plan-1",
+			PlanID:         spec.PlanID,
 			Action:         AuditActionPlanSignal,
 			IdempotencyKey: "command-pending",
 			Payload:        map[string]any{"type": string(agentos.SignalPlanApprove)},
@@ -197,7 +234,7 @@ func TestMemoryPlanStoreListRecoverablePlanCommands(t *testing.T) {
 		},
 		{
 			CommandID:      "command-failed",
-			PlanID:         "plan-1",
+			PlanID:         spec.PlanID,
 			Action:         AuditActionPlanSignal,
 			IdempotencyKey: "command-failed",
 			Payload:        map[string]any{"type": string(agentos.SignalPlanReject)},
@@ -218,7 +255,7 @@ func TestMemoryPlanStoreListRecoverablePlanCommands(t *testing.T) {
 	}
 
 	got, err := store.ListRecoverablePlanCommands(ctx, PlanCommandScope{
-		PlanID:   "plan-1",
+		PlanID:   spec.PlanID,
 		Action:   AuditActionPlanSignal,
 		Statuses: []PlanCommandStatus{PlanCommandPending},
 		Limit:    1,
@@ -231,7 +268,7 @@ func TestMemoryPlanStoreListRecoverablePlanCommands(t *testing.T) {
 	}
 
 	got, err = store.ListRecoverablePlanCommands(ctx, PlanCommandScope{
-		PlanID:   "plan-1",
+		PlanID:   spec.PlanID,
 		Statuses: []PlanCommandStatus{PlanCommandFailed},
 	})
 	if err != nil {
@@ -253,8 +290,9 @@ func TestRecoverablePlanCommandStatusesRejectsDelivered(t *testing.T) {
 
 func TestMemoryPlanStoreRejectsCommandKeyReuseWithDifferentRequest(t *testing.T) {
 	store := NewMemoryPlanStore()
+	spec := createMemoryPlanForTest(t, context.Background(), store, "plan-1")
 	command := PlanCommandRecord{
-		PlanID:         "plan-1",
+		PlanID:         spec.PlanID,
 		ActorID:        "operator-1",
 		Action:         AuditActionPlanSignal,
 		IdempotencyKey: "signal-1",
@@ -334,9 +372,26 @@ func testRunPlanSpec(planID, idempotencyKey string) agentos.RunPlanSpec {
 
 	return agentos.RunPlanSpec{
 		PlanID:         planID,
+		AccountID:      "acct-" + planID,
+		ProjectID:      "proj-" + planID,
 		IdempotencyKey: idempotencyKey,
 		Nodes: []agentos.PlanNodeSpec{
 			{NodeID: "node-1", Run: agentos.RunSpec{RunID: "run-1", Backend: ref}},
 		},
 	}
+}
+
+func createMemoryPlanForTest(t *testing.T, ctx context.Context, store *MemoryPlanStore, planID string) agentos.RunPlanSpec {
+	t.Helper()
+
+	spec := testRunPlanSpec(planID, planID+"-start-key")
+	status := agentos.RunPlanStatus{
+		PlanID:         spec.PlanID,
+		LifecycleState: agentos.PlanLifecycleRunning,
+	}
+	if _, _, err := store.CreatePlan(ctx, spec, status); err != nil {
+		t.Fatalf("CreatePlan: %v", err)
+	}
+
+	return spec
 }
