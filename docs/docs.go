@@ -96,7 +96,7 @@ const docTemplate = `{
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/request.AgentOSControl"
+                            "$ref": "#/definitions/request.AgentOSPlanControl"
                         }
                     }
                 ],
@@ -222,7 +222,7 @@ const docTemplate = `{
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/request.AgentOSSignal"
+                            "$ref": "#/definitions/request.AgentOSPlanSignal"
                         }
                     }
                 ],
@@ -1670,6 +1670,70 @@ const docTemplate = `{
                 }
             }
         },
+        "request.AgentOSPlanControl": {
+            "type": "object",
+            "required": [
+                "account_id",
+                "operation"
+            ],
+            "properties": {
+                "account_id": {
+                    "type": "string"
+                },
+                "actor_id": {
+                    "type": "string"
+                },
+                "idempotency_key": {
+                    "type": "string"
+                },
+                "metadata": {
+                    "type": "object",
+                    "additionalProperties": {
+                        "type": "string"
+                    }
+                },
+                "operation": {
+                    "$ref": "#/definitions/agentos.ControlOperation"
+                },
+                "project_id": {
+                    "type": "string"
+                },
+                "requested_at": {
+                    "type": "string"
+                }
+            }
+        },
+        "request.AgentOSPlanSignal": {
+            "type": "object",
+            "required": [
+                "account_id",
+                "type"
+            ],
+            "properties": {
+                "account_id": {
+                    "type": "string"
+                },
+                "actor_id": {
+                    "type": "string"
+                },
+                "idempotency_key": {
+                    "type": "string"
+                },
+                "payload": {
+                    "type": "object",
+                    "additionalProperties": {}
+                },
+                "project_id": {
+                    "type": "string"
+                },
+                "sent_at": {
+                    "type": "string"
+                },
+                "type": {
+                    "$ref": "#/definitions/agentos.SignalType"
+                }
+            }
+        },
         "request.AgentOSSignal": {
             "type": "object",
             "required": [
@@ -1826,14 +1890,11 @@ const docTemplate = `{
                 1000000000,
                 60000000000,
                 3600000000000,
-                -9223372036854775808,
-                9223372036854775807,
                 1,
                 1000,
                 1000000,
                 1000000000,
-                60000000000,
-                3600000000000
+                60000000000
             ],
             "x-enum-varnames": [
                 "minDuration",
@@ -1844,14 +1905,11 @@ const docTemplate = `{
                 "Second",
                 "Minute",
                 "Hour",
-                "minDuration",
-                "maxDuration",
                 "Nanosecond",
                 "Microsecond",
                 "Millisecond",
                 "Second",
-                "Minute",
-                "Hour"
+                "Minute"
             ]
         },
         "v1.ingestAgentOSEventResponse": {

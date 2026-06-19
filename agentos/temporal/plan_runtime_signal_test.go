@@ -13,8 +13,9 @@ import (
 
 func TestPlanRuntimeSignalPlanValidatesSignalBeforeAudit(t *testing.T) {
 	rt := &planRuntime{}
+	ref := agentos.PlanRef{PlanID: "plan-1", AccountID: "acct-1"}
 
-	err := rt.SignalPlan(t.Context(), "plan-1", agentos.Signal{
+	err := rt.SignalPlan(t.Context(), ref, agentos.Signal{
 		Type:           agentos.SignalUserMessage,
 		IdempotencyKey: "message-1",
 	})
@@ -22,7 +23,7 @@ func TestPlanRuntimeSignalPlanValidatesSignalBeforeAudit(t *testing.T) {
 		t.Fatalf("SignalPlan error = %v, want ErrInvalidSignal", err)
 	}
 
-	err = rt.SignalPlan(t.Context(), "plan-1", agentos.Signal{
+	err = rt.SignalPlan(t.Context(), ref, agentos.Signal{
 		Type:           agentos.SignalPlanNodeRetry,
 		IdempotencyKey: "retry-1",
 	})
@@ -35,6 +36,8 @@ func TestPlanRuntimeStatusPlanReadsDurableIndex(t *testing.T) {
 	store := agentosplan.NewMemoryPlanStore()
 	spec := agentos.RunPlanSpec{
 		PlanID:         "plan-1",
+		AccountID:      "acct-1",
+		ProjectID:      "proj-1",
 		IdempotencyKey: "plan-start-1",
 		Nodes: []agentos.PlanNodeSpec{
 			{
@@ -56,7 +59,7 @@ func TestPlanRuntimeStatusPlanReadsDurableIndex(t *testing.T) {
 	}
 
 	rt := &planRuntime{planIndex: store}
-	got, err := rt.StatusPlan(t.Context(), spec.PlanID)
+	got, err := rt.StatusPlan(t.Context(), agentos.PlanRef{PlanID: spec.PlanID, AccountID: spec.AccountID, ProjectID: spec.ProjectID})
 	if err != nil {
 		t.Fatalf("StatusPlan: %v", err)
 	}
@@ -65,21 +68,67 @@ func TestPlanRuntimeStatusPlanReadsDurableIndex(t *testing.T) {
 	}
 }
 
+func TestPlanRuntimeStartPlanRequiresAccountScope(t *testing.T) {
+	rt := &planRuntime{planIndex: agentosplan.NewMemoryPlanStore()}
+
+	_, err := rt.StartPlan(t.Context(), agentos.RunPlanSpec{
+		PlanID:         "plan-1",
+		IdempotencyKey: "plan-start-1",
+	})
+	if !errors.Is(err, agentos.ErrInvalidPlanScope) {
+		t.Fatalf("StartPlan error = %v, want ErrInvalidPlanScope", err)
+	}
+}
+
 func TestPlanRuntimeStatusPlanReportsMissingDurablePlan(t *testing.T) {
 	rt := &planRuntime{planIndex: agentosplan.NewMemoryPlanStore()}
 
-	_, err := rt.StatusPlan(t.Context(), "missing-plan")
+	_, err := rt.StatusPlan(t.Context(), agentos.PlanRef{PlanID: "missing-plan", AccountID: "acct-1"})
 	if !errors.Is(err, agentos.ErrPlanRouteNotFound) {
 		t.Fatalf("StatusPlan error = %v, want ErrPlanRouteNotFound", err)
 	}
 }
 
-func TestPlanRuntimeSignalPlanDoesNotAuditFailedDelivery(t *testing.T) {
-	store := agentosplan.NewMemoryPlanStore()
-	temporalClient := &fakePlanTemporalClient{signalErr: errors.New("temporal unavailable")}
-	rt := &planRuntime{temporalClient: temporalClient, auditStore: store}
+func TestPlanRuntimeStatusPlanRejectsTenantMismatch(t *testing.T) {
+	store, ref := newPlanRuntimeTestStore(t)
+	rt := &planRuntime{planIndex: store}
 
-	err := rt.SignalPlan(t.Context(), "plan-1", agentos.Signal{
+	ref.AccountID = "acct-other"
+	_, err := rt.StatusPlan(t.Context(), ref)
+	if !errors.Is(err, agentos.ErrPlanRouteNotFound) {
+		t.Fatalf("StatusPlan error = %v, want ErrPlanRouteNotFound", err)
+	}
+}
+
+func TestPlanRuntimeSubscribePlanEnforcesTenantScope(t *testing.T) {
+	store, ref := newPlanRuntimeTestStore(t)
+	if _, err := store.AppendPlanEvent(t.Context(), agentos.PlanEvent{Event: agentos.Event{EventType: agentos.EventPlanStarted}, PlanID: ref.PlanID}, "event-1"); err != nil {
+		t.Fatalf("AppendPlanEvent: %v", err)
+	}
+	rt := &planRuntime{planIndex: store, planEvents: store}
+
+	_, err := rt.SubscribePlan(t.Context(), agentos.PlanStreamScope{PlanID: ref.PlanID, AccountID: "acct-other", ProjectID: ref.ProjectID})
+	if !errors.Is(err, agentos.ErrPlanRouteNotFound) {
+		t.Fatalf("SubscribePlan mismatch error = %v, want ErrPlanRouteNotFound", err)
+	}
+
+	sub, err := rt.SubscribePlan(t.Context(), agentos.PlanStreamScope{PlanID: ref.PlanID, AccountID: ref.AccountID, ProjectID: ref.ProjectID})
+	if err != nil {
+		t.Fatalf("SubscribePlan scoped: %v", err)
+	}
+	defer sub.Close()
+	event := <-sub.Events()
+	if event.EventType != agentos.EventPlanStarted {
+		t.Fatalf("event = %#v", event)
+	}
+}
+
+func TestPlanRuntimeSignalPlanDoesNotAuditFailedDelivery(t *testing.T) {
+	store, ref := newPlanRuntimeTestStore(t)
+	temporalClient := &fakePlanTemporalClient{signalErr: errors.New("temporal unavailable")}
+	rt := &planRuntime{temporalClient: temporalClient, auditStore: store, planIndex: store}
+
+	err := rt.SignalPlan(t.Context(), ref, agentos.Signal{
 		Type:           agentos.SignalPlanApprove,
 		IdempotencyKey: "approve-1",
 		ActorID:        "operator-1",
@@ -96,7 +145,7 @@ func TestPlanRuntimeSignalPlanDoesNotAuditFailedDelivery(t *testing.T) {
 }
 
 func TestPlanRuntimeSignalPlanSkipsDeliveryWhenAuditExists(t *testing.T) {
-	store := agentosplan.NewMemoryPlanStore()
+	store, ref := newPlanRuntimeTestStore(t)
 	signal := agentos.Signal{
 		Type:           agentos.SignalPlanApprove,
 		IdempotencyKey: "approve-1",
@@ -106,9 +155,9 @@ func TestPlanRuntimeSignalPlanSkipsDeliveryWhenAuditExists(t *testing.T) {
 		t.Fatalf("RecordAudit: %v", err)
 	}
 	temporalClient := &fakePlanTemporalClient{signalErr: errors.New("should not signal")}
-	rt := &planRuntime{temporalClient: temporalClient, auditStore: store}
+	rt := &planRuntime{temporalClient: temporalClient, auditStore: store, planIndex: store}
 
-	if err := rt.SignalPlan(t.Context(), "plan-1", signal); err != nil {
+	if err := rt.SignalPlan(t.Context(), ref, signal); err != nil {
 		t.Fatalf("SignalPlan: %v", err)
 	}
 	if temporalClient.signalCount != 0 {
@@ -117,7 +166,7 @@ func TestPlanRuntimeSignalPlanSkipsDeliveryWhenAuditExists(t *testing.T) {
 }
 
 func TestPlanRuntimeSignalPlanRejectsAuditKeyReuseWithDifferentSignal(t *testing.T) {
-	store := agentosplan.NewMemoryPlanStore()
+	store, ref := newPlanRuntimeTestStore(t)
 	if _, _, err := store.RecordAudit(t.Context(), planSignalAuditRecord("plan-1", agentos.Signal{
 		Type:           agentos.SignalPlanApprove,
 		IdempotencyKey: "signal-1",
@@ -126,9 +175,9 @@ func TestPlanRuntimeSignalPlanRejectsAuditKeyReuseWithDifferentSignal(t *testing
 		t.Fatalf("RecordAudit: %v", err)
 	}
 	temporalClient := &fakePlanTemporalClient{signalErr: errors.New("should not signal")}
-	rt := &planRuntime{temporalClient: temporalClient, auditStore: store}
+	rt := &planRuntime{temporalClient: temporalClient, auditStore: store, planIndex: store}
 
-	err := rt.SignalPlan(t.Context(), "plan-1", agentos.Signal{
+	err := rt.SignalPlan(t.Context(), ref, agentos.Signal{
 		Type:           agentos.SignalPlanReject,
 		IdempotencyKey: "signal-1",
 		ActorID:        "operator-1",
@@ -142,11 +191,11 @@ func TestPlanRuntimeSignalPlanRejectsAuditKeyReuseWithDifferentSignal(t *testing
 }
 
 func TestPlanRuntimeControlPlanAuditsAfterDelivery(t *testing.T) {
-	store := agentosplan.NewMemoryPlanStore()
+	store, ref := newPlanRuntimeTestStore(t)
 	temporalClient := &fakePlanTemporalClient{}
-	rt := &planRuntime{temporalClient: temporalClient, auditStore: store}
+	rt := &planRuntime{temporalClient: temporalClient, auditStore: store, planIndex: store}
 
-	err := rt.ControlPlan(t.Context(), "plan-1", agentos.ControlRequest{
+	err := rt.ControlPlan(t.Context(), ref, agentos.ControlRequest{
 		Operation:      agentos.ControlCancel,
 		IdempotencyKey: "cancel-1",
 		ActorID:        "operator-1",
@@ -167,7 +216,7 @@ func TestPlanRuntimeControlPlanAuditsAfterDelivery(t *testing.T) {
 }
 
 func TestPlanRuntimeControlPlanRejectsAuditKeyReuseWithDifferentControl(t *testing.T) {
-	store := agentosplan.NewMemoryPlanStore()
+	store, ref := newPlanRuntimeTestStore(t)
 	if _, _, err := store.RecordAudit(t.Context(), agentosplan.AuditRecord{
 		PlanID:         "plan-1",
 		ActorID:        "operator-1",
@@ -181,9 +230,9 @@ func TestPlanRuntimeControlPlanRejectsAuditKeyReuseWithDifferentControl(t *testi
 		t.Fatalf("RecordAudit: %v", err)
 	}
 	temporalClient := &fakePlanTemporalClient{signalErr: errors.New("should not signal")}
-	rt := &planRuntime{temporalClient: temporalClient, auditStore: store}
+	rt := &planRuntime{temporalClient: temporalClient, auditStore: store, planIndex: store}
 
-	err := rt.ControlPlan(t.Context(), "plan-1", agentos.ControlRequest{
+	err := rt.ControlPlan(t.Context(), ref, agentos.ControlRequest{
 		Operation:      agentos.ControlPause,
 		IdempotencyKey: "control-1",
 		ActorID:        "operator-1",
@@ -194,6 +243,28 @@ func TestPlanRuntimeControlPlanRejectsAuditKeyReuseWithDifferentControl(t *testi
 	if temporalClient.signalCount != 0 {
 		t.Fatalf("signal count = %d, want 0", temporalClient.signalCount)
 	}
+}
+
+func newPlanRuntimeTestStore(t *testing.T) (*agentosplan.MemoryPlanStore, agentos.PlanRef) {
+	t.Helper()
+
+	store := agentosplan.NewMemoryPlanStore()
+	spec := agentos.RunPlanSpec{
+		PlanID:         "plan-1",
+		AccountID:      "acct-1",
+		ProjectID:      "proj-1",
+		IdempotencyKey: "plan-start-1",
+	}
+	status := agentos.RunPlanStatus{
+		PlanID:         spec.PlanID,
+		LifecycleState: agentos.PlanLifecycleRunning,
+		UpdatedAt:      time.Now().UTC(),
+	}
+	if _, _, err := store.CreatePlan(t.Context(), spec, status); err != nil {
+		t.Fatalf("CreatePlan: %v", err)
+	}
+
+	return store, agentos.PlanRef{PlanID: spec.PlanID, AccountID: spec.AccountID, ProjectID: spec.ProjectID}
 }
 
 type fakePlanTemporalClient struct {

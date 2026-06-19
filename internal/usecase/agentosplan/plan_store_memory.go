@@ -178,6 +178,15 @@ func (s *MemoryPlanStore) ListPlanEvents(_ context.Context, scope agentos.PlanSt
 
 	s.mu.RLock()
 	defer s.mu.RUnlock()
+	if scope.AccountID != "" {
+		spec, ok := s.specs[scope.PlanID]
+		if !ok {
+			return nil, fmt.Errorf("%w: %s", agentos.ErrPlanRouteNotFound, scope.PlanID)
+		}
+		if err := ValidatePlanTenantAccess(agentos.PlanRef{PlanID: scope.PlanID, AccountID: scope.AccountID, ProjectID: scope.ProjectID}, spec); err != nil {
+			return nil, err
+		}
+	}
 	events := append([]agentos.PlanEvent(nil), s.events[scope.PlanID]...)
 	sort.SliceStable(events, func(i, j int) bool {
 		return events[i].Sequence < events[j].Sequence

@@ -63,7 +63,19 @@ func (r *V1) statusAgentOSPlan(ctx *fiber.Ctx) error {
 		return errorResponse(ctx, http.StatusNotFound, "agentos plan runtime is not configured")
 	}
 
-	status, err := r.planRuntime.StatusPlan(ctx.UserContext(), ctx.Params("plan_id"))
+	var req request.AgentOSPlanScope
+	if err := ctx.QueryParser(&req); err != nil {
+		return errorResponse(ctx, http.StatusBadRequest, "invalid plan scope")
+	}
+	if err := r.v.Struct(&req); err != nil {
+		return errorResponse(ctx, http.StatusBadRequest, err.Error())
+	}
+
+	status, err := r.planRuntime.StatusPlan(ctx.UserContext(), agentos.PlanRef{
+		PlanID:    ctx.Params("plan_id"),
+		AccountID: req.AccountID,
+		ProjectID: req.ProjectID,
+	})
 	if err != nil {
 		return agentOSError(ctx, err)
 	}
@@ -78,7 +90,7 @@ func (r *V1) statusAgentOSPlan(ctx *fiber.Ctx) error {
 // @Accept      json
 // @Produce     json
 // @Param       plan_id path string true "Plan ID"
-// @Param       request body request.AgentOSSignal true "AgentOS plan signal"
+// @Param       request body request.AgentOSPlanSignal true "AgentOS plan signal"
 // @Success     202
 // @Failure     400 {object} response.Error
 // @Failure     404 {object} response.Error
@@ -89,7 +101,7 @@ func (r *V1) signalAgentOSPlan(ctx *fiber.Ctx) error {
 		return errorResponse(ctx, http.StatusNotFound, "agentos plan runtime is not configured")
 	}
 
-	var req request.AgentOSSignal
+	var req request.AgentOSPlanSignal
 	if err := ctx.BodyParser(&req); err != nil {
 		return errorResponse(ctx, http.StatusBadRequest, "invalid request body")
 	}
@@ -97,7 +109,11 @@ func (r *V1) signalAgentOSPlan(ctx *fiber.Ctx) error {
 		return errorResponse(ctx, http.StatusBadRequest, err.Error())
 	}
 
-	if err := r.planRuntime.SignalPlan(ctx.UserContext(), ctx.Params("plan_id"), agentos.Signal{
+	if err := r.planRuntime.SignalPlan(ctx.UserContext(), agentos.PlanRef{
+		PlanID:    ctx.Params("plan_id"),
+		AccountID: req.AccountID,
+		ProjectID: req.ProjectID,
+	}, agentos.Signal{
 		Type:           req.Type,
 		IdempotencyKey: req.IdempotencyKey,
 		ActorID:        req.ActorID,
@@ -117,7 +133,7 @@ func (r *V1) signalAgentOSPlan(ctx *fiber.Ctx) error {
 // @Accept      json
 // @Produce     json
 // @Param       plan_id path string true "Plan ID"
-// @Param       request body request.AgentOSControl true "AgentOS plan control operation"
+// @Param       request body request.AgentOSPlanControl true "AgentOS plan control operation"
 // @Success     202
 // @Failure     400 {object} response.Error
 // @Failure     404 {object} response.Error
@@ -128,7 +144,7 @@ func (r *V1) controlAgentOSPlan(ctx *fiber.Ctx) error {
 		return errorResponse(ctx, http.StatusNotFound, "agentos plan runtime is not configured")
 	}
 
-	var req request.AgentOSControl
+	var req request.AgentOSPlanControl
 	if err := ctx.BodyParser(&req); err != nil {
 		return errorResponse(ctx, http.StatusBadRequest, "invalid request body")
 	}
@@ -136,7 +152,11 @@ func (r *V1) controlAgentOSPlan(ctx *fiber.Ctx) error {
 		return errorResponse(ctx, http.StatusBadRequest, err.Error())
 	}
 
-	if err := r.planRuntime.ControlPlan(ctx.UserContext(), ctx.Params("plan_id"), agentos.ControlRequest{
+	if err := r.planRuntime.ControlPlan(ctx.UserContext(), agentos.PlanRef{
+		PlanID:    ctx.Params("plan_id"),
+		AccountID: req.AccountID,
+		ProjectID: req.ProjectID,
+	}, agentos.ControlRequest{
 		Operation:      req.Operation,
 		IdempotencyKey: req.IdempotencyKey,
 		RequestedAt:    req.RequestedAt,
@@ -173,9 +193,14 @@ func (r *V1) streamAgentOSPlanEvents(ctx *fiber.Ctx) error {
 	if err := ctx.QueryParser(&req); err != nil {
 		return errorResponse(ctx, http.StatusBadRequest, "invalid stream scope")
 	}
+	if err := r.v.Struct(&req); err != nil {
+		return errorResponse(ctx, http.StatusBadRequest, err.Error())
+	}
 
 	sub, err := r.planRuntime.SubscribePlan(ctx.UserContext(), agentos.PlanStreamScope{
 		PlanID:        ctx.Params("plan_id"),
+		AccountID:     req.AccountID,
+		ProjectID:     req.ProjectID,
 		NodeID:        req.NodeID,
 		RunID:         req.RunID,
 		AfterSequence: req.AfterSequence,

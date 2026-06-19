@@ -50,6 +50,7 @@ func TestAgentOSPlanRoutesUsePlanRuntime(t *testing.T) {
 
 	signalBody := `{
 		"type": "plan.node.retry",
+		"account_id": "acct-1",
 		"idempotency_key": "retry-1",
 		"actor_id": "operator-1",
 		"payload": {"node_id": "research"}
@@ -58,15 +59,17 @@ func TestAgentOSPlanRoutesUsePlanRuntime(t *testing.T) {
 	if resp.StatusCode != http.StatusAccepted {
 		t.Fatalf("signal status = %d", resp.StatusCode)
 	}
-	if planRuntime.signalPlanID != "plan-1" ||
+	if planRuntime.signalRef.PlanID != "plan-1" ||
+		planRuntime.signalRef.AccountID != "acct-1" ||
 		planRuntime.signal.Type != agentos.SignalPlanNodeRetry ||
 		planRuntime.signal.ActorID != "operator-1" ||
 		planRuntime.signal.Payload["node_id"] != "research" {
-		t.Fatalf("unexpected signal: plan=%q signal=%#v", planRuntime.signalPlanID, planRuntime.signal)
+		t.Fatalf("unexpected signal: ref=%#v signal=%#v", planRuntime.signalRef, planRuntime.signal)
 	}
 
 	controlBody := `{
 		"operation": "pause",
+		"account_id": "acct-1",
 		"idempotency_key": "pause-1",
 		"actor_id": "operator-1"
 	}`
@@ -74,13 +77,14 @@ func TestAgentOSPlanRoutesUsePlanRuntime(t *testing.T) {
 	if resp.StatusCode != http.StatusAccepted {
 		t.Fatalf("control status = %d", resp.StatusCode)
 	}
-	if planRuntime.controlPlanID != "plan-1" ||
+	if planRuntime.controlRef.PlanID != "plan-1" ||
+		planRuntime.controlRef.AccountID != "acct-1" ||
 		planRuntime.control.Operation != agentos.ControlPause ||
 		planRuntime.control.ActorID != "operator-1" {
-		t.Fatalf("unexpected control: plan=%q control=%#v", planRuntime.controlPlanID, planRuntime.control)
+		t.Fatalf("unexpected control: ref=%#v control=%#v", planRuntime.controlRef, planRuntime.control)
 	}
 
-	resp = doAgentOSRouteRequest(t, app, http.MethodGet, "/v1/agentos/plans/plan-1/status", "")
+	resp = doAgentOSRouteRequest(t, app, http.MethodGet, "/v1/agentos/plans/plan-1/status?account_id=acct-1", "")
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("status code = %d", resp.StatusCode)
@@ -99,7 +103,7 @@ func TestAgentOSPlanEventRouteStreamsSSE(t *testing.T) {
 	app := fiber.New()
 	NewRoutes(app.Group("/v1"), nil, nil, logger.New("error"), nil, nil, nil, nil, nil, nil, planRuntime)
 
-	resp := doAgentOSRouteRequest(t, app, http.MethodGet, "/v1/agentos/plans/plan-1/events?node_id=research&after_sequence=7", "")
+	resp := doAgentOSRouteRequest(t, app, http.MethodGet, "/v1/agentos/plans/plan-1/events?account_id=acct-1&node_id=research&after_sequence=7", "")
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("events status = %d", resp.StatusCode)
@@ -108,6 +112,7 @@ func TestAgentOSPlanEventRouteStreamsSSE(t *testing.T) {
 		t.Fatalf("content type = %q", contentType)
 	}
 	if planRuntime.scope.PlanID != "plan-1" ||
+		planRuntime.scope.AccountID != "acct-1" ||
 		planRuntime.scope.NodeID != "research" ||
 		planRuntime.scope.AfterSequence != 7 {
 		t.Fatalf("unexpected scope: %#v", planRuntime.scope)
@@ -137,12 +142,12 @@ func TestAgentOSPlanEventRouteStreamsSSE(t *testing.T) {
 }
 
 type fakePlanRuntime struct {
-	started       agentos.RunPlanSpec
-	signalPlanID  string
-	signal        agentos.Signal
-	controlPlanID string
-	control       agentos.ControlRequest
-	scope         agentos.PlanStreamScope
+	started    agentos.RunPlanSpec
+	signalRef  agentos.PlanRef
+	signal     agentos.Signal
+	controlRef agentos.PlanRef
+	control    agentos.ControlRequest
+	scope      agentos.PlanStreamScope
 }
 
 func newFakePlanRuntime() *fakePlanRuntime {
@@ -155,19 +160,19 @@ func (r *fakePlanRuntime) StartPlan(_ context.Context, spec agentos.RunPlanSpec)
 	return agentos.RunPlanStatus{PlanID: spec.PlanID, LifecycleState: agentos.PlanLifecycleRunning, UpdatedAt: time.Now()}, nil
 }
 
-func (r *fakePlanRuntime) StatusPlan(_ context.Context, planID string) (agentos.RunPlanStatus, error) {
-	return agentos.RunPlanStatus{PlanID: planID, LifecycleState: agentos.PlanLifecycleRunning, UpdatedAt: time.Now()}, nil
+func (r *fakePlanRuntime) StatusPlan(_ context.Context, ref agentos.PlanRef) (agentos.RunPlanStatus, error) {
+	return agentos.RunPlanStatus{PlanID: ref.PlanID, LifecycleState: agentos.PlanLifecycleRunning, UpdatedAt: time.Now()}, nil
 }
 
-func (r *fakePlanRuntime) SignalPlan(_ context.Context, planID string, signal agentos.Signal) error {
-	r.signalPlanID = planID
+func (r *fakePlanRuntime) SignalPlan(_ context.Context, ref agentos.PlanRef, signal agentos.Signal) error {
+	r.signalRef = ref
 	r.signal = signal
 
 	return nil
 }
 
-func (r *fakePlanRuntime) ControlPlan(_ context.Context, planID string, control agentos.ControlRequest) error {
-	r.controlPlanID = planID
+func (r *fakePlanRuntime) ControlPlan(_ context.Context, ref agentos.PlanRef, control agentos.ControlRequest) error {
+	r.controlRef = ref
 	r.control = control
 
 	return nil

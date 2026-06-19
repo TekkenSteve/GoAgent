@@ -41,11 +41,41 @@ type AgentOSControl struct {
 	Metadata       map[string]string        `json:"metadata,omitempty"`
 }
 
+// AgentOSPlanSignal sends business input to a RunPlan inside tenant scope.
+type AgentOSPlanSignal struct {
+	Type           agentos.SignalType `json:"type" validate:"required"`
+	AccountID      string             `json:"account_id" validate:"required"`
+	ProjectID      string             `json:"project_id,omitempty"`
+	IdempotencyKey string             `json:"idempotency_key,omitempty"`
+	ActorID        string             `json:"actor_id,omitempty"`
+	Payload        map[string]any     `json:"payload,omitempty"`
+	SentAt         time.Time          `json:"sent_at,omitempty"`
+}
+
+// AgentOSPlanControl sends a lifecycle control operation to a RunPlan inside tenant scope.
+type AgentOSPlanControl struct {
+	Operation      agentos.ControlOperation `json:"operation" validate:"required"`
+	AccountID      string                   `json:"account_id" validate:"required"`
+	ProjectID      string                   `json:"project_id,omitempty"`
+	IdempotencyKey string                   `json:"idempotency_key,omitempty"`
+	RequestedAt    time.Time                `json:"requested_at,omitempty"`
+	ActorID        string                   `json:"actor_id,omitempty"`
+	Metadata       map[string]string        `json:"metadata,omitempty"`
+}
+
 // AgentOSPlanStreamScope selects plan events for REST streaming.
 type AgentOSPlanStreamScope struct {
+	AccountID     string `query:"account_id" validate:"required"`
+	ProjectID     string `query:"project_id"`
 	NodeID        string `query:"node_id"`
 	RunID         string `query:"run_id"`
 	AfterSequence int64  `query:"after_sequence"`
+}
+
+// AgentOSPlanScope selects one plan inside a tenant boundary.
+type AgentOSPlanScope struct {
+	AccountID string `query:"account_id" validate:"required"`
+	ProjectID string `query:"project_id"`
 }
 
 // AgentOSEvent is the public REST envelope for external backend event ingest.

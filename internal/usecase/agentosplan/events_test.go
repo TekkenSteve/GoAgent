@@ -2,6 +2,7 @@ package agentosplan
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
 
@@ -66,6 +67,30 @@ func TestMemoryPlanStoreAppendPlanEventIsIdempotent(t *testing.T) {
 	events, err := store.ListPlanEvents(ctx, agentos.PlanStreamScope{PlanID: "plan-1"}, 0)
 	if err != nil {
 		t.Fatalf("ListPlanEvents: %v", err)
+	}
+	if len(events) != 1 {
+		t.Fatalf("events = %#v", events)
+	}
+}
+
+func TestMemoryPlanStoreListPlanEventsEnforcesTenantScope(t *testing.T) {
+	ctx := context.Background()
+	store := NewMemoryPlanStore()
+	spec := agentos.RunPlanSpec{PlanID: "plan-1", AccountID: "acct-1", ProjectID: "proj-1", IdempotencyKey: "plan-start-1"}
+	status := agentos.RunPlanStatus{PlanID: "plan-1", LifecycleState: agentos.PlanLifecycleRunning}
+	if err := store.SavePlanState(ctx, PlanStateSnapshot{Spec: spec, Status: status}); err != nil {
+		t.Fatalf("SavePlanState: %v", err)
+	}
+	if _, err := store.AppendPlanEvent(ctx, agentos.PlanEvent{Event: agentos.Event{EventType: agentos.EventPlanStarted}, PlanID: spec.PlanID}, "event-1"); err != nil {
+		t.Fatalf("AppendPlanEvent: %v", err)
+	}
+
+	if _, err := store.ListPlanEvents(ctx, agentos.PlanStreamScope{PlanID: spec.PlanID, AccountID: "acct-other", ProjectID: spec.ProjectID}, 0); !errors.Is(err, agentos.ErrPlanRouteNotFound) {
+		t.Fatalf("ListPlanEvents mismatch error = %v, want ErrPlanRouteNotFound", err)
+	}
+	events, err := store.ListPlanEvents(ctx, agentos.PlanStreamScope{PlanID: spec.PlanID, AccountID: spec.AccountID, ProjectID: spec.ProjectID}, 0)
+	if err != nil {
+		t.Fatalf("ListPlanEvents scoped: %v", err)
 	}
 	if len(events) != 1 {
 		t.Fatalf("events = %#v", events)

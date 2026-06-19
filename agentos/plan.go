@@ -24,6 +24,13 @@ type RunPlanSpec struct {
 	Policy         PlanPolicy        `json:"policy,omitempty"`
 }
 
+// PlanRef identifies a plan inside an account/project boundary.
+type PlanRef struct {
+	PlanID    string `json:"plan_id"`
+	AccountID string `json:"account_id"`
+	ProjectID string `json:"project_id,omitempty"`
+}
+
 // PlanNodeSpec describes one backend-owned child run in a RunPlan.
 type PlanNodeSpec struct {
 	NodeID     string         `json:"node_id"`
@@ -209,6 +216,8 @@ const (
 // PlanStreamScope selects events for a plan, node, or child run.
 type PlanStreamScope struct {
 	PlanID        string `json:"plan_id"`
+	AccountID     string `json:"account_id"`
+	ProjectID     string `json:"project_id,omitempty"`
 	NodeID        string `json:"node_id,omitempty"`
 	RunID         string `json:"run_id,omitempty"`
 	AfterSequence int64  `json:"after_sequence,omitempty"`

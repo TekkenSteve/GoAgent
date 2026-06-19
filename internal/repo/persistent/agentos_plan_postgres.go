@@ -517,6 +517,18 @@ func (r *AgentOSPlanRepo) ListPlanEvents(ctx context.Context, scope agentos.Plan
 	if scope.PlanID == "" {
 		return nil, fmt.Errorf("%w: plan id is required", agentos.ErrInvalidStreamScope)
 	}
+	if scope.AccountID != "" {
+		spec, _, exists, err := r.GetPlan(ctx, scope.PlanID)
+		if err != nil {
+			return nil, err
+		}
+		if !exists {
+			return nil, fmt.Errorf("%w: %s", agentos.ErrPlanRouteNotFound, scope.PlanID)
+		}
+		if err := agentosplan.ValidatePlanTenantAccess(agentos.PlanRef{PlanID: scope.PlanID, AccountID: scope.AccountID, ProjectID: scope.ProjectID}, spec); err != nil {
+			return nil, err
+		}
+	}
 
 	builder := r.Builder.
 		Select("event_json").

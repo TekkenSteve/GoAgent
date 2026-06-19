@@ -11,6 +11,7 @@ var (
 	ErrInvalidControlOperation = errors.New("agentos: invalid control operation")
 	ErrInvalidStreamScope      = errors.New("agentos: invalid stream scope")
 	ErrInvalidRunPlan          = errors.New("agentos: invalid run plan")
+	ErrInvalidPlanScope        = errors.New("agentos: invalid plan scope")
 	ErrPlanRouteNotFound       = errors.New("agentos: plan route not found")
 	ErrCapabilityNotFound      = errors.New("agentos: capability not found")
 	ErrArtifactNotFound        = errors.New("agentos: artifact not found")

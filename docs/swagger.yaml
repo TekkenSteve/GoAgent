@@ -729,6 +729,49 @@ definitions:
     - event_type
     - source
     type: object
+  request.AgentOSPlanControl:
+    properties:
+      account_id:
+        type: string
+      actor_id:
+        type: string
+      idempotency_key:
+        type: string
+      metadata:
+        additionalProperties:
+          type: string
+        type: object
+      operation:
+        $ref: '#/definitions/agentos.ControlOperation'
+      project_id:
+        type: string
+      requested_at:
+        type: string
+    required:
+    - account_id
+    - operation
+    type: object
+  request.AgentOSPlanSignal:
+    properties:
+      account_id:
+        type: string
+      actor_id:
+        type: string
+      idempotency_key:
+        type: string
+      payload:
+        additionalProperties: {}
+        type: object
+      project_id:
+        type: string
+      sent_at:
+        type: string
+      type:
+        $ref: '#/definitions/agentos.SignalType'
+    required:
+    - account_id
+    - type
+    type: object
   request.AgentOSSignal:
     properties:
       actor_id:
@@ -836,14 +879,11 @@ definitions:
     - 1000000000
     - 60000000000
     - 3600000000000
-    - -9223372036854775808
-    - 9223372036854775807
     - 1
     - 1000
     - 1000000
     - 1000000000
     - 60000000000
-    - 3600000000000
     format: int64
     type: integer
     x-enum-varnames:
@@ -855,14 +895,11 @@ definitions:
     - Second
     - Minute
     - Hour
-    - minDuration
-    - maxDuration
     - Nanosecond
     - Microsecond
     - Millisecond
     - Second
     - Minute
-    - Hour
   v1.ingestAgentOSEventResponse:
     properties:
       duplicate:
@@ -934,7 +971,7 @@ paths:
         name: request
         required: true
         schema:
-          $ref: '#/definitions/request.AgentOSControl'
+          $ref: '#/definitions/request.AgentOSPlanControl'
       produces:
       - application/json
       responses:
@@ -1018,7 +1055,7 @@ paths:
         name: request
         required: true
         schema:
-          $ref: '#/definitions/request.AgentOSSignal'
+          $ref: '#/definitions/request.AgentOSPlanSignal'
       produces:
       - application/json
       responses:

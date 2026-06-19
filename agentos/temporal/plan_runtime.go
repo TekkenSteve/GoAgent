@@ -100,6 +100,9 @@ func (r *planRuntime) StartPlan(ctx context.Context, spec agentos.RunPlanSpec) (
 	if spec.PlanID == "" {
 		return agentos.RunPlanStatus{}, fmt.Errorf("%w: plan id is required", agentos.ErrInvalidRunPlan)
 	}
+	if spec.AccountID == "" {
+		return agentos.RunPlanStatus{}, fmt.Errorf("%w: account id is required", agentos.ErrInvalidPlanScope)
+	}
 	if spec.IdempotencyKey == "" {
 		return agentos.RunPlanStatus{}, fmt.Errorf("%w: plan idempotency key is required", agentos.ErrInvalidRunPlan)
 	}
@@ -147,33 +150,45 @@ func (r *planRuntime) StartPlan(ctx context.Context, spec agentos.RunPlanSpec) (
 	return status, nil
 }
 
-func (r *planRuntime) StatusPlan(ctx context.Context, planID string) (agentos.RunPlanStatus, error) {
-	if planID == "" {
-		return agentos.RunPlanStatus{}, fmt.Errorf("%w: plan id is required", agentos.ErrInvalidRunPlan)
-	}
-	if r.planIndex == nil {
-		return agentos.RunPlanStatus{}, errors.New("agentos temporal plan runtime: plan index is not configured")
-	}
+func (r *planRuntime) StatusPlan(ctx context.Context, ref agentos.PlanRef) (agentos.RunPlanStatus, error) {
+	_, status, err := r.authorizePlan(ctx, ref)
 
-	_, status, exists, err := r.planIndex.GetPlan(ctx, planID)
-	if err != nil {
-		return agentos.RunPlanStatus{}, err
-	}
-	if !exists {
-		return agentos.RunPlanStatus{}, fmt.Errorf("%w: %s", agentos.ErrPlanRouteNotFound, planID)
-	}
-
-	return status, nil
+	return status, err
 }
 
-func (r *planRuntime) SignalPlan(ctx context.Context, planID string, signal agentos.Signal) error {
-	if planID == "" {
-		return fmt.Errorf("%w: plan id is required", agentos.ErrInvalidRunPlan)
+func (r *planRuntime) authorizePlan(ctx context.Context, ref agentos.PlanRef) (agentos.RunPlanSpec, agentos.RunPlanStatus, error) {
+	if err := agentosplan.ValidatePlanRef(ref); err != nil {
+		return agentos.RunPlanSpec{}, agentos.RunPlanStatus{}, err
+	}
+	if r.planIndex == nil {
+		return agentos.RunPlanSpec{}, agentos.RunPlanStatus{}, errors.New("agentos temporal plan runtime: plan index is not configured")
+	}
+
+	spec, status, exists, err := r.planIndex.GetPlan(ctx, ref.PlanID)
+	if err != nil {
+		return agentos.RunPlanSpec{}, agentos.RunPlanStatus{}, err
+	}
+	if !exists {
+		return agentos.RunPlanSpec{}, agentos.RunPlanStatus{}, fmt.Errorf("%w: %s", agentos.ErrPlanRouteNotFound, ref.PlanID)
+	}
+	if err := agentosplan.ValidatePlanTenantAccess(ref, spec); err != nil {
+		return agentos.RunPlanSpec{}, agentos.RunPlanStatus{}, err
+	}
+
+	return spec, status, nil
+}
+
+func (r *planRuntime) SignalPlan(ctx context.Context, ref agentos.PlanRef, signal agentos.Signal) error {
+	if err := agentosplan.ValidatePlanRef(ref); err != nil {
+		return err
 	}
 	if err := agentosplan.ValidatePlanSignal(signal); err != nil {
 		return err
 	}
-	record := planSignalAuditRecord(planID, signal)
+	if _, _, err := r.authorizePlan(ctx, ref); err != nil {
+		return err
+	}
+	record := planSignalAuditRecord(ref.PlanID, signal)
 	exists, err := r.planAuditRecorded(ctx, record)
 	if err != nil {
 		return err
@@ -182,7 +197,7 @@ func (r *planRuntime) SignalPlan(ctx context.Context, planID string, signal agen
 		return nil
 	}
 
-	if err := r.temporalClient.SignalWorkflow(ctx, planWorkflowID(planID), "", PlanSignalName, signal); err != nil {
+	if err := r.temporalClient.SignalWorkflow(ctx, planWorkflowID(ref.PlanID), "", PlanSignalName, signal); err != nil {
 		return fmt.Errorf("agentos temporal plan runtime - signal plan workflow: %w", err)
 	}
 	if _, err := r.recordPlanAudit(ctx, record); err != nil {
@@ -192,9 +207,9 @@ func (r *planRuntime) SignalPlan(ctx context.Context, planID string, signal agen
 	return nil
 }
 
-func (r *planRuntime) ControlPlan(ctx context.Context, planID string, control agentos.ControlRequest) error {
-	if planID == "" {
-		return fmt.Errorf("%w: plan id is required", agentos.ErrInvalidRunPlan)
+func (r *planRuntime) ControlPlan(ctx context.Context, ref agentos.PlanRef, control agentos.ControlRequest) error {
+	if err := agentosplan.ValidatePlanRef(ref); err != nil {
+		return err
 	}
 	if err := agentos.ValidateControlRequest(control); err != nil {
 		return err
@@ -205,8 +220,11 @@ func (r *planRuntime) ControlPlan(ctx context.Context, planID string, control ag
 	if control.ActorID == "" {
 		return fmt.Errorf("%w: control actor id is required", agentos.ErrInvalidControlOperation)
 	}
+	if _, _, err := r.authorizePlan(ctx, ref); err != nil {
+		return err
+	}
 	record := agentosplan.AuditRecord{
-		PlanID:         planID,
+		PlanID:         ref.PlanID,
 		ActorID:        control.ActorID,
 		Action:         agentosplan.AuditActionPlanControl,
 		IdempotencyKey: control.IdempotencyKey,
@@ -223,7 +241,7 @@ func (r *planRuntime) ControlPlan(ctx context.Context, planID string, control ag
 		return nil
 	}
 
-	if err := r.temporalClient.SignalWorkflow(ctx, planWorkflowID(planID), "", PlanControlSignalName, control); err != nil {
+	if err := r.temporalClient.SignalWorkflow(ctx, planWorkflowID(ref.PlanID), "", PlanControlSignalName, control); err != nil {
 		return fmt.Errorf("agentos temporal plan runtime - control plan workflow: %w", err)
 	}
 	if _, err := r.recordPlanAudit(ctx, record); err != nil {
@@ -237,8 +255,11 @@ func (r *planRuntime) SubscribePlan(ctx context.Context, scope agentos.PlanStrea
 	if r.planEvents == nil {
 		return nil, errors.New("agentos temporal plan runtime: plan event store is not configured")
 	}
-	if scope.PlanID == "" {
-		return nil, fmt.Errorf("%w: plan id is required", agentos.ErrInvalidStreamScope)
+	if err := agentosplan.ValidatePlanStreamScope(scope); err != nil {
+		return nil, err
+	}
+	if _, _, err := r.authorizePlan(ctx, agentos.PlanRef{PlanID: scope.PlanID, AccountID: scope.AccountID, ProjectID: scope.ProjectID}); err != nil {
+		return nil, err
 	}
 
 	events, err := r.planEvents.ListPlanEvents(ctx, scope, 0)

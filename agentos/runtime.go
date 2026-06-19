@@ -15,9 +15,9 @@ type Runtime interface {
 // PlanRuntime is the durable cross-backend AgentOS planning boundary.
 type PlanRuntime interface {
 	StartPlan(ctx context.Context, spec RunPlanSpec) (RunPlanStatus, error)
-	StatusPlan(ctx context.Context, planID string) (RunPlanStatus, error)
-	SignalPlan(ctx context.Context, planID string, signal Signal) error
-	ControlPlan(ctx context.Context, planID string, control ControlRequest) error
+	StatusPlan(ctx context.Context, ref PlanRef) (RunPlanStatus, error)
+	SignalPlan(ctx context.Context, ref PlanRef, signal Signal) error
+	ControlPlan(ctx context.Context, ref PlanRef, control ControlRequest) error
 	SubscribePlan(ctx context.Context, scope PlanStreamScope) (Subscription, error)
 }
 

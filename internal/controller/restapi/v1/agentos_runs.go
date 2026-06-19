@@ -173,6 +173,7 @@ func agentOSError(ctx *fiber.Ctx, err error) error {
 		errors.Is(err, agentos.ErrInvalidSignal),
 		errors.Is(err, agentos.ErrInvalidControlOperation),
 		errors.Is(err, agentos.ErrInvalidStreamScope),
+		errors.Is(err, agentos.ErrInvalidPlanScope),
 		errors.Is(err, agentos.ErrInvalidRunPlan),
 		errors.Is(err, agentos.ErrInvalidArtifact),
 		errors.Is(err, agentos.ErrInvalidExpression),
