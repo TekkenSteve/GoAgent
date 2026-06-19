@@ -111,6 +111,7 @@ func newPlanWorkflowTestEnv(mocks *planWorkflowMocks) *testsuite.TestWorkflowEnv
 	env.RegisterActivityWithOptions(mocks.start, activity.RegisterOptions{Name: StartPlanNodeActivityName})
 	env.RegisterActivityWithOptions(mocks.status, activity.RegisterOptions{Name: StatusPlanNodeActivityName})
 	env.RegisterActivityWithOptions(mocks.control, activity.RegisterOptions{Name: ControlPlanNodeActivityName})
+	env.RegisterActivityWithOptions(mocks.publishArtifacts, activity.RegisterOptions{Name: PublishPlanArtifactsActivityName})
 
 	return env
 }
@@ -135,4 +136,13 @@ func (m *planWorkflowMocks) status(_ context.Context, input statusPlanNodeInput)
 
 func (m *planWorkflowMocks) control(context.Context, controlPlanNodeInput) error {
 	return nil
+}
+
+func (m *planWorkflowMocks) publishArtifacts(_ context.Context, input publishPlanArtifactsInput) (publishPlanArtifactsOutput, error) {
+	refs, err := normalizeRunArtifacts(input.PlanID, input.Node, input.Status)
+	if err != nil {
+		return publishPlanArtifactsOutput{}, err
+	}
+
+	return publishPlanArtifactsOutput{Artifacts: refs}, nil
 }

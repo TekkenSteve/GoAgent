@@ -11,6 +11,7 @@ import (
 	"github.com/TekkenSteve/GoAgent/internal/entity"
 	"github.com/TekkenSteve/GoAgent/internal/pkg/postgres"
 	goredis "github.com/TekkenSteve/GoAgent/internal/pkg/redis"
+	artifactrepo "github.com/TekkenSteve/GoAgent/internal/repo/artifact"
 	"github.com/TekkenSteve/GoAgent/internal/repo/cached"
 	"github.com/TekkenSteve/GoAgent/internal/repo/compressor"
 	"github.com/TekkenSteve/GoAgent/internal/repo/framework"
@@ -29,8 +30,9 @@ import (
 )
 
 var (
-	ErrWorkerPostgresURLRequired = errors.New("agentos temporal worker: postgres url is required")
-	ErrWorkerRedisURLRequired    = errors.New("agentos temporal worker: redis url is required")
+	ErrWorkerPostgresURLRequired       = errors.New("agentos temporal worker: postgres url is required")
+	ErrWorkerRedisURLRequired          = errors.New("agentos temporal worker: redis url is required")
+	ErrWorkerArtifactStoreRootRequired = errors.New("agentos temporal worker: artifact store root is required")
 )
 
 func newWorkerKit(ctx context.Context, cfg WorkerConfig) (*WorkerKit, error) {
@@ -39,6 +41,9 @@ func newWorkerKit(ctx context.Context, cfg WorkerConfig) (*WorkerKit, error) {
 	}
 	if cfg.RedisURL == "" {
 		return nil, ErrWorkerRedisURLRequired
+	}
+	if cfg.ArtifactStoreRoot == "" {
+		return nil, ErrWorkerArtifactStoreRootRequired
 	}
 
 	l := logger.New(cfg.LogLevel)
@@ -88,6 +93,15 @@ func newWorkerKit(ctx context.Context, cfg WorkerConfig) (*WorkerKit, error) {
 
 	runBackendIndex := temporalrepo.NewRunBackendIndexRepo(pg)
 	planStore := temporalrepo.NewAgentOSPlanRepo(pg)
+	blobStore, err := artifactrepo.NewLocalBlobStore(cfg.ArtifactStoreRoot)
+	if err != nil {
+		temporalClient.Close()
+		_ = rdb.Close()
+		pg.Close()
+
+		return nil, fmt.Errorf("agentos temporal worker - artifact blob store: %w", err)
+	}
+	artifactStore := temporalrepo.NewAgentOSArtifactRepo(pg, blobStore)
 	planRuntime, err := NewRuntimeWithClient(ctx, RuntimeConfig{
 		TemporalAddress:          cfg.TemporalAddress,
 		TemporalNamespace:        cfg.TemporalNamespace,
@@ -103,7 +117,7 @@ func newWorkerKit(ctx context.Context, cfg WorkerConfig) (*WorkerKit, error) {
 
 		return nil, fmt.Errorf("agentos temporal worker - plan runtime: %w", err)
 	}
-	planActivities, err := NewPlanActivitiesWithStores(planRuntime, cfg.Capabilities, planStore, planStore, runBackendIndex)
+	planActivities, err := NewPlanActivitiesWithStores(planRuntime, cfg.Capabilities, planStore, planStore, runBackendIndex, artifactStore)
 	if err != nil {
 		temporalClient.Close()
 		_ = rdb.Close()

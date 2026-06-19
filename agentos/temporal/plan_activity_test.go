@@ -47,6 +47,77 @@ func TestPlanActivitiesStartStatusControl(t *testing.T) {
 	}
 }
 
+func TestPlanActivitiesStartResolvesMappedInput(t *testing.T) {
+	runtime := &fakePlanRuntime{}
+	activities := NewPlanActivities(runtime)
+	ref := agentos.BackendRef{Kind: agentos.BackendKindNative, Name: agentos.BackendNameGoAgentNative}
+
+	started, err := activities.StartPlanNodeActivity(context.Background(), startPlanNodeInput{
+		PlanID: "plan-1",
+		PlanInputs: map[string]any{
+			"task": map[string]any{"topic": "artifact routing"},
+		},
+		Node: agentos.PlanNodeSpec{
+			NodeID: "node-1",
+			Run: agentos.RunSpec{
+				RunID:   "run-1",
+				Backend: ref,
+				Input:   map[string]any{"existing": true},
+			},
+			Inputs: []agentos.InputMapping{
+				{Target: "topic", SourcePath: "task.topic", Required: true},
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("StartPlanNodeActivity: %v", err)
+	}
+	if started.Status.RunID != "run-1" {
+		t.Fatalf("started = %#v", started)
+	}
+	if runtime.started.Input["existing"] != true {
+		t.Fatalf("existing input = %#v", runtime.started.Input)
+	}
+	if runtime.started.Input["topic"] != "artifact routing" {
+		t.Fatalf("topic input = %#v", runtime.started.Input)
+	}
+}
+
+func TestPlanActivitiesPublishArtifactsIsIdempotent(t *testing.T) {
+	activities := NewPlanActivities(&fakePlanRuntime{})
+	input := publishPlanArtifactsInput{
+		PlanID: "plan-1",
+		Node: agentos.PlanNodeSpec{
+			NodeID: "node-1",
+		},
+		Status: agentos.RunStatus{
+			RunID:          "run-1",
+			LifecycleState: "completed",
+			Artifacts: []agentos.ArtifactRef{
+				{ArtifactID: "artifact-1", Name: "summary", Kind: agentos.ArtifactKindObject},
+			},
+		},
+	}
+
+	first, err := activities.PublishPlanArtifactsActivity(context.Background(), input)
+	if err != nil {
+		t.Fatalf("first PublishPlanArtifactsActivity: %v", err)
+	}
+	second, err := activities.PublishPlanArtifactsActivity(context.Background(), input)
+	if err != nil {
+		t.Fatalf("second PublishPlanArtifactsActivity: %v", err)
+	}
+	if len(first.Artifacts) != 1 || len(second.Artifacts) != 1 {
+		t.Fatalf("published artifacts = %#v %#v", first.Artifacts, second.Artifacts)
+	}
+	if second.Artifacts[0].ArtifactID != first.Artifacts[0].ArtifactID {
+		t.Fatalf("idempotent artifact id = %q, want %q", second.Artifacts[0].ArtifactID, first.Artifacts[0].ArtifactID)
+	}
+	if first.Artifacts[0].PlanID != "plan-1" || first.Artifacts[0].NodeID != "node-1" || first.Artifacts[0].RunID != "run-1" {
+		t.Fatalf("artifact scope = %#v", first.Artifacts[0])
+	}
+}
+
 func TestPlanActivitiesValidatePlanUsesCapabilityCatalog(t *testing.T) {
 	ref := agentos.BackendRef{Kind: agentos.BackendKindHTTP, Name: "research"}
 	activities, err := NewPlanActivitiesWithCapabilities(&fakePlanRuntime{}, []agentos.Capability{

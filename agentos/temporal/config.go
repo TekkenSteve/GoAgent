@@ -112,6 +112,7 @@ type WorkerConfig struct {
 	RedisURL          string
 	LLMConfigPath     string
 	LogLevel          string
+	ArtifactStoreRoot string
 
 	TemporalExternalBackends []ExternalBackendConfig
 	HTTPBackends             []HTTPBackendConfig

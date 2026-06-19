@@ -13,15 +13,16 @@ import (
 )
 
 const (
-	PlanWorkflowName             = "AgentOSPlanWorkflow"
-	PlanStatusQueryName          = "agentos.plan.status"
-	PlanSignalName               = "agentos.plan.signal"
-	PlanControlSignalName        = "agentos.plan.control"
-	ValidatePlanActivityName     = "AgentOSValidatePlan"
-	StartPlanNodeActivityName    = "AgentOSStartPlanNode"
-	StatusPlanNodeActivityName   = "AgentOSStatusPlanNode"
-	ControlPlanNodeActivityName  = "AgentOSControlPlanNode"
-	PersistPlanStateActivityName = "AgentOSPersistPlanState"
+	PlanWorkflowName                 = "AgentOSPlanWorkflow"
+	PlanStatusQueryName              = "agentos.plan.status"
+	PlanSignalName                   = "agentos.plan.signal"
+	PlanControlSignalName            = "agentos.plan.control"
+	ValidatePlanActivityName         = "AgentOSValidatePlan"
+	StartPlanNodeActivityName        = "AgentOSStartPlanNode"
+	StatusPlanNodeActivityName       = "AgentOSStatusPlanNode"
+	ControlPlanNodeActivityName      = "AgentOSControlPlanNode"
+	PublishPlanArtifactsActivityName = "AgentOSPublishPlanArtifacts"
+	PersistPlanStateActivityName     = "AgentOSPersistPlanState"
 )
 
 const planNodePollInterval = 5 * time.Second
@@ -128,7 +129,7 @@ func PlanWorkflow(ctx workflow.Context, spec agentos.RunPlanSpec) (agentos.RunPl
 			if !nodeSchedulable(state, node.NodeID) {
 				continue
 			}
-			if err := startPlanNode(activityCtx, ctx, spec, &state, node); err != nil {
+			if err := startPlanNode(activityCtx, ctx, spec, &state, node, validation.Plan.EdgesByTo[node.NodeID]); err != nil {
 				if persistErr := applyPlanStateEvent(activityCtx, ctx, spec, &state, agentosplan.StateEvent{Kind: agentosplan.EventNodeFailed, NodeID: node.NodeID, Reason: err.Error()}); persistErr != nil {
 					return state.Status, errors.Join(err, persistErr)
 				}
@@ -193,7 +194,7 @@ func applyPlanStateEvent(activityCtx workflow.Context, workflowCtx workflow.Cont
 	return nil
 }
 
-func startPlanNode(activityCtx workflow.Context, workflowCtx workflow.Context, spec agentos.RunPlanSpec, state *agentosplan.State, node agentos.PlanNodeSpec) error {
+func startPlanNode(activityCtx workflow.Context, workflowCtx workflow.Context, spec agentos.RunPlanSpec, state *agentosplan.State, node agentos.PlanNodeSpec, incomingEdges []agentos.PlanEdgeSpec) error {
 	if err := applyPlanStateEvent(activityCtx, workflowCtx, spec, state, agentosplan.StateEvent{Kind: agentosplan.EventNodeReady, NodeID: node.NodeID}); err != nil {
 		return err
 	}
@@ -202,7 +203,13 @@ func startPlanNode(activityCtx workflow.Context, workflowCtx workflow.Context, s
 	}
 
 	var started startPlanNodeOutput
-	if err := workflow.ExecuteActivity(activityCtx, StartPlanNodeActivityName, startPlanNodeInput{PlanID: spec.PlanID, Node: node}).Get(activityCtx, &started); err != nil {
+	if err := workflow.ExecuteActivity(activityCtx, StartPlanNodeActivityName, startPlanNodeInput{
+		PlanID:     spec.PlanID,
+		PlanInputs: spec.Inputs,
+		Status:     state.Status,
+		Node:       node,
+		Edges:      incomingEdges,
+	}).Get(activityCtx, &started); err != nil {
 		return err
 	}
 	if started.Status.RunID != "" && started.Status.RunID != node.Run.RunID {
@@ -255,11 +262,16 @@ func pollRunningPlanNodes(activityCtx workflow.Context, workflowCtx workflow.Con
 }
 
 func applyNodeRunTerminal(activityCtx workflow.Context, workflowCtx workflow.Context, spec agentos.RunPlanSpec, state *agentosplan.State, node agentos.PlanNodeSpec, status agentos.RunStatus) error {
-	artifacts, err := normalizeRunArtifacts(spec.PlanID, node, status)
-	if err != nil {
+	var published publishPlanArtifactsOutput
+	if err := workflow.ExecuteActivity(activityCtx, PublishPlanArtifactsActivityName, publishPlanArtifactsInput{
+		PlanID: spec.PlanID,
+		Node:   node,
+		Status: status,
+	}).Get(activityCtx, &published); err != nil {
 		return applyPlanStateEvent(activityCtx, workflowCtx, spec, state, agentosplan.StateEvent{Kind: agentosplan.EventNodeFailed, NodeID: node.NodeID, RunID: status.RunID, Reason: err.Error()})
 
 	}
+	artifacts := published.Artifacts
 	if len(artifacts) > 0 {
 		if err := applyPlanStateEvent(activityCtx, workflowCtx, spec, state, agentosplan.StateEvent{Kind: agentosplan.EventArtifactsPublished, NodeID: node.NodeID, RunID: status.RunID, Artifacts: artifacts}); err != nil {
 			return err

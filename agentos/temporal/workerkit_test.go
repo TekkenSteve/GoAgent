@@ -26,6 +26,16 @@ func TestNewWorkerKitRequiresRedisURL(t *testing.T) {
 	}
 }
 
+func TestNewWorkerKitRequiresArtifactStoreRoot(t *testing.T) {
+	_, err := NewWorkerKit(context.Background(), WorkerConfig{
+		PostgresURL: "postgres://user:pass@localhost:5432/db",
+		RedisURL:    "redis://localhost:6379",
+	})
+	if !errors.Is(err, ErrWorkerArtifactStoreRootRequired) {
+		t.Fatalf("NewWorkerKit error = %v, want %v", err, ErrWorkerArtifactStoreRootRequired)
+	}
+}
+
 func TestWorkerKitRegistersPlanWorkflowAndActivities(t *testing.T) {
 	kit := &WorkerKit{planActivities: NewPlanActivities(&fakePlanRuntime{})}
 	worker := &fakeWorker{}
@@ -46,6 +56,7 @@ func TestWorkerKitRegistersPlanWorkflowAndActivities(t *testing.T) {
 		StartPlanNodeActivityName,
 		StatusPlanNodeActivityName,
 		ControlPlanNodeActivityName,
+		PublishPlanArtifactsActivityName,
 		PersistPlanStateActivityName,
 	} {
 		if !worker.activityRegistered(name) {

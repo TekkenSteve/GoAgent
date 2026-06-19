@@ -15,6 +15,8 @@ type PlanActivities struct {
 	PlanStateStore   agentosplan.PlanStateStore
 	PlanEventStore   agentosplan.PlanEventStore
 	RunBackendBinder PlanRunBackendBinder
+	ArtifactStore    agentosplan.ArtifactStore
+	Expressions      agentosplan.ValueExpressionCompiler
 }
 
 // PlanRunBackendBinder records plan-node ownership into the run route index.
@@ -36,8 +38,9 @@ func NewPlanActivities(runtime agentos.Runtime) *PlanActivities {
 // capability catalog used by RunPlan validation.
 func NewPlanActivitiesWithCapabilities(runtime agentos.Runtime, capabilities []agentos.Capability) (*PlanActivities, error) {
 	store := agentosplan.NewMemoryPlanStore()
+	artifactStore := agentosplan.NewMemoryArtifactStore()
 
-	return NewPlanActivitiesWithStores(runtime, capabilities, store, store, nil)
+	return NewPlanActivitiesWithStores(runtime, capabilities, store, store, nil, artifactStore)
 }
 
 // NewPlanActivitiesWithStores creates plan activities with explicit durable
@@ -48,6 +51,7 @@ func NewPlanActivitiesWithStores(
 	stateStore agentosplan.PlanStateStore,
 	eventStore agentosplan.PlanEventStore,
 	runBackendBinder PlanRunBackendBinder,
+	artifactStore agentosplan.ArtifactStore,
 ) (*PlanActivities, error) {
 	compiler, err := agentosplan.NewCELCompiler()
 	if err != nil {
@@ -67,6 +71,8 @@ func NewPlanActivitiesWithStores(
 		PlanStateStore:   stateStore,
 		PlanEventStore:   eventStore,
 		RunBackendBinder: runBackendBinder,
+		ArtifactStore:    artifactStore,
+		Expressions:      compiler,
 	}, nil
 }
 
@@ -115,8 +121,11 @@ func (a *PlanActivities) controlsByNode(ctx context.Context, plan agentosplan.Ex
 }
 
 type startPlanNodeInput struct {
-	PlanID string
-	Node   agentos.PlanNodeSpec
+	PlanID     string
+	PlanInputs map[string]any
+	Status     agentos.RunPlanStatus
+	Node       agentos.PlanNodeSpec
+	Edges      []agentos.PlanEdgeSpec
 }
 
 type startPlanNodeOutput struct {
@@ -135,6 +144,12 @@ func (a *PlanActivities) StartPlanNodeActivity(ctx context.Context, input startP
 		}
 		input.Node.Run.IdempotencyKey = key
 	}
+	resolvedInput, err := agentosplan.ResolveRunInput(ctx, a.ArtifactStore, a.Expressions, input.PlanInputs, input.Status, input.Node, input.Edges)
+	if err != nil {
+		return startPlanNodeOutput{}, err
+	}
+	input.Node.Run.Input = resolvedInput
+
 	status, err := a.Runtime.Start(ctx, input.Node.Run)
 	if err != nil {
 		return startPlanNodeOutput{}, err
@@ -181,6 +196,41 @@ func (a *PlanActivities) PersistPlanStateActivity(ctx context.Context, input per
 	}
 
 	return persistPlanStateOutput{Event: event}, nil
+}
+
+type publishPlanArtifactsInput struct {
+	PlanID string
+	Node   agentos.PlanNodeSpec
+	Status agentos.RunStatus
+}
+
+type publishPlanArtifactsOutput struct {
+	Artifacts []agentos.ArtifactRef
+}
+
+// PublishPlanArtifactsActivity persists child-run artifact refs outside workflow history.
+func (a *PlanActivities) PublishPlanArtifactsActivity(ctx context.Context, input publishPlanArtifactsInput) (publishPlanArtifactsOutput, error) {
+	if a.ArtifactStore == nil {
+		return publishPlanArtifactsOutput{}, fmt.Errorf("%w: artifact store is required", agentos.ErrInvalidArtifact)
+	}
+	refs, err := normalizeRunArtifacts(input.PlanID, input.Node, input.Status)
+	if err != nil {
+		return publishPlanArtifactsOutput{}, err
+	}
+	stored := make([]agentos.ArtifactRef, 0, len(refs))
+	for _, ref := range refs {
+		key, err := agentosplan.ArtifactPublishIdempotencyKey(input.PlanID, input.Node.NodeID, input.Status.RunID, ref.Name)
+		if err != nil {
+			return publishPlanArtifactsOutput{}, err
+		}
+		storedRef, err := a.ArtifactStore.Put(ctx, ref, nil, key)
+		if err != nil {
+			return publishPlanArtifactsOutput{}, err
+		}
+		stored = append(stored, storedRef)
+	}
+
+	return publishPlanArtifactsOutput{Artifacts: stored}, nil
 }
 
 type statusPlanNodeInput struct {
