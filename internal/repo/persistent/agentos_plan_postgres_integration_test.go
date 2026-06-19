@@ -38,6 +38,7 @@ func TestAgentOSPlanPostgresDurablePersistence(t *testing.T) {
 		t.Fatalf("NewLocalBlobStore: %v", err)
 	}
 	artifactStore := NewAgentOSArtifactRepo(pg, blobStore)
+	capabilityCatalog := NewAgentOSCapabilityCatalogRepo(pg)
 
 	suffix := time.Now().UTC().Format("20060102150405.000000000")
 	spec := postgresIntegrationPlanSpec("plan-"+suffix, "plan-start-"+suffix)
@@ -170,6 +171,46 @@ func TestAgentOSPlanPostgresDurablePersistence(t *testing.T) {
 	if loadedArtifact.PlanID != spec.PlanID || payload == nil {
 		t.Fatalf("Artifact Get = %#v payload=%#v", loadedArtifact, payload)
 	}
+
+	capability := agentos.Capability{
+		Backend:  spec.Nodes[0].Run.Backend,
+		Name:     "run",
+		Controls: []agentos.ControlOperation{agentos.ControlCancel},
+	}
+	capabilityKey, err := agentosplan.CapabilityRegistrationIdempotencyKey(capability)
+	if err != nil {
+		t.Fatalf("CapabilityRegistrationIdempotencyKey: %v", err)
+	}
+	registered, created, err := capabilityCatalog.RegisterCapability(ctx, capability, capabilityKey)
+	if err != nil {
+		t.Fatalf("RegisterCapability first: %v", err)
+	}
+	if !created {
+		t.Fatal("RegisterCapability first was not created")
+	}
+	replayed, created, err := capabilityCatalog.RegisterCapability(ctx, capability, capabilityKey)
+	if err != nil {
+		t.Fatalf("RegisterCapability replay: %v", err)
+	}
+	if created || replayed.Name != registered.Name {
+		t.Fatalf("RegisterCapability replay = %#v created=%v, want %#v created=false", replayed, created, registered)
+	}
+	loadedCapability, ok, err := capabilityCatalog.GetCapability(ctx, capability.Backend, capability.Name)
+	if err != nil {
+		t.Fatalf("GetCapability: %v", err)
+	}
+	if !ok || len(loadedCapability.Controls) != 1 || loadedCapability.Controls[0] != agentos.ControlCancel {
+		t.Fatalf("GetCapability = %#v ok=%v", loadedCapability, ok)
+	}
+	changedCapability := capability
+	changedCapability.Description = "changed"
+	changedKey, err := agentosplan.CapabilityRegistrationIdempotencyKey(changedCapability)
+	if err != nil {
+		t.Fatalf("CapabilityRegistrationIdempotencyKey changed: %v", err)
+	}
+	if _, _, err := capabilityCatalog.RegisterCapability(ctx, changedCapability, changedKey); !errors.Is(err, agentos.ErrInvalidRunPlan) {
+		t.Fatalf("RegisterCapability changed error = %v, want ErrInvalidRunPlan", err)
+	}
 }
 
 func postgresIntegrationPlanSpec(planID, idempotencyKey string) agentos.RunPlanSpec {
@@ -216,6 +257,7 @@ func applyAgentOSPlanMigrations(t *testing.T, pg *postgres.Postgres) {
 	for _, migration := range []string{
 		"20260617000001_create_agentos_plan_persistence.up.sql",
 		"20260618000001_add_artifact_idempotency.up.sql",
+		"20260619000001_create_agentos_capabilities.up.sql",
 	} {
 		path := filepath.Join("..", "..", "..", "migrations", migration)
 		data, err := os.ReadFile(path)

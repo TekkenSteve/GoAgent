@@ -301,6 +301,51 @@ func TestPlanActivitiesValidatePlanReturnsCapabilityControls(t *testing.T) {
 	}
 }
 
+func TestPlanActivitiesValidatePlanUsesInjectedCapabilityCatalog(t *testing.T) {
+	ref := agentos.BackendRef{Kind: agentos.BackendKindHTTP, Name: "research"}
+	catalog, err := agentosplan.NewStaticCapabilityCatalog([]agentos.Capability{
+		{Backend: ref, Name: "run", Controls: []agentos.ControlOperation{agentos.ControlCancel}},
+	})
+	if err != nil {
+		t.Fatalf("NewStaticCapabilityCatalog: %v", err)
+	}
+	store := agentosplan.NewMemoryPlanStore()
+	activities, err := NewPlanActivitiesWithCatalog(
+		&fakePlanRuntime{},
+		catalog,
+		store,
+		store,
+		nil,
+		nil,
+		agentosplan.NewMemoryArtifactStore(),
+	)
+	if err != nil {
+		t.Fatalf("NewPlanActivitiesWithCatalog: %v", err)
+	}
+
+	output, err := activities.ValidatePlanActivity(context.Background(), validatePlanInput{
+		Spec: agentos.RunPlanSpec{
+			PlanID: "plan-1",
+			Nodes: []agentos.PlanNodeSpec{
+				{
+					NodeID:     "research",
+					Capability: "run",
+					Run: agentos.RunSpec{
+						RunID:   "run-research",
+						Backend: ref,
+					},
+				},
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("ValidatePlanActivity: %v", err)
+	}
+	if got := output.ControlsByNode["research"]; len(got) != 1 || got[0] != agentos.ControlCancel {
+		t.Fatalf("controls = %#v", output.ControlsByNode)
+	}
+}
+
 type fakePlanRuntime struct {
 	started agentos.RunSpec
 	control agentos.ControlOperation

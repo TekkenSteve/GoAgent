@@ -8,8 +8,8 @@ import (
 	"github.com/TekkenSteve/GoAgent/agentos"
 )
 
-// StaticCapabilityCatalog is an in-memory capability catalog for tests,
-// embedded demos, and WorkerKit assembly.
+// StaticCapabilityCatalog is an in-memory capability catalog for tests, CLI
+// validation, and embedded demos.
 type StaticCapabilityCatalog struct {
 	mu           sync.RWMutex
 	capabilities map[capabilityKey]agentos.Capability
@@ -24,7 +24,7 @@ type capabilityKey struct {
 func NewStaticCapabilityCatalog(capabilities []agentos.Capability) (*StaticCapabilityCatalog, error) {
 	catalog := &StaticCapabilityCatalog{capabilities: make(map[capabilityKey]agentos.Capability)}
 	for _, capability := range capabilities {
-		if err := catalog.Register(capability); err != nil {
+		if _, _, err := catalog.RegisterCapability(context.Background(), capability, ""); err != nil {
 			return nil, err
 		}
 	}
@@ -32,20 +32,20 @@ func NewStaticCapabilityCatalog(capabilities []agentos.Capability) (*StaticCapab
 	return catalog, nil
 }
 
-// Register adds or replaces one capability.
-func (c *StaticCapabilityCatalog) Register(capability agentos.Capability) error {
-	if capability.Backend.Kind == "" || capability.Backend.Name == "" {
-		return fmt.Errorf("%w: capability backend is required", agentos.ErrInvalidBackendRef)
+// RegisterCapability adds or replaces one capability.
+func (c *StaticCapabilityCatalog) RegisterCapability(_ context.Context, capability agentos.Capability, _ string) (agentos.Capability, bool, error) {
+	if c == nil {
+		return agentos.Capability{}, false, fmt.Errorf("%w: capability catalog is nil", agentos.ErrCapabilityNotFound)
 	}
-	if capability.Name == "" {
-		return fmt.Errorf("%w: capability name is required", agentos.ErrCapabilityNotFound)
+	if err := ValidateCapability(capability); err != nil {
+		return agentos.Capability{}, false, err
 	}
 
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.capabilities[capabilityKey{backend: capability.Backend, name: capability.Name}] = capability
 
-	return nil
+	return capability, true, nil
 }
 
 // GetCapability returns a registered capability.
@@ -60,3 +60,8 @@ func (c *StaticCapabilityCatalog) GetCapability(_ context.Context, backend agent
 
 	return capability, ok, nil
 }
+
+var (
+	_ CapabilityCatalog  = (*StaticCapabilityCatalog)(nil)
+	_ CapabilityRegistry = (*StaticCapabilityCatalog)(nil)
+)

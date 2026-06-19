@@ -22,6 +22,7 @@ import (
 	"github.com/TekkenSteve/GoAgent/internal/repo/toolkit"
 	"github.com/TekkenSteve/GoAgent/internal/repo/webapi"
 	"github.com/TekkenSteve/GoAgent/internal/usecase/agent"
+	"github.com/TekkenSteve/GoAgent/internal/usecase/agentosplan"
 	billingpkg "github.com/TekkenSteve/GoAgent/internal/usecase/billing"
 	templatepkg "github.com/TekkenSteve/GoAgent/internal/usecase/template"
 	triggerpkg "github.com/TekkenSteve/GoAgent/internal/usecase/trigger"
@@ -108,6 +109,14 @@ func newWorkerKit(ctx context.Context, cfg WorkerConfig) (*WorkerKit, error) {
 		return nil, fmt.Errorf("agentos temporal worker - artifact blob store: %w", err)
 	}
 	artifactStore := temporalrepo.NewAgentOSArtifactRepo(pg, blobStore)
+	capabilityCatalog := temporalrepo.NewAgentOSCapabilityCatalogRepo(pg)
+	if err := agentosplan.RegisterCapabilities(ctx, capabilityCatalog, cfg.Capabilities); err != nil {
+		temporalClient.Close()
+		_ = rdb.Close()
+		pg.Close()
+
+		return nil, fmt.Errorf("agentos temporal worker - register capabilities: %w", err)
+	}
 	planEventStream := repostream.NewRedisPlanEventStream(rdb)
 	planRuntime, err := NewRuntimeWithClient(ctx, RuntimeConfig{
 		TemporalAddress:          cfg.TemporalAddress,
@@ -124,7 +133,7 @@ func newWorkerKit(ctx context.Context, cfg WorkerConfig) (*WorkerKit, error) {
 
 		return nil, fmt.Errorf("agentos temporal worker - plan runtime: %w", err)
 	}
-	planActivities, err := NewPlanActivitiesWithStores(planRuntime, cfg.Capabilities, planStore, planStore, planEventStream, runBackendIndex, artifactStore)
+	planActivities, err := NewPlanActivitiesWithCatalog(planRuntime, capabilityCatalog, planStore, planStore, planEventStream, runBackendIndex, artifactStore)
 	if err != nil {
 		temporalClient.Close()
 		_ = rdb.Close()

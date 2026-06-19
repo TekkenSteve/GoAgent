@@ -32,6 +32,11 @@ type CapabilityCatalog interface {
 	GetCapability(ctx context.Context, backend agentos.BackendRef, name string) (agentos.Capability, bool, error)
 }
 
+// CapabilityRegistry persists backend capability declarations.
+type CapabilityRegistry interface {
+	RegisterCapability(ctx context.Context, capability agentos.Capability, idempotencyKey string) (agentos.Capability, bool, error)
+}
+
 // ArtifactStore stores artifacts outside workflow history.
 type ArtifactStore interface {
 	Put(ctx context.Context, artifact agentos.ArtifactRef, payload any, idempotencyKey string) (agentos.ArtifactRef, error)

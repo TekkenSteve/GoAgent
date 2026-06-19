@@ -56,11 +56,26 @@ func NewPlanActivitiesWithStores(
 	runBackendBinder PlanRunBackendBinder,
 	artifactStore agentosplan.ArtifactStore,
 ) (*PlanActivities, error) {
-	compiler, err := agentosplan.NewCELCompiler()
+	catalog, err := agentosplan.NewStaticCapabilityCatalog(capabilities)
 	if err != nil {
 		return nil, err
 	}
-	catalog, err := agentosplan.NewStaticCapabilityCatalog(capabilities)
+
+	return NewPlanActivitiesWithCatalog(runtime, catalog, stateStore, eventStore, eventPublisher, runBackendBinder, artifactStore)
+}
+
+// NewPlanActivitiesWithCatalog creates plan activities with an explicit
+// capability catalog. Production wiring should provide a durable catalog.
+func NewPlanActivitiesWithCatalog(
+	runtime agentos.Runtime,
+	catalog agentosplan.CapabilityCatalog,
+	stateStore agentosplan.PlanStateStore,
+	eventStore agentosplan.PlanEventStore,
+	eventPublisher agentosplan.PlanEventPublisher,
+	runBackendBinder PlanRunBackendBinder,
+	artifactStore agentosplan.ArtifactStore,
+) (*PlanActivities, error) {
+	compiler, err := agentosplan.NewCELCompiler()
 	if err != nil {
 		return nil, err
 	}

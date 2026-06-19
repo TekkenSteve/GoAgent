@@ -34,6 +34,7 @@ import (
 	"github.com/TekkenSteve/GoAgent/internal/repo/webapi"
 	"github.com/TekkenSteve/GoAgent/internal/usecase"
 	"github.com/TekkenSteve/GoAgent/internal/usecase/agent"
+	"github.com/TekkenSteve/GoAgent/internal/usecase/agentosplan"
 	agentosruntime "github.com/TekkenSteve/GoAgent/internal/usecase/agentosruntime"
 	billingpkg "github.com/TekkenSteve/GoAgent/internal/usecase/billing"
 	agentfwusecase "github.com/TekkenSteve/GoAgent/internal/usecase/executor"
@@ -258,13 +259,17 @@ func initTemporalComponents(
 		l.Fatal(fmt.Errorf("app - Run - artifact store: %w", err))
 	}
 	artifactStore := temporalrepo.NewAgentOSArtifactRepo(pg, blobStore)
+	capabilityCatalog := temporalrepo.NewAgentOSCapabilityCatalogRepo(pg)
 	capabilities, err := cfg.AgentOS.Capabilities()
 	if err != nil {
 		l.Fatal(fmt.Errorf("app - Run - agentos capabilities: %w", err))
 	}
-	planActivities, err := agentostemporal.NewPlanActivitiesWithStores(
+	if err := agentosplan.RegisterCapabilities(context.Background(), capabilityCatalog, capabilities); err != nil {
+		l.Fatal(fmt.Errorf("app - Run - register agentos capabilities: %w", err))
+	}
+	planActivities, err := agentostemporal.NewPlanActivitiesWithCatalog(
 		agentOSRuntime,
-		capabilities,
+		capabilityCatalog,
 		planStore,
 		planStore,
 		planEventStream,
