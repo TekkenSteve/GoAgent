@@ -4,6 +4,7 @@ import (
 	"fmt"
 
 	"github.com/TekkenSteve/GoAgent/agentos"
+	"github.com/TekkenSteve/GoAgent/internal/usecase/agentosplan"
 )
 
 func normalizeRunArtifacts(planID string, node agentos.PlanNodeSpec, status agentos.RunStatus) ([]agentos.ArtifactRef, error) {
@@ -34,22 +35,14 @@ func normalizeRunArtifacts(planID string, node agentos.PlanNodeSpec, status agen
 }
 
 func validateRequiredArtifacts(outputs []agentos.ArtifactSpec, refs []agentos.ArtifactRef) error {
-	byName := make(map[string]agentos.ArtifactRef, len(refs))
-	for _, ref := range refs {
-		byName[ref.Name] = ref
-	}
-	for _, output := range outputs {
-		if !output.Required {
-			continue
-		}
-		ref, ok := byName[output.Name]
-		if !ok {
-			return fmt.Errorf("%w: required output artifact %q was not published", agentos.ErrInvalidArtifact, output.Name)
-		}
-		if ref.Kind != output.Kind {
-			return fmt.Errorf("%w: output artifact %q kind %q does not match required kind %q", agentos.ErrInvalidArtifact, output.Name, ref.Kind, output.Kind)
-		}
-	}
+	return agentosplan.ValidateArtifactsAgainstSpecs("", outputs, refs)
+}
 
-	return nil
+func runSucceeded(lifecycle string) bool {
+	switch lifecycle {
+	case "completed", "succeeded":
+		return true
+	default:
+		return false
+	}
 }

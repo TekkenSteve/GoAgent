@@ -130,13 +130,8 @@ func (v Validator) validateNode(ctx context.Context, spec agentos.RunPlanSpec, n
 			}
 		}
 	}
-	for _, artifact := range node.Outputs {
-		if artifact.Name == "" {
-			return fmt.Errorf("%w: node %q artifact name is required", agentos.ErrInvalidArtifact, node.NodeID)
-		}
-		if artifact.Kind == "" {
-			return fmt.Errorf("%w: node %q artifact %q kind is required", agentos.ErrInvalidArtifact, node.NodeID, artifact.Name)
-		}
+	if err := ValidateArtifactSpecs(node.NodeID, node.Outputs); err != nil {
+		return err
 	}
 	if node.Capability == "" {
 		return nil

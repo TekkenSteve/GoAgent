@@ -2,6 +2,7 @@ package temporal
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"testing"
 	"time"
@@ -116,6 +117,89 @@ func TestPlanActivitiesPublishArtifactsIsIdempotent(t *testing.T) {
 	}
 	if first.Artifacts[0].PlanID != "plan-1" || first.Artifacts[0].NodeID != "node-1" || first.Artifacts[0].RunID != "run-1" {
 		t.Fatalf("artifact scope = %#v", first.Artifacts[0])
+	}
+}
+
+func TestPlanActivitiesPublishArtifactsValidatesSuccessfulOutputContract(t *testing.T) {
+	ref := agentos.BackendRef{Kind: agentos.BackendKindHTTP, Name: "research"}
+	activities, err := NewPlanActivitiesWithCapabilities(&fakePlanRuntime{}, []agentos.Capability{
+		{
+			Backend: ref,
+			Name:    "run",
+			OutputSchema: json.RawMessage(`{
+				"type": "object",
+				"properties": {
+					"artifacts": {
+						"type": "array",
+						"items": {
+							"type": "object",
+							"properties": {
+								"metadata": {
+									"type": "object",
+									"properties": {
+										"quality": {"enum": ["approved"]}
+									},
+									"required": ["quality"]
+								}
+							},
+							"required": ["metadata"]
+						}
+					}
+				},
+				"required": ["artifacts"]
+			}`),
+		},
+	})
+	if err != nil {
+		t.Fatalf("NewPlanActivitiesWithCapabilities: %v", err)
+	}
+
+	_, err = activities.PublishPlanArtifactsActivity(context.Background(), publishPlanArtifactsInput{
+		PlanID: "plan-1",
+		Node: agentos.PlanNodeSpec{
+			NodeID:     "research",
+			Capability: "run",
+			Run:        agentos.RunSpec{RunID: "run-research", Backend: ref},
+			Outputs: []agentos.ArtifactSpec{
+				{Name: "summary", Kind: agentos.ArtifactKindObject, MediaType: "application/json", Required: true},
+			},
+		},
+		Status: agentos.RunStatus{
+			RunID:          "run-research",
+			LifecycleState: "completed",
+			Artifacts: []agentos.ArtifactRef{
+				{
+					ArtifactID: "artifact-1",
+					Name:       "summary",
+					Kind:       agentos.ArtifactKindObject,
+					MediaType:  "application/json",
+					Metadata:   map[string]string{"quality": "draft"},
+				},
+			},
+		},
+	})
+	if !errors.Is(err, agentos.ErrInvalidArtifact) {
+		t.Fatalf("error = %v, want ErrInvalidArtifact", err)
+	}
+}
+
+func TestPlanActivitiesPublishArtifactsDoesNotRequireOutputsForFailedRun(t *testing.T) {
+	activities := NewPlanActivities(&fakePlanRuntime{})
+	_, err := activities.PublishPlanArtifactsActivity(context.Background(), publishPlanArtifactsInput{
+		PlanID: "plan-1",
+		Node: agentos.PlanNodeSpec{
+			NodeID: "node-1",
+			Outputs: []agentos.ArtifactSpec{
+				{Name: "summary", Kind: agentos.ArtifactKindObject, Required: true},
+			},
+		},
+		Status: agentos.RunStatus{
+			RunID:          "run-1",
+			LifecycleState: "failed",
+		},
+	})
+	if err != nil {
+		t.Fatalf("PublishPlanArtifactsActivity failed run: %v", err)
 	}
 }
 

@@ -247,6 +247,11 @@ func (a *PlanActivities) PublishPlanArtifactsActivity(ctx context.Context, input
 	if err != nil {
 		return publishPlanArtifactsOutput{}, err
 	}
+	if runSucceeded(input.Status.LifecycleState) {
+		if err := a.validatePublishedArtifacts(ctx, input.Node, refs); err != nil {
+			return publishPlanArtifactsOutput{}, err
+		}
+	}
 	stored := make([]agentos.ArtifactRef, 0, len(refs))
 	for _, ref := range refs {
 		key, err := agentosplan.ArtifactPublishIdempotencyKey(input.PlanID, input.Node.NodeID, input.Status.RunID, ref.Name)
@@ -261,6 +266,27 @@ func (a *PlanActivities) PublishPlanArtifactsActivity(ctx context.Context, input
 	}
 
 	return publishPlanArtifactsOutput{Artifacts: stored}, nil
+}
+
+func (a *PlanActivities) validatePublishedArtifacts(ctx context.Context, node agentos.PlanNodeSpec, refs []agentos.ArtifactRef) error {
+	if err := agentosplan.ValidateArtifactsAgainstSpecs(node.NodeID, node.Outputs, refs); err != nil {
+		return err
+	}
+	if node.Capability == "" || a.Validator.Capabilities == nil {
+		return nil
+	}
+	capability, ok, err := a.Validator.Capabilities.GetCapability(ctx, node.Run.Backend, node.Capability)
+	if err != nil {
+		return err
+	}
+	if !ok {
+		return fmt.Errorf("%w: node %q capability %s/%s/%s", agentos.ErrCapabilityNotFound, node.NodeID, node.Run.Backend.Kind, node.Run.Backend.Name, node.Capability)
+	}
+	if err := agentosplan.ValidateCapabilityOutputArtifacts(node.NodeID, capability.OutputSchema, refs); err != nil {
+		return err
+	}
+
+	return nil
 }
 
 type evaluatePlanExpansionInput struct {
