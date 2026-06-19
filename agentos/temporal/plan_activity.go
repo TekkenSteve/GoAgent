@@ -129,6 +129,7 @@ type startPlanNodeInput struct {
 	Status     agentos.RunPlanStatus
 	Node       agentos.PlanNodeSpec
 	Edges      []agentos.PlanEdgeSpec
+	Attempt    int32
 }
 
 type startPlanNodeOutput struct {
@@ -140,8 +141,12 @@ func (a *PlanActivities) StartPlanNodeActivity(ctx context.Context, input startP
 	if a.Runtime == nil {
 		return startPlanNodeOutput{}, fmt.Errorf("%w: plan activity runtime is required", agentos.ErrInvalidRunPlan)
 	}
+	attempt := input.Attempt
+	if attempt <= 0 {
+		attempt = 1
+	}
 	if input.Node.Run.IdempotencyKey == "" {
-		key, err := agentosplan.NodeStartIdempotencyKey(input.PlanID, input.Node.NodeID)
+		key, err := agentosplan.NodeStartIdempotencyKey(input.PlanID, input.Node.NodeID, attempt)
 		if err != nil {
 			return startPlanNodeOutput{}, err
 		}

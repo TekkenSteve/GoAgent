@@ -51,6 +51,7 @@ const (
 	EventNodeStarted        EventKind = "node.started"
 	EventNodeSucceeded      EventKind = "node.succeeded"
 	EventNodeFailed         EventKind = "node.failed"
+	EventNodeRetryScheduled EventKind = "node.retry_scheduled"
 	EventNodeSkipped        EventKind = "node.skipped"
 	EventNodeCanceled       EventKind = "node.canceled"
 	EventArtifactsPublished EventKind = "artifacts.published"
@@ -62,6 +63,7 @@ type StateEvent struct {
 	NodeID    string                `json:"node_id,omitempty"`
 	RunID     string                `json:"run_id,omitempty"`
 	Reason    string                `json:"reason,omitempty"`
+	Attempt   int32                 `json:"attempt,omitempty"`
 	Artifacts []agentos.ArtifactRef `json:"artifacts,omitempty"`
 	At        time.Time             `json:"at,omitempty"`
 }
@@ -94,6 +96,8 @@ func (s *State) Apply(event StateEvent) error {
 		return s.transitionNode(event.NodeID, agentos.PlanNodeSucceeded, event, at)
 	case EventNodeFailed:
 		return s.transitionNode(event.NodeID, agentos.PlanNodeFailed, event, at)
+	case EventNodeRetryScheduled:
+		return s.retryNode(event.NodeID, event, at)
 	case EventNodeSkipped:
 		return s.transitionNode(event.NodeID, agentos.PlanNodeSkipped, event, at)
 	case EventNodeCanceled:
@@ -122,6 +126,7 @@ func (s *State) transitionNode(nodeID string, lifecycle string, event StateEvent
 	if !ok {
 		return fmt.Errorf("%w: unknown node %q", agentos.ErrInvalidRunPlan, nodeID)
 	}
+	previousLifecycle := node.LifecycleState
 	node.LifecycleState = lifecycle
 	node.Reason = event.Reason
 	if event.RunID != "" {
@@ -129,14 +134,36 @@ func (s *State) transitionNode(nodeID string, lifecycle string, event StateEvent
 	}
 	switch lifecycle {
 	case agentos.PlanNodeRunning:
-		node.Attempts++
-		if node.StartedAt.IsZero() {
+		if previousLifecycle != agentos.PlanNodeRunning {
+			if event.Attempt > 0 {
+				node.Attempts = event.Attempt
+			} else {
+				node.Attempts++
+			}
 			node.StartedAt = at
+			node.CompletedAt = time.Time{}
 		}
 	case agentos.PlanNodeSucceeded, agentos.PlanNodeFailed, agentos.PlanNodeSkipped, agentos.PlanNodeCanceled:
 		node.CompletedAt = at
 	}
 	node.Artifacts = append(node.Artifacts, event.Artifacts...)
+	node.UpdatedAt = at
+	s.nodes[nodeID] = node
+	s.refresh(at)
+
+	return nil
+}
+
+func (s *State) retryNode(nodeID string, event StateEvent, at time.Time) error {
+	node, ok := s.nodes[nodeID]
+	if !ok {
+		return fmt.Errorf("%w: unknown node %q", agentos.ErrInvalidRunPlan, nodeID)
+	}
+	node.LifecycleState = agentos.PlanNodeReady
+	node.RunID = ""
+	node.Reason = event.Reason
+	node.StartedAt = time.Time{}
+	node.CompletedAt = time.Time{}
 	node.UpdatedAt = at
 	s.nodes[nodeID] = node
 	s.refresh(at)

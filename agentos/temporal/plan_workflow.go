@@ -198,7 +198,12 @@ func startPlanNode(activityCtx workflow.Context, workflowCtx workflow.Context, s
 	if err := applyPlanStateEvent(activityCtx, workflowCtx, spec, state, agentosplan.StateEvent{Kind: agentosplan.EventNodeReady, NodeID: node.NodeID}); err != nil {
 		return err
 	}
-	if err := applyPlanStateEvent(activityCtx, workflowCtx, spec, state, agentosplan.StateEvent{Kind: agentosplan.EventNodeStarted, NodeID: node.NodeID, RunID: node.Run.RunID}); err != nil {
+	attempt := nextNodeAttempt(*state, node.NodeID)
+	attemptNode, err := nodeForAttempt(spec.PlanID, node, attempt)
+	if err != nil {
+		return err
+	}
+	if err := applyPlanStateEvent(activityCtx, workflowCtx, spec, state, agentosplan.StateEvent{Kind: agentosplan.EventNodeStarted, NodeID: node.NodeID, RunID: attemptNode.Run.RunID, Attempt: attempt}); err != nil {
 		return err
 	}
 
@@ -207,13 +212,14 @@ func startPlanNode(activityCtx workflow.Context, workflowCtx workflow.Context, s
 		PlanID:     spec.PlanID,
 		PlanInputs: spec.Inputs,
 		Status:     state.Status,
-		Node:       node,
+		Node:       attemptNode,
 		Edges:      incomingEdges,
+		Attempt:    attempt,
 	}).Get(activityCtx, &started); err != nil {
-		return err
+		return applyNodeAttemptFailure(activityCtx, workflowCtx, spec, state, node, attemptNode.Run.RunID, fmt.Sprintf("start attempt %d failed: %s", attempt, err))
 	}
-	if started.Status.RunID != "" && started.Status.RunID != node.Run.RunID {
-		if err := applyPlanStateEvent(activityCtx, workflowCtx, spec, state, agentosplan.StateEvent{Kind: agentosplan.EventNodeStarted, NodeID: node.NodeID, RunID: started.Status.RunID}); err != nil {
+	if started.Status.RunID != "" && started.Status.RunID != attemptNode.Run.RunID {
+		if err := applyPlanStateEvent(activityCtx, workflowCtx, spec, state, agentosplan.StateEvent{Kind: agentosplan.EventNodeStarted, NodeID: node.NodeID, RunID: started.Status.RunID, Attempt: attempt}); err != nil {
 			return err
 		}
 	}
@@ -226,8 +232,25 @@ func startPlanNode(activityCtx workflow.Context, workflowCtx workflow.Context, s
 
 func pollRunningPlanNodes(activityCtx workflow.Context, workflowCtx workflow.Context, spec agentos.RunPlanSpec, state *agentosplan.State, nodes map[string]agentos.PlanNodeSpec) (bool, error) {
 	progressed := false
+	now := workflow.Now(workflowCtx)
 	for _, node := range state.Status.Nodes {
 		if node.LifecycleState != agentos.PlanNodeRunning {
+			continue
+		}
+		nodeSpec, ok := nodes[node.NodeID]
+		if !ok {
+			return progressed, fmt.Errorf("%w: unknown node %q", agentos.ErrInvalidRunPlan, node.NodeID)
+		}
+		if nodeTimedOut(now, node, nodeSpec) {
+			if err := cancelTimedOutNode(activityCtx, spec.PlanID, node); err != nil {
+				return progressed, err
+			}
+			reason := fmt.Sprintf("node timed out after %d seconds", nodeSpec.Policy.TimeoutSeconds)
+			if err := applyNodeAttemptFailure(activityCtx, workflowCtx, spec, state, nodeSpec, node.RunID, reason); err != nil {
+				return true, err
+			}
+
+			progressed = true
 			continue
 		}
 		if node.RunID == "" {
@@ -247,10 +270,6 @@ func pollRunningPlanNodes(activityCtx workflow.Context, workflowCtx workflow.Con
 			return true, nil
 		}
 		if runTerminal(current.Status.LifecycleState) {
-			nodeSpec, ok := nodes[node.NodeID]
-			if !ok {
-				return progressed, fmt.Errorf("%w: unknown node %q", agentos.ErrInvalidRunPlan, node.NodeID)
-			}
 			if err := applyNodeRunTerminal(activityCtx, workflowCtx, spec, state, nodeSpec, current.Status); err != nil {
 				return progressed, err
 			}
@@ -280,17 +299,110 @@ func applyNodeRunTerminal(activityCtx workflow.Context, workflowCtx workflow.Con
 	switch status.LifecycleState {
 	case "completed", "succeeded":
 		if err := validateRequiredArtifacts(node.Outputs, artifacts); err != nil {
-			return applyPlanStateEvent(activityCtx, workflowCtx, spec, state, agentosplan.StateEvent{Kind: agentosplan.EventNodeFailed, NodeID: node.NodeID, RunID: status.RunID, Reason: err.Error()})
+			return applyNodeAttemptFailure(activityCtx, workflowCtx, spec, state, node, status.RunID, err.Error())
 
 		}
 		return applyPlanStateEvent(activityCtx, workflowCtx, spec, state, agentosplan.StateEvent{Kind: agentosplan.EventNodeSucceeded, NodeID: node.NodeID, RunID: status.RunID})
 	case "failed":
-		return applyPlanStateEvent(activityCtx, workflowCtx, spec, state, agentosplan.StateEvent{Kind: agentosplan.EventNodeFailed, NodeID: node.NodeID, RunID: status.RunID, Reason: status.Reason})
+		return applyNodeAttemptFailure(activityCtx, workflowCtx, spec, state, node, status.RunID, status.Reason)
 	case "canceled", "cancelled":
 		return applyPlanStateEvent(activityCtx, workflowCtx, spec, state, agentosplan.StateEvent{Kind: agentosplan.EventNodeCanceled, NodeID: node.NodeID, RunID: status.RunID, Reason: status.Reason})
 	}
 
 	return nil
+}
+
+func applyNodeAttemptFailure(activityCtx workflow.Context, workflowCtx workflow.Context, spec agentos.RunPlanSpec, state *agentosplan.State, node agentos.PlanNodeSpec, runID string, reason string) error {
+	if reason == "" {
+		reason = "node attempt failed"
+	}
+	current, ok := state.NodeStatus(node.NodeID)
+	if !ok {
+		return fmt.Errorf("%w: unknown node %q", agentos.ErrInvalidRunPlan, node.NodeID)
+	}
+	nextAttempt := current.Attempts + 1
+	if current.Attempts < maxNodeAttempts(node.Policy) {
+		return applyPlanStateEvent(activityCtx, workflowCtx, spec, state, agentosplan.StateEvent{
+			Kind:    agentosplan.EventNodeRetryScheduled,
+			NodeID:  node.NodeID,
+			RunID:   runID,
+			Reason:  reason,
+			Attempt: nextAttempt,
+		})
+	}
+
+	return applyPlanStateEvent(activityCtx, workflowCtx, spec, state, agentosplan.StateEvent{
+		Kind:   agentosplan.EventNodeFailed,
+		NodeID: node.NodeID,
+		RunID:  runID,
+		Reason: reason,
+	})
+}
+
+func cancelTimedOutNode(activityCtx workflow.Context, planID string, node agentos.PlanNodeStatus) error {
+	if node.RunID == "" {
+		return fmt.Errorf("%w: timed out node %q has no active run id", agentos.ErrInvalidRunPlan, node.NodeID)
+	}
+	key, err := agentosplan.NodeTimeoutControlIdempotencyKey(planID, node.NodeID, node.RunID)
+	if err != nil {
+		return err
+	}
+	control := agentos.ControlRequest{
+		Operation:      agentos.ControlCancel,
+		IdempotencyKey: key,
+	}
+	if err := workflow.ExecuteActivity(activityCtx, ControlPlanNodeActivityName, controlPlanNodeInput{RunID: node.RunID, Control: control}).Get(activityCtx, nil); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func nodeTimedOut(now time.Time, status agentos.PlanNodeStatus, node agentos.PlanNodeSpec) bool {
+	if status.LifecycleState != agentos.PlanNodeRunning || status.StartedAt.IsZero() || node.Policy.TimeoutSeconds <= 0 {
+		return false
+	}
+
+	return !now.Before(status.StartedAt.Add(time.Duration(node.Policy.TimeoutSeconds) * time.Second))
+}
+
+func nextNodeAttempt(state agentosplan.State, nodeID string) int32 {
+	status, ok := state.NodeStatus(nodeID)
+	if !ok {
+		return 1
+	}
+
+	return status.Attempts + 1
+}
+
+func nodeForAttempt(planID string, node agentos.PlanNodeSpec, attempt int32) (agentos.PlanNodeSpec, error) {
+	if attempt <= 0 {
+		return agentos.PlanNodeSpec{}, fmt.Errorf("%w: node start attempt must be positive", agentos.ErrInvalidRunPlan)
+	}
+	node.Run.RunID = nodeRunIDForAttempt(node.Run.RunID, attempt)
+	key, err := agentosplan.NodeStartIdempotencyKey(planID, node.NodeID, attempt)
+	if err != nil {
+		return agentos.PlanNodeSpec{}, err
+	}
+	node.Run.IdempotencyKey = key
+
+	return node, nil
+}
+
+func nodeRunIDForAttempt(baseRunID string, attempt int32) string {
+	if attempt <= 1 {
+		return baseRunID
+	}
+
+	return fmt.Sprintf("%s-attempt-%d", baseRunID, attempt)
+}
+
+func maxNodeAttempts(policy agentos.NodePolicy) int32 {
+	if policy.MaxAttempts <= 0 {
+		return 1
+	}
+
+	return policy.MaxAttempts
 }
 
 func drainPlanControl(activityCtx workflow.Context, workflowCtx workflow.Context, spec agentos.RunPlanSpec, ch workflow.ReceiveChannel, state *agentosplan.State, paused bool, controlsByNode map[string][]agentos.ControlOperation, processed map[string]bool) (bool, bool, error) {

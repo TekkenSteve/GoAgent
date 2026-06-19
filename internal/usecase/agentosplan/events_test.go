@@ -71,3 +71,58 @@ func TestMemoryPlanStoreAppendPlanEventIsIdempotent(t *testing.T) {
 		t.Fatalf("events = %#v", events)
 	}
 }
+
+func TestPlanEventFromRetryScheduledIncludesAttempt(t *testing.T) {
+	at := time.Date(2026, 6, 19, 12, 0, 0, 0, time.UTC)
+	event, _, err := PlanEventFromStateEvent(
+		agentos.RunPlanSpec{PlanID: "plan-1"},
+		agentos.RunPlanStatus{PlanID: "plan-1", LifecycleState: agentos.PlanLifecycleRunning, UpdatedAt: at},
+		StateEvent{
+			Kind:    EventNodeRetryScheduled,
+			NodeID:  "node-1",
+			RunID:   "run-1",
+			Reason:  "failed",
+			Attempt: 2,
+			At:      at,
+		},
+	)
+	if err != nil {
+		t.Fatalf("PlanEventFromStateEvent: %v", err)
+	}
+	if event.EventType != agentos.EventPlanNodeRetryScheduled {
+		t.Fatalf("event type = %q", event.EventType)
+	}
+	if event.Payload["attempt"] != int32(2) {
+		t.Fatalf("payload = %#v", event.Payload)
+	}
+}
+
+func TestNodeStartIdempotencyKeyIncludesAttempt(t *testing.T) {
+	first, err := NodeStartIdempotencyKey("plan-1", "node-1", 1)
+	if err != nil {
+		t.Fatalf("NodeStartIdempotencyKey first: %v", err)
+	}
+	second, err := NodeStartIdempotencyKey("plan-1", "node-1", 2)
+	if err != nil {
+		t.Fatalf("NodeStartIdempotencyKey second: %v", err)
+	}
+	if first == second {
+		t.Fatalf("attempt-specific keys should differ: %q", first)
+	}
+	if _, err := NodeStartIdempotencyKey("plan-1", "node-1", 0); err == nil {
+		t.Fatal("NodeStartIdempotencyKey accepted attempt 0")
+	}
+}
+
+func TestNodeTimeoutControlIdempotencyKeyRequiresRunID(t *testing.T) {
+	key, err := NodeTimeoutControlIdempotencyKey("plan-1", "node-1", "run-1")
+	if err != nil {
+		t.Fatalf("NodeTimeoutControlIdempotencyKey: %v", err)
+	}
+	if key == "" {
+		t.Fatal("timeout control idempotency key is empty")
+	}
+	if _, err := NodeTimeoutControlIdempotencyKey("plan-1", "node-1", ""); err == nil {
+		t.Fatal("NodeTimeoutControlIdempotencyKey accepted empty run id")
+	}
+}

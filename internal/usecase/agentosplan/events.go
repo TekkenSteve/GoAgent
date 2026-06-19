@@ -13,6 +13,7 @@ import (
 const (
 	idempotencyOperationNodeStart       = "node_start"
 	idempotencyOperationNodeControl     = "node_control"
+	idempotencyOperationNodeTimeout     = "node_timeout"
 	idempotencyOperationArtifactPublish = "artifact_publish"
 )
 
@@ -44,6 +45,9 @@ func PlanEventFromStateEvent(spec agentos.RunPlanSpec, status agentos.RunPlanSta
 	}
 	if event.Reason != "" {
 		payload["reason"] = event.Reason
+	}
+	if event.Attempt > 0 {
+		payload["attempt"] = event.Attempt
 	}
 	if len(event.Artifacts) > 0 {
 		payload["artifacts"] = event.Artifacts
@@ -87,24 +91,60 @@ func StateEventIdempotencyKey(planID string, event StateEvent) (string, error) {
 
 // NodeStartIdempotencyKey creates the stable idempotency key for starting one
 // backend-owned child run.
-func NodeStartIdempotencyKey(planID, nodeID string) (string, error) {
+func NodeStartIdempotencyKey(planID, nodeID string, attempt int32) (string, error) {
 	if planID == "" {
 		return "", fmt.Errorf("%w: plan id is required", agentos.ErrInvalidRunPlan)
 	}
 	if nodeID == "" {
 		return "", fmt.Errorf("%w: node id is required", agentos.ErrInvalidRunPlan)
 	}
+	if attempt <= 0 {
+		return "", fmt.Errorf("%w: node start attempt must be positive", agentos.ErrInvalidRunPlan)
+	}
 	data, err := json.Marshal(struct {
 		Operation string `json:"operation"`
 		PlanID    string `json:"plan_id"`
 		NodeID    string `json:"node_id"`
+		Attempt   int32  `json:"attempt"`
 	}{
 		Operation: idempotencyOperationNodeStart,
 		PlanID:    planID,
 		NodeID:    nodeID,
+		Attempt:   attempt,
 	})
 	if err != nil {
 		return "", fmt.Errorf("%w: marshal node start key: %s", agentos.ErrInvalidPlanEvent, err)
+	}
+	sum := sha256.Sum256(data)
+
+	return planID + ":" + hex.EncodeToString(sum[:]), nil
+}
+
+// NodeTimeoutControlIdempotencyKey creates the stable idempotency key for
+// canceling a timed-out child run.
+func NodeTimeoutControlIdempotencyKey(planID, nodeID, runID string) (string, error) {
+	if planID == "" {
+		return "", fmt.Errorf("%w: plan id is required", agentos.ErrInvalidRunPlan)
+	}
+	if nodeID == "" {
+		return "", fmt.Errorf("%w: node id is required", agentos.ErrInvalidRunPlan)
+	}
+	if runID == "" {
+		return "", fmt.Errorf("%w: run id is required", agentos.ErrInvalidRunSpec)
+	}
+	data, err := json.Marshal(struct {
+		Operation string `json:"operation"`
+		PlanID    string `json:"plan_id"`
+		NodeID    string `json:"node_id"`
+		RunID     string `json:"run_id"`
+	}{
+		Operation: idempotencyOperationNodeTimeout,
+		PlanID:    planID,
+		NodeID:    nodeID,
+		RunID:     runID,
+	})
+	if err != nil {
+		return "", fmt.Errorf("%w: marshal node timeout key: %s", agentos.ErrInvalidPlanEvent, err)
 	}
 	sum := sha256.Sum256(data)
 
@@ -197,6 +237,8 @@ func planEventType(kind EventKind) (agentos.EventType, error) {
 		return agentos.EventPlanNodeSucceeded, nil
 	case EventNodeFailed:
 		return agentos.EventPlanNodeFailed, nil
+	case EventNodeRetryScheduled:
+		return agentos.EventPlanNodeRetryScheduled, nil
 	case EventNodeSkipped:
 		return agentos.EventPlanNodeSkipped, nil
 	case EventNodeCanceled:

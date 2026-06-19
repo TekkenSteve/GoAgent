@@ -96,9 +96,87 @@ func TestPlanWorkflowErrorEdgeRunsRecoveryButPlanRemainsFailed(t *testing.T) {
 	require.Equal(t, []string{"run-attempt", "run-recover"}, mocks.started)
 }
 
+func TestPlanWorkflowRetriesFailedNodeAttempt(t *testing.T) {
+	t.Parallel()
+
+	ref := agentos.BackendRef{Kind: agentos.BackendKindNative, Name: agentos.BackendNameGoAgentNative}
+	spec := agentos.RunPlanSpec{
+		PlanID: "plan-retry",
+		Nodes: []agentos.PlanNodeSpec{
+			{
+				NodeID: "flaky",
+				Run:    agentos.RunSpec{RunID: "run-flaky", Backend: ref},
+				Policy: agentos.NodePolicy{
+					MaxAttempts: 2,
+				},
+			},
+		},
+	}
+	mocks := &planWorkflowMocks{
+		statuses: map[string]agentos.RunStatus{
+			"run-flaky":           {RunID: "run-flaky", LifecycleState: "failed", Reason: "first attempt failed"},
+			"run-flaky-attempt-2": {RunID: "run-flaky-attempt-2", LifecycleState: "completed"},
+		},
+	}
+	env := newPlanWorkflowTestEnv(mocks)
+
+	env.ExecuteWorkflow(PlanWorkflow, spec)
+
+	require.True(t, env.IsWorkflowCompleted())
+	require.NoError(t, env.GetWorkflowError())
+
+	var result agentos.RunPlanStatus
+	require.NoError(t, env.GetWorkflowResult(&result))
+	require.Equal(t, agentos.PlanLifecycleSucceeded, result.LifecycleState)
+	require.Equal(t, []string{"run-flaky", "run-flaky-attempt-2"}, mocks.started)
+	require.Len(t, result.Nodes, 1)
+	require.Equal(t, int32(2), result.Nodes[0].Attempts)
+	require.Equal(t, "run-flaky-attempt-2", result.Nodes[0].RunID)
+}
+
+func TestPlanWorkflowCancelsTimedOutNode(t *testing.T) {
+	t.Parallel()
+
+	ref := agentos.BackendRef{Kind: agentos.BackendKindNative, Name: agentos.BackendNameGoAgentNative}
+	spec := agentos.RunPlanSpec{
+		PlanID: "plan-timeout",
+		Nodes: []agentos.PlanNodeSpec{
+			{
+				NodeID: "slow",
+				Run:    agentos.RunSpec{RunID: "run-slow", Backend: ref},
+				Policy: agentos.NodePolicy{
+					TimeoutSeconds: 1,
+				},
+			},
+		},
+	}
+	mocks := &planWorkflowMocks{
+		statuses: map[string]agentos.RunStatus{
+			"run-slow": {RunID: "run-slow", LifecycleState: "running"},
+		},
+	}
+	env := newPlanWorkflowTestEnv(mocks)
+
+	env.ExecuteWorkflow(PlanWorkflow, spec)
+
+	require.True(t, env.IsWorkflowCompleted())
+	require.NoError(t, env.GetWorkflowError())
+
+	var result agentos.RunPlanStatus
+	require.NoError(t, env.GetWorkflowResult(&result))
+	require.Equal(t, agentos.PlanLifecycleFailed, result.LifecycleState)
+	require.Contains(t, result.Reason, "timed out")
+	require.Equal(t, []string{"run-slow"}, mocks.started)
+	require.Len(t, mocks.controls, 1)
+	require.Equal(t, "run-slow", mocks.controls[0].RunID)
+	require.Equal(t, agentos.ControlCancel, mocks.controls[0].Control.Operation)
+	require.NotEmpty(t, mocks.controls[0].Control.IdempotencyKey)
+}
+
 type planWorkflowMocks struct {
 	started  []string
 	statuses map[string]agentos.RunStatus
+	controls []controlPlanNodeInput
 }
 
 func newPlanWorkflowTestEnv(mocks *planWorkflowMocks) *testsuite.TestWorkflowEnvironment {
@@ -134,7 +212,9 @@ func (m *planWorkflowMocks) status(_ context.Context, input statusPlanNodeInput)
 	return statusPlanNodeOutput{Status: status}, nil
 }
 
-func (m *planWorkflowMocks) control(context.Context, controlPlanNodeInput) error {
+func (m *planWorkflowMocks) control(_ context.Context, input controlPlanNodeInput) error {
+	m.controls = append(m.controls, input)
+
 	return nil
 }
 
