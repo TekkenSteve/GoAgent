@@ -51,6 +51,21 @@ type PlanIndex interface {
 	UpdatePlanStatus(ctx context.Context, status agentos.RunPlanStatus, idempotencyKey string) error
 }
 
+// PlanRefScope selects durable plans for internal control-plane projectors.
+type PlanRefScope struct {
+	AccountID       string
+	ProjectID       string
+	LifecycleStates []string
+	UpdatedAfter    time.Time
+	Limit           int
+}
+
+// PlanRefStore lists durable plan identities without exposing implementation
+// tables to projectors.
+type PlanRefStore interface {
+	ListPlanRefs(ctx context.Context, scope PlanRefScope) ([]agentos.PlanRef, error)
+}
+
 // PlanStateSnapshot is the durable replay/audit snapshot written by plan activities.
 type PlanStateSnapshot struct {
 	Spec           agentos.RunPlanSpec
@@ -68,6 +83,31 @@ type PlanStateStore interface {
 type PlanEventStore interface {
 	AppendPlanEvent(ctx context.Context, event agentos.PlanEvent, idempotencyKey string) (agentos.PlanEvent, error)
 	ListPlanEvents(ctx context.Context, scope agentos.PlanStreamScope, limit int) ([]agentos.PlanEvent, error)
+}
+
+// PlanMetricCheckpoint stores the exporter-owned cursor and projection state
+// for one durable RunPlan event stream.
+type PlanMetricCheckpoint struct {
+	ExporterID string
+	PlanID     string
+	AccountID  string
+	ProjectID  string
+	Sequence   int64
+	Projection PlanMetricProjectionState
+	UpdatedAt  time.Time
+}
+
+// PlanMetricCheckpointStore persists metric projection checkpoints.
+type PlanMetricCheckpointStore interface {
+	GetPlanMetricCheckpoint(ctx context.Context, exporterID string, ref agentos.PlanRef) (PlanMetricCheckpoint, bool, error)
+	SavePlanMetricCheckpoint(ctx context.Context, checkpoint PlanMetricCheckpoint) error
+}
+
+// PlanMetricsSink receives idempotent durable metric samples. Implementations
+// must de-duplicate by PlanMetricSample.Key before mutating non-idempotent
+// counters or external metrics systems.
+type PlanMetricsSink interface {
+	RecordPlanMetric(ctx context.Context, sample PlanMetricSample) error
 }
 
 // PlanEventPublisher publishes live PlanEvents after the durable event source

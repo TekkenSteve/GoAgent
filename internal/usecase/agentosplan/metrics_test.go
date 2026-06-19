@@ -171,6 +171,54 @@ func TestBuildPlanMetricSamplesAfterUsesEarlierHistoryForDurations(t *testing.T)
 	}
 }
 
+func TestBuildPlanMetricSamplesFromStateProjectsTailBatch(t *testing.T) {
+	requestedAt := time.Date(2026, 6, 19, 13, 0, 0, 0, time.UTC)
+	planStartedAt := requestedAt.Add(1 * time.Second)
+	nodeStartedAt := requestedAt.Add(2 * time.Second)
+	nodeSucceededAt := requestedAt.Add(7 * time.Second)
+	planSucceededAt := requestedAt.Add(11 * time.Second)
+	spec := agentos.RunPlanSpec{
+		PlanID:    "plan-metrics-state",
+		AccountID: "acct-1",
+		ProjectID: "proj-1",
+		Nodes: []agentos.PlanNodeSpec{
+			{
+				NodeID: "review",
+				Run: agentos.RunSpec{
+					RunID:   "run-review",
+					Backend: agentos.BackendRef{Kind: agentos.BackendKindHTTP, Name: "reviewer"},
+				},
+			},
+		},
+	}
+	state := PlanMetricProjectionState{
+		PlanStartedAt: planStartedAt,
+		NodeStartedAt: []PlanMetricNodeStartState{
+			{NodeID: "review", RunID: "run-review", StartedAt: nodeStartedAt},
+		},
+	}
+	events := []agentos.PlanEvent{
+		metricEvent(3, agentos.EventPlanNodeSucceeded, spec.PlanID, "review", "run-review", nodeSucceededAt, nil),
+		metricEvent(4, agentos.EventPlanSucceeded, spec.PlanID, "", "", planSucceededAt, nil),
+	}
+
+	samples, nextState, err := BuildPlanMetricSamplesFromState(context.Background(), spec, state, events)
+	if err != nil {
+		t.Fatalf("BuildPlanMetricSamplesFromState: %v", err)
+	}
+
+	requireMetric(t, samples, PlanMetricNodeCompletedTotal, "review", 1)
+	requireMetric(t, samples, PlanMetricNodeDurationSeconds, "review", 5)
+	requireMetric(t, samples, PlanMetricPlanCompletedTotal, "", 1)
+	requireMetric(t, samples, PlanMetricPlanDurationSeconds, "", 10)
+	if !nextState.PlanStartedAt.IsZero() {
+		t.Fatalf("next plan start = %s, want zero after terminal plan event", nextState.PlanStartedAt)
+	}
+	if len(nextState.NodeStartedAt) != 0 {
+		t.Fatalf("next node starts = %#v, want empty after terminal node event", nextState.NodeStartedAt)
+	}
+}
+
 func metricEvent(sequence int64, eventType agentos.EventType, planID string, nodeID string, runID string, at time.Time, payload map[string]any) agentos.PlanEvent {
 	return agentos.PlanEvent{
 		Event: agentos.Event{

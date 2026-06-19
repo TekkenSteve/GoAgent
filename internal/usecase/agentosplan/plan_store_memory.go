@@ -21,6 +21,23 @@ type MemoryPlanStore struct {
 	eventKeys map[string]agentos.PlanEvent
 	commands  map[string]PlanCommandRecord
 	auditKeys map[string]AuditRecord
+	metrics   map[planMetricCheckpointKey]PlanMetricCheckpoint
+}
+
+type planMetricCheckpointKey struct {
+	ExporterID string
+	PlanID     string
+	AccountID  string
+	ProjectID  string
+}
+
+func planMetricCheckpointKeyFromRef(exporterID string, ref agentos.PlanRef) planMetricCheckpointKey {
+	return planMetricCheckpointKey{
+		ExporterID: exporterID,
+		PlanID:     ref.PlanID,
+		AccountID:  ref.AccountID,
+		ProjectID:  ref.ProjectID,
+	}
 }
 
 // NewMemoryPlanStore creates an empty in-memory plan store.
@@ -33,6 +50,7 @@ func NewMemoryPlanStore() *MemoryPlanStore {
 		eventKeys: make(map[string]agentos.PlanEvent),
 		commands:  make(map[string]PlanCommandRecord),
 		auditKeys: make(map[string]AuditRecord),
+		metrics:   make(map[planMetricCheckpointKey]PlanMetricCheckpoint),
 	}
 }
 
@@ -87,6 +105,59 @@ func (s *MemoryPlanStore) GetPlan(_ context.Context, planID string) (agentos.Run
 	}
 
 	return spec, s.statuses[planID], true, nil
+}
+
+func (s *MemoryPlanStore) ListPlanRefs(_ context.Context, scope PlanRefScope) ([]agentos.PlanRef, error) {
+	if scope.Limit < 0 {
+		return nil, fmt.Errorf("%w: plan ref limit must be non-negative", agentos.ErrInvalidPlanScope)
+	}
+	lifecycleStates := make(map[string]struct{}, len(scope.LifecycleStates))
+	for _, state := range scope.LifecycleStates {
+		if state == "" {
+			return nil, fmt.Errorf("%w: lifecycle state is required", agentos.ErrInvalidPlanScope)
+		}
+		lifecycleStates[state] = struct{}{}
+	}
+
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	refs := make([]agentos.PlanRef, 0, len(s.specs))
+	for planID, spec := range s.specs {
+		status := s.statuses[planID]
+		if scope.AccountID != "" && spec.AccountID != scope.AccountID {
+			continue
+		}
+		if scope.ProjectID != "" && spec.ProjectID != scope.ProjectID {
+			continue
+		}
+		if len(lifecycleStates) > 0 {
+			if _, ok := lifecycleStates[status.LifecycleState]; !ok {
+				continue
+			}
+		}
+		if !scope.UpdatedAfter.IsZero() && !status.UpdatedAt.After(scope.UpdatedAfter) {
+			continue
+		}
+		refs = append(refs, agentos.PlanRef{
+			PlanID:    spec.PlanID,
+			AccountID: spec.AccountID,
+			ProjectID: spec.ProjectID,
+		})
+	}
+	sort.SliceStable(refs, func(i, j int) bool {
+		left := s.statuses[refs[i].PlanID]
+		right := s.statuses[refs[j].PlanID]
+		if !left.UpdatedAt.Equal(right.UpdatedAt) {
+			return left.UpdatedAt.Before(right.UpdatedAt)
+		}
+
+		return refs[i].PlanID < refs[j].PlanID
+	})
+	if scope.Limit > 0 && len(refs) > scope.Limit {
+		refs = refs[:scope.Limit]
+	}
+
+	return refs, nil
 }
 
 func (s *MemoryPlanStore) UpdatePlanStatus(_ context.Context, status agentos.RunPlanStatus, _ string) error {
@@ -216,6 +287,47 @@ func (s *MemoryPlanStore) ListPlanEvents(_ context.Context, scope agentos.PlanSt
 	}
 
 	return filtered, nil
+}
+
+func (s *MemoryPlanStore) GetPlanMetricCheckpoint(_ context.Context, exporterID string, ref agentos.PlanRef) (PlanMetricCheckpoint, bool, error) {
+	if exporterID == "" {
+		return PlanMetricCheckpoint{}, false, fmt.Errorf("%w: metrics exporter id is required", agentos.ErrInvalidRunPlan)
+	}
+	if err := ValidatePlanRef(ref); err != nil {
+		return PlanMetricCheckpoint{}, false, err
+	}
+
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	checkpoint, ok := s.metrics[planMetricCheckpointKeyFromRef(exporterID, ref)]
+
+	return checkpoint, ok, nil
+}
+
+func (s *MemoryPlanStore) SavePlanMetricCheckpoint(_ context.Context, checkpoint PlanMetricCheckpoint) error {
+	ref := agentos.PlanRef{
+		PlanID:    checkpoint.PlanID,
+		AccountID: checkpoint.AccountID,
+		ProjectID: checkpoint.ProjectID,
+	}
+	if err := ValidatePlanMetricCheckpointRef(checkpoint, checkpoint.ExporterID, ref); err != nil {
+		return err
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	key := planMetricCheckpointKeyFromRef(checkpoint.ExporterID, ref)
+	if existing, ok := s.metrics[key]; ok {
+		if checkpoint.Sequence < existing.Sequence {
+			return fmt.Errorf("%w: metrics checkpoint sequence moved backward from %d to %d", agentos.ErrInvalidRunPlan, existing.Sequence, checkpoint.Sequence)
+		}
+	}
+	if checkpoint.UpdatedAt.IsZero() {
+		checkpoint.UpdatedAt = time.Now().UTC()
+	}
+	s.metrics[key] = checkpoint
+
+	return nil
 }
 
 func (s *MemoryPlanStore) RecordAudit(_ context.Context, record AuditRecord) (AuditRecord, bool, error) {
@@ -430,9 +542,11 @@ func (s *MemoryPlanStore) ListAuditRecords(_ context.Context, scope agentos.Plan
 }
 
 var (
-	_ PlanIndex        = (*MemoryPlanStore)(nil)
-	_ PlanStateStore   = (*MemoryPlanStore)(nil)
-	_ PlanEventStore   = (*MemoryPlanStore)(nil)
-	_ PlanCommandStore = (*MemoryPlanStore)(nil)
-	_ AuditStore       = (*MemoryPlanStore)(nil)
+	_ PlanIndex                 = (*MemoryPlanStore)(nil)
+	_ PlanRefStore              = (*MemoryPlanStore)(nil)
+	_ PlanStateStore            = (*MemoryPlanStore)(nil)
+	_ PlanEventStore            = (*MemoryPlanStore)(nil)
+	_ PlanMetricCheckpointStore = (*MemoryPlanStore)(nil)
+	_ PlanCommandStore          = (*MemoryPlanStore)(nil)
+	_ AuditStore                = (*MemoryPlanStore)(nil)
 )

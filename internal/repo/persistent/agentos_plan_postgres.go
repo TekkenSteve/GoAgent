@@ -92,6 +92,61 @@ func (r *AgentOSPlanRepo) GetPlan(ctx context.Context, planID string) (agentos.R
 	return snapshot.Spec, snapshot.Status, true, nil
 }
 
+func (r *AgentOSPlanRepo) ListPlanRefs(ctx context.Context, scope agentosplan.PlanRefScope) ([]agentos.PlanRef, error) {
+	if scope.Limit < 0 {
+		return nil, fmt.Errorf("%w: plan ref limit must be non-negative", agentos.ErrInvalidPlanScope)
+	}
+	for _, state := range scope.LifecycleStates {
+		if state == "" {
+			return nil, fmt.Errorf("%w: lifecycle state is required", agentos.ErrInvalidPlanScope)
+		}
+	}
+
+	builder := r.Builder.
+		Select("plan_id", "account_id", "project_id").
+		From("plans").
+		OrderBy("updated_at ASC", "plan_id ASC")
+	if scope.AccountID != "" {
+		builder = builder.Where(sq.Eq{"account_id": scope.AccountID})
+	}
+	if scope.ProjectID != "" {
+		builder = builder.Where(sq.Eq{"project_id": scope.ProjectID})
+	}
+	if len(scope.LifecycleStates) > 0 {
+		builder = builder.Where(sq.Eq{"lifecycle_state": scope.LifecycleStates})
+	}
+	if !scope.UpdatedAfter.IsZero() {
+		builder = builder.Where(sq.Gt{"updated_at": scope.UpdatedAfter})
+	}
+	if scope.Limit > 0 {
+		builder = builder.Limit(uint64(scope.Limit))
+	}
+
+	sql, args, err := builder.ToSql()
+	if err != nil {
+		return nil, fmt.Errorf("AgentOSPlanRepo - ListPlanRefs - builder: %w", err)
+	}
+	rows, err := r.Pool.Query(ctx, sql, args...)
+	if err != nil {
+		return nil, fmt.Errorf("AgentOSPlanRepo - ListPlanRefs - query: %w", err)
+	}
+	defer rows.Close()
+
+	var refs []agentos.PlanRef
+	for rows.Next() {
+		var ref agentos.PlanRef
+		if err := rows.Scan(&ref.PlanID, &ref.AccountID, &ref.ProjectID); err != nil {
+			return nil, fmt.Errorf("AgentOSPlanRepo - ListPlanRefs - scan: %w", err)
+		}
+		refs = append(refs, ref)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("AgentOSPlanRepo - ListPlanRefs - rows: %w", err)
+	}
+
+	return refs, nil
+}
+
 func (r *AgentOSPlanRepo) UpdatePlanStatus(ctx context.Context, status agentos.RunPlanStatus, idempotencyKey string) error {
 	if status.PlanID == "" {
 		return fmt.Errorf("%w: plan id is required", agentos.ErrInvalidRunPlan)
@@ -706,6 +761,116 @@ func (r *AgentOSPlanRepo) ListPlanEvents(ctx context.Context, scope agentos.Plan
 	return events, nil
 }
 
+func (r *AgentOSPlanRepo) GetPlanMetricCheckpoint(ctx context.Context, exporterID string, ref agentos.PlanRef) (agentosplan.PlanMetricCheckpoint, bool, error) {
+	if exporterID == "" {
+		return agentosplan.PlanMetricCheckpoint{}, false, fmt.Errorf("%w: metrics exporter id is required", agentos.ErrInvalidRunPlan)
+	}
+	if err := agentosplan.ValidatePlanRef(ref); err != nil {
+		return agentosplan.PlanMetricCheckpoint{}, false, err
+	}
+
+	sql, args, err := r.Builder.
+		Select("exporter_id", "plan_id", "account_id", "project_id", "sequence", "projection_json", "updated_at").
+		From("plan_metric_checkpoints").
+		Where(sq.Eq{
+			"exporter_id": exporterID,
+			"plan_id":     ref.PlanID,
+			"account_id":  ref.AccountID,
+			"project_id":  ref.ProjectID,
+		}).
+		ToSql()
+	if err != nil {
+		return agentosplan.PlanMetricCheckpoint{}, false, fmt.Errorf("AgentOSPlanRepo - GetPlanMetricCheckpoint - builder: %w", err)
+	}
+
+	var checkpoint agentosplan.PlanMetricCheckpoint
+	var projectionJSON []byte
+	err = r.Pool.QueryRow(ctx, sql, args...).Scan(
+		&checkpoint.ExporterID,
+		&checkpoint.PlanID,
+		&checkpoint.AccountID,
+		&checkpoint.ProjectID,
+		&checkpoint.Sequence,
+		&projectionJSON,
+		&checkpoint.UpdatedAt,
+	)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return agentosplan.PlanMetricCheckpoint{}, false, nil
+		}
+
+		return agentosplan.PlanMetricCheckpoint{}, false, fmt.Errorf("AgentOSPlanRepo - GetPlanMetricCheckpoint - query: %w", err)
+	}
+	if len(projectionJSON) > 0 {
+		if err := json.Unmarshal(projectionJSON, &checkpoint.Projection); err != nil {
+			return agentosplan.PlanMetricCheckpoint{}, false, fmt.Errorf("AgentOSPlanRepo - GetPlanMetricCheckpoint - decode projection: %w", err)
+		}
+	}
+	if err := agentosplan.ValidatePlanMetricCheckpointRef(checkpoint, exporterID, ref); err != nil {
+		return agentosplan.PlanMetricCheckpoint{}, false, err
+	}
+
+	return checkpoint, true, nil
+}
+
+func (r *AgentOSPlanRepo) SavePlanMetricCheckpoint(ctx context.Context, checkpoint agentosplan.PlanMetricCheckpoint) error {
+	ref := agentos.PlanRef{
+		PlanID:    checkpoint.PlanID,
+		AccountID: checkpoint.AccountID,
+		ProjectID: checkpoint.ProjectID,
+	}
+	if err := agentosplan.ValidatePlanMetricCheckpointRef(checkpoint, checkpoint.ExporterID, ref); err != nil {
+		return err
+	}
+	scope, exists, err := planTenantScopeByPlanID(ctx, r.Pool, checkpoint.PlanID)
+	if err != nil {
+		return err
+	}
+	if !exists {
+		return fmt.Errorf("%w: %s", agentos.ErrPlanRouteNotFound, checkpoint.PlanID)
+	}
+	if scope.AccountID != checkpoint.AccountID || scope.ProjectID != checkpoint.ProjectID {
+		return fmt.Errorf("%w: %s", agentos.ErrPlanRouteNotFound, checkpoint.PlanID)
+	}
+
+	projectionJSON, err := json.Marshal(checkpoint.Projection)
+	if err != nil {
+		return fmt.Errorf("AgentOSPlanRepo - SavePlanMetricCheckpoint - marshal projection: %w", err)
+	}
+	result, err := r.Pool.Exec(ctx, `
+INSERT INTO plan_metric_checkpoints (
+    exporter_id,
+    plan_id,
+    account_id,
+    project_id,
+    sequence,
+    projection_json,
+    updated_at
+) VALUES ($1,$2,$3,$4,$5,$6,NOW())
+ON CONFLICT (exporter_id, plan_id) DO UPDATE SET
+    account_id = EXCLUDED.account_id,
+    project_id = EXCLUDED.project_id,
+    sequence = EXCLUDED.sequence,
+    projection_json = EXCLUDED.projection_json,
+    updated_at = NOW()
+WHERE plan_metric_checkpoints.sequence <= EXCLUDED.sequence`,
+		checkpoint.ExporterID,
+		checkpoint.PlanID,
+		checkpoint.AccountID,
+		checkpoint.ProjectID,
+		checkpoint.Sequence,
+		projectionJSON,
+	)
+	if err != nil {
+		return fmt.Errorf("AgentOSPlanRepo - SavePlanMetricCheckpoint - upsert: %w", err)
+	}
+	if result.RowsAffected() == 0 {
+		return fmt.Errorf("%w: metrics checkpoint sequence moved backward for plan %q", agentos.ErrInvalidRunPlan, checkpoint.PlanID)
+	}
+
+	return nil
+}
+
 func (r *AgentOSPlanRepo) RecordAudit(ctx context.Context, record agentosplan.AuditRecord) (agentosplan.AuditRecord, bool, error) {
 	if record.PlanID == "" {
 		return agentosplan.AuditRecord{}, false, fmt.Errorf("%w: plan id is required", agentos.ErrInvalidRunPlan)
@@ -1201,9 +1366,11 @@ func nullableTime(value time.Time) any {
 }
 
 var (
-	_ agentosplan.PlanIndex        = (*AgentOSPlanRepo)(nil)
-	_ agentosplan.PlanStateStore   = (*AgentOSPlanRepo)(nil)
-	_ agentosplan.PlanEventStore   = (*AgentOSPlanRepo)(nil)
-	_ agentosplan.PlanCommandStore = (*AgentOSPlanRepo)(nil)
-	_ agentosplan.AuditStore       = (*AgentOSPlanRepo)(nil)
+	_ agentosplan.PlanIndex                 = (*AgentOSPlanRepo)(nil)
+	_ agentosplan.PlanRefStore              = (*AgentOSPlanRepo)(nil)
+	_ agentosplan.PlanStateStore            = (*AgentOSPlanRepo)(nil)
+	_ agentosplan.PlanEventStore            = (*AgentOSPlanRepo)(nil)
+	_ agentosplan.PlanMetricCheckpointStore = (*AgentOSPlanRepo)(nil)
+	_ agentosplan.PlanCommandStore          = (*AgentOSPlanRepo)(nil)
+	_ agentosplan.AuditStore                = (*AgentOSPlanRepo)(nil)
 )

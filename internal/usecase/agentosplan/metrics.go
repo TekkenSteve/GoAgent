@@ -56,6 +56,47 @@ type PlanMetricSample struct {
 	Labels    map[string]string
 }
 
+// PlanMetricSampleKey is the stable idempotency identity for a projected metric
+// sample. A single PlanEvent can emit multiple metric names, so event identity
+// alone is not sufficient.
+type PlanMetricSampleKey struct {
+	Name     PlanMetricName
+	PlanID   string
+	NodeID   string
+	RunID    string
+	EventID  string
+	Sequence int64
+}
+
+// Key returns the durable idempotency identity for this sample.
+func (s PlanMetricSample) Key() PlanMetricSampleKey {
+	return PlanMetricSampleKey{
+		Name:     s.Name,
+		PlanID:   s.PlanID,
+		NodeID:   s.NodeID,
+		RunID:    s.RunID,
+		EventID:  s.EventID,
+		Sequence: s.Sequence,
+	}
+}
+
+// PlanMetricProjectionState is the durable state required to continue metric
+// projection from a per-plan event checkpoint without rereading the full event
+// history.
+type PlanMetricProjectionState struct {
+	PlanStartedAt time.Time                  `json:"plan_started_at,omitempty"`
+	NodeStartedAt []PlanMetricNodeStartState `json:"node_started_at,omitempty"`
+}
+
+// PlanMetricNodeStartState remembers the start timestamp for one backend-owned
+// child run so duration metrics can be computed when its terminal event arrives
+// in a later exporter batch.
+type PlanMetricNodeStartState struct {
+	NodeID    string    `json:"node_id"`
+	RunID     string    `json:"run_id,omitempty"`
+	StartedAt time.Time `json:"started_at"`
+}
+
 // BuildPlanMetricSamples projects operational metrics from a durable RunPlan
 // event history. Samples keep event identity so downstream exporters can
 // de-duplicate on EventID/Sequence.
@@ -66,11 +107,23 @@ func BuildPlanMetricSamples(ctx context.Context, spec agentos.RunPlanSpec, event
 // BuildPlanMetricSamplesAfter projects metrics for events after a durable
 // checkpoint while still reading earlier history to reconstruct durations and
 // other stateful measurements.
-func BuildPlanMetricSamplesAfter(_ context.Context, spec agentos.RunPlanSpec, events []agentos.PlanEvent, afterSequence int64) ([]PlanMetricSample, error) {
+func BuildPlanMetricSamplesAfter(ctx context.Context, spec agentos.RunPlanSpec, events []agentos.PlanEvent, afterSequence int64) ([]PlanMetricSample, error) {
+	samples, _, err := projectPlanMetricSamples(ctx, spec, PlanMetricProjectionState{}, events, afterSequence)
+
+	return samples, err
+}
+
+// BuildPlanMetricSamplesFromState projects metrics from an incremental event
+// batch and returns the next durable projection state.
+func BuildPlanMetricSamplesFromState(ctx context.Context, spec agentos.RunPlanSpec, state PlanMetricProjectionState, events []agentos.PlanEvent) ([]PlanMetricSample, PlanMetricProjectionState, error) {
+	return projectPlanMetricSamples(ctx, spec, state, events, 0)
+}
+
+func projectPlanMetricSamples(_ context.Context, spec agentos.RunPlanSpec, state PlanMetricProjectionState, events []agentos.PlanEvent, afterSequence int64) ([]PlanMetricSample, PlanMetricProjectionState, error) {
 	ordered := orderedPlanEvents(events)
 	nodeByID := planNodeByID(spec)
-	planStart := time.Time{}
-	nodeStarts := map[string]time.Time{}
+	planStart := state.PlanStartedAt
+	nodeStarts := nodeStartsFromMetricProjectionState(state)
 	samples := make([]PlanMetricSample, 0, len(ordered))
 
 	for _, event := range ordered {
@@ -93,6 +146,7 @@ func BuildPlanMetricSamplesAfter(_ context.Context, spec agentos.RunPlanSpec, ev
 			if !planStart.IsZero() && !event.Timestamp.IsZero() {
 				samples = append(samples, metricSample(spec, event, PlanMetricPlanDurationSeconds, secondsBetween(planStart, event.Timestamp), metricUnitSeconds, labels))
 			}
+			planStart = time.Time{}
 		case agentos.EventPlanNodeStarted:
 			nodeStarts[nodeMetricKey(event.NodeID, event.RunID)] = event.Timestamp
 			if !emit {
@@ -109,9 +163,11 @@ func BuildPlanMetricSamplesAfter(_ context.Context, spec agentos.RunPlanSpec, ev
 			}
 			labels := mergeLabels(backendLabels(nodeByID[event.NodeID]), map[string]string{"lifecycle_state": nodeLifecycleForEvent(event.EventType)})
 			samples = append(samples, metricSample(spec, event, PlanMetricNodeCompletedTotal, 1, metricUnitCount, labels))
-			if start := nodeStarts[nodeMetricKey(event.NodeID, event.RunID)]; !start.IsZero() && !event.Timestamp.IsZero() {
+			key := nodeMetricKey(event.NodeID, event.RunID)
+			if start := nodeStarts[key]; !start.IsZero() && !event.Timestamp.IsZero() {
 				samples = append(samples, metricSample(spec, event, PlanMetricNodeDurationSeconds, secondsBetween(start, event.Timestamp), metricUnitSeconds, labels))
 			}
+			delete(nodeStarts, key)
 			if event.EventType == agentos.EventPlanNodeFailed {
 				samples = append(samples, metricSample(spec, event, PlanMetricBackendErrorsTotal, 1, metricUnitCount, backendLabels(nodeByID[event.NodeID])))
 			}
@@ -121,7 +177,7 @@ func BuildPlanMetricSamplesAfter(_ context.Context, spec agentos.RunPlanSpec, ev
 			}
 			artifactSamples, err := artifactMetricSamples(spec, event)
 			if err != nil {
-				return nil, err
+				return nil, PlanMetricProjectionState{}, err
 			}
 			samples = append(samples, artifactSamples...)
 		case agentos.EventUsageReported:
@@ -130,7 +186,7 @@ func BuildPlanMetricSamplesAfter(_ context.Context, spec agentos.RunPlanSpec, ev
 			}
 			budgetSamples, err := budgetMetricSamples(spec, event)
 			if err != nil {
-				return nil, err
+				return nil, PlanMetricProjectionState{}, err
 			}
 			samples = append(samples, budgetSamples...)
 		case agentos.EventPlanExpanded:
@@ -146,11 +202,51 @@ func BuildPlanMetricSamplesAfter(_ context.Context, spec agentos.RunPlanSpec, ev
 		}
 	}
 
-	return samples, nil
+	nextState := metricProjectionStateFromStarts(planStart, nodeStarts)
+
+	return samples, nextState, nil
 }
 
 func shouldEmitMetricSample(event agentos.PlanEvent, afterSequence int64) bool {
 	return afterSequence == 0 || event.Sequence > afterSequence
+}
+
+func nodeStartsFromMetricProjectionState(state PlanMetricProjectionState) map[planMetricNodeKey]time.Time {
+	starts := make(map[planMetricNodeKey]time.Time, len(state.NodeStartedAt))
+	for _, start := range state.NodeStartedAt {
+		if start.NodeID == "" || start.StartedAt.IsZero() {
+			continue
+		}
+		starts[nodeMetricKey(start.NodeID, start.RunID)] = start.StartedAt
+	}
+
+	return starts
+}
+
+func metricProjectionStateFromStarts(planStart time.Time, nodeStarts map[planMetricNodeKey]time.Time) PlanMetricProjectionState {
+	state := PlanMetricProjectionState{PlanStartedAt: planStart}
+	if len(nodeStarts) == 0 {
+		return state
+	}
+
+	starts := make([]PlanMetricNodeStartState, 0, len(nodeStarts))
+	for key, startedAt := range nodeStarts {
+		starts = append(starts, PlanMetricNodeStartState{
+			NodeID:    key.NodeID,
+			RunID:     key.RunID,
+			StartedAt: startedAt,
+		})
+	}
+	sort.SliceStable(starts, func(i, j int) bool {
+		if starts[i].NodeID != starts[j].NodeID {
+			return starts[i].NodeID < starts[j].NodeID
+		}
+
+		return starts[i].RunID < starts[j].RunID
+	})
+	state.NodeStartedAt = starts
+
+	return state
 }
 
 func artifactMetricSamples(spec agentos.RunPlanSpec, event agentos.PlanEvent) ([]PlanMetricSample, error) {
@@ -242,8 +338,13 @@ func nodeRequestedAt(spec agentos.RunPlanSpec, node agentos.PlanNodeSpec) time.T
 	return spec.RequestedAt
 }
 
-func nodeMetricKey(nodeID string, runID string) string {
-	return nodeID + "\x00" + runID
+type planMetricNodeKey struct {
+	NodeID string
+	RunID  string
+}
+
+func nodeMetricKey(nodeID string, runID string) planMetricNodeKey {
+	return planMetricNodeKey{NodeID: nodeID, RunID: runID}
 }
 
 func secondsBetween(start time.Time, end time.Time) float64 {
