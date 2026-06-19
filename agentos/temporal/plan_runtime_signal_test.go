@@ -80,16 +80,41 @@ func TestPlanRuntimeStartPlanRequiresAccountScope(t *testing.T) {
 	}
 }
 
-func TestPlanRuntimeWithoutPostgresDoesNotInstallMemoryPlanStores(t *testing.T) {
-	rt, err := newPlanRuntimeWithClient(t.Context(), RuntimeConfig{TemporalTaskQueue: "agentos-test"}, &fakePlanTemporalClient{}, false)
-	if err != nil {
-		t.Fatalf("newPlanRuntimeWithClient: %v", err)
-	}
-	if rt.planIndex != nil || rt.planEvents != nil || rt.auditStore != nil {
-		t.Fatalf("durable stores = index:%T events:%T audit:%T, want nil without postgres", rt.planIndex, rt.planEvents, rt.auditStore)
+func TestPlanRuntimeRequiresDurableStoresAtConstruction(t *testing.T) {
+	_, err := NewPlanRuntime(t.Context(), RuntimeConfig{TemporalTaskQueue: "agentos-test"})
+	if !errors.Is(err, ErrPlanRuntimePostgresURLRequired) {
+		t.Fatalf("NewPlanRuntime missing postgres error = %v, want %v", err, ErrPlanRuntimePostgresURLRequired)
 	}
 
-	_, err = rt.StartPlan(t.Context(), agentos.RunPlanSpec{
+	_, err = newPlanRuntimeWithClient(t.Context(), RuntimeConfig{TemporalTaskQueue: "agentos-test"}, &fakePlanTemporalClient{}, false)
+	if !errors.Is(err, ErrPlanRuntimePostgresURLRequired) {
+		t.Fatalf("newPlanRuntimeWithClient missing postgres error = %v, want %v", err, ErrPlanRuntimePostgresURLRequired)
+	}
+
+	_, err = newPlanRuntimeWithClient(t.Context(), RuntimeConfig{
+		TemporalTaskQueue: "agentos-test",
+		PostgresURL:       "postgres://user:pass@localhost:5432/db",
+	}, &fakePlanTemporalClient{}, false)
+	if !errors.Is(err, ErrPlanRuntimeArtifactStoreBackendRequired) {
+		t.Fatalf("newPlanRuntimeWithClient missing artifact backend error = %v, want %v", err, ErrPlanRuntimeArtifactStoreBackendRequired)
+	}
+
+	_, err = newPlanRuntimeWithClient(t.Context(), RuntimeConfig{
+		TemporalTaskQueue: "agentos-test",
+		PostgresURL:       "postgres://user:pass@localhost:5432/db",
+		ArtifactStore: ArtifactStoreConfig{
+			Backend: ArtifactStoreBackendLocal,
+		},
+	}, &fakePlanTemporalClient{}, false)
+	if !errors.Is(err, ErrPlanRuntimeArtifactStoreLocalRootRequired) {
+		t.Fatalf("newPlanRuntimeWithClient missing local root error = %v, want %v", err, ErrPlanRuntimeArtifactStoreLocalRootRequired)
+	}
+}
+
+func TestPlanRuntimeNilDurableStoresFailMethods(t *testing.T) {
+	rt := &planRuntime{}
+
+	_, err := rt.StartPlan(t.Context(), agentos.RunPlanSpec{
 		PlanID:         "plan-1",
 		AccountID:      "acct-1",
 		IdempotencyKey: "plan-start-1",

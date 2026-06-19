@@ -35,6 +35,15 @@ var (
 	errPlanRuntimePlanEventStoreRequired = errors.New("agentos temporal plan runtime: plan event store is not configured")
 	errPlanRuntimeArtifactStoreRequired  = errors.New("agentos temporal plan runtime: artifact store is not configured")
 	errPlanRuntimeAuditStoreRequired     = errors.New("agentos temporal plan runtime: audit store is not configured")
+
+	ErrPlanRuntimePostgresURLRequired              = errors.New("agentos temporal plan runtime: postgres url is required")
+	ErrPlanRuntimeArtifactStoreBackendRequired     = errors.New("agentos temporal plan runtime: artifact store backend is required")
+	ErrPlanRuntimeArtifactStoreBackendUnknown      = errors.New("agentos temporal plan runtime: artifact store backend is unknown")
+	ErrPlanRuntimeArtifactStoreLocalRootRequired   = errors.New("agentos temporal plan runtime: artifact local root is required")
+	ErrPlanRuntimeArtifactStoreS3BucketRequired    = errors.New("agentos temporal plan runtime: artifact s3 bucket is required")
+	ErrPlanRuntimeArtifactStoreS3RegionRequired    = errors.New("agentos temporal plan runtime: artifact s3 region is required")
+	ErrPlanRuntimeArtifactStoreS3AccessKeyRequired = errors.New("agentos temporal plan runtime: artifact s3 access key id is required")
+	ErrPlanRuntimeArtifactStoreS3SecretKeyRequired = errors.New("agentos temporal plan runtime: artifact s3 secret access key is required")
 )
 
 type planTemporalClient interface {
@@ -45,6 +54,10 @@ type planTemporalClient interface {
 
 // NewPlanRuntime creates the default Temporal implementation of agentos.PlanRuntime.
 func NewPlanRuntime(ctx context.Context, cfg RuntimeConfig) (agentos.PlanRuntime, error) {
+	if err := validatePlanRuntimeConfig(cfg); err != nil {
+		return nil, err
+	}
+
 	fwTemporal := temporalConfig(cfg)
 	c, err := client.Dial(client.Options{
 		HostPort:  fwTemporal.Address,
@@ -74,6 +87,10 @@ func NewPlanRuntimeWithClient(ctx context.Context, cfg RuntimeConfig, c client.C
 }
 
 func newPlanRuntimeWithClient(ctx context.Context, cfg RuntimeConfig, c planTemporalClient, closeTemporal bool) (*planRuntime, error) {
+	if err := validatePlanRuntimeConfig(cfg); err != nil {
+		return nil, err
+	}
+
 	fwTemporal := temporalConfig(cfg)
 	rt := &planRuntime{
 		temporalClient: c,
@@ -88,28 +105,25 @@ func newPlanRuntimeWithClient(ctx context.Context, cfg RuntimeConfig, c planTemp
 		rt.redis = rdb
 		rt.planLiveEvents = repostream.NewRedisPlanEventStream(rdb)
 	}
-	if cfg.PostgresURL != "" {
-		pg, err := newRuntimePostgres(cfg)
-		if err != nil {
-			_ = rt.Close()
+	pg, err := newRuntimePostgres(cfg)
+	if err != nil {
+		_ = rt.Close()
 
-			return nil, fmt.Errorf("agentos temporal plan runtime postgres: %w", err)
-		}
-		rt.postgres = pg
-		planStore := temporalrepo.NewAgentOSPlanRepo(pg)
-		rt.planEvents = planStore
-		rt.planIndex = planStore
-		rt.auditStore = planStore
-		if cfg.ArtifactStore.Backend != "" {
-			blobStore, err := artifactrepo.NewBlobStore(ctx, artifactBlobConfig(cfg.ArtifactStore))
-			if err != nil {
-				_ = rt.Close()
-
-				return nil, fmt.Errorf("agentos temporal plan runtime artifact store: %w", err)
-			}
-			rt.artifactStore = temporalrepo.NewAgentOSArtifactRepo(pg, blobStore)
-		}
+		return nil, fmt.Errorf("agentos temporal plan runtime postgres: %w", err)
 	}
+	rt.postgres = pg
+	planStore := temporalrepo.NewAgentOSPlanRepo(pg)
+	rt.planEvents = planStore
+	rt.planIndex = planStore
+	rt.auditStore = planStore
+
+	blobStore, err := artifactrepo.NewBlobStore(ctx, artifactBlobConfig(cfg.ArtifactStore))
+	if err != nil {
+		_ = rt.Close()
+
+		return nil, fmt.Errorf("agentos temporal plan runtime artifact store: %w", err)
+	}
+	rt.artifactStore = temporalrepo.NewAgentOSArtifactRepo(pg, blobStore)
 
 	return rt, nil
 }
@@ -467,6 +481,22 @@ func planArtifactRefMatches(ref agentos.ArtifactRef, scope agentos.PlanArtifactS
 	}
 
 	return true
+}
+
+func validatePlanRuntimeConfig(cfg RuntimeConfig) error {
+	if cfg.PostgresURL == "" {
+		return ErrPlanRuntimePostgresURLRequired
+	}
+
+	return validateArtifactStoreConfig(cfg.ArtifactStore, artifactStoreValidationErrors{
+		backendRequired:   ErrPlanRuntimeArtifactStoreBackendRequired,
+		backendUnknown:    ErrPlanRuntimeArtifactStoreBackendUnknown,
+		localRootRequired: ErrPlanRuntimeArtifactStoreLocalRootRequired,
+		s3BucketRequired:  ErrPlanRuntimeArtifactStoreS3BucketRequired,
+		s3RegionRequired:  ErrPlanRuntimeArtifactStoreS3RegionRequired,
+		s3AccessRequired:  ErrPlanRuntimeArtifactStoreS3AccessKeyRequired,
+		s3SecretRequired:  ErrPlanRuntimeArtifactStoreS3SecretKeyRequired,
+	})
 }
 
 func newRuntimePostgres(cfg RuntimeConfig) (*postgres.Postgres, error) {

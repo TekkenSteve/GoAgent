@@ -170,31 +170,15 @@ func newWorkerKit(ctx context.Context, cfg WorkerConfig) (*WorkerKit, error) {
 }
 
 func validateWorkerArtifactStore(cfg ArtifactStoreConfig) error {
-	switch cfg.Backend {
-	case ArtifactStoreBackendLocal:
-		if cfg.Local.Root == "" {
-			return ErrWorkerArtifactStoreLocalRootRequired
-		}
-	case ArtifactStoreBackendS3:
-		if cfg.S3.Bucket == "" {
-			return ErrWorkerArtifactStoreS3BucketRequired
-		}
-		if cfg.S3.Region == "" {
-			return ErrWorkerArtifactStoreS3RegionRequired
-		}
-		if cfg.S3.AccessKeyID == "" {
-			return ErrWorkerArtifactStoreS3AccessKeyRequired
-		}
-		if cfg.S3.SecretAccessKey == "" {
-			return ErrWorkerArtifactStoreS3SecretKeyRequired
-		}
-	case "":
-		return ErrWorkerArtifactStoreBackendRequired
-	default:
-		return fmt.Errorf("%w: %s", ErrWorkerArtifactStoreBackendUnknown, cfg.Backend)
-	}
-
-	return nil
+	return validateArtifactStoreConfig(cfg, artifactStoreValidationErrors{
+		backendRequired:   ErrWorkerArtifactStoreBackendRequired,
+		backendUnknown:    ErrWorkerArtifactStoreBackendUnknown,
+		localRootRequired: ErrWorkerArtifactStoreLocalRootRequired,
+		s3BucketRequired:  ErrWorkerArtifactStoreS3BucketRequired,
+		s3RegionRequired:  ErrWorkerArtifactStoreS3RegionRequired,
+		s3AccessRequired:  ErrWorkerArtifactStoreS3AccessKeyRequired,
+		s3SecretRequired:  ErrWorkerArtifactStoreS3SecretKeyRequired,
+	})
 }
 
 func artifactBlobConfig(cfg ArtifactStoreConfig) artifactrepo.Config {
