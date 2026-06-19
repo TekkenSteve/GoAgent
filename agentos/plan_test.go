@@ -25,6 +25,21 @@ func TestRunPlanSpecJSONSchema(t *testing.T) {
 	}
 }
 
+func TestPlanDeltaSpecJSONSchema(t *testing.T) {
+	data, err := PlanDeltaSpecJSONSchema()
+	if err != nil {
+		t.Fatalf("PlanDeltaSpecJSONSchema: %v", err)
+	}
+
+	var schema map[string]any
+	if err := json.Unmarshal(data, &schema); err != nil {
+		t.Fatalf("schema json: %v", err)
+	}
+	if len(schema) == 0 {
+		t.Fatal("schema is empty")
+	}
+}
+
 func TestRunPlanSpecJSONSchemaFileIsCurrent(t *testing.T) {
 	generated, err := RunPlanSpecJSONSchema()
 	if err != nil {
@@ -36,6 +51,20 @@ func TestRunPlanSpecJSONSchemaFileIsCurrent(t *testing.T) {
 	}
 	if string(stored) != string(generated) {
 		t.Fatal("docs/schemas/run_plan.schema.json is stale; run make agentos-plan-schema")
+	}
+}
+
+func TestPlanDeltaSpecJSONSchemaFileIsCurrent(t *testing.T) {
+	generated, err := PlanDeltaSpecJSONSchema()
+	if err != nil {
+		t.Fatalf("PlanDeltaSpecJSONSchema: %v", err)
+	}
+	stored, err := os.ReadFile("../docs/schemas/plan_delta.schema.json")
+	if err != nil {
+		t.Fatalf("ReadFile schema: %v", err)
+	}
+	if string(stored) != string(generated) {
+		t.Fatal("docs/schemas/plan_delta.schema.json is stale; run make agentos-plan-schema")
 	}
 }
 

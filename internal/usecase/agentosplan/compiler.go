@@ -33,3 +33,23 @@ func (c RunPlanCompiler) CompileYAML(ctx context.Context, data []byte) (Executab
 
 	return c.CompileJSON(ctx, jsonData)
 }
+
+// CompileDeltaJSON decodes JSON PlanDelta and validates the expanded plan.
+func (c RunPlanCompiler) CompileDeltaJSON(ctx context.Context, base agentos.RunPlanSpec, data []byte, expansionCount int32) (agentos.RunPlanSpec, ExecutablePlan, error) {
+	var delta PlanDelta
+	if err := json.Unmarshal(data, &delta); err != nil {
+		return agentos.RunPlanSpec{}, ExecutablePlan{}, fmt.Errorf("%w: decode delta json: %s", agentos.ErrInvalidRunPlan, err)
+	}
+
+	return ApplyDelta(ctx, c.Validator, base, delta, expansionCount)
+}
+
+// CompileDeltaYAML decodes YAML PlanDelta and validates the expanded plan.
+func (c RunPlanCompiler) CompileDeltaYAML(ctx context.Context, base agentos.RunPlanSpec, data []byte, expansionCount int32) (agentos.RunPlanSpec, ExecutablePlan, error) {
+	jsonData, err := yaml.YAMLToJSON(data)
+	if err != nil {
+		return agentos.RunPlanSpec{}, ExecutablePlan{}, fmt.Errorf("%w: decode delta yaml: %s", agentos.ErrInvalidRunPlan, err)
+	}
+
+	return c.CompileDeltaJSON(ctx, base, jsonData, expansionCount)
+}

@@ -9,10 +9,7 @@ import (
 
 // PlanDelta is the only supported dynamic expansion unit. It is intended to be
 // produced and validated inside PlanWorkflow, not patched arbitrarily by clients.
-type PlanDelta struct {
-	Nodes []agentos.PlanNodeSpec `json:"nodes,omitempty"`
-	Edges []agentos.PlanEdgeSpec `json:"edges,omitempty"`
-}
+type PlanDelta = agentos.PlanDeltaSpec
 
 // ApplyDelta validates and appends nodes/edges under the plan policy limits.
 func ApplyDelta(ctx context.Context, validator Validator, current agentos.RunPlanSpec, delta PlanDelta, expansionCount int32) (agentos.RunPlanSpec, ExecutablePlan, error) {

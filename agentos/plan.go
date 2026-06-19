@@ -45,6 +45,14 @@ type PlanEdgeSpec struct {
 	InputMapping []InputMapping `json:"input_mapping,omitempty"`
 }
 
+// PlanDeltaSpec is the public wire contract for workflow-owned dynamic
+// expansion proposals. External callers may author or validate this artifact,
+// but only PlanWorkflow may apply it to a running topology.
+type PlanDeltaSpec struct {
+	Nodes []PlanNodeSpec `json:"nodes,omitempty"`
+	Edges []PlanEdgeSpec `json:"edges,omitempty"`
+}
+
 // EdgeTrigger selects which upstream node terminal state activates an edge.
 type EdgeTrigger string
 
@@ -216,6 +224,16 @@ type PlanEvent struct {
 // RunPlanSpecJSONSchema returns a JSON Schema inferred from RunPlanSpec.
 func RunPlanSpecJSONSchema() ([]byte, error) {
 	schema, err := jsonschema.For[RunPlanSpec](nil)
+	if err != nil {
+		return nil, err
+	}
+
+	return json.MarshalIndent(schema, "", "  ")
+}
+
+// PlanDeltaSpecJSONSchema returns a JSON Schema inferred from PlanDeltaSpec.
+func PlanDeltaSpecJSONSchema() ([]byte, error) {
+	schema, err := jsonschema.For[PlanDeltaSpec](nil)
 	if err != nil {
 		return nil, err
 	}
