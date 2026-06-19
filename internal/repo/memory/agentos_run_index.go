@@ -33,6 +33,13 @@ func (i *AgentOSRunIndex) Bind(_ context.Context, spec agentos.RunSpec) error {
 
 	i.mu.Lock()
 	defer i.mu.Unlock()
+	if existing, exists := i.routes[spec.RunID]; exists {
+		if existing != spec.Backend {
+			return fmt.Errorf("%w: run %q is already owned by %s/%s", agentos.ErrInvalidBackendRef, spec.RunID, existing.Kind, existing.Name)
+		}
+
+		return nil
+	}
 	i.routes[spec.RunID] = spec.Backend
 
 	return nil

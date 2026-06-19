@@ -160,6 +160,21 @@ func TestAgentOSPlanPostgresDurablePersistence(t *testing.T) {
 	if err := routeIndex.BindPlanNode(ctx, spec.PlanID, spec.Nodes[0].NodeID, changedRun, agentos.RunStatus{RunID: changedRun.RunID}); !errors.Is(err, agentos.ErrInvalidRunSpec) {
 		t.Fatalf("BindPlanNode changed run error = %v, want ErrInvalidRunSpec", err)
 	}
+	standaloneRun := agentos.RunSpec{
+		RunID:   "standalone-" + suffix,
+		Backend: runSpec.Backend,
+	}
+	if err := routeIndex.Bind(ctx, standaloneRun); err != nil {
+		t.Fatalf("Bind standalone first: %v", err)
+	}
+	if err := routeIndex.Bind(ctx, standaloneRun); err != nil {
+		t.Fatalf("Bind standalone replay: %v", err)
+	}
+	standaloneChangedBackend := standaloneRun
+	standaloneChangedBackend.Backend = agentos.BackendRef{Kind: agentos.BackendKindHTTP, Name: "other-backend"}
+	if err := routeIndex.Bind(ctx, standaloneChangedBackend); !errors.Is(err, agentos.ErrInvalidBackendRef) {
+		t.Fatalf("Bind standalone changed backend error = %v, want ErrInvalidBackendRef", err)
+	}
 
 	artifactRef := agentos.ArtifactRef{
 		PlanID:    spec.PlanID,

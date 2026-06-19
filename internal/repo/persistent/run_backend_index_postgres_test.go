@@ -59,6 +59,17 @@ func TestValidateRunBackendIndexIdempotencyRejectsDifferentBackend(t *testing.T)
 	}
 }
 
+func TestValidateRunBackendIndexIdempotencyRejectsDifferentKey(t *testing.T) {
+	existing := testRunBackendIndexRecord()
+	requested := existing
+	requested.IdempotencyKey = "other-key"
+
+	err := validateRunBackendIndexIdempotency(existing, requested)
+	if !errors.Is(err, agentos.ErrInvalidRunSpec) {
+		t.Fatalf("error = %v, want ErrInvalidRunSpec", err)
+	}
+}
+
 func testRunBackendIndexRecord() entity.RunBackendIndexRecord {
 	return entity.RunBackendIndexRecord{
 		RunID:          "run-1",

@@ -162,23 +162,13 @@ func (r *RunBackendIndexRepo) upsert(ctx context.Context, record entity.RunBacke
 			record.IdempotencyKey,
 			record.LifecycleState,
 		).
-		Suffix(`
-ON CONFLICT (run_id) DO UPDATE SET
-    plan_id = EXCLUDED.plan_id,
-    node_id = EXCLUDED.node_id,
-    thread_id = EXCLUDED.thread_id,
-    account_id = EXCLUDED.account_id,
-    project_id = EXCLUDED.project_id,
-    backend_kind = EXCLUDED.backend_kind,
-    backend_name = EXCLUDED.backend_name,
-    idempotency_key = EXCLUDED.idempotency_key,
-    lifecycle_state = EXCLUDED.lifecycle_state,
-    updated_at = NOW()`).
+		Suffix("ON CONFLICT (run_id) DO NOTHING").
 		ToSql()
 	if err != nil {
 		return fmt.Errorf("RunBackendIndexRepo - upsert - builder: %w", err)
 	}
-	if _, err := r.Pool.Exec(ctx, sql, args...); err != nil {
+	tag, err := r.Pool.Exec(ctx, sql, args...)
+	if err != nil {
 		if isPostgresUniqueViolation(err) && record.IdempotencyKey != "" {
 			existing, exists, lookupErr := r.runByIdempotencyKey(ctx, record.IdempotencyKey)
 			if lookupErr != nil {
@@ -190,6 +180,17 @@ ON CONFLICT (run_id) DO UPDATE SET
 		}
 
 		return fmt.Errorf("RunBackendIndexRepo - upsert - exec: %w", err)
+	}
+	if tag.RowsAffected() == 0 {
+		existing, exists, err := r.Get(ctx, record.RunID)
+		if err != nil {
+			return err
+		}
+		if !exists {
+			return fmt.Errorf("%w: run %q conflict did not leave an ownership record", agentos.ErrRunRouteNotFound, record.RunID)
+		}
+
+		return validateRunBackendIndexIdempotency(existing, record)
 	}
 
 	return nil
@@ -255,6 +256,9 @@ func validateRunBackendIndexIdempotency(existing entity.RunBackendIndexRecord, r
 	}
 	if existing.BackendKind != requested.BackendKind || existing.BackendName != requested.BackendName {
 		return fmt.Errorf("%w: run %q idempotency key was reused for a different backend", agentos.ErrInvalidBackendRef, existing.RunID)
+	}
+	if existing.IdempotencyKey != "" && requested.IdempotencyKey != "" && existing.IdempotencyKey != requested.IdempotencyKey {
+		return fmt.Errorf("%w: run %q was already bound with a different idempotency key", agentos.ErrInvalidRunSpec, existing.RunID)
 	}
 
 	return nil
