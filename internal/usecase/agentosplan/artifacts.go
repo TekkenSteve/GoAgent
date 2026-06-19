@@ -39,6 +39,9 @@ func (s *MemoryArtifactStore) Put(_ context.Context, artifact agentos.ArtifactRe
 	if idempotencyKey == "" {
 		return agentos.ArtifactRef{}, fmt.Errorf("%w: artifact idempotency key is required", agentos.ErrInvalidArtifact)
 	}
+	if artifact.PlanID == "" {
+		return agentos.ArtifactRef{}, fmt.Errorf("%w: plan id is required", agentos.ErrInvalidArtifact)
+	}
 	if artifact.Name == "" {
 		return agentos.ArtifactRef{}, fmt.Errorf("%w: artifact name is required", agentos.ErrInvalidArtifact)
 	}
@@ -80,9 +83,7 @@ func (s *MemoryArtifactStore) Put(_ context.Context, artifact agentos.ArtifactRe
 	if idempotencyKey != "" {
 		s.byKey[idempotencyKey] = artifact.ArtifactID
 	}
-	if artifact.PlanID != "" {
-		s.byPlan[artifact.PlanID] = append(s.byPlan[artifact.PlanID], artifact.ArtifactID)
-	}
+	s.byPlan[artifact.PlanID] = append(s.byPlan[artifact.PlanID], artifact.ArtifactID)
 
 	return artifact, nil
 }

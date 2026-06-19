@@ -61,6 +61,7 @@ func TestArtifactPlanDeltaProviderFailsWhenPayloadMissing(t *testing.T) {
 	store := NewMemoryArtifactStore()
 	ref, err := store.Put(context.Background(), agentos.ArtifactRef{
 		ArtifactID: "delta-1",
+		PlanID:     "plan-1",
 		Name:       "expand",
 		Kind:       agentos.ArtifactKindPlanDelta,
 	}, nil, "delta-key")

@@ -20,6 +20,18 @@ func TestMemoryArtifactStoreRequiresIdempotencyKey(t *testing.T) {
 	}
 }
 
+func TestMemoryArtifactStoreRequiresPlanID(t *testing.T) {
+	store := NewMemoryArtifactStore()
+
+	_, err := store.Put(context.Background(), agentos.ArtifactRef{
+		Name: "summary",
+		Kind: agentos.ArtifactKindObject,
+	}, map[string]any{"ok": true}, "artifact-key")
+	if !errors.Is(err, agentos.ErrInvalidArtifact) {
+		t.Fatalf("Put error = %v, want ErrInvalidArtifact", err)
+	}
+}
+
 func TestMemoryArtifactStorePutIsIdempotent(t *testing.T) {
 	store := NewMemoryArtifactStore()
 	first, err := store.Put(context.Background(), agentos.ArtifactRef{
