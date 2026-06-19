@@ -242,6 +242,9 @@ func (s *MemoryPlanStore) AppendPlanEvent(_ context.Context, event agentos.PlanE
 	if event.EventID == "" {
 		event.EventID = fmt.Sprintf("%s:%d", event.PlanID, event.Sequence)
 	}
+	if event.Timestamp.IsZero() {
+		event.Timestamp = time.Now().UTC()
+	}
 	s.events[event.PlanID] = append(s.events[event.PlanID], event)
 	s.eventKeys[idempotencyKey] = event
 

@@ -115,6 +115,42 @@ func TestPlanEventCodecRejectsMissingPlanID(t *testing.T) {
 	}
 }
 
+func TestPlanEventCodecRequiresStoredEventIdentity(t *testing.T) {
+	valid := PlanEvent{
+		Event: Event{
+			EventID:   "evt-1",
+			EventType: EventPlanStarted,
+			Sequence:  1,
+			Timestamp: time.Date(2026, 6, 19, 12, 0, 0, 0, time.UTC),
+		},
+		PlanID: "plan-1",
+	}
+	cases := map[string]PlanEvent{
+		"event id": func() PlanEvent {
+			event := valid
+			event.EventID = ""
+			return event
+		}(),
+		"sequence": func() PlanEvent {
+			event := valid
+			event.Sequence = 0
+			return event
+		}(),
+		"timestamp": func() PlanEvent {
+			event := valid
+			event.Timestamp = time.Time{}
+			return event
+		}(),
+	}
+	for name, event := range cases {
+		t.Run(name, func(t *testing.T) {
+			if _, err := MarshalPlanEvent(event); !errors.Is(err, ErrInvalidPlanEvent) {
+				t.Fatalf("MarshalPlanEvent error = %v, want ErrInvalidPlanEvent", err)
+			}
+		})
+	}
+}
+
 func assertNoInternalEntity(t *testing.T, typ reflect.Type, seen map[reflect.Type]bool) {
 	t.Helper()
 	for typ.Kind() == reflect.Pointer || typ.Kind() == reflect.Slice || typ.Kind() == reflect.Array {

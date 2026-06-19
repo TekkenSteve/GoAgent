@@ -64,6 +64,9 @@ func TestMemoryPlanStoreAppendPlanEventIsIdempotent(t *testing.T) {
 	if first.EventID != second.EventID || first.Sequence != second.Sequence {
 		t.Fatalf("events are not idempotent: %#v %#v", first, second)
 	}
+	if _, err := agentos.MarshalPlanEvent(first); err != nil {
+		t.Fatalf("stored event is not valid public PlanEvent: %v", err)
+	}
 	events, err := store.ListPlanEvents(ctx, agentos.PlanStreamScope{PlanID: "plan-1"}, 0)
 	if err != nil {
 		t.Fatalf("ListPlanEvents: %v", err)

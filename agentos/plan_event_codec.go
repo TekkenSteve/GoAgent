@@ -31,8 +31,17 @@ func validatePlanEvent(event PlanEvent) error {
 	if event.PlanID == "" {
 		return fmt.Errorf("%w: plan id is required", ErrInvalidPlanEvent)
 	}
+	if event.EventID == "" {
+		return fmt.Errorf("%w: event id is required", ErrInvalidPlanEvent)
+	}
 	if event.EventType == "" {
 		return fmt.Errorf("%w: event type is required", ErrInvalidPlanEvent)
+	}
+	if event.Sequence <= 0 {
+		return fmt.Errorf("%w: sequence must be positive", ErrInvalidPlanEvent)
+	}
+	if event.Timestamp.IsZero() {
+		return fmt.Errorf("%w: timestamp is required", ErrInvalidPlanEvent)
 	}
 
 	return nil
