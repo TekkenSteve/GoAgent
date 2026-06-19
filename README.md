@@ -193,6 +193,18 @@ Native GoAgent `entity.Step` remains an internal detail of the GoAgent native ba
 
 Plan runtime query APIs are durable: status comes from the plan index, event history comes from the plan event store, audits come from the audit store, and artifact payloads come from the artifact store. SSE is only the live streaming transport layered on top of the durable event history.
 
+`cmd/agentos-plan` is the RunPlan DSL/compiler tool. It validates JSON/YAML
+`RunPlanSpec`, generates JSON Schema, validates bounded `PlanDelta` expansion,
+and imports/exports Serverless Workflow as an edge interoperability format. The
+typed `agentos.RunPlanSpec` remains the source of truth.
+
+```bash
+go run ./cmd/agentos-plan schema --kind run-plan --out docs/schemas/run_plan.schema.json
+go run ./cmd/agentos-plan validate --file plan.yaml --format yaml --capabilities capabilities.yaml --capabilities-format yaml
+go run ./cmd/agentos-plan export-serverless --file plan.yaml --format yaml --capabilities capabilities.yaml --capabilities-format yaml --out-format yaml --out workflow.yaml
+go run ./cmd/agentos-plan import-serverless --file workflow.yaml --format yaml --capabilities capabilities.yaml --capabilities-format yaml --out-format json
+```
+
 External Go projects should import only:
 
 ```go
