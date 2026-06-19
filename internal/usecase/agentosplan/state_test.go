@@ -87,3 +87,86 @@ func TestStatePlanApprovalAndRejection(t *testing.T) {
 		t.Fatalf("rejected status = %#v", state.Status)
 	}
 }
+
+func TestStateRestoresFromSnapshotStatus(t *testing.T) {
+	now := time.Date(2026, 6, 19, 12, 0, 0, 0, time.UTC)
+	ref := agentos.BackendRef{Kind: agentos.BackendKindNative, Name: agentos.BackendNameGoAgentNative}
+	spec := agentos.RunPlanSpec{
+		PlanID: "plan-restore",
+		Nodes: []agentos.PlanNodeSpec{
+			{NodeID: "a", Run: agentos.RunSpec{RunID: "run-a", Backend: ref}},
+			{NodeID: "b", Run: agentos.RunSpec{RunID: "run-b", Backend: ref}},
+		},
+	}
+	status := agentos.RunPlanStatus{
+		PlanID:         "plan-restore",
+		LifecycleState: agentos.PlanLifecycleRunning,
+		Nodes: []agentos.PlanNodeStatus{
+			{NodeID: "b", RunID: "run-b", Backend: ref, LifecycleState: agentos.PlanNodePending, UpdatedAt: now},
+			{NodeID: "a", RunID: "run-a", Backend: ref, LifecycleState: agentos.PlanNodeRunning, UpdatedAt: now},
+		},
+		UpdatedAt: now,
+	}
+
+	state, err := NewStateFromStatus(spec, status)
+	if err != nil {
+		t.Fatalf("NewStateFromStatus: %v", err)
+	}
+	if got := state.Status.ActiveRunIDs; len(got) != 1 || got[0] != "run-a" {
+		t.Fatalf("active runs = %#v", got)
+	}
+	if got := state.Status.Nodes; got[0].NodeID != "a" || got[1].NodeID != "b" {
+		t.Fatalf("nodes not sorted/restored = %#v", got)
+	}
+}
+
+func TestStateRestoresRejectsSnapshotMismatch(t *testing.T) {
+	ref := agentos.BackendRef{Kind: agentos.BackendKindNative, Name: agentos.BackendNameGoAgentNative}
+	spec := agentos.RunPlanSpec{
+		PlanID: "plan-restore",
+		Nodes: []agentos.PlanNodeSpec{
+			{NodeID: "known", Run: agentos.RunSpec{RunID: "run-known", Backend: ref}},
+		},
+	}
+	status := agentos.RunPlanStatus{
+		PlanID: "plan-restore",
+		Nodes: []agentos.PlanNodeStatus{
+			{NodeID: "unknown", Backend: ref, LifecycleState: agentos.PlanNodePending},
+		},
+	}
+
+	if _, err := NewStateFromStatus(spec, status); err == nil {
+		t.Fatal("NewStateFromStatus succeeded with unknown snapshot node")
+	}
+}
+
+func TestStateBudgetReportedAccumulatesPlanAndNodeUsage(t *testing.T) {
+	now := time.Date(2026, 6, 19, 12, 0, 0, 0, time.UTC)
+	ref := agentos.BackendRef{Kind: agentos.BackendKindNative, Name: agentos.BackendNameGoAgentNative}
+	state := NewState(agentos.RunPlanSpec{
+		PlanID: "plan-budget",
+		Nodes: []agentos.PlanNodeSpec{
+			{NodeID: "node-1", Run: agentos.RunSpec{RunID: "run-1", Backend: ref}},
+		},
+	}, now)
+
+	if err := state.Apply(StateEvent{
+		Kind:        EventBudgetReported,
+		NodeID:      "node-1",
+		RunID:       "run-1",
+		BudgetDelta: agentos.PlanBudgetUsage{SpentCents: 25},
+		At:          now,
+	}); err != nil {
+		t.Fatalf("Apply budget: %v", err)
+	}
+	if state.Status.BudgetUsage.SpentCents != 25 {
+		t.Fatalf("plan spent = %d, want 25", state.Status.BudgetUsage.SpentCents)
+	}
+	node, _ := state.NodeStatus("node-1")
+	if node.BudgetUsage.SpentCents != 25 {
+		t.Fatalf("node spent = %d, want 25", node.BudgetUsage.SpentCents)
+	}
+	if state.AppliedTransitions() != 1 {
+		t.Fatalf("transitions = %d, want 1", state.AppliedTransitions())
+	}
+}

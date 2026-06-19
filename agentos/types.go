@@ -45,13 +45,14 @@ type BackendRef struct {
 
 // RunStatus is the public lifecycle view for a run.
 type RunStatus struct {
-	RunID          string        `json:"run_id"`
-	LifecycleState string        `json:"lifecycle_state"`
-	Step           int32         `json:"step,omitempty"`
-	Progress       *RunProgress  `json:"progress,omitempty"`
-	Artifacts      []ArtifactRef `json:"artifacts,omitempty"`
-	Reason         string        `json:"reason,omitempty"`
-	UpdatedAt      time.Time     `json:"updated_at,omitempty"`
+	RunID          string          `json:"run_id"`
+	LifecycleState string          `json:"lifecycle_state"`
+	Step           int32           `json:"step,omitempty"`
+	Progress       *RunProgress    `json:"progress,omitempty"`
+	Artifacts      []ArtifactRef   `json:"artifacts,omitempty"`
+	BudgetUsage    PlanBudgetUsage `json:"budget_usage,omitempty"`
+	Reason         string          `json:"reason,omitempty"`
+	UpdatedAt      time.Time       `json:"updated_at,omitempty"`
 }
 
 // RunProgress is a generic public progress view. Backend-specific details

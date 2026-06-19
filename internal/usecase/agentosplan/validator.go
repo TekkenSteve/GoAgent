@@ -38,6 +38,9 @@ func (v Validator) Validate(ctx context.Context, spec agentos.RunPlanSpec) (Exec
 		return ExecutablePlan{}, fmt.Errorf("%w: plan id is required", agentos.ErrInvalidRunPlan)
 	}
 	policy := normalizePolicy(spec.Policy)
+	if policy.MaxHistoryEvents > 0 && policy.ContinueAsNewEvents > policy.MaxHistoryEvents {
+		return ExecutablePlan{}, fmt.Errorf("%w: continue-as-new events %d exceeds max history events %d", agentos.ErrInvalidRunPlan, policy.ContinueAsNewEvents, policy.MaxHistoryEvents)
+	}
 	if len(spec.Nodes) == 0 {
 		return ExecutablePlan{}, fmt.Errorf("%w: nodes are required", agentos.ErrInvalidRunPlan)
 	}

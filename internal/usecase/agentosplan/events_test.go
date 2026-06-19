@@ -124,6 +124,35 @@ func TestPlanEventFromApprovalSignals(t *testing.T) {
 	}
 }
 
+func TestPlanEventFromBudgetReportedUsesPublicUsageEvent(t *testing.T) {
+	at := time.Date(2026, 6, 19, 12, 0, 0, 0, time.UTC)
+	event, _, err := PlanEventFromStateEvent(
+		agentos.RunPlanSpec{PlanID: "plan-1"},
+		agentos.RunPlanStatus{
+			PlanID:         "plan-1",
+			LifecycleState: agentos.PlanLifecycleRunning,
+			BudgetUsage:    agentos.PlanBudgetUsage{SpentCents: 75},
+			UpdatedAt:      at,
+		},
+		StateEvent{
+			Kind:        EventBudgetReported,
+			NodeID:      "node-1",
+			RunID:       "run-1",
+			BudgetDelta: agentos.PlanBudgetUsage{SpentCents: 25},
+			At:          at,
+		},
+	)
+	if err != nil {
+		t.Fatalf("PlanEventFromStateEvent: %v", err)
+	}
+	if event.EventType != agentos.EventUsageReported {
+		t.Fatalf("event type = %q", event.EventType)
+	}
+	if event.Payload["budget_delta"] == nil || event.Payload["budget_usage"] == nil {
+		t.Fatalf("payload missing budget usage = %#v", event.Payload)
+	}
+}
+
 func TestNodeStartIdempotencyKeyIncludesAttempt(t *testing.T) {
 	first, err := NodeStartIdempotencyKey("plan-1", "node-1", 1)
 	if err != nil {

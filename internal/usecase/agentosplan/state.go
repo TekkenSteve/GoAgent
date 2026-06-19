@@ -10,8 +10,9 @@ import (
 
 // State is the deterministic reducer state for a RunPlan.
 type State struct {
-	Status agentos.RunPlanStatus
-	nodes  map[string]agentos.PlanNodeStatus
+	Status      agentos.RunPlanStatus
+	nodes       map[string]agentos.PlanNodeStatus
+	transitions int32
 }
 
 // NewState initializes state from a validated or unvalidated plan spec.
@@ -38,6 +39,54 @@ func NewState(spec agentos.RunPlanSpec, now time.Time) State {
 	return State{Status: status, nodes: nodes}
 }
 
+// NewStateFromStatus restores reducer state from a durable snapshot status.
+func NewStateFromStatus(spec agentos.RunPlanSpec, status agentos.RunPlanStatus) (State, error) {
+	if spec.PlanID == "" {
+		return State{}, fmt.Errorf("%w: plan id is required", agentos.ErrInvalidRunPlan)
+	}
+	if status.PlanID == "" {
+		status.PlanID = spec.PlanID
+	}
+	if status.PlanID != spec.PlanID {
+		return State{}, fmt.Errorf("%w: snapshot plan id %q does not match spec plan id %q", agentos.ErrInvalidRunPlan, status.PlanID, spec.PlanID)
+	}
+
+	expectedNodes := make(map[string]struct{}, len(spec.Nodes))
+	for _, node := range spec.Nodes {
+		if node.NodeID == "" {
+			return State{}, fmt.Errorf("%w: node id is required", agentos.ErrInvalidRunPlan)
+		}
+		if _, exists := expectedNodes[node.NodeID]; exists {
+			return State{}, fmt.Errorf("%w: duplicate node %q", agentos.ErrInvalidRunPlan, node.NodeID)
+		}
+		expectedNodes[node.NodeID] = struct{}{}
+	}
+
+	nodes := make(map[string]agentos.PlanNodeStatus, len(status.Nodes))
+	for _, node := range status.Nodes {
+		if node.NodeID == "" {
+			return State{}, fmt.Errorf("%w: snapshot node id is required", agentos.ErrInvalidRunPlan)
+		}
+		if _, expected := expectedNodes[node.NodeID]; !expected {
+			return State{}, fmt.Errorf("%w: snapshot contains unknown node %q", agentos.ErrInvalidRunPlan, node.NodeID)
+		}
+		if _, exists := nodes[node.NodeID]; exists {
+			return State{}, fmt.Errorf("%w: snapshot contains duplicate node %q", agentos.ErrInvalidRunPlan, node.NodeID)
+		}
+		nodes[node.NodeID] = node
+	}
+	for nodeID := range expectedNodes {
+		if _, exists := nodes[nodeID]; !exists {
+			return State{}, fmt.Errorf("%w: snapshot missing node %q", agentos.ErrInvalidRunPlan, nodeID)
+		}
+	}
+
+	state := State{Status: status, nodes: nodes}
+	state.refresh(status.UpdatedAt)
+
+	return state, nil
+}
+
 // EventKind identifies one reducer event.
 type EventKind string
 
@@ -57,17 +106,19 @@ const (
 	EventNodeSkipped        EventKind = "node.skipped"
 	EventNodeCanceled       EventKind = "node.canceled"
 	EventArtifactsPublished EventKind = "artifacts.published"
+	EventBudgetReported     EventKind = "budget.reported"
 )
 
 // StateEvent transitions plan state.
 type StateEvent struct {
-	Kind      EventKind             `json:"kind"`
-	NodeID    string                `json:"node_id,omitempty"`
-	RunID     string                `json:"run_id,omitempty"`
-	Reason    string                `json:"reason,omitempty"`
-	Attempt   int32                 `json:"attempt,omitempty"`
-	Artifacts []agentos.ArtifactRef `json:"artifacts,omitempty"`
-	At        time.Time             `json:"at,omitempty"`
+	Kind        EventKind               `json:"kind"`
+	NodeID      string                  `json:"node_id,omitempty"`
+	RunID       string                  `json:"run_id,omitempty"`
+	Reason      string                  `json:"reason,omitempty"`
+	Attempt     int32                   `json:"attempt,omitempty"`
+	Artifacts   []agentos.ArtifactRef   `json:"artifacts,omitempty"`
+	BudgetDelta agentos.PlanBudgetUsage `json:"budget_delta,omitempty"`
+	At          time.Time               `json:"at,omitempty"`
 }
 
 // Apply applies one deterministic state transition.
@@ -122,10 +173,13 @@ func (s *State) Apply(event StateEvent) error {
 			s.nodes[event.NodeID] = node
 		}
 		s.Status.Artifacts = append(s.Status.Artifacts, event.Artifacts...)
+	case EventBudgetReported:
+		return s.reportBudget(event, at)
 	default:
 		return fmt.Errorf("%w: unknown plan event %q", agentos.ErrInvalidRunPlan, event.Kind)
 	}
 	s.refresh(at)
+	s.transitions++
 
 	return nil
 }
@@ -159,6 +213,7 @@ func (s *State) transitionNode(nodeID string, lifecycle string, event StateEvent
 	node.UpdatedAt = at
 	s.nodes[nodeID] = node
 	s.refresh(at)
+	s.transitions++
 
 	return nil
 }
@@ -176,6 +231,27 @@ func (s *State) retryNode(nodeID string, event StateEvent, at time.Time) error {
 	node.UpdatedAt = at
 	s.nodes[nodeID] = node
 	s.refresh(at)
+	s.transitions++
+
+	return nil
+}
+
+func (s *State) reportBudget(event StateEvent, at time.Time) error {
+	if event.BudgetDelta.SpentCents < 0 {
+		return fmt.Errorf("%w: budget delta cannot be negative", agentos.ErrInvalidRunPlan)
+	}
+	if event.NodeID != "" {
+		node, ok := s.nodes[event.NodeID]
+		if !ok {
+			return fmt.Errorf("%w: unknown node %q", agentos.ErrInvalidRunPlan, event.NodeID)
+		}
+		node.BudgetUsage.SpentCents += event.BudgetDelta.SpentCents
+		node.UpdatedAt = at
+		s.nodes[event.NodeID] = node
+	}
+	s.Status.BudgetUsage.SpentCents += event.BudgetDelta.SpentCents
+	s.refresh(at)
+	s.transitions++
 
 	return nil
 }
@@ -212,4 +288,10 @@ func (s State) NodeStatus(nodeID string) (agentos.PlanNodeStatus, bool) {
 	status, ok := s.nodes[nodeID]
 
 	return status, ok
+}
+
+// AppliedTransitions returns the reducer transitions applied since this State
+// was created or restored.
+func (s State) AppliedTransitions() int32 {
+	return s.transitions
 }

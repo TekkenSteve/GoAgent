@@ -82,6 +82,20 @@ func TestValidatorRejectsSchemaMismatch(t *testing.T) {
 	}
 }
 
+func TestValidatorRejectsContinuationThresholdAboveHistoryGuard(t *testing.T) {
+	ref := agentos.BackendRef{Kind: agentos.BackendKindNative, Name: agentos.BackendNameGoAgentNative}
+	spec := samplePlan(ref)
+	spec.Policy = agentos.PlanPolicy{
+		ContinueAsNewEvents: 20,
+		MaxHistoryEvents:    10,
+	}
+
+	_, err := Validator{}.Validate(context.Background(), spec)
+	if !errors.Is(err, agentos.ErrInvalidRunPlan) {
+		t.Fatalf("error = %v, want ErrInvalidRunPlan", err)
+	}
+}
+
 func TestSchedulerReadyNodes(t *testing.T) {
 	ctx := context.Background()
 	compiler, err := NewCELCompiler()

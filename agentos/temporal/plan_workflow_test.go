@@ -50,7 +50,7 @@ func TestPlanWorkflowExecutesSuccessEdgeAndPublishesArtifacts(t *testing.T) {
 	}
 	env := newPlanWorkflowTestEnv(mocks)
 
-	env.ExecuteWorkflow(PlanWorkflow, spec)
+	env.ExecuteWorkflow(PlanWorkflow, planWorkflowInput{Spec: spec})
 
 	require.True(t, env.IsWorkflowCompleted())
 	require.NoError(t, env.GetWorkflowError())
@@ -87,7 +87,7 @@ func TestPlanWorkflowErrorEdgeRunsRecoveryButPlanRemainsFailed(t *testing.T) {
 	}
 	env := newPlanWorkflowTestEnv(mocks)
 
-	env.ExecuteWorkflow(PlanWorkflow, spec)
+	env.ExecuteWorkflow(PlanWorkflow, planWorkflowInput{Spec: spec})
 
 	require.True(t, env.IsWorkflowCompleted())
 	require.NoError(t, env.GetWorkflowError())
@@ -122,7 +122,7 @@ func TestPlanWorkflowRetriesFailedNodeAttempt(t *testing.T) {
 	}
 	env := newPlanWorkflowTestEnv(mocks)
 
-	env.ExecuteWorkflow(PlanWorkflow, spec)
+	env.ExecuteWorkflow(PlanWorkflow, planWorkflowInput{Spec: spec})
 
 	require.True(t, env.IsWorkflowCompleted())
 	require.NoError(t, env.GetWorkflowError())
@@ -159,7 +159,7 @@ func TestPlanWorkflowCancelsTimedOutNode(t *testing.T) {
 	}
 	env := newPlanWorkflowTestEnv(mocks)
 
-	env.ExecuteWorkflow(PlanWorkflow, spec)
+	env.ExecuteWorkflow(PlanWorkflow, planWorkflowInput{Spec: spec})
 
 	require.True(t, env.IsWorkflowCompleted())
 	require.NoError(t, env.GetWorkflowError())
@@ -173,6 +173,49 @@ func TestPlanWorkflowCancelsTimedOutNode(t *testing.T) {
 	require.Equal(t, "run-slow", mocks.controls[0].RunID)
 	require.Equal(t, agentos.ControlCancel, mocks.controls[0].Control.Operation)
 	require.NotEmpty(t, mocks.controls[0].Control.IdempotencyKey)
+}
+
+func TestPlanWorkflowCancelsActiveNodesWhenBudgetExceeded(t *testing.T) {
+	t.Parallel()
+
+	ref := agentos.BackendRef{Kind: agentos.BackendKindNative, Name: agentos.BackendNameGoAgentNative}
+	spec := agentos.RunPlanSpec{
+		PlanID: "plan-budget",
+		Policy: agentos.PlanPolicy{
+			BudgetCents:      50,
+			MaxParallelNodes: 2,
+		},
+		Nodes: []agentos.PlanNodeSpec{
+			{NodeID: "expensive", Run: agentos.RunSpec{RunID: "run-expensive", Backend: ref}},
+			{NodeID: "slow", Run: agentos.RunSpec{RunID: "run-slow", Backend: ref}},
+		},
+	}
+	mocks := &planWorkflowMocks{
+		statuses: map[string]agentos.RunStatus{
+			"run-expensive": {
+				RunID:          "run-expensive",
+				LifecycleState: "completed",
+				BudgetUsage:    agentos.PlanBudgetUsage{SpentCents: 60},
+			},
+			"run-slow": {RunID: "run-slow", LifecycleState: "running"},
+		},
+	}
+	env := newPlanWorkflowTestEnv(mocks)
+
+	env.ExecuteWorkflow(PlanWorkflow, planWorkflowInput{Spec: spec})
+
+	require.True(t, env.IsWorkflowCompleted())
+	require.NoError(t, env.GetWorkflowError())
+
+	var result agentos.RunPlanStatus
+	require.NoError(t, env.GetWorkflowResult(&result))
+	require.Equal(t, agentos.PlanLifecycleFailed, result.LifecycleState)
+	require.Equal(t, int64(60), result.BudgetUsage.SpentCents)
+	require.Contains(t, result.Reason, "budget exceeded")
+	require.Equal(t, []string{"run-expensive", "run-slow"}, mocks.started)
+	require.Len(t, mocks.controls, 1)
+	require.Equal(t, "run-slow", mocks.controls[0].RunID)
+	require.Equal(t, agentos.ControlCancel, mocks.controls[0].Control.Operation)
 }
 
 func TestPlanWorkflowRetriesFailedNodeFromSignal(t *testing.T) {
@@ -210,7 +253,7 @@ func TestPlanWorkflowRetriesFailedNodeFromSignal(t *testing.T) {
 		})
 	}, time.Second)
 
-	env.ExecuteWorkflow(PlanWorkflow, spec)
+	env.ExecuteWorkflow(PlanWorkflow, planWorkflowInput{Spec: spec})
 
 	require.True(t, env.IsWorkflowCompleted())
 	require.NoError(t, env.GetWorkflowError())
@@ -253,7 +296,7 @@ func TestPlanWorkflowRejectSignalFailsRunningPlan(t *testing.T) {
 		})
 	}, time.Second)
 
-	env.ExecuteWorkflow(PlanWorkflow, spec)
+	env.ExecuteWorkflow(PlanWorkflow, planWorkflowInput{Spec: spec})
 
 	require.True(t, env.IsWorkflowCompleted())
 	require.NoError(t, env.GetWorkflowError())
@@ -300,7 +343,7 @@ func TestPlanWorkflowApproveSignalUnblocksPausedPlan(t *testing.T) {
 		})
 	}, 2*time.Second)
 
-	env.ExecuteWorkflow(PlanWorkflow, spec)
+	env.ExecuteWorkflow(PlanWorkflow, planWorkflowInput{Spec: spec})
 
 	require.True(t, env.IsWorkflowCompleted())
 	require.NoError(t, env.GetWorkflowError())
@@ -311,6 +354,36 @@ func TestPlanWorkflowApproveSignalUnblocksPausedPlan(t *testing.T) {
 	require.Equal(t, []string{"run-slow"}, mocks.started)
 	require.Len(t, mocks.controls, 1)
 	require.Equal(t, agentos.ControlPause, mocks.controls[0].Control.Operation)
+}
+
+func TestPlanWorkflowContinuedInputRestoresSnapshotStatus(t *testing.T) {
+	t.Parallel()
+
+	ref := agentos.BackendRef{Kind: agentos.BackendKindNative, Name: agentos.BackendNameGoAgentNative}
+	spec := agentos.RunPlanSpec{
+		PlanID: "plan-continued",
+		Nodes: []agentos.PlanNodeSpec{
+			{NodeID: "running", Run: agentos.RunSpec{RunID: "run-running", Backend: ref}},
+		},
+	}
+	status := agentos.RunPlanStatus{
+		PlanID:         "plan-continued",
+		LifecycleState: agentos.PlanLifecycleRunning,
+		Nodes: []agentos.PlanNodeStatus{
+			{NodeID: "running", RunID: "run-running", Backend: ref, LifecycleState: agentos.PlanNodeRunning},
+		},
+		BudgetUsage: agentos.PlanBudgetUsage{SpentCents: 25},
+	}
+
+	state, err := initialPlanWorkflowState(planWorkflowInput{
+		Spec:      spec,
+		Status:    status,
+		Continued: true,
+	}, time.Date(2026, 6, 19, 12, 0, 0, 0, time.UTC))
+	require.NoError(t, err)
+	require.Equal(t, agentos.PlanLifecycleRunning, state.Status.LifecycleState)
+	require.Equal(t, int64(25), state.Status.BudgetUsage.SpentCents)
+	require.Equal(t, []string{"run-running"}, state.Status.ActiveRunIDs)
 }
 
 type planWorkflowMocks struct {

@@ -27,10 +27,21 @@ const (
 
 const planNodePollInterval = 5 * time.Second
 
+type planWorkflowInput struct {
+	Spec              agentos.RunPlanSpec   `json:"spec"`
+	Status            agentos.RunPlanStatus `json:"status,omitempty"`
+	Continued         bool                  `json:"continued,omitempty"`
+	ContinuationCount int32                 `json:"continuation_count,omitempty"`
+}
+
 // PlanWorkflow executes a cross-backend RunPlan using deterministic plan state
 // and activity-backed backend I/O.
-func PlanWorkflow(ctx workflow.Context, spec agentos.RunPlanSpec) (agentos.RunPlanStatus, error) {
-	state := agentosplan.NewState(spec, workflow.Now(ctx))
+func PlanWorkflow(ctx workflow.Context, input planWorkflowInput) (agentos.RunPlanStatus, error) {
+	spec := input.Spec
+	state, err := initialPlanWorkflowState(input, workflow.Now(ctx))
+	if err != nil {
+		return agentos.RunPlanStatus{}, err
+	}
 	if err := workflow.SetQueryHandler(ctx, PlanStatusQueryName, func() (agentos.RunPlanStatus, error) {
 		return state.Status, nil
 	}); err != nil {
@@ -46,8 +57,10 @@ func PlanWorkflow(ctx workflow.Context, spec agentos.RunPlanSpec) (agentos.RunPl
 			MaximumAttempts: 3,
 		},
 	})
-	if err := applyPlanStateEvent(activityCtx, ctx, spec, &state, agentosplan.StateEvent{Kind: agentosplan.EventPlanStarted}); err != nil {
-		return state.Status, err
+	if !input.Continued {
+		if err := applyPlanStateEvent(activityCtx, ctx, spec, &state, agentosplan.StateEvent{Kind: agentosplan.EventPlanStarted}); err != nil {
+			return state.Status, err
+		}
 	}
 
 	var validation validatePlanOutput
@@ -65,7 +78,7 @@ func PlanWorkflow(ctx workflow.Context, spec agentos.RunPlanSpec) (agentos.RunPl
 	}
 	scheduler := agentosplan.Scheduler{Expressions: compiler}
 	maxParallel := normalizePlanParallelism(spec.Policy.MaxParallelNodes)
-	paused := false
+	paused := state.Status.LifecycleState == agentos.PlanLifecycleBlocked
 	processedControls := make(map[string]bool)
 	processedSignals := make(map[string]bool)
 
@@ -99,6 +112,9 @@ func PlanWorkflow(ctx workflow.Context, spec agentos.RunPlanSpec) (agentos.RunPl
 			return state.Status, nil
 		}
 		if paused {
+			if err := continuePlanWorkflowIfNeeded(ctx, input, state); err != nil {
+				return state.Status, err
+			}
 			if err := workflow.Sleep(ctx, planNodePollInterval); err != nil {
 				return state.Status, err
 			}
@@ -141,6 +157,13 @@ func PlanWorkflow(ctx workflow.Context, spec agentos.RunPlanSpec) (agentos.RunPl
 			}
 			capacity--
 			progressed = true
+			budgetExceeded, err := applyPlanBudgetGuard(activityCtx, ctx, spec, &state, validation.ControlsByNode)
+			if err != nil {
+				return state.Status, err
+			}
+			if budgetExceeded {
+				return state.Status, nil
+			}
 		}
 
 		pollProgressed, err := pollRunningPlanNodes(activityCtx, ctx, spec, &state, validation.Plan.NodeByID)
@@ -150,6 +173,14 @@ func PlanWorkflow(ctx workflow.Context, spec agentos.RunPlanSpec) (agentos.RunPl
 			return state.Status, errors.Join(err, persistErr)
 		}
 		progressed = progressed || pollProgressed
+
+		budgetExceeded, err := applyPlanBudgetGuard(activityCtx, ctx, spec, &state, validation.ControlsByNode)
+		if err != nil {
+			return state.Status, err
+		}
+		if budgetExceeded {
+			return state.Status, nil
+		}
 
 		if planNodesTerminal(state.Status) {
 			if err := applyTerminalPlanState(activityCtx, ctx, spec, &state); err != nil {
@@ -166,12 +197,42 @@ func PlanWorkflow(ctx workflow.Context, spec agentos.RunPlanSpec) (agentos.RunPl
 
 			return state.Status, fmt.Errorf("%w: %s", agentos.ErrInvalidRunPlan, reason)
 		}
+		if err := continuePlanWorkflowIfNeeded(ctx, input, state); err != nil {
+			return state.Status, err
+		}
 		if !progressed {
 			if err := workflow.Sleep(ctx, planNodePollInterval); err != nil {
 				return state.Status, err
 			}
 		}
 	}
+}
+
+func initialPlanWorkflowState(input planWorkflowInput, now time.Time) (agentosplan.State, error) {
+	if input.Continued {
+		return agentosplan.NewStateFromStatus(input.Spec, input.Status)
+	}
+
+	return agentosplan.NewState(input.Spec, now), nil
+}
+
+func continuePlanWorkflowIfNeeded(ctx workflow.Context, input planWorkflowInput, state agentosplan.State) error {
+	if planTerminal(state.Status.LifecycleState) {
+		return nil
+	}
+	decision := agentosplan.EvaluateContinuationPolicy(input.Spec.Policy, agentosplan.ContinuationSnapshot{
+		AppliedTransitions: state.AppliedTransitions(),
+	})
+	if !decision.ShouldContinue {
+		return nil
+	}
+
+	nextInput := input
+	nextInput.Status = state.Status
+	nextInput.Continued = true
+	nextInput.ContinuationCount++
+
+	return workflow.NewContinueAsNewError(ctx, PlanWorkflowName, nextInput)
 }
 
 func applyPlanStateEvent(activityCtx workflow.Context, workflowCtx workflow.Context, spec agentos.RunPlanSpec, state *agentosplan.State, event agentosplan.StateEvent) error {
@@ -286,6 +347,10 @@ func pollRunningPlanNodes(activityCtx workflow.Context, workflowCtx workflow.Con
 }
 
 func applyNodeRunTerminal(activityCtx workflow.Context, workflowCtx workflow.Context, spec agentos.RunPlanSpec, state *agentosplan.State, node agentos.PlanNodeSpec, status agentos.RunStatus) error {
+	if err := applyRunBudgetUsage(activityCtx, workflowCtx, spec, state, node, status); err != nil {
+		return err
+	}
+
 	var published publishPlanArtifactsOutput
 	if err := workflow.ExecuteActivity(activityCtx, PublishPlanArtifactsActivityName, publishPlanArtifactsInput{
 		PlanID: spec.PlanID,
@@ -315,6 +380,22 @@ func applyNodeRunTerminal(activityCtx workflow.Context, workflowCtx workflow.Con
 	}
 
 	return nil
+}
+
+func applyRunBudgetUsage(activityCtx workflow.Context, workflowCtx workflow.Context, spec agentos.RunPlanSpec, state *agentosplan.State, node agentos.PlanNodeSpec, status agentos.RunStatus) error {
+	if status.BudgetUsage.SpentCents == 0 {
+		return nil
+	}
+	if status.BudgetUsage.SpentCents < 0 {
+		return fmt.Errorf("%w: run %q reported negative budget usage", agentos.ErrInvalidRunPlan, status.RunID)
+	}
+
+	return applyPlanStateEvent(activityCtx, workflowCtx, spec, state, agentosplan.StateEvent{
+		Kind:        agentosplan.EventBudgetReported,
+		NodeID:      node.NodeID,
+		RunID:       status.RunID,
+		BudgetDelta: status.BudgetUsage,
+	})
 }
 
 func applyNodeAttemptFailure(activityCtx workflow.Context, workflowCtx workflow.Context, spec agentos.RunPlanSpec, state *agentosplan.State, node agentos.PlanNodeSpec, runID string, reason string) error {
@@ -361,6 +442,38 @@ func cancelTimedOutNode(activityCtx workflow.Context, planID string, node agento
 	}
 
 	return nil
+}
+
+func applyPlanBudgetGuard(activityCtx workflow.Context, workflowCtx workflow.Context, spec agentos.RunPlanSpec, state *agentosplan.State, controlsByNode map[string][]agentos.ControlOperation) (bool, error) {
+	if !agentosplan.BudgetExceeded(spec.Policy, state.Status.BudgetUsage) {
+		return false, nil
+	}
+
+	key, err := agentosplan.BudgetExceededControlIdempotencyKey(spec.PlanID, state.Status.BudgetUsage, spec.Policy.BudgetCents)
+	if err != nil {
+		return false, err
+	}
+	control := agentos.ControlRequest{
+		Operation:      agentos.ControlCancel,
+		IdempotencyKey: key,
+	}
+	if err := controlActivePlanNodes(activityCtx, spec.PlanID, state.Status, control, controlsByNode); err != nil {
+		return false, err
+	}
+	reason := agentosplan.BudgetExceededReason(spec.Policy, state.Status.BudgetUsage)
+	for _, node := range state.Status.Nodes {
+		if node.LifecycleState != agentos.PlanNodeRunning {
+			continue
+		}
+		if err := applyPlanStateEvent(activityCtx, workflowCtx, spec, state, agentosplan.StateEvent{Kind: agentosplan.EventNodeCanceled, NodeID: node.NodeID, RunID: node.RunID, Reason: reason}); err != nil {
+			return false, err
+		}
+	}
+	if err := applyPlanStateEvent(activityCtx, workflowCtx, spec, state, agentosplan.StateEvent{Kind: agentosplan.EventPlanFailed, Reason: reason}); err != nil {
+		return false, err
+	}
+
+	return true, nil
 }
 
 func nodeTimedOut(now time.Time, status agentos.PlanNodeStatus, node agentos.PlanNodeSpec) bool {
@@ -624,6 +737,15 @@ func planNodesTerminal(status agentos.RunPlanStatus) bool {
 	}
 
 	return true
+}
+
+func planTerminal(lifecycle string) bool {
+	switch lifecycle {
+	case agentos.PlanLifecycleSucceeded, agentos.PlanLifecycleFailed, agentos.PlanLifecycleCanceled:
+		return true
+	default:
+		return false
+	}
 }
 
 func planNodeTerminal(lifecycle string) bool {

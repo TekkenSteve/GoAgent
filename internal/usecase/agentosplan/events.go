@@ -15,6 +15,7 @@ const (
 	idempotencyOperationNodeControl     = "node_control"
 	idempotencyOperationNodeTimeout     = "node_timeout"
 	idempotencyOperationArtifactPublish = "artifact_publish"
+	idempotencyOperationBudgetExceeded  = "budget_exceeded"
 )
 
 // PlanEventFromStateEvent maps a deterministic reducer transition to the public
@@ -51,6 +52,10 @@ func PlanEventFromStateEvent(spec agentos.RunPlanSpec, status agentos.RunPlanSta
 	}
 	if len(event.Artifacts) > 0 {
 		payload["artifacts"] = event.Artifacts
+	}
+	if event.BudgetDelta.SpentCents != 0 {
+		payload["budget_delta"] = event.BudgetDelta
+		payload["budget_usage"] = status.BudgetUsage
 	}
 
 	planEvent := agentos.PlanEvent{
@@ -184,6 +189,31 @@ func ArtifactPublishIdempotencyKey(planID, nodeID, runID, artifactName string) (
 	return planID + ":" + hex.EncodeToString(sum[:]), nil
 }
 
+// BudgetExceededControlIdempotencyKey creates the parent idempotency key for
+// propagating cancellation after a plan budget guard trips.
+func BudgetExceededControlIdempotencyKey(planID string, usage agentos.PlanBudgetUsage, budgetCents int64) (string, error) {
+	if planID == "" {
+		return "", fmt.Errorf("%w: plan id is required", agentos.ErrInvalidRunPlan)
+	}
+	data, err := json.Marshal(struct {
+		Operation   string `json:"operation"`
+		PlanID      string `json:"plan_id"`
+		SpentCents  int64  `json:"spent_cents"`
+		BudgetCents int64  `json:"budget_cents"`
+	}{
+		Operation:   idempotencyOperationBudgetExceeded,
+		PlanID:      planID,
+		SpentCents:  usage.SpentCents,
+		BudgetCents: budgetCents,
+	})
+	if err != nil {
+		return "", fmt.Errorf("%w: marshal budget exceeded key: %s", agentos.ErrInvalidPlanEvent, err)
+	}
+	sum := sha256.Sum256(data)
+
+	return planID + ":" + hex.EncodeToString(sum[:]), nil
+}
+
 // NodeControlIdempotencyKey creates the stable idempotency key for propagating
 // one plan-level control operation to one backend-owned child run.
 func NodeControlIdempotencyKey(planID, nodeID string, operation agentos.ControlOperation, parentKey string) (string, error) {
@@ -249,6 +279,8 @@ func planEventType(kind EventKind) (agentos.EventType, error) {
 		return agentos.EventPlanNodeCanceled, nil
 	case EventArtifactsPublished:
 		return agentos.EventNodeOutputPublished, nil
+	case EventBudgetReported:
+		return agentos.EventUsageReported, nil
 	default:
 		return "", fmt.Errorf("%w: unknown plan event kind %q", agentos.ErrInvalidPlanEvent, kind)
 	}

@@ -157,16 +157,17 @@ type RunPlanStatus struct {
 
 // PlanNodeStatus is the public lifecycle view for one plan node.
 type PlanNodeStatus struct {
-	NodeID         string        `json:"node_id"`
-	RunID          string        `json:"run_id,omitempty"`
-	Backend        BackendRef    `json:"backend"`
-	LifecycleState string        `json:"lifecycle_state"`
-	Attempts       int32         `json:"attempts,omitempty"`
-	Reason         string        `json:"reason,omitempty"`
-	Artifacts      []ArtifactRef `json:"artifacts,omitempty"`
-	StartedAt      time.Time     `json:"started_at,omitempty"`
-	CompletedAt    time.Time     `json:"completed_at,omitempty"`
-	UpdatedAt      time.Time     `json:"updated_at,omitempty"`
+	NodeID         string          `json:"node_id"`
+	RunID          string          `json:"run_id,omitempty"`
+	Backend        BackendRef      `json:"backend"`
+	LifecycleState string          `json:"lifecycle_state"`
+	Attempts       int32           `json:"attempts,omitempty"`
+	BudgetUsage    PlanBudgetUsage `json:"budget_usage,omitempty"`
+	Reason         string          `json:"reason,omitempty"`
+	Artifacts      []ArtifactRef   `json:"artifacts,omitempty"`
+	StartedAt      time.Time       `json:"started_at,omitempty"`
+	CompletedAt    time.Time       `json:"completed_at,omitempty"`
+	UpdatedAt      time.Time       `json:"updated_at,omitempty"`
 }
 
 // PlanBudgetUsage reports plan-level resource consumption.

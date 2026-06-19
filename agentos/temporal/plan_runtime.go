@@ -127,7 +127,7 @@ func (r *planRuntime) StartPlan(ctx context.Context, spec agentos.RunPlanSpec) (
 	_, err = r.temporalClient.ExecuteWorkflow(ctx, client.StartWorkflowOptions{
 		ID:        planWorkflowID(spec.PlanID),
 		TaskQueue: r.taskQueue,
-	}, PlanWorkflowName, spec)
+	}, PlanWorkflowName, planWorkflowInput{Spec: spec})
 	if err != nil && !sdktemporal.IsWorkflowExecutionAlreadyStartedError(err) {
 		return agentos.RunPlanStatus{}, fmt.Errorf("agentos temporal plan runtime - start plan workflow: %w", err)
 	}
