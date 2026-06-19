@@ -164,7 +164,7 @@ func TestBackendStatusGetsRunStatus(t *testing.T) {
 		_ = json.NewEncoder(w).Encode(agentos.RunStatus{
 			RunID:          "run-1",
 			LifecycleState: "running",
-			Step:           3,
+			Progress:       &agentos.RunProgress{Current: 3, Total: 10, Label: "draft"},
 		})
 	}))
 	defer server.Close()
@@ -175,7 +175,7 @@ func TestBackendStatusGetsRunStatus(t *testing.T) {
 		t.Fatalf("Status: %v", err)
 	}
 
-	if status.RunID != "run-1" || status.LifecycleState != "running" || status.Step != 3 {
+	if status.RunID != "run-1" || status.LifecycleState != "running" || status.Progress == nil || status.Progress.Current != 3 {
 		t.Fatalf("unexpected status: %#v", status)
 	}
 }

@@ -309,6 +309,88 @@
                 }
             }
         },
+        "/agentos/plans/{plan_id}/console": {
+            "get": {
+                "description": "Render an operator console for one AgentOS RunPlan.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "text/html"
+                ],
+                "tags": [
+                    "agentos"
+                ],
+                "summary": "AgentOS plan console",
+                "operationId": "agentos-plan-console",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Plan ID",
+                        "name": "plan_id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Account ID",
+                        "name": "account_id",
+                        "in": "query",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Project ID",
+                        "name": "project_id",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "description": "Maximum events",
+                        "name": "event_limit",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "description": "Maximum audit records",
+                        "name": "audit_limit",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "description": "Maximum artifact refs",
+                        "name": "artifact_limit",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "HTML console",
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/response.Error"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/response.Error"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/response.Error"
+                        }
+                    }
+                }
+            }
+        },
         "/agentos/plans/{plan_id}/control": {
             "post": {
                 "description": "Send lifecycle control such as pause, resume, or cancel to an AgentOS RunPlan.",
@@ -344,6 +426,161 @@
                 "responses": {
                     "202": {
                         "description": "Accepted"
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/response.Error"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/response.Error"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/response.Error"
+                        }
+                    }
+                }
+            }
+        },
+        "/agentos/plans/{plan_id}/debug/traces": {
+            "get": {
+                "description": "Query typed debug traces projected from durable RunPlan events.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "agentos"
+                ],
+                "summary": "List AgentOS plan debug traces",
+                "operationId": "agentos-list-plan-debug-traces",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Plan ID",
+                        "name": "plan_id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Account ID",
+                        "name": "account_id",
+                        "in": "query",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Project ID",
+                        "name": "project_id",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Node ID",
+                        "name": "node_id",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Child run ID",
+                        "name": "run_id",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "description": "Only return traces after this sequence",
+                        "name": "after_sequence",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "description": "Maximum traces",
+                        "name": "limit",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "array",
+                            "items": {
+                                "$ref": "#/definitions/agentos.PlanDebugTrace"
+                            }
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/response.Error"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/response.Error"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/response.Error"
+                        }
+                    }
+                }
+            }
+        },
+        "/agentos/plans/{plan_id}/description": {
+            "get": {
+                "description": "Query the current public topology and aggregate status of an AgentOS RunPlan.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "agentos"
+                ],
+                "summary": "Describe AgentOS plan",
+                "operationId": "agentos-plan-description",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Plan ID",
+                        "name": "plan_id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Account ID",
+                        "name": "account_id",
+                        "in": "query",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Project ID",
+                        "name": "project_id",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/agentos.RunPlanDescription"
+                        }
                     },
                     "400": {
                         "description": "Bad Request",
@@ -1271,6 +1508,9 @@
         "agentos.PlanAuditRecord": {
             "type": "object",
             "properties": {
+                "account_id": {
+                    "type": "string"
+                },
                 "action": {
                     "$ref": "#/definitions/agentos.PlanAuditAction"
                 },
@@ -1296,6 +1536,9 @@
                 "plan_id": {
                     "type": "string"
                 },
+                "project_id": {
+                    "type": "string"
+                },
                 "run_id": {
                     "type": "string"
                 }
@@ -1306,6 +1549,111 @@
             "properties": {
                 "spent_cents": {
                     "type": "integer"
+                }
+            }
+        },
+        "agentos.PlanCapabilityTrace": {
+            "type": "object",
+            "properties": {
+                "backend": {
+                    "$ref": "#/definitions/agentos.BackendRef"
+                },
+                "capability": {
+                    "type": "string"
+                },
+                "controls": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/agentos.ControlOperation"
+                    }
+                },
+                "has_input_schema": {
+                    "type": "boolean"
+                },
+                "has_output_schema": {
+                    "type": "boolean"
+                },
+                "signals": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/agentos.SignalType"
+                    }
+                }
+            }
+        },
+        "agentos.PlanConditionTrace": {
+            "type": "object",
+            "properties": {
+                "edge_id": {
+                    "type": "string"
+                },
+                "expression": {
+                    "type": "string"
+                },
+                "from": {
+                    "type": "string"
+                },
+                "node_id": {
+                    "type": "string"
+                },
+                "on": {
+                    "$ref": "#/definitions/agentos.EdgeTrigger"
+                },
+                "parent_state": {
+                    "type": "string"
+                },
+                "result": {
+                    "type": "boolean"
+                },
+                "scope": {
+                    "type": "string"
+                },
+                "to": {
+                    "type": "string"
+                }
+            }
+        },
+        "agentos.PlanDebugTrace": {
+            "type": "object",
+            "properties": {
+                "capability": {
+                    "$ref": "#/definitions/agentos.PlanCapabilityTrace"
+                },
+                "conditions": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/agentos.PlanConditionTrace"
+                    }
+                },
+                "event_id": {
+                    "type": "string"
+                },
+                "event_type": {
+                    "$ref": "#/definitions/agentos.EventType"
+                },
+                "input_resolution": {
+                    "$ref": "#/definitions/agentos.PlanInputResolutionTrace"
+                },
+                "node_id": {
+                    "type": "string"
+                },
+                "plan_id": {
+                    "type": "string"
+                },
+                "run_id": {
+                    "type": "string"
+                },
+                "sequence": {
+                    "type": "integer"
+                },
+                "thread_id": {
+                    "type": "string"
+                },
+                "timestamp": {
+                    "type": "string"
+                },
+                "transition": {
+                    "$ref": "#/definitions/agentos.PlanStateTransition"
                 }
             }
         },
@@ -1368,6 +1716,52 @@
                 },
                 "timestamp": {
                     "type": "string"
+                }
+            }
+        },
+        "agentos.PlanInputMappingTrace": {
+            "type": "object",
+            "properties": {
+                "expression": {
+                    "type": "string"
+                },
+                "required": {
+                    "type": "boolean"
+                },
+                "source_artifact": {
+                    "type": "string"
+                },
+                "source_node_id": {
+                    "type": "string"
+                },
+                "source_path": {
+                    "type": "string"
+                },
+                "target": {
+                    "type": "string"
+                }
+            }
+        },
+        "agentos.PlanInputResolutionTrace": {
+            "type": "object",
+            "properties": {
+                "input_digest": {
+                    "type": "string"
+                },
+                "input_keys": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "mapping_count": {
+                    "type": "integer"
+                },
+                "mappings": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/agentos.PlanInputMappingTrace"
+                    }
                 }
             }
         },
@@ -1489,6 +1883,142 @@
                 },
                 "timeout_seconds": {
                     "type": "integer"
+                }
+            }
+        },
+        "agentos.PlanStateTransition": {
+            "type": "object",
+            "properties": {
+                "next_lifecycle_state": {
+                    "type": "string"
+                },
+                "previous_lifecycle_state": {
+                    "type": "string"
+                }
+            }
+        },
+        "agentos.PlanTopology": {
+            "type": "object",
+            "properties": {
+                "edges": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/agentos.PlanTopologyEdge"
+                    }
+                },
+                "nodes": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/agentos.PlanTopologyNode"
+                    }
+                },
+                "order": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                }
+            }
+        },
+        "agentos.PlanTopologyEdge": {
+            "type": "object",
+            "properties": {
+                "condition": {
+                    "type": "string"
+                },
+                "edge_id": {
+                    "type": "string"
+                },
+                "from": {
+                    "type": "string"
+                },
+                "input_mapping": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/agentos.InputMapping"
+                    }
+                },
+                "on": {
+                    "$ref": "#/definitions/agentos.EdgeTrigger"
+                },
+                "to": {
+                    "type": "string"
+                }
+            }
+        },
+        "agentos.PlanTopologyNode": {
+            "type": "object",
+            "properties": {
+                "backend": {
+                    "$ref": "#/definitions/agentos.BackendRef"
+                },
+                "capability": {
+                    "type": "string"
+                },
+                "conditions": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "inputs": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/agentos.InputMapping"
+                    }
+                },
+                "node_id": {
+                    "type": "string"
+                },
+                "outputs": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/agentos.ArtifactSpec"
+                    }
+                },
+                "policy": {
+                    "$ref": "#/definitions/agentos.NodePolicy"
+                },
+                "run_id": {
+                    "type": "string"
+                },
+                "status": {
+                    "$ref": "#/definitions/agentos.PlanNodeStatus"
+                }
+            }
+        },
+        "agentos.RunPlanDescription": {
+            "type": "object",
+            "properties": {
+                "account_id": {
+                    "type": "string"
+                },
+                "metadata": {
+                    "type": "object",
+                    "additionalProperties": {
+                        "type": "string"
+                    }
+                },
+                "plan_id": {
+                    "type": "string"
+                },
+                "policy": {
+                    "$ref": "#/definitions/agentos.PlanPolicy"
+                },
+                "project_id": {
+                    "type": "string"
+                },
+                "status": {
+                    "$ref": "#/definitions/agentos.RunPlanStatus"
+                },
+                "thread_id": {
+                    "type": "string"
+                },
+                "topology": {
+                    "$ref": "#/definitions/agentos.PlanTopology"
+                },
+                "updated_at": {
+                    "type": "string"
                 }
             }
         },
@@ -1669,9 +2199,6 @@
                 },
                 "run_id": {
                     "type": "string"
-                },
-                "step": {
-                    "type": "integer"
                 },
                 "updated_at": {
                     "type": "string"
@@ -2315,8 +2842,6 @@
                 1000000000,
                 60000000000,
                 3600000000000,
-                -9223372036854775808,
-                9223372036854775807,
                 1,
                 1000,
                 1000000,
@@ -2333,8 +2858,6 @@
                 "Second",
                 "Minute",
                 "Hour",
-                "minDuration",
-                "maxDuration",
                 "Nanosecond",
                 "Microsecond",
                 "Millisecond",

@@ -61,10 +61,15 @@ func (e *agentOSExecutor) Control(ctx context.Context, runID string, op entity.C
 }
 
 func runStatusToEntity(status agentos.RunStatus) entity.RunStatus {
+	var step int32
+	if status.Progress != nil {
+		step = status.Progress.Current
+	}
+
 	return entity.RunStatus{
 		RunID:          status.RunID,
 		LifecycleState: status.LifecycleState,
-		Step:           status.Step,
+		Step:           step,
 		Reason:         status.Reason,
 		UpdatedAt:      status.UpdatedAt,
 	}

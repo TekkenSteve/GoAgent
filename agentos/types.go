@@ -47,7 +47,6 @@ type BackendRef struct {
 type RunStatus struct {
 	RunID          string          `json:"run_id"`
 	LifecycleState string          `json:"lifecycle_state"`
-	Step           int32           `json:"step,omitempty"`
 	Progress       *RunProgress    `json:"progress,omitempty"`
 	Artifacts      []ArtifactRef   `json:"artifacts,omitempty"`
 	BudgetUsage    PlanBudgetUsage `json:"budget_usage,omitempty"`

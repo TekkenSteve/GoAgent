@@ -75,9 +75,16 @@ func TestRunPlanPublicTypesDoNotExposeInternalEntity(t *testing.T) {
 		reflect.TypeOf(PlanEdgeSpec{}),
 		reflect.TypeOf(RunPlanStatus{}),
 		reflect.TypeOf(PlanNodeStatus{}),
+		reflect.TypeOf(RunStatus{}),
 	}
 	for _, typ := range publicTypes {
 		assertNoInternalEntity(t, typ, map[reflect.Type]bool{})
+	}
+}
+
+func TestRunStatusDoesNotExposeNativeStep(t *testing.T) {
+	if _, ok := reflect.TypeOf(RunStatus{}).FieldByName("Step"); ok {
+		t.Fatal("agentos.RunStatus must expose generic Progress, not native Step")
 	}
 }
 

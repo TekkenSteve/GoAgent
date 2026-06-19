@@ -225,6 +225,8 @@ definitions:
     - PlanAuditActionControl
   agentos.PlanAuditRecord:
     properties:
+      account_id:
+        type: string
       action:
         $ref: '#/definitions/agentos.PlanAuditAction'
       actor_id:
@@ -242,6 +244,8 @@ definitions:
         type: object
       plan_id:
         type: string
+      project_id:
+        type: string
       run_id:
         type: string
     type: object
@@ -249,6 +253,75 @@ definitions:
     properties:
       spent_cents:
         type: integer
+    type: object
+  agentos.PlanCapabilityTrace:
+    properties:
+      backend:
+        $ref: '#/definitions/agentos.BackendRef'
+      capability:
+        type: string
+      controls:
+        items:
+          $ref: '#/definitions/agentos.ControlOperation'
+        type: array
+      has_input_schema:
+        type: boolean
+      has_output_schema:
+        type: boolean
+      signals:
+        items:
+          $ref: '#/definitions/agentos.SignalType'
+        type: array
+    type: object
+  agentos.PlanConditionTrace:
+    properties:
+      edge_id:
+        type: string
+      expression:
+        type: string
+      from:
+        type: string
+      node_id:
+        type: string
+      "on":
+        $ref: '#/definitions/agentos.EdgeTrigger'
+      parent_state:
+        type: string
+      result:
+        type: boolean
+      scope:
+        type: string
+      to:
+        type: string
+    type: object
+  agentos.PlanDebugTrace:
+    properties:
+      capability:
+        $ref: '#/definitions/agentos.PlanCapabilityTrace'
+      conditions:
+        items:
+          $ref: '#/definitions/agentos.PlanConditionTrace'
+        type: array
+      event_id:
+        type: string
+      event_type:
+        $ref: '#/definitions/agentos.EventType'
+      input_resolution:
+        $ref: '#/definitions/agentos.PlanInputResolutionTrace'
+      node_id:
+        type: string
+      plan_id:
+        type: string
+      run_id:
+        type: string
+      sequence:
+        type: integer
+      thread_id:
+        type: string
+      timestamp:
+        type: string
+      transition:
+        $ref: '#/definitions/agentos.PlanStateTransition'
     type: object
   agentos.PlanEdgeSpec:
     properties:
@@ -290,6 +363,36 @@ definitions:
         type: string
       timestamp:
         type: string
+    type: object
+  agentos.PlanInputMappingTrace:
+    properties:
+      expression:
+        type: string
+      required:
+        type: boolean
+      source_artifact:
+        type: string
+      source_node_id:
+        type: string
+      source_path:
+        type: string
+      target:
+        type: string
+    type: object
+  agentos.PlanInputResolutionTrace:
+    properties:
+      input_digest:
+        type: string
+      input_keys:
+        items:
+          type: string
+        type: array
+      mapping_count:
+        type: integer
+      mappings:
+        items:
+          $ref: '#/definitions/agentos.PlanInputMappingTrace'
+        type: array
     type: object
   agentos.PlanJoinStrategy:
     enum:
@@ -371,6 +474,95 @@ definitions:
         type: integer
       timeout_seconds:
         type: integer
+    type: object
+  agentos.PlanStateTransition:
+    properties:
+      next_lifecycle_state:
+        type: string
+      previous_lifecycle_state:
+        type: string
+    type: object
+  agentos.PlanTopology:
+    properties:
+      edges:
+        items:
+          $ref: '#/definitions/agentos.PlanTopologyEdge'
+        type: array
+      nodes:
+        items:
+          $ref: '#/definitions/agentos.PlanTopologyNode'
+        type: array
+      order:
+        items:
+          type: string
+        type: array
+    type: object
+  agentos.PlanTopologyEdge:
+    properties:
+      condition:
+        type: string
+      edge_id:
+        type: string
+      from:
+        type: string
+      input_mapping:
+        items:
+          $ref: '#/definitions/agentos.InputMapping'
+        type: array
+      "on":
+        $ref: '#/definitions/agentos.EdgeTrigger'
+      to:
+        type: string
+    type: object
+  agentos.PlanTopologyNode:
+    properties:
+      backend:
+        $ref: '#/definitions/agentos.BackendRef'
+      capability:
+        type: string
+      conditions:
+        items:
+          type: string
+        type: array
+      inputs:
+        items:
+          $ref: '#/definitions/agentos.InputMapping'
+        type: array
+      node_id:
+        type: string
+      outputs:
+        items:
+          $ref: '#/definitions/agentos.ArtifactSpec'
+        type: array
+      policy:
+        $ref: '#/definitions/agentos.NodePolicy'
+      run_id:
+        type: string
+      status:
+        $ref: '#/definitions/agentos.PlanNodeStatus'
+    type: object
+  agentos.RunPlanDescription:
+    properties:
+      account_id:
+        type: string
+      metadata:
+        additionalProperties:
+          type: string
+        type: object
+      plan_id:
+        type: string
+      policy:
+        $ref: '#/definitions/agentos.PlanPolicy'
+      project_id:
+        type: string
+      status:
+        $ref: '#/definitions/agentos.RunPlanStatus'
+      thread_id:
+        type: string
+      topology:
+        $ref: '#/definitions/agentos.PlanTopology'
+      updated_at:
+        type: string
     type: object
   agentos.RunPlanSpec:
     properties:
@@ -490,8 +682,6 @@ definitions:
         type: string
       run_id:
         type: string
-      step:
-        type: integer
       updated_at:
         type: string
     type: object
@@ -943,8 +1133,6 @@ definitions:
     - 1000000000
     - 60000000000
     - 3600000000000
-    - -9223372036854775808
-    - 9223372036854775807
     - 1
     - 1000
     - 1000000
@@ -962,8 +1150,6 @@ definitions:
     - Second
     - Minute
     - Hour
-    - minDuration
-    - maxDuration
     - Nanosecond
     - Microsecond
     - Millisecond
@@ -1189,6 +1375,61 @@ paths:
       summary: List AgentOS plan audits
       tags:
       - agentos
+  /agentos/plans/{plan_id}/console:
+    get:
+      consumes:
+      - application/json
+      description: Render an operator console for one AgentOS RunPlan.
+      operationId: agentos-plan-console
+      parameters:
+      - description: Plan ID
+        in: path
+        name: plan_id
+        required: true
+        type: string
+      - description: Account ID
+        in: query
+        name: account_id
+        required: true
+        type: string
+      - description: Project ID
+        in: query
+        name: project_id
+        type: string
+      - description: Maximum events
+        in: query
+        name: event_limit
+        type: integer
+      - description: Maximum audit records
+        in: query
+        name: audit_limit
+        type: integer
+      - description: Maximum artifact refs
+        in: query
+        name: artifact_limit
+        type: integer
+      produces:
+      - text/html
+      responses:
+        "200":
+          description: HTML console
+          schema:
+            type: string
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/response.Error'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/response.Error'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/response.Error'
+      summary: AgentOS plan console
+      tags:
+      - agentos
   /agentos/plans/{plan_id}/control:
     post:
       consumes:
@@ -1226,6 +1467,111 @@ paths:
           schema:
             $ref: '#/definitions/response.Error'
       summary: Control AgentOS plan
+      tags:
+      - agentos
+  /agentos/plans/{plan_id}/debug/traces:
+    get:
+      consumes:
+      - application/json
+      description: Query typed debug traces projected from durable RunPlan events.
+      operationId: agentos-list-plan-debug-traces
+      parameters:
+      - description: Plan ID
+        in: path
+        name: plan_id
+        required: true
+        type: string
+      - description: Account ID
+        in: query
+        name: account_id
+        required: true
+        type: string
+      - description: Project ID
+        in: query
+        name: project_id
+        type: string
+      - description: Node ID
+        in: query
+        name: node_id
+        type: string
+      - description: Child run ID
+        in: query
+        name: run_id
+        type: string
+      - description: Only return traces after this sequence
+        in: query
+        name: after_sequence
+        type: integer
+      - description: Maximum traces
+        in: query
+        name: limit
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            items:
+              $ref: '#/definitions/agentos.PlanDebugTrace'
+            type: array
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/response.Error'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/response.Error'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/response.Error'
+      summary: List AgentOS plan debug traces
+      tags:
+      - agentos
+  /agentos/plans/{plan_id}/description:
+    get:
+      consumes:
+      - application/json
+      description: Query the current public topology and aggregate status of an AgentOS
+        RunPlan.
+      operationId: agentos-plan-description
+      parameters:
+      - description: Plan ID
+        in: path
+        name: plan_id
+        required: true
+        type: string
+      - description: Account ID
+        in: query
+        name: account_id
+        required: true
+        type: string
+      - description: Project ID
+        in: query
+        name: project_id
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/agentos.RunPlanDescription'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/response.Error'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/response.Error'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/response.Error'
+      summary: Describe AgentOS plan
       tags:
       - agentos
   /agentos/plans/{plan_id}/events:

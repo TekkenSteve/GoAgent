@@ -57,7 +57,7 @@ func TestRunStatusFromEntity(t *testing.T) {
 	want := agentos.RunStatus{
 		RunID:          "run-1",
 		LifecycleState: "running",
-		Step:           3,
+		Progress:       &agentos.RunProgress{Current: 3},
 		Reason:         "waiting",
 		UpdatedAt:      updatedAt,
 	}

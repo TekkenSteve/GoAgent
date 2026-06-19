@@ -151,7 +151,7 @@ func TestBackendStatusUsesQueryWhenConfigured(t *testing.T) {
 		queryValue: encodedStatus{status: agentos.RunStatus{
 			RunID:          "run-1",
 			LifecycleState: "paused",
-			Step:           7,
+			Progress:       &agentos.RunProgress{Current: 7, Total: 9, Label: "checkpoint"},
 		}},
 	}
 	backend := newTestBackend(t, temporalClient, Config{
@@ -166,7 +166,7 @@ func TestBackendStatusUsesQueryWhenConfigured(t *testing.T) {
 		t.Fatalf("Status: %v", err)
 	}
 
-	if temporalClient.queryType != "agentos_status" || status.LifecycleState != "paused" || status.Step != 7 {
+	if temporalClient.queryType != "agentos_status" || status.LifecycleState != "paused" || status.Progress == nil || status.Progress.Current != 7 {
 		t.Fatalf("unexpected status/query: status=%#v query=%q", status, temporalClient.queryType)
 	}
 }

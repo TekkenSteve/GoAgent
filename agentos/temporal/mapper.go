@@ -53,13 +53,19 @@ func executionRequestFromRunSpec(spec agentos.RunSpec) (*entity.ExecuteRequest, 
 }
 
 func runStatusFromEntity(status entity.RunStatus) agentos.RunStatus {
-	return agentos.RunStatus{
+	mapped := agentos.RunStatus{
 		RunID:          status.RunID,
 		LifecycleState: status.LifecycleState,
-		Step:           status.Step,
 		Reason:         status.Reason,
 		UpdatedAt:      status.UpdatedAt,
 	}
+	if status.Step > 0 {
+		mapped.Progress = &agentos.RunProgress{
+			Current: status.Step,
+		}
+	}
+
+	return mapped
 }
 
 func controlOperationToEntity(op agentos.ControlOperation) (entity.ControlOperation, error) {
