@@ -304,6 +304,25 @@ func TestAgentOSPlanPostgresPlanEventIdempotencyDoesNotAdvanceSequence(t *testin
 	}
 }
 
+func TestAgentOSPlanPostgresAppendPlanEventRequiresIdempotencyKey(t *testing.T) {
+	ctx, pg, suffix := newAgentOSPlanPostgresIntegrationDB(t)
+	planRepo := NewAgentOSPlanRepo(pg)
+
+	spec := postgresIntegrationPlanSpec("plan-event-key-required-"+suffix, "plan-event-start-key-required-"+suffix)
+	status := agentosplan.NewState(spec, time.Now().UTC()).Status
+	if _, _, err := planRepo.CreatePlan(ctx, spec, status); err != nil {
+		t.Fatalf("CreatePlan: %v", err)
+	}
+
+	_, err := planRepo.AppendPlanEvent(ctx, agentos.PlanEvent{
+		Event:  agentos.Event{EventType: agentos.EventPlanStarted},
+		PlanID: spec.PlanID,
+	}, "")
+	if !errors.Is(err, agentos.ErrInvalidPlanEvent) {
+		t.Fatalf("AppendPlanEvent empty key error = %v, want ErrInvalidPlanEvent", err)
+	}
+}
+
 func TestAgentOSArtifactPostgresRejectsDifferentIdempotencyReplay(t *testing.T) {
 	ctx, pg, suffix := newAgentOSPlanPostgresIntegrationDB(t)
 	blobStore, err := artifactblob.NewLocalBlobStore(t.TempDir())
@@ -428,6 +447,7 @@ func applyAgentOSPlanMigrations(t *testing.T, pg *postgres.Postgres) {
 		"20260617000001_create_agentos_plan_persistence.up.sql",
 		"20260618000001_add_artifact_idempotency.up.sql",
 		"20260619000001_create_agentos_capabilities.up.sql",
+		"20260619000002_require_plan_event_idempotency.up.sql",
 	} {
 		path := filepath.Join("..", "..", "..", "migrations", migration)
 		data, err := os.ReadFile(path)

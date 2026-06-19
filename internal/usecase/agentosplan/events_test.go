@@ -73,6 +73,25 @@ func TestMemoryPlanStoreAppendPlanEventIsIdempotent(t *testing.T) {
 	}
 }
 
+func TestMemoryPlanStoreAppendPlanEventRequiresIdempotencyKey(t *testing.T) {
+	ctx := context.Background()
+	store := NewMemoryPlanStore()
+	if err := store.SavePlanState(ctx, PlanStateSnapshot{
+		Spec:   agentos.RunPlanSpec{PlanID: "plan-1"},
+		Status: agentos.RunPlanStatus{PlanID: "plan-1", LifecycleState: agentos.PlanLifecycleRunning},
+	}); err != nil {
+		t.Fatalf("SavePlanState: %v", err)
+	}
+
+	_, err := store.AppendPlanEvent(ctx, agentos.PlanEvent{
+		Event:  agentos.Event{EventType: agentos.EventPlanStarted},
+		PlanID: "plan-1",
+	}, "")
+	if !errors.Is(err, agentos.ErrInvalidPlanEvent) {
+		t.Fatalf("AppendPlanEvent empty key error = %v, want ErrInvalidPlanEvent", err)
+	}
+}
+
 func TestMemoryPlanStoreAppendPlanEventRejectsDifferentReplay(t *testing.T) {
 	ctx := context.Background()
 	store := NewMemoryPlanStore()

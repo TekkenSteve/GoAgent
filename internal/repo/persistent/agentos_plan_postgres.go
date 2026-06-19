@@ -373,6 +373,9 @@ func (r *AgentOSPlanRepo) AppendPlanEvent(ctx context.Context, event agentos.Pla
 	if event.PlanID == "" {
 		return agentos.PlanEvent{}, fmt.Errorf("%w: plan id is required", agentos.ErrInvalidPlanEvent)
 	}
+	if idempotencyKey == "" {
+		return agentos.PlanEvent{}, fmt.Errorf("%w: plan event idempotency key is required", agentos.ErrInvalidPlanEvent)
+	}
 	requestedEvent := event
 
 	tx, err := r.Pool.Begin(ctx)
@@ -397,18 +400,16 @@ FOR UPDATE`, event.PlanID).Scan(&currentSequence)
 		return agentos.PlanEvent{}, fmt.Errorf("AgentOSPlanRepo - AppendPlanEvent - lock plan: %w", err)
 	}
 
-	if idempotencyKey != "" {
-		existing, exists, err := r.planEventByIdempotencyKeyWith(ctx, tx, event.PlanID, idempotencyKey)
-		if err != nil {
+	existing, exists, err := r.planEventByIdempotencyKeyWith(ctx, tx, event.PlanID, idempotencyKey)
+	if err != nil {
+		return agentos.PlanEvent{}, err
+	}
+	if exists {
+		if err := agentosplan.ValidatePlanEventIdempotency(existing, event); err != nil {
 			return agentos.PlanEvent{}, err
 		}
-		if exists {
-			if err := agentosplan.ValidatePlanEventIdempotency(existing, event); err != nil {
-				return agentos.PlanEvent{}, err
-			}
 
-			return existing, nil
-		}
+		return existing, nil
 	}
 
 	event.Sequence = currentSequence + 1
@@ -466,7 +467,7 @@ RETURNING event_json`
 		event.Timestamp,
 	).Scan(&storedJSON)
 	if err != nil {
-		if idempotencyKey != "" && isPostgresUniqueViolation(err) {
+		if isPostgresUniqueViolation(err) {
 			existing, exists, lookupErr := r.planEventByIdempotencyKeyWith(ctx, tx, event.PlanID, idempotencyKey)
 			if lookupErr != nil {
 				return agentos.PlanEvent{}, lookupErr

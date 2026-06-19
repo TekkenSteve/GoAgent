@@ -149,17 +149,18 @@ func (s *MemoryPlanStore) AppendPlanEvent(_ context.Context, event agentos.PlanE
 	if event.PlanID == "" {
 		return agentos.PlanEvent{}, fmt.Errorf("%w: plan id is required", agentos.ErrInvalidPlanEvent)
 	}
+	if idempotencyKey == "" {
+		return agentos.PlanEvent{}, fmt.Errorf("%w: plan event idempotency key is required", agentos.ErrInvalidPlanEvent)
+	}
 
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if idempotencyKey != "" {
-		if existing, ok := s.eventKeys[idempotencyKey]; ok {
-			if err := ValidatePlanEventIdempotency(existing, event); err != nil {
-				return agentos.PlanEvent{}, err
-			}
-
-			return existing, nil
+	if existing, ok := s.eventKeys[idempotencyKey]; ok {
+		if err := ValidatePlanEventIdempotency(existing, event); err != nil {
+			return agentos.PlanEvent{}, err
 		}
+
+		return existing, nil
 	}
 	if event.Sequence == 0 {
 		event.Sequence = int64(len(s.events[event.PlanID]) + 1)
@@ -168,9 +169,7 @@ func (s *MemoryPlanStore) AppendPlanEvent(_ context.Context, event agentos.PlanE
 		event.EventID = fmt.Sprintf("%s:%d", event.PlanID, event.Sequence)
 	}
 	s.events[event.PlanID] = append(s.events[event.PlanID], event)
-	if idempotencyKey != "" {
-		s.eventKeys[idempotencyKey] = event
-	}
+	s.eventKeys[idempotencyKey] = event
 
 	return event, nil
 }
