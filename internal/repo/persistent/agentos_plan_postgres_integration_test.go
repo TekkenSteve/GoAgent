@@ -4,6 +4,7 @@ package persistent
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"os"
 	"path/filepath"
@@ -66,6 +67,40 @@ func TestAgentOSPlanPostgresDurablePersistence(t *testing.T) {
 	}
 	if err := planRepo.SavePlanState(ctx, agentosplan.PlanStateSnapshot{Spec: changedSpec, Status: status}); !errors.Is(err, agentos.ErrInvalidRunPlan) {
 		t.Fatalf("SavePlanState changed spec error = %v, want ErrInvalidRunPlan", err)
+	}
+	nodeStatus := status
+	nodeStatus.Nodes = append([]agentos.PlanNodeStatus(nil), status.Nodes...)
+	nodeStatus.Nodes[0].LifecycleState = agentos.PlanNodeSucceeded
+	nodeStatus.Nodes[0].Reason = "node table source"
+	if err := planRepo.SavePlanState(ctx, agentosplan.PlanStateSnapshot{
+		Spec:           spec,
+		Status:         nodeStatus,
+		IdempotencyKey: spec.IdempotencyKey,
+	}); err != nil {
+		t.Fatalf("SavePlanState node source: %v", err)
+	}
+	contradictoryStatus := nodeStatus
+	contradictoryStatus.Nodes = append([]agentos.PlanNodeStatus(nil), nodeStatus.Nodes...)
+	contradictoryStatus.Nodes[0].LifecycleState = agentos.PlanNodeFailed
+	contradictoryStatus.Nodes[0].Reason = "stale aggregate json"
+	contradictoryStatusJSON, err := json.Marshal(contradictoryStatus)
+	if err != nil {
+		t.Fatalf("marshal contradictory status: %v", err)
+	}
+	if _, err := pg.Pool.Exec(ctx, `UPDATE plans SET status_json = $2 WHERE plan_id = $1`, spec.PlanID, contradictoryStatusJSON); err != nil {
+		t.Fatalf("corrupt aggregate node status: %v", err)
+	}
+	loadedSnapshot, exists, err := planRepo.LoadPlanState(ctx, spec.PlanID)
+	if err != nil {
+		t.Fatalf("LoadPlanState: %v", err)
+	}
+	if !exists {
+		t.Fatal("LoadPlanState did not find plan")
+	}
+	if len(loadedSnapshot.Status.Nodes) != 1 ||
+		loadedSnapshot.Status.Nodes[0].LifecycleState != agentos.PlanNodeSucceeded ||
+		loadedSnapshot.Status.Nodes[0].Reason != "node table source" {
+		t.Fatalf("LoadPlanState nodes = %#v, want durable plan_nodes source", loadedSnapshot.Status.Nodes)
 	}
 
 	event := agentos.PlanEvent{

@@ -125,6 +125,11 @@ func (r *AgentOSPlanRepo) SavePlanState(ctx context.Context, snapshot agentospla
 	if snapshot.Status.UpdatedAt.IsZero() {
 		snapshot.Status.UpdatedAt = time.Now().UTC()
 	}
+	state, err := agentosplan.NewStateFromStatus(snapshot.Spec, snapshot.Status)
+	if err != nil {
+		return err
+	}
+	snapshot.Status = state.Status
 
 	specJSON, err := json.Marshal(snapshot.Spec)
 	if err != nil {
@@ -207,6 +212,9 @@ ON CONFLICT (plan_id) DO UPDATE SET
 		if err := r.upsertPlanNode(ctx, tx, snapshot.Spec.PlanID, capabilityByNode[node.NodeID], node); err != nil {
 			return err
 		}
+	}
+	if err := r.deleteStalePlanNodes(ctx, tx, snapshot.Spec.PlanID, snapshot.Status.Nodes); err != nil {
+		return err
 	}
 
 	if err := tx.Commit(ctx); err != nil {
@@ -293,6 +301,26 @@ ON CONFLICT (plan_id, node_id) DO UPDATE SET
 	return nil
 }
 
+func (r *AgentOSPlanRepo) deleteStalePlanNodes(ctx context.Context, tx pgx.Tx, planID string, nodes []agentos.PlanNodeStatus) error {
+	nodeIDs := make([]string, 0, len(nodes))
+	for _, node := range nodes {
+		nodeIDs = append(nodeIDs, node.NodeID)
+	}
+	if len(nodeIDs) == 0 {
+		if _, err := tx.Exec(ctx, `DELETE FROM plan_nodes WHERE plan_id = $1`, planID); err != nil {
+			return fmt.Errorf("AgentOSPlanRepo - deleteStalePlanNodes - delete all: %w", err)
+		}
+
+		return nil
+	}
+
+	if _, err := tx.Exec(ctx, `DELETE FROM plan_nodes WHERE plan_id = $1 AND NOT (node_id = ANY($2))`, planID, nodeIDs); err != nil {
+		return fmt.Errorf("AgentOSPlanRepo - deleteStalePlanNodes - delete: %w", err)
+	}
+
+	return nil
+}
+
 func (r *AgentOSPlanRepo) LoadPlanState(ctx context.Context, planID string) (agentosplan.PlanStateSnapshot, bool, error) {
 	if planID == "" {
 		return agentosplan.PlanStateSnapshot{}, false, fmt.Errorf("%w: plan id is required", agentos.ErrInvalidRunPlan)
@@ -327,12 +355,57 @@ func (r *AgentOSPlanRepo) LoadPlanState(ctx context.Context, planID string) (age
 	if err := json.Unmarshal(statusJSON, &status); err != nil {
 		return agentosplan.PlanStateSnapshot{}, false, fmt.Errorf("AgentOSPlanRepo - LoadPlanState - decode status: %w", err)
 	}
+	nodes, err := r.loadPlanNodeStatuses(ctx, planID)
+	if err != nil {
+		return agentosplan.PlanStateSnapshot{}, false, err
+	}
+	status.Nodes = nodes
+	state, err := agentosplan.NewStateFromStatus(spec, status)
+	if err != nil {
+		return agentosplan.PlanStateSnapshot{}, false, err
+	}
+	status = state.Status
 
 	return agentosplan.PlanStateSnapshot{
 		Spec:           spec,
 		Status:         status,
 		IdempotencyKey: idempotencyKey,
 	}, true, nil
+}
+
+func (r *AgentOSPlanRepo) loadPlanNodeStatuses(ctx context.Context, planID string) ([]agentos.PlanNodeStatus, error) {
+	sql, args, err := r.Builder.
+		Select("status_json").
+		From("plan_nodes").
+		Where(sq.Eq{"plan_id": planID}).
+		OrderBy("node_id ASC").
+		ToSql()
+	if err != nil {
+		return nil, fmt.Errorf("AgentOSPlanRepo - loadPlanNodeStatuses - builder: %w", err)
+	}
+	rows, err := r.Pool.Query(ctx, sql, args...)
+	if err != nil {
+		return nil, fmt.Errorf("AgentOSPlanRepo - loadPlanNodeStatuses - query: %w", err)
+	}
+	defer rows.Close()
+
+	nodes := make([]agentos.PlanNodeStatus, 0)
+	for rows.Next() {
+		var statusJSON []byte
+		if err := rows.Scan(&statusJSON); err != nil {
+			return nil, fmt.Errorf("AgentOSPlanRepo - loadPlanNodeStatuses - scan: %w", err)
+		}
+		var node agentos.PlanNodeStatus
+		if err := json.Unmarshal(statusJSON, &node); err != nil {
+			return nil, fmt.Errorf("AgentOSPlanRepo - loadPlanNodeStatuses - decode status: %w", err)
+		}
+		nodes = append(nodes, node)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("AgentOSPlanRepo - loadPlanNodeStatuses - rows: %w", err)
+	}
+
+	return nodes, nil
 }
 
 func (r *AgentOSPlanRepo) planByIdempotencyKey(ctx context.Context, idempotencyKey string) (agentos.RunPlanSpec, agentos.RunPlanStatus, bool, error) {
