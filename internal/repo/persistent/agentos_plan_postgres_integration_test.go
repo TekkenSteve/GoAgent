@@ -1,0 +1,228 @@
+//go:build postgres_integration
+
+package persistent
+
+import (
+	"context"
+	"errors"
+	"os"
+	"path/filepath"
+	"testing"
+	"time"
+
+	"github.com/TekkenSteve/GoAgent/agentos"
+	"github.com/TekkenSteve/GoAgent/internal/pkg/postgres"
+	artifactblob "github.com/TekkenSteve/GoAgent/internal/repo/artifact"
+	"github.com/TekkenSteve/GoAgent/internal/usecase/agentosplan"
+)
+
+func TestAgentOSPlanPostgresDurablePersistence(t *testing.T) {
+	pgURL := os.Getenv("GOAGENT_POSTGRES_TEST_URL")
+	if pgURL == "" {
+		t.Fatal("GOAGENT_POSTGRES_TEST_URL is required for postgres_integration tests")
+	}
+
+	pg, err := postgres.New(pgURL, postgres.MaxPoolSize(1), postgres.ConnAttempts(1), postgres.ConnTimeout(100*time.Millisecond))
+	if err != nil {
+		t.Fatalf("postgres.New: %v", err)
+	}
+	defer pg.Close()
+	waitForPostgres(t, pg)
+	applyAgentOSPlanMigrations(t, pg)
+
+	ctx := t.Context()
+	planRepo := NewAgentOSPlanRepo(pg)
+	routeIndex := NewRunBackendIndexRepo(pg)
+	blobStore, err := artifactblob.NewLocalBlobStore(t.TempDir())
+	if err != nil {
+		t.Fatalf("NewLocalBlobStore: %v", err)
+	}
+	artifactStore := NewAgentOSArtifactRepo(pg, blobStore)
+
+	suffix := time.Now().UTC().Format("20060102150405.000000000")
+	spec := postgresIntegrationPlanSpec("plan-"+suffix, "plan-start-"+suffix)
+	status := agentosplan.NewState(spec, time.Now().UTC()).Status
+
+	first, created, err := planRepo.CreatePlan(ctx, spec, status)
+	if err != nil {
+		t.Fatalf("CreatePlan first: %v", err)
+	}
+	if !created {
+		t.Fatal("CreatePlan first was not created")
+	}
+	second, created, err := planRepo.CreatePlan(ctx, spec, agentos.RunPlanStatus{PlanID: spec.PlanID, LifecycleState: agentos.PlanLifecycleFailed})
+	if err != nil {
+		t.Fatalf("CreatePlan replay: %v", err)
+	}
+	if created || second.LifecycleState != first.LifecycleState {
+		t.Fatalf("CreatePlan replay = %#v created=%v, want %#v created=false", second, created, first)
+	}
+
+	changedSpec := spec
+	changedSpec.Nodes[0].NodeID = "changed"
+	if _, _, err := planRepo.CreatePlan(ctx, changedSpec, status); !errors.Is(err, agentos.ErrInvalidRunPlan) {
+		t.Fatalf("CreatePlan changed spec error = %v, want ErrInvalidRunPlan", err)
+	}
+	if err := planRepo.SavePlanState(ctx, agentosplan.PlanStateSnapshot{Spec: changedSpec, Status: status}); !errors.Is(err, agentos.ErrInvalidRunPlan) {
+		t.Fatalf("SavePlanState changed spec error = %v, want ErrInvalidRunPlan", err)
+	}
+
+	event := agentos.PlanEvent{
+		Event: agentos.Event{
+			EventType: agentos.EventPlanStarted,
+			Timestamp: time.Now().UTC(),
+			Payload:   map[string]any{"source": "postgres-integration"},
+		},
+		PlanID: spec.PlanID,
+	}
+	firstEvent, err := planRepo.AppendPlanEvent(ctx, event, "plan-event-"+suffix)
+	if err != nil {
+		t.Fatalf("AppendPlanEvent first: %v", err)
+	}
+	secondEvent, err := planRepo.AppendPlanEvent(ctx, event, "plan-event-"+suffix)
+	if err != nil {
+		t.Fatalf("AppendPlanEvent replay: %v", err)
+	}
+	if secondEvent.EventID != firstEvent.EventID || secondEvent.Sequence != firstEvent.Sequence {
+		t.Fatalf("AppendPlanEvent replay = %#v, want %#v", secondEvent, firstEvent)
+	}
+	events, err := planRepo.ListPlanEvents(ctx, agentos.PlanStreamScope{PlanID: spec.PlanID}, 0)
+	if err != nil {
+		t.Fatalf("ListPlanEvents: %v", err)
+	}
+	if len(events) != 1 || events[0].EventID != firstEvent.EventID {
+		t.Fatalf("ListPlanEvents = %#v", events)
+	}
+
+	audit, created, err := planRepo.RecordAudit(ctx, agentosplan.AuditRecord{
+		PlanID:         spec.PlanID,
+		Action:         agentosplan.AuditActionPlanControl,
+		IdempotencyKey: "audit-" + suffix,
+		Payload:        map[string]any{"operation": string(agentos.ControlCancel)},
+	})
+	if err != nil {
+		t.Fatalf("RecordAudit first: %v", err)
+	}
+	if !created {
+		t.Fatal("RecordAudit first was not created")
+	}
+	auditReplay, created, err := planRepo.RecordAudit(ctx, agentosplan.AuditRecord{
+		PlanID:         spec.PlanID,
+		Action:         agentosplan.AuditActionPlanControl,
+		IdempotencyKey: "audit-" + suffix,
+	})
+	if err != nil {
+		t.Fatalf("RecordAudit replay: %v", err)
+	}
+	if created || auditReplay.AuditID != audit.AuditID {
+		t.Fatalf("RecordAudit replay = %#v created=%v, want %#v created=false", auditReplay, created, audit)
+	}
+
+	runSpec := spec.Nodes[0].Run
+	runSpec.IdempotencyKey, err = agentosplan.NodeStartIdempotencyKey(spec.PlanID, spec.Nodes[0].NodeID, 1)
+	if err != nil {
+		t.Fatalf("NodeStartIdempotencyKey: %v", err)
+	}
+	runStatus := agentos.RunStatus{RunID: runSpec.RunID, LifecycleState: "running"}
+	if err := routeIndex.BindPlanNode(ctx, spec.PlanID, spec.Nodes[0].NodeID, runSpec, runStatus); err != nil {
+		t.Fatalf("BindPlanNode first: %v", err)
+	}
+	if err := routeIndex.BindPlanNode(ctx, spec.PlanID, spec.Nodes[0].NodeID, runSpec, runStatus); err != nil {
+		t.Fatalf("BindPlanNode replay: %v", err)
+	}
+	resolved, err := routeIndex.Resolve(ctx, runSpec.RunID)
+	if err != nil {
+		t.Fatalf("Resolve: %v", err)
+	}
+	if resolved != runSpec.Backend {
+		t.Fatalf("Resolve = %#v, want %#v", resolved, runSpec.Backend)
+	}
+	changedRun := runSpec
+	changedRun.RunID = runSpec.RunID + "-changed"
+	if err := routeIndex.BindPlanNode(ctx, spec.PlanID, spec.Nodes[0].NodeID, changedRun, agentos.RunStatus{RunID: changedRun.RunID}); !errors.Is(err, agentos.ErrInvalidRunSpec) {
+		t.Fatalf("BindPlanNode changed run error = %v, want ErrInvalidRunSpec", err)
+	}
+
+	artifactRef := agentos.ArtifactRef{
+		PlanID:    spec.PlanID,
+		NodeID:    spec.Nodes[0].NodeID,
+		RunID:     runSpec.RunID,
+		Name:      "summary",
+		Kind:      agentos.ArtifactKindObject,
+		MediaType: "application/json",
+	}
+	storedArtifact, err := artifactStore.Put(ctx, artifactRef, map[string]any{"summary": "ok"}, "artifact-"+suffix)
+	if err != nil {
+		t.Fatalf("Artifact Put first: %v", err)
+	}
+	replayedArtifact, err := artifactStore.Put(ctx, artifactRef, map[string]any{"summary": "ok"}, "artifact-"+suffix)
+	if err != nil {
+		t.Fatalf("Artifact Put replay: %v", err)
+	}
+	if replayedArtifact.ArtifactID != storedArtifact.ArtifactID {
+		t.Fatalf("Artifact replay = %#v, want %#v", replayedArtifact, storedArtifact)
+	}
+	loadedArtifact, payload, err := artifactStore.Get(ctx, storedArtifact.ArtifactID)
+	if err != nil {
+		t.Fatalf("Artifact Get: %v", err)
+	}
+	if loadedArtifact.PlanID != spec.PlanID || payload == nil {
+		t.Fatalf("Artifact Get = %#v payload=%#v", loadedArtifact, payload)
+	}
+}
+
+func postgresIntegrationPlanSpec(planID, idempotencyKey string) agentos.RunPlanSpec {
+	ref := agentos.BackendRef{Kind: agentos.BackendKindNative, Name: agentos.BackendNameGoAgentNative}
+
+	return agentos.RunPlanSpec{
+		PlanID:         planID,
+		ThreadID:       "thread-" + planID,
+		AccountID:      "account-" + planID,
+		ProjectID:      "project-" + planID,
+		IdempotencyKey: idempotencyKey,
+		Nodes: []agentos.PlanNodeSpec{
+			{
+				NodeID: "node-1",
+				Run: agentos.RunSpec{
+					RunID:     "run-" + planID,
+					ThreadID:  "thread-" + planID,
+					AccountID: "account-" + planID,
+					ProjectID: "project-" + planID,
+					Backend:   ref,
+				},
+			},
+		},
+	}
+}
+
+func waitForPostgres(t *testing.T, pg *postgres.Postgres) {
+	t.Helper()
+	for range 30 {
+		ctx, cancel := context.WithTimeout(t.Context(), time.Second)
+		err := pg.Pool.Ping(ctx)
+		cancel()
+		if err == nil {
+			return
+		}
+		time.Sleep(250 * time.Millisecond)
+	}
+
+	t.Fatal("postgres did not become ready")
+}
+
+func applyAgentOSPlanMigrations(t *testing.T, pg *postgres.Postgres) {
+	t.Helper()
+	for _, migration := range []string{
+		"20260617000001_create_agentos_plan_persistence.up.sql",
+		"20260618000001_add_artifact_idempotency.up.sql",
+	} {
+		path := filepath.Join("..", "..", "..", "migrations", migration)
+		data, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatalf("read migration %s: %v", migration, err)
+		}
+		if _, err := pg.Pool.Exec(t.Context(), string(data)); err != nil {
+			t.Fatalf("apply migration %s: %v", migration, err)
+		}
+	}
+}

@@ -140,6 +140,16 @@ func (r *AgentOSPlanRepo) SavePlanState(ctx context.Context, snapshot agentospla
 		_ = tx.Rollback(ctx)
 	}()
 
+	existingSpec, exists, err := r.planSpecForUpdate(ctx, tx, snapshot.Spec.PlanID)
+	if err != nil {
+		return err
+	}
+	if exists {
+		if err := agentosplan.ValidatePlanStartIdempotency(existingSpec, snapshot.Spec); err != nil {
+			return err
+		}
+	}
+
 	idempotencyKey := snapshot.Spec.IdempotencyKey
 	sql, args, err := r.Builder.
 		Insert("plans").
@@ -201,6 +211,29 @@ ON CONFLICT (plan_id) DO UPDATE SET
 	}
 
 	return nil
+}
+
+func (r *AgentOSPlanRepo) planSpecForUpdate(ctx context.Context, tx pgx.Tx, planID string) (agentos.RunPlanSpec, bool, error) {
+	var specJSON []byte
+	err := tx.QueryRow(ctx, `
+SELECT spec_json
+FROM plans
+WHERE plan_id = $1
+FOR UPDATE`, planID).Scan(&specJSON)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return agentos.RunPlanSpec{}, false, nil
+		}
+
+		return agentos.RunPlanSpec{}, false, fmt.Errorf("AgentOSPlanRepo - planSpecForUpdate - query: %w", err)
+	}
+
+	var spec agentos.RunPlanSpec
+	if err := json.Unmarshal(specJSON, &spec); err != nil {
+		return agentos.RunPlanSpec{}, false, fmt.Errorf("AgentOSPlanRepo - planSpecForUpdate - decode spec: %w", err)
+	}
+
+	return spec, true, nil
 }
 
 func (r *AgentOSPlanRepo) upsertPlanNode(ctx context.Context, tx pgx.Tx, planID, capability string, node agentos.PlanNodeStatus) error {
