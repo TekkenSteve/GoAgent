@@ -52,3 +52,46 @@ func TestValidateAuditIdempotencyRejectsDifferentPayload(t *testing.T) {
 		t.Fatalf("error = %v, want ErrInvalidRunPlan", err)
 	}
 }
+
+func TestValidatePlanEventIdempotencyRejectsDifferentPayload(t *testing.T) {
+	existing := agentos.PlanEvent{
+		Event: agentos.Event{
+			EventID:   "plan-1:1",
+			EventType: agentos.EventPlanStarted,
+			Sequence:  1,
+			Payload:   map[string]any{"state": "started"},
+		},
+		PlanID: "plan-1",
+	}
+	requested := agentos.PlanEvent{
+		Event: agentos.Event{
+			EventType: agentos.EventPlanStarted,
+			Payload:   map[string]any{"state": "failed"},
+		},
+		PlanID: "plan-1",
+	}
+
+	err := ValidatePlanEventIdempotency(existing, requested)
+	if !errors.Is(err, agentos.ErrInvalidPlanEvent) {
+		t.Fatalf("error = %v, want ErrInvalidPlanEvent", err)
+	}
+}
+
+func TestValidateArtifactPublishIdempotencyRejectsDifferentDigest(t *testing.T) {
+	existing := agentos.ArtifactRef{
+		ArtifactID: "artifact-1",
+		PlanID:     "plan-1",
+		Name:       "summary",
+		Kind:       agentos.ArtifactKindObject,
+		MediaType:  "application/json",
+		SizeBytes:  12,
+		Digest:     "sha256:first",
+	}
+	requested := existing
+	requested.Digest = "sha256:second"
+
+	err := ValidateArtifactPublishIdempotency(existing, requested)
+	if !errors.Is(err, agentos.ErrInvalidArtifact) {
+		t.Fatalf("error = %v, want ErrInvalidArtifact", err)
+	}
+}

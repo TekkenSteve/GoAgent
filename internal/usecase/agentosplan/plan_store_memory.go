@@ -154,6 +154,10 @@ func (s *MemoryPlanStore) AppendPlanEvent(_ context.Context, event agentos.PlanE
 	defer s.mu.Unlock()
 	if idempotencyKey != "" {
 		if existing, ok := s.eventKeys[idempotencyKey]; ok {
+			if err := ValidatePlanEventIdempotency(existing, event); err != nil {
+				return agentos.PlanEvent{}, err
+			}
+
 			return existing, nil
 		}
 	}

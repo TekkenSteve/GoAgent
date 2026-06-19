@@ -373,12 +373,7 @@ func (r *AgentOSPlanRepo) AppendPlanEvent(ctx context.Context, event agentos.Pla
 	if event.PlanID == "" {
 		return agentos.PlanEvent{}, fmt.Errorf("%w: plan id is required", agentos.ErrInvalidPlanEvent)
 	}
-	if idempotencyKey != "" {
-		existing, exists, err := r.planEventByIdempotencyKey(ctx, event.PlanID, idempotencyKey)
-		if err != nil || exists {
-			return existing, err
-		}
-	}
+	requestedEvent := event
 
 	tx, err := r.Pool.Begin(ctx)
 	if err != nil {
@@ -388,22 +383,40 @@ func (r *AgentOSPlanRepo) AppendPlanEvent(ctx context.Context, event agentos.Pla
 		_ = tx.Rollback(ctx)
 	}()
 
-	var sequence int64
+	var currentSequence int64
 	err = tx.QueryRow(ctx, `
-UPDATE plans
-SET event_sequence = event_sequence + 1
+SELECT event_sequence
+FROM plans
 WHERE plan_id = $1
-RETURNING event_sequence`, event.PlanID).Scan(&sequence)
+FOR UPDATE`, event.PlanID).Scan(&currentSequence)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return agentos.PlanEvent{}, fmt.Errorf("%w: %s", agentos.ErrPlanRouteNotFound, event.PlanID)
 		}
 
-		return agentos.PlanEvent{}, fmt.Errorf("AgentOSPlanRepo - AppendPlanEvent - next sequence: %w", err)
+		return agentos.PlanEvent{}, fmt.Errorf("AgentOSPlanRepo - AppendPlanEvent - lock plan: %w", err)
 	}
 
-	if event.Sequence == 0 {
-		event.Sequence = sequence
+	if idempotencyKey != "" {
+		existing, exists, err := r.planEventByIdempotencyKeyWith(ctx, tx, event.PlanID, idempotencyKey)
+		if err != nil {
+			return agentos.PlanEvent{}, err
+		}
+		if exists {
+			if err := agentosplan.ValidatePlanEventIdempotency(existing, event); err != nil {
+				return agentos.PlanEvent{}, err
+			}
+
+			return existing, nil
+		}
+	}
+
+	event.Sequence = currentSequence + 1
+	if _, err := tx.Exec(ctx, `
+UPDATE plans
+SET event_sequence = $2
+WHERE plan_id = $1`, event.PlanID, event.Sequence); err != nil {
+		return agentos.PlanEvent{}, fmt.Errorf("AgentOSPlanRepo - AppendPlanEvent - update sequence: %w", err)
 	}
 	if event.EventID == "" {
 		event.EventID = fmt.Sprintf("%s:%d", event.PlanID, event.Sequence)
@@ -438,24 +451,6 @@ INSERT INTO plan_events (
     timestamp
 ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
 RETURNING event_json`
-	if idempotencyKey != "" {
-		insertSQL = `
-INSERT INTO plan_events (
-    event_id,
-    plan_id,
-    node_id,
-    run_id,
-    event_type,
-    sequence,
-    idempotency_key,
-    payload_json,
-    event_json,
-    timestamp
-) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
-ON CONFLICT (plan_id, idempotency_key) WHERE idempotency_key <> ''
-DO UPDATE SET event_json = plan_events.event_json
-RETURNING event_json`
-	}
 
 	var storedJSON []byte
 	err = tx.QueryRow(ctx, insertSQL,
@@ -471,6 +466,20 @@ RETURNING event_json`
 		event.Timestamp,
 	).Scan(&storedJSON)
 	if err != nil {
+		if idempotencyKey != "" && isPostgresUniqueViolation(err) {
+			existing, exists, lookupErr := r.planEventByIdempotencyKeyWith(ctx, tx, event.PlanID, idempotencyKey)
+			if lookupErr != nil {
+				return agentos.PlanEvent{}, lookupErr
+			}
+			if exists {
+				if err := agentosplan.ValidatePlanEventIdempotency(existing, requestedEvent); err != nil {
+					return agentos.PlanEvent{}, err
+				}
+
+				return existing, nil
+			}
+		}
+
 		return agentos.PlanEvent{}, fmt.Errorf("AgentOSPlanRepo - AppendPlanEvent - insert: %w", err)
 	}
 	if err := tx.Commit(ctx); err != nil {
@@ -486,6 +495,14 @@ RETURNING event_json`
 }
 
 func (r *AgentOSPlanRepo) planEventByIdempotencyKey(ctx context.Context, planID, idempotencyKey string) (agentos.PlanEvent, bool, error) {
+	return r.planEventByIdempotencyKeyWith(ctx, r.Pool, planID, idempotencyKey)
+}
+
+type planEventRowQuerier interface {
+	QueryRow(ctx context.Context, sql string, args ...any) pgx.Row
+}
+
+func (r *AgentOSPlanRepo) planEventByIdempotencyKeyWith(ctx context.Context, querier planEventRowQuerier, planID, idempotencyKey string) (agentos.PlanEvent, bool, error) {
 	sql, args, err := r.Builder.
 		Select("event_json").
 		From("plan_events").
@@ -496,7 +513,7 @@ func (r *AgentOSPlanRepo) planEventByIdempotencyKey(ctx context.Context, planID,
 	}
 
 	var eventJSON []byte
-	err = r.Pool.QueryRow(ctx, sql, args...).Scan(&eventJSON)
+	err = querier.QueryRow(ctx, sql, args...).Scan(&eventJSON)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return agentos.PlanEvent{}, false, nil

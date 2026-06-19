@@ -2,8 +2,11 @@ package agentosplan
 
 import (
 	"bytes"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"time"
 
 	"github.com/TekkenSteve/GoAgent/agentos"
 )
@@ -76,4 +79,141 @@ func normalizeAuditPayload(payload map[string]any) map[string]any {
 	}
 
 	return payload
+}
+
+// ArtifactIDFromIdempotencyKey creates the stable artifact identity used when
+// callers do not provide one explicitly.
+func ArtifactIDFromIdempotencyKey(idempotencyKey string) string {
+	sum := sha256.Sum256([]byte(idempotencyKey))
+
+	return hex.EncodeToString(sum[:])
+}
+
+// ValidatePlanEventIdempotency verifies that a repeated event append request
+// is the same durable event request that originally claimed the key. Store-
+// assigned identity fields are only compared when the replay explicitly sets
+// them.
+func ValidatePlanEventIdempotency(existing agentos.PlanEvent, requested agentos.PlanEvent) error {
+	if requested.EventID != "" && existing.EventID != requested.EventID {
+		return fmt.Errorf("%w: plan event idempotency key belongs to event %q", agentos.ErrInvalidPlanEvent, existing.EventID)
+	}
+	if requested.Sequence != 0 && existing.Sequence != requested.Sequence {
+		return fmt.Errorf("%w: plan event idempotency key belongs to sequence %d", agentos.ErrInvalidPlanEvent, existing.Sequence)
+	}
+	if !requested.Timestamp.IsZero() && !sameTime(existing.Timestamp, requested.Timestamp) {
+		return fmt.Errorf("%w: plan event idempotency key belongs to timestamp %s", agentos.ErrInvalidPlanEvent, existing.Timestamp.Format(time.RFC3339Nano))
+	}
+
+	existingJSON, err := json.Marshal(planEventIdempotencyIdentity(existing))
+	if err != nil {
+		return fmt.Errorf("%w: marshal existing plan event: %s", agentos.ErrInvalidPlanEvent, err)
+	}
+	requestedJSON, err := json.Marshal(planEventIdempotencyIdentity(requested))
+	if err != nil {
+		return fmt.Errorf("%w: marshal requested plan event: %s", agentos.ErrInvalidPlanEvent, err)
+	}
+	if !bytes.Equal(existingJSON, requestedJSON) {
+		return fmt.Errorf("%w: plan event idempotency key was reused with a different event", agentos.ErrInvalidPlanEvent)
+	}
+
+	return nil
+}
+
+type planEventIdempotencyFields struct {
+	PlanID    string            `json:"plan_id"`
+	NodeID    string            `json:"node_id,omitempty"`
+	RunID     string            `json:"run_id,omitempty"`
+	ThreadID  string            `json:"thread_id,omitempty"`
+	EventType agentos.EventType `json:"event_type"`
+	Source    string            `json:"source,omitempty"`
+	Payload   map[string]any    `json:"payload"`
+}
+
+func planEventIdempotencyIdentity(event agentos.PlanEvent) planEventIdempotencyFields {
+	return planEventIdempotencyFields{
+		PlanID:    event.PlanID,
+		NodeID:    event.NodeID,
+		RunID:     event.RunID,
+		ThreadID:  event.ThreadID,
+		EventType: event.EventType,
+		Source:    event.Source,
+		Payload:   normalizeEventPayload(event.Payload),
+	}
+}
+
+func normalizeEventPayload(payload map[string]any) map[string]any {
+	if payload == nil {
+		return map[string]any{}
+	}
+
+	return payload
+}
+
+// ValidateArtifactPublishIdempotency verifies that a repeated artifact publish
+// request is the same durable artifact request that originally claimed the key.
+func ValidateArtifactPublishIdempotency(existing agentos.ArtifactRef, requested agentos.ArtifactRef) error {
+	if existing.ArtifactID != requested.ArtifactID {
+		return fmt.Errorf("%w: artifact idempotency key belongs to artifact %q", agentos.ErrInvalidArtifact, existing.ArtifactID)
+	}
+	if requested.URI != "" && existing.URI != requested.URI {
+		return fmt.Errorf("%w: artifact idempotency key belongs to uri %q", agentos.ErrInvalidArtifact, existing.URI)
+	}
+
+	existingJSON, err := json.Marshal(artifactIdempotencyIdentity(existing))
+	if err != nil {
+		return fmt.Errorf("%w: marshal existing artifact: %s", agentos.ErrInvalidArtifact, err)
+	}
+	requestedJSON, err := json.Marshal(artifactIdempotencyIdentity(requested))
+	if err != nil {
+		return fmt.Errorf("%w: marshal requested artifact: %s", agentos.ErrInvalidArtifact, err)
+	}
+	if !bytes.Equal(existingJSON, requestedJSON) {
+		return fmt.Errorf("%w: artifact idempotency key was reused with a different artifact", agentos.ErrInvalidArtifact)
+	}
+
+	return nil
+}
+
+type artifactIdempotencyFields struct {
+	ArtifactID string               `json:"artifact_id"`
+	PlanID     string               `json:"plan_id,omitempty"`
+	NodeID     string               `json:"node_id,omitempty"`
+	RunID      string               `json:"run_id,omitempty"`
+	Name       string               `json:"name"`
+	Kind       agentos.ArtifactKind `json:"kind"`
+	MediaType  string               `json:"media_type,omitempty"`
+	SizeBytes  int64                `json:"size_bytes,omitempty"`
+	Digest     string               `json:"digest,omitempty"`
+	Metadata   map[string]string    `json:"metadata"`
+}
+
+func artifactIdempotencyIdentity(ref agentos.ArtifactRef) artifactIdempotencyFields {
+	return artifactIdempotencyFields{
+		ArtifactID: ref.ArtifactID,
+		PlanID:     ref.PlanID,
+		NodeID:     ref.NodeID,
+		RunID:      ref.RunID,
+		Name:       ref.Name,
+		Kind:       ref.Kind,
+		MediaType:  ref.MediaType,
+		SizeBytes:  ref.SizeBytes,
+		Digest:     ref.Digest,
+		Metadata:   normalizeArtifactMetadata(ref.Metadata),
+	}
+}
+
+func normalizeArtifactMetadata(metadata map[string]string) map[string]string {
+	if metadata == nil {
+		return map[string]string{}
+	}
+
+	return metadata
+}
+
+func sameTime(left time.Time, right time.Time) bool {
+	if left.IsZero() || right.IsZero() {
+		return left.IsZero() && right.IsZero()
+	}
+
+	return left.Equal(right)
 }

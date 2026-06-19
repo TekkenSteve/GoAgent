@@ -70,19 +70,20 @@ type RunBackendIndexRecord struct {
 
 // ArtifactRecord stores artifact metadata while payloads live in blob storage.
 type ArtifactRecord struct {
-	ArtifactID string
-	PlanID     string
-	NodeID     string
-	RunID      string
-	Name       string
-	Kind       string
-	MediaType  string
-	URI        string
-	SizeBytes  int64
-	Digest     string
-	Metadata   json.RawMessage
-	CreatedAt  time.Time
-	UpdatedAt  time.Time
+	ArtifactID     string
+	PlanID         string
+	NodeID         string
+	RunID          string
+	Name           string
+	Kind           string
+	MediaType      string
+	URI            string
+	SizeBytes      int64
+	Digest         string
+	IdempotencyKey string
+	Metadata       json.RawMessage
+	CreatedAt      time.Time
+	UpdatedAt      time.Time
 }
 
 // AuditLogRecord stores durable human/system control actions.

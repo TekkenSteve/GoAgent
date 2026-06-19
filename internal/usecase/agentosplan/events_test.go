@@ -73,6 +73,29 @@ func TestMemoryPlanStoreAppendPlanEventIsIdempotent(t *testing.T) {
 	}
 }
 
+func TestMemoryPlanStoreAppendPlanEventRejectsDifferentReplay(t *testing.T) {
+	ctx := context.Background()
+	store := NewMemoryPlanStore()
+	spec := agentos.RunPlanSpec{PlanID: "plan-1"}
+	status := agentos.RunPlanStatus{PlanID: "plan-1", LifecycleState: agentos.PlanLifecycleRunning}
+	if err := store.SavePlanState(ctx, PlanStateSnapshot{Spec: spec, Status: status}); err != nil {
+		t.Fatalf("SavePlanState: %v", err)
+	}
+
+	event := agentos.PlanEvent{
+		Event:  agentos.Event{EventType: agentos.EventPlanStarted, Payload: map[string]any{"state": "started"}},
+		PlanID: "plan-1",
+	}
+	if _, err := store.AppendPlanEvent(ctx, event, "key-1"); err != nil {
+		t.Fatalf("AppendPlanEvent first: %v", err)
+	}
+	event.EventType = agentos.EventPlanFailed
+	event.Payload = map[string]any{"state": "failed"}
+	if _, err := store.AppendPlanEvent(ctx, event, "key-1"); !errors.Is(err, agentos.ErrInvalidPlanEvent) {
+		t.Fatalf("AppendPlanEvent changed replay error = %v, want ErrInvalidPlanEvent", err)
+	}
+}
+
 func TestMemoryPlanStoreListPlanEventsEnforcesTenantScope(t *testing.T) {
 	ctx := context.Background()
 	store := NewMemoryPlanStore()

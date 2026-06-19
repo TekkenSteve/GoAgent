@@ -2,12 +2,13 @@ package agentosplan
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
+	"reflect"
 	"sync"
 	"time"
 
 	"github.com/TekkenSteve/GoAgent/agentos"
-	"github.com/google/uuid"
 )
 
 // MemoryArtifactStore stores artifacts in-process. Production runtimes should
@@ -47,7 +48,7 @@ func (s *MemoryArtifactStore) Put(_ context.Context, artifact agentos.ArtifactRe
 		return agentos.ArtifactRef{}, fmt.Errorf("%w: artifact kind is required", agentos.ErrInvalidArtifact)
 	}
 	if artifact.ArtifactID == "" {
-		artifact.ArtifactID = uuid.NewString()
+		artifact.ArtifactID = ArtifactIDFromIdempotencyKey(idempotencyKey)
 	}
 	if artifact.CreatedAt.IsZero() {
 		artifact.CreatedAt = s.now()
@@ -58,6 +59,12 @@ func (s *MemoryArtifactStore) Put(_ context.Context, artifact agentos.ArtifactRe
 	if idempotencyKey != "" {
 		if artifactID, exists := s.byKey[idempotencyKey]; exists {
 			existing := s.artifacts[artifactID]
+			if err := ValidateArtifactPublishIdempotency(existing.ref, artifact); err != nil {
+				return agentos.ArtifactRef{}, err
+			}
+			if err := validateArtifactPayloadIdempotency(existing.payload, payload); err != nil {
+				return agentos.ArtifactRef{}, err
+			}
 
 			return existing.ref, nil
 		}
@@ -98,4 +105,17 @@ func (s *MemoryArtifactStore) List(_ context.Context, planID string) ([]agentos.
 	}
 
 	return refs, nil
+}
+
+func validateArtifactPayloadIdempotency(existing any, requested any) error {
+	if reflect.DeepEqual(existing, requested) {
+		return nil
+	}
+	existingJSON, existingErr := json.Marshal(existing)
+	requestedJSON, requestedErr := json.Marshal(requested)
+	if existingErr == nil && requestedErr == nil && string(existingJSON) == string(requestedJSON) {
+		return nil
+	}
+
+	return fmt.Errorf("%w: artifact idempotency key was reused with a different payload", agentos.ErrInvalidArtifact)
 }

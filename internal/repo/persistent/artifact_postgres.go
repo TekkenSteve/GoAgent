@@ -14,6 +14,7 @@ import (
 	"github.com/TekkenSteve/GoAgent/agentos"
 	"github.com/TekkenSteve/GoAgent/internal/pkg/postgres"
 	artifactblob "github.com/TekkenSteve/GoAgent/internal/repo/artifact"
+	"github.com/TekkenSteve/GoAgent/internal/usecase/agentosplan"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 )
@@ -43,27 +44,46 @@ func (r *AgentOSArtifactRepo) Put(ctx context.Context, ref agentos.ArtifactRef, 
 		return agentos.ArtifactRef{}, fmt.Errorf("%w: artifact kind is required", agentos.ErrInvalidArtifact)
 	}
 	if ref.ArtifactID == "" {
-		ref.ArtifactID = stableArtifactID(idempotencyKey)
+		ref.ArtifactID = agentosplan.ArtifactIDFromIdempotencyKey(idempotencyKey)
 	}
 	if ref.CreatedAt.IsZero() {
 		ref.CreatedAt = time.Now().UTC()
 	}
+	var encodedPayload []byte
 	if payload != nil {
-		if r.blob == nil {
-			return agentos.ArtifactRef{}, fmt.Errorf("%w: blob store is required for artifact payload", agentos.ErrInvalidArtifact)
-		}
 		encoded, mediaType, err := encodeArtifactPayload(payload, ref.MediaType)
 		if err != nil {
 			return agentos.ArtifactRef{}, err
 		}
-		object, err := r.blob.Put(ctx, ref.ArtifactID, encoded)
+		encodedPayload = encoded
+		ref.MediaType = mediaType
+		ref.SizeBytes = int64(len(encodedPayload))
+		ref.Digest = digestArtifactPayload(encodedPayload)
+	}
+
+	existing, exists, err := r.artifactByIdempotencyKey(ctx, idempotencyKey)
+	if err != nil {
+		return agentos.ArtifactRef{}, err
+	}
+	if exists {
+		if err := agentosplan.ValidateArtifactPublishIdempotency(existing, ref); err != nil {
+			return agentos.ArtifactRef{}, err
+		}
+
+		return existing, nil
+	}
+
+	if payload != nil {
+		if r.blob == nil {
+			return agentos.ArtifactRef{}, fmt.Errorf("%w: blob store is required for artifact payload", agentos.ErrInvalidArtifact)
+		}
+		object, err := r.blob.Put(ctx, artifactBlobKey(ref.ArtifactID, ref.Digest), encodedPayload)
 		if err != nil {
 			return agentos.ArtifactRef{}, err
 		}
 		ref.URI = object.URI
 		ref.SizeBytes = object.SizeBytes
 		ref.Digest = object.Digest
-		ref.MediaType = mediaType
 	}
 	metadataJSON, err := json.Marshal(ref.Metadata)
 	if err != nil {
@@ -87,18 +107,7 @@ INSERT INTO artifacts (
     created_at
 ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)
 ON CONFLICT (artifact_id) DO UPDATE SET
-    plan_id = EXCLUDED.plan_id,
-    node_id = EXCLUDED.node_id,
-    run_id = EXCLUDED.run_id,
-    name = EXCLUDED.name,
-    kind = EXCLUDED.kind,
-    media_type = EXCLUDED.media_type,
-    uri = EXCLUDED.uri,
-    size_bytes = EXCLUDED.size_bytes,
-    digest = EXCLUDED.digest,
-    metadata_json = EXCLUDED.metadata_json,
-    idempotency_key = EXCLUDED.idempotency_key,
-    updated_at = NOW()
+    artifact_id = artifacts.artifact_id
 WHERE artifacts.idempotency_key = EXCLUDED.idempotency_key
 RETURNING `+strings.Join(artifactColumns(), ", "),
 		ref.ArtifactID,
@@ -126,11 +135,18 @@ RETURNING `+strings.Join(artifactColumns(), ", "),
 				return agentos.ArtifactRef{}, lookupErr
 			}
 			if exists {
+				if err := agentosplan.ValidateArtifactPublishIdempotency(existing, ref); err != nil {
+					return agentos.ArtifactRef{}, err
+				}
+
 				return existing, nil
 			}
 		}
 
 		return agentos.ArtifactRef{}, fmt.Errorf("AgentOSArtifactRepo - Put - insert: %w", err)
+	}
+	if err := agentosplan.ValidateArtifactPublishIdempotency(stored, ref); err != nil {
+		return agentos.ArtifactRef{}, err
 	}
 
 	return stored, nil
@@ -221,10 +237,18 @@ func artifactColumns() []string {
 	return []string{"artifact_id", "plan_id", "node_id", "run_id", "name", "kind", "media_type", "uri", "size_bytes", "digest", "metadata_json", "created_at"}
 }
 
-func stableArtifactID(idempotencyKey string) string {
-	sum := sha256.Sum256([]byte(idempotencyKey))
+func digestArtifactPayload(payload []byte) string {
+	sum := sha256.Sum256(payload)
 
-	return hex.EncodeToString(sum[:])
+	return "sha256:" + hex.EncodeToString(sum[:])
+}
+
+func artifactBlobKey(artifactID, digest string) string {
+	if digest == "" {
+		return artifactID
+	}
+
+	return artifactID + "/" + strings.TrimPrefix(digest, "sha256:")
 }
 
 func isPostgresUniqueViolation(err error) bool {
