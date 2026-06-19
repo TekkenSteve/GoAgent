@@ -322,6 +322,8 @@
   },
   "required": [
     "plan_id",
+    "account_id",
+    "project_id",
     "nodes"
   ],
   "additionalProperties": false

@@ -39,11 +39,13 @@ func main() {
 
 	planID := fmt.Sprintf("embed-plan-%d", time.Now().UnixMilli())
 	accountID := "demo-account"
+	projectID := "demo-project"
 	native := agentos.BackendRef{Kind: agentos.BackendKindNative, Name: agentos.BackendNameGoAgentNative}
 	status, err := rt.StartPlan(ctx, agentos.RunPlanSpec{
 		PlanID:         planID,
 		ThreadID:       planID,
 		AccountID:      accountID,
+		ProjectID:      projectID,
 		IdempotencyKey: planID + ":start",
 		RequestedAt:    time.Now().UTC(),
 		Inputs: map[string]any{
@@ -56,6 +58,7 @@ func main() {
 					RunID:          planID + "-research",
 					ThreadID:       planID,
 					AccountID:      accountID,
+					ProjectID:      projectID,
 					ModelRef:       "gpt-4.1-mini",
 					UserMessage:    "Summarize the core idea of durable agent orchestration.",
 					RequestedAt:    time.Now().UTC(),
@@ -69,6 +72,7 @@ func main() {
 					RunID:          planID + "-verify",
 					ThreadID:       planID,
 					AccountID:      accountID,
+					ProjectID:      projectID,
 					ModelRef:       "gpt-4.1-mini",
 					UserMessage:    "Check the previous result for missing operational constraints.",
 					RequestedAt:    time.Now().UTC(),
@@ -92,7 +96,7 @@ func main() {
 
 	fmt.Fprintf(os.Stdout, "plan started: id=%s state=%s\n", status.PlanID, status.LifecycleState)
 
-	current, err := rt.StatusPlan(ctx, agentos.PlanRef{PlanID: planID, AccountID: accountID})
+	current, err := rt.StatusPlan(ctx, agentos.PlanRef{PlanID: planID, AccountID: accountID, ProjectID: projectID})
 	if err != nil {
 		log.Fatalf("status plan: %v", err)
 	}

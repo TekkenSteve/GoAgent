@@ -15,6 +15,9 @@ func ValidatePlanRef(ref agentos.PlanRef) error {
 	if ref.AccountID == "" {
 		return fmt.Errorf("%w: account id is required", agentos.ErrInvalidPlanScope)
 	}
+	if ref.ProjectID == "" {
+		return fmt.Errorf("%w: project id is required", agentos.ErrInvalidPlanScope)
+	}
 
 	return nil
 }

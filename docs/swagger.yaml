@@ -1004,6 +1004,7 @@ definitions:
     required:
     - account_id
     - operation
+    - project_id
     type: object
   request.AgentOSPlanSignal:
     properties:
@@ -1024,6 +1025,7 @@ definitions:
         $ref: '#/definitions/agentos.SignalType'
     required:
     - account_id
+    - project_id
     - type
     type: object
   request.AgentOSSignal:
@@ -1133,6 +1135,8 @@ definitions:
     - 1000000000
     - 60000000000
     - 3600000000000
+    - -9223372036854775808
+    - 9223372036854775807
     - 1
     - 1000
     - 1000000
@@ -1150,6 +1154,8 @@ definitions:
     - Second
     - Minute
     - Hour
+    - minDuration
+    - maxDuration
     - Nanosecond
     - Microsecond
     - Millisecond
@@ -1229,6 +1235,7 @@ paths:
       - description: Project ID
         in: query
         name: project_id
+        required: true
         type: string
       - description: Node ID
         in: query
@@ -1291,6 +1298,7 @@ paths:
       - description: Project ID
         in: query
         name: project_id
+        required: true
         type: string
       produces:
       - application/json
@@ -1334,6 +1342,7 @@ paths:
       - description: Project ID
         in: query
         name: project_id
+        required: true
         type: string
       - description: Node ID
         in: query
@@ -1395,6 +1404,7 @@ paths:
       - description: Project ID
         in: query
         name: project_id
+        required: true
         type: string
       - description: Maximum events
         in: query
@@ -1489,6 +1499,7 @@ paths:
       - description: Project ID
         in: query
         name: project_id
+        required: true
         type: string
       - description: Node ID
         in: query
@@ -1551,6 +1562,7 @@ paths:
       - description: Project ID
         in: query
         name: project_id
+        required: true
         type: string
       produces:
       - application/json
@@ -1640,6 +1652,7 @@ paths:
       - description: Project ID
         in: query
         name: project_id
+        required: true
         type: string
       - description: Node ID
         in: query

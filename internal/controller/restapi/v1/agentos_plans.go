@@ -91,7 +91,7 @@ func (r *V1) statusAgentOSPlan(ctx *fiber.Ctx) error {
 // @Produce     json
 // @Param       plan_id path string true "Plan ID"
 // @Param       account_id query string true "Account ID"
-// @Param       project_id query string false "Project ID"
+// @Param       project_id query string true "Project ID"
 // @Success     200 {object} agentos.RunPlanDescription
 // @Failure     400 {object} response.Error
 // @Failure     404 {object} response.Error
@@ -216,7 +216,7 @@ func (r *V1) controlAgentOSPlan(ctx *fiber.Ctx) error {
 // @Produce     json
 // @Param       plan_id path string true "Plan ID"
 // @Param       account_id query string true "Account ID"
-// @Param       project_id query string false "Project ID"
+// @Param       project_id query string true "Project ID"
 // @Param       node_id query string false "Node ID"
 // @Param       run_id query string false "Child run ID"
 // @Param       action query string false "Audit action"
@@ -263,7 +263,7 @@ func (r *V1) listAgentOSPlanAudits(ctx *fiber.Ctx) error {
 // @Produce     json
 // @Param       plan_id path string true "Plan ID"
 // @Param       account_id query string true "Account ID"
-// @Param       project_id query string false "Project ID"
+// @Param       project_id query string true "Project ID"
 // @Param       node_id query string false "Node ID"
 // @Param       run_id query string false "Child run ID"
 // @Param       limit query int false "Maximum refs"
@@ -309,7 +309,7 @@ func (r *V1) listAgentOSPlanArtifacts(ctx *fiber.Ctx) error {
 // @Param       plan_id path string true "Plan ID"
 // @Param       artifact_id path string true "Artifact ID"
 // @Param       account_id query string true "Account ID"
-// @Param       project_id query string false "Project ID"
+// @Param       project_id query string true "Project ID"
 // @Success     200 {object} agentos.Artifact
 // @Failure     400 {object} response.Error
 // @Failure     404 {object} response.Error
@@ -349,7 +349,7 @@ func (r *V1) getAgentOSPlanArtifact(ctx *fiber.Ctx) error {
 // @Produce     json
 // @Param       plan_id path string true "Plan ID"
 // @Param       account_id query string true "Account ID"
-// @Param       project_id query string false "Project ID"
+// @Param       project_id query string true "Project ID"
 // @Param       node_id query string false "Node ID"
 // @Param       run_id query string false "Child run ID"
 // @Param       after_sequence query int false "Only return events after this sequence"
@@ -396,7 +396,7 @@ func (r *V1) listAgentOSPlanEvents(ctx *fiber.Ctx) error {
 // @Produce     json
 // @Param       plan_id path string true "Plan ID"
 // @Param       account_id query string true "Account ID"
-// @Param       project_id query string false "Project ID"
+// @Param       project_id query string true "Project ID"
 // @Param       node_id query string false "Node ID"
 // @Param       run_id query string false "Child run ID"
 // @Param       after_sequence query int false "Only return traces after this sequence"

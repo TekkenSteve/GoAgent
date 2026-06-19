@@ -35,7 +35,7 @@ var agentOSPlanConsoleTemplate = template.Must(template.New("agentos_plan_consol
 // @Produce     html
 // @Param       plan_id path string true "Plan ID"
 // @Param       account_id query string true "Account ID"
-// @Param       project_id query string false "Project ID"
+// @Param       project_id query string true "Project ID"
 // @Param       event_limit query int false "Maximum events"
 // @Param       audit_limit query int false "Maximum audit records"
 // @Param       artifact_limit query int false "Maximum artifact refs"

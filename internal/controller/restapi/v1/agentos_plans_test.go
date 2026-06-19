@@ -24,6 +24,7 @@ func TestAgentOSPlanRoutesUsePlanRuntime(t *testing.T) {
 		"plan_id": "plan-1",
 		"thread_id": "thread-1",
 		"account_id": "acct-1",
+		"project_id": "proj-1",
 		"idempotency_key": "plan-start-1",
 		"inputs": {"topic": "durable coordination"},
 		"nodes": [
@@ -32,6 +33,7 @@ func TestAgentOSPlanRoutesUsePlanRuntime(t *testing.T) {
 				"run": {
 					"run_id": "run-research",
 					"account_id": "acct-1",
+					"project_id": "proj-1",
 					"backend": {"kind": "http", "name": "research-http"},
 					"input": {"task": "research"}
 				}
@@ -52,6 +54,7 @@ func TestAgentOSPlanRoutesUsePlanRuntime(t *testing.T) {
 	signalBody := `{
 		"type": "plan.node.retry",
 		"account_id": "acct-1",
+		"project_id": "proj-1",
 		"idempotency_key": "retry-1",
 		"actor_id": "operator-1",
 		"payload": {"node_id": "research"}
@@ -62,6 +65,7 @@ func TestAgentOSPlanRoutesUsePlanRuntime(t *testing.T) {
 	}
 	if planRuntime.signalRef.PlanID != "plan-1" ||
 		planRuntime.signalRef.AccountID != "acct-1" ||
+		planRuntime.signalRef.ProjectID != "proj-1" ||
 		planRuntime.signal.Type != agentos.SignalPlanNodeRetry ||
 		planRuntime.signal.ActorID != "operator-1" ||
 		planRuntime.signal.Payload["node_id"] != "research" {
@@ -71,6 +75,7 @@ func TestAgentOSPlanRoutesUsePlanRuntime(t *testing.T) {
 	controlBody := `{
 		"operation": "pause",
 		"account_id": "acct-1",
+		"project_id": "proj-1",
 		"idempotency_key": "pause-1",
 		"actor_id": "operator-1"
 	}`
@@ -80,12 +85,13 @@ func TestAgentOSPlanRoutesUsePlanRuntime(t *testing.T) {
 	}
 	if planRuntime.controlRef.PlanID != "plan-1" ||
 		planRuntime.controlRef.AccountID != "acct-1" ||
+		planRuntime.controlRef.ProjectID != "proj-1" ||
 		planRuntime.control.Operation != agentos.ControlPause ||
 		planRuntime.control.ActorID != "operator-1" {
 		t.Fatalf("unexpected control: ref=%#v control=%#v", planRuntime.controlRef, planRuntime.control)
 	}
 
-	resp = doAgentOSRouteRequest(t, app, http.MethodGet, "/v1/agentos/plans/plan-1/status?account_id=acct-1", "")
+	resp = doAgentOSRouteRequest(t, app, http.MethodGet, "/v1/agentos/plans/plan-1/status?account_id=acct-1&project_id=proj-1", "")
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("status code = %d", resp.StatusCode)
@@ -98,7 +104,7 @@ func TestAgentOSPlanRoutesUsePlanRuntime(t *testing.T) {
 		t.Fatalf("unexpected status: %#v", status)
 	}
 
-	resp = doAgentOSRouteRequest(t, app, http.MethodGet, "/v1/agentos/plans/plan-1/description?account_id=acct-1", "")
+	resp = doAgentOSRouteRequest(t, app, http.MethodGet, "/v1/agentos/plans/plan-1/description?account_id=acct-1&project_id=proj-1", "")
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("description status = %d", resp.StatusCode)
@@ -115,13 +121,14 @@ func TestAgentOSPlanRoutesUsePlanRuntime(t *testing.T) {
 		t.Fatalf("unexpected description: %#v", description)
 	}
 
-	resp = doAgentOSRouteRequest(t, app, http.MethodGet, "/v1/agentos/plans/plan-1/audits?account_id=acct-1&action=plan.control&limit=25", "")
+	resp = doAgentOSRouteRequest(t, app, http.MethodGet, "/v1/agentos/plans/plan-1/audits?account_id=acct-1&project_id=proj-1&action=plan.control&limit=25", "")
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("audits status = %d", resp.StatusCode)
 	}
 	if planRuntime.auditScope.PlanID != "plan-1" ||
 		planRuntime.auditScope.AccountID != "acct-1" ||
+		planRuntime.auditScope.ProjectID != "proj-1" ||
 		planRuntime.auditScope.Action != agentos.PlanAuditActionControl ||
 		planRuntime.auditScope.Limit != 25 {
 		t.Fatalf("unexpected audit scope: %#v", planRuntime.auditScope)
@@ -134,13 +141,14 @@ func TestAgentOSPlanRoutesUsePlanRuntime(t *testing.T) {
 		t.Fatalf("unexpected audits: %#v", audits)
 	}
 
-	resp = doAgentOSRouteRequest(t, app, http.MethodGet, "/v1/agentos/plans/plan-1/artifacts?account_id=acct-1&node_id=research&limit=10", "")
+	resp = doAgentOSRouteRequest(t, app, http.MethodGet, "/v1/agentos/plans/plan-1/artifacts?account_id=acct-1&project_id=proj-1&node_id=research&limit=10", "")
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("artifacts status = %d", resp.StatusCode)
 	}
 	if planRuntime.artifactScope.PlanID != "plan-1" ||
 		planRuntime.artifactScope.AccountID != "acct-1" ||
+		planRuntime.artifactScope.ProjectID != "proj-1" ||
 		planRuntime.artifactScope.NodeID != "research" ||
 		planRuntime.artifactScope.Limit != 10 {
 		t.Fatalf("unexpected artifact scope: %#v", planRuntime.artifactScope)
@@ -153,13 +161,14 @@ func TestAgentOSPlanRoutesUsePlanRuntime(t *testing.T) {
 		t.Fatalf("unexpected artifacts: %#v", refs)
 	}
 
-	resp = doAgentOSRouteRequest(t, app, http.MethodGet, "/v1/agentos/plans/plan-1/artifacts/artifact-1?account_id=acct-1", "")
+	resp = doAgentOSRouteRequest(t, app, http.MethodGet, "/v1/agentos/plans/plan-1/artifacts/artifact-1?account_id=acct-1&project_id=proj-1", "")
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("artifact status = %d", resp.StatusCode)
 	}
 	if planRuntime.artifactGetScope.PlanID != "plan-1" ||
 		planRuntime.artifactGetScope.AccountID != "acct-1" ||
+		planRuntime.artifactGetScope.ProjectID != "proj-1" ||
 		planRuntime.artifactGetScope.ArtifactID != "artifact-1" {
 		t.Fatalf("unexpected artifact get scope: %#v", planRuntime.artifactGetScope)
 	}
@@ -171,13 +180,14 @@ func TestAgentOSPlanRoutesUsePlanRuntime(t *testing.T) {
 		t.Fatalf("unexpected artifact: %#v", artifact)
 	}
 
-	resp = doAgentOSRouteRequest(t, app, http.MethodGet, "/v1/agentos/plans/plan-1/events/history?account_id=acct-1&node_id=research&run_id=run-research&after_sequence=7&limit=3", "")
+	resp = doAgentOSRouteRequest(t, app, http.MethodGet, "/v1/agentos/plans/plan-1/events/history?account_id=acct-1&project_id=proj-1&node_id=research&run_id=run-research&after_sequence=7&limit=3", "")
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("event history status = %d", resp.StatusCode)
 	}
 	if planRuntime.eventScope.PlanID != "plan-1" ||
 		planRuntime.eventScope.AccountID != "acct-1" ||
+		planRuntime.eventScope.ProjectID != "proj-1" ||
 		planRuntime.eventScope.NodeID != "research" ||
 		planRuntime.eventScope.RunID != "run-research" ||
 		planRuntime.eventScope.AfterSequence != 7 ||
@@ -192,13 +202,14 @@ func TestAgentOSPlanRoutesUsePlanRuntime(t *testing.T) {
 		t.Fatalf("unexpected event history: %#v", planEvents)
 	}
 
-	resp = doAgentOSRouteRequest(t, app, http.MethodGet, "/v1/agentos/plans/plan-1/debug/traces?account_id=acct-1&node_id=research&after_sequence=7&limit=3", "")
+	resp = doAgentOSRouteRequest(t, app, http.MethodGet, "/v1/agentos/plans/plan-1/debug/traces?account_id=acct-1&project_id=proj-1&node_id=research&after_sequence=7&limit=3", "")
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("debug traces status = %d", resp.StatusCode)
 	}
 	if planRuntime.debugScope.PlanID != "plan-1" ||
 		planRuntime.debugScope.AccountID != "acct-1" ||
+		planRuntime.debugScope.ProjectID != "proj-1" ||
 		planRuntime.debugScope.NodeID != "research" ||
 		planRuntime.debugScope.AfterSequence != 7 ||
 		planRuntime.debugScope.Limit != 3 {
@@ -221,7 +232,7 @@ func TestAgentOSPlanEventRouteStreamsSSE(t *testing.T) {
 	app := fiber.New()
 	NewRoutes(app.Group("/v1"), nil, nil, logger.New("error"), nil, nil, nil, nil, nil, nil, planRuntime)
 
-	resp := doAgentOSRouteRequest(t, app, http.MethodGet, "/v1/agentos/plans/plan-1/events?account_id=acct-1&node_id=research&after_sequence=7", "")
+	resp := doAgentOSRouteRequest(t, app, http.MethodGet, "/v1/agentos/plans/plan-1/events?account_id=acct-1&project_id=proj-1&node_id=research&after_sequence=7", "")
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("events status = %d", resp.StatusCode)
@@ -231,6 +242,7 @@ func TestAgentOSPlanEventRouteStreamsSSE(t *testing.T) {
 	}
 	if planRuntime.scope.PlanID != "plan-1" ||
 		planRuntime.scope.AccountID != "acct-1" ||
+		planRuntime.scope.ProjectID != "proj-1" ||
 		planRuntime.scope.NodeID != "research" ||
 		planRuntime.scope.AfterSequence != 7 {
 		t.Fatalf("unexpected scope: %#v", planRuntime.scope)

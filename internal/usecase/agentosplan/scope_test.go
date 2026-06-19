@@ -7,10 +7,15 @@ import (
 	"github.com/TekkenSteve/GoAgent/agentos"
 )
 
-func TestValidatePlanRefRequiresAccountScope(t *testing.T) {
+func TestValidatePlanRefRequiresTenantScope(t *testing.T) {
 	err := ValidatePlanRef(agentos.PlanRef{PlanID: "plan-1"})
 	if !errors.Is(err, agentos.ErrInvalidPlanScope) {
 		t.Fatalf("error = %v, want ErrInvalidPlanScope", err)
+	}
+
+	err = ValidatePlanRef(agentos.PlanRef{PlanID: "plan-1", AccountID: "acct-1"})
+	if !errors.Is(err, agentos.ErrInvalidPlanScope) {
+		t.Fatalf("project error = %v, want ErrInvalidPlanScope", err)
 	}
 }
 
@@ -21,21 +26,21 @@ func TestValidatePlanTenantAccessHidesMismatches(t *testing.T) {
 		t.Fatalf("account mismatch error = %v, want ErrPlanRouteNotFound", err)
 	}
 
-	err = ValidatePlanTenantAccess(agentos.PlanRef{PlanID: "plan-1", AccountID: "acct-1"}, spec)
+	err = ValidatePlanTenantAccess(agentos.PlanRef{PlanID: "plan-1", AccountID: "acct-1", ProjectID: "proj-2"}, spec)
 	if !errors.Is(err, agentos.ErrPlanRouteNotFound) {
 		t.Fatalf("project mismatch error = %v, want ErrPlanRouteNotFound", err)
 	}
 }
 
 func TestValidatePlanAuditScopeRejectsNegativeLimit(t *testing.T) {
-	err := ValidatePlanAuditScope(agentos.PlanAuditScope{PlanID: "plan-1", AccountID: "acct-1", Limit: -1})
+	err := ValidatePlanAuditScope(agentos.PlanAuditScope{PlanID: "plan-1", AccountID: "acct-1", ProjectID: "proj-1", Limit: -1})
 	if !errors.Is(err, agentos.ErrInvalidPlanScope) {
 		t.Fatalf("error = %v, want ErrInvalidPlanScope", err)
 	}
 }
 
 func TestValidatePlanDebugTraceScopeRejectsNegativeLimit(t *testing.T) {
-	err := ValidatePlanDebugTraceScope(agentos.PlanDebugTraceScope{PlanID: "plan-1", AccountID: "acct-1", Limit: -1})
+	err := ValidatePlanDebugTraceScope(agentos.PlanDebugTraceScope{PlanID: "plan-1", AccountID: "acct-1", ProjectID: "proj-1", Limit: -1})
 	if !errors.Is(err, agentos.ErrInvalidPlanScope) {
 		t.Fatalf("error = %v, want ErrInvalidPlanScope", err)
 	}

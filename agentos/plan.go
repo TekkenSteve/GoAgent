@@ -13,8 +13,8 @@ import (
 type RunPlanSpec struct {
 	PlanID         string            `json:"plan_id"`
 	ThreadID       string            `json:"thread_id,omitempty"`
-	AccountID      string            `json:"account_id,omitempty"`
-	ProjectID      string            `json:"project_id,omitempty"`
+	AccountID      string            `json:"account_id"`
+	ProjectID      string            `json:"project_id"`
 	IdempotencyKey string            `json:"idempotency_key,omitempty"`
 	RequestedAt    time.Time         `json:"requested_at,omitempty"`
 	Inputs         map[string]any    `json:"inputs,omitempty"`
@@ -28,7 +28,7 @@ type RunPlanSpec struct {
 type PlanRef struct {
 	PlanID    string `json:"plan_id"`
 	AccountID string `json:"account_id"`
-	ProjectID string `json:"project_id,omitempty"`
+	ProjectID string `json:"project_id"`
 }
 
 // PlanNodeSpec describes one backend-owned child run in a RunPlan.
@@ -129,7 +129,7 @@ type Artifact struct {
 type PlanArtifactScope struct {
 	PlanID     string `json:"plan_id"`
 	AccountID  string `json:"account_id"`
-	ProjectID  string `json:"project_id,omitempty"`
+	ProjectID  string `json:"project_id"`
 	NodeID     string `json:"node_id,omitempty"`
 	RunID      string `json:"run_id,omitempty"`
 	ArtifactID string `json:"artifact_id,omitempty"`
@@ -282,7 +282,7 @@ const (
 type PlanStreamScope struct {
 	PlanID        string `json:"plan_id"`
 	AccountID     string `json:"account_id"`
-	ProjectID     string `json:"project_id,omitempty"`
+	ProjectID     string `json:"project_id"`
 	NodeID        string `json:"node_id,omitempty"`
 	RunID         string `json:"run_id,omitempty"`
 	AfterSequence int64  `json:"after_sequence,omitempty"`
@@ -292,7 +292,7 @@ type PlanStreamScope struct {
 type PlanEventScope struct {
 	PlanID        string `json:"plan_id"`
 	AccountID     string `json:"account_id"`
-	ProjectID     string `json:"project_id,omitempty"`
+	ProjectID     string `json:"project_id"`
 	NodeID        string `json:"node_id,omitempty"`
 	RunID         string `json:"run_id,omitempty"`
 	AfterSequence int64  `json:"after_sequence,omitempty"`
@@ -303,7 +303,7 @@ type PlanEventScope struct {
 type PlanDebugTraceScope struct {
 	PlanID        string `json:"plan_id"`
 	AccountID     string `json:"account_id"`
-	ProjectID     string `json:"project_id,omitempty"`
+	ProjectID     string `json:"project_id"`
 	NodeID        string `json:"node_id,omitempty"`
 	RunID         string `json:"run_id,omitempty"`
 	AfterSequence int64  `json:"after_sequence,omitempty"`
@@ -394,7 +394,7 @@ const (
 type PlanAuditScope struct {
 	PlanID    string          `json:"plan_id"`
 	AccountID string          `json:"account_id"`
-	ProjectID string          `json:"project_id,omitempty"`
+	ProjectID string          `json:"project_id"`
 	NodeID    string          `json:"node_id,omitempty"`
 	RunID     string          `json:"run_id,omitempty"`
 	Action    PlanAuditAction `json:"action,omitempty"`

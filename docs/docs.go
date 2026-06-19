@@ -101,7 +101,8 @@ const docTemplate = `{
                         "type": "string",
                         "description": "Project ID",
                         "name": "project_id",
-                        "in": "query"
+                        "in": "query",
+                        "required": true
                     },
                     {
                         "type": "string",
@@ -193,7 +194,8 @@ const docTemplate = `{
                         "type": "string",
                         "description": "Project ID",
                         "name": "project_id",
-                        "in": "query"
+                        "in": "query",
+                        "required": true
                     }
                 ],
                 "responses": {
@@ -257,7 +259,8 @@ const docTemplate = `{
                         "type": "string",
                         "description": "Project ID",
                         "name": "project_id",
-                        "in": "query"
+                        "in": "query",
+                        "required": true
                     },
                     {
                         "type": "string",
@@ -348,7 +351,8 @@ const docTemplate = `{
                         "type": "string",
                         "description": "Project ID",
                         "name": "project_id",
-                        "in": "query"
+                        "in": "query",
+                        "required": true
                     },
                     {
                         "type": "integer",
@@ -487,7 +491,8 @@ const docTemplate = `{
                         "type": "string",
                         "description": "Project ID",
                         "name": "project_id",
-                        "in": "query"
+                        "in": "query",
+                        "required": true
                     },
                     {
                         "type": "string",
@@ -578,7 +583,8 @@ const docTemplate = `{
                         "type": "string",
                         "description": "Project ID",
                         "name": "project_id",
-                        "in": "query"
+                        "in": "query",
+                        "required": true
                     }
                 ],
                 "responses": {
@@ -711,7 +717,8 @@ const docTemplate = `{
                         "type": "string",
                         "description": "Project ID",
                         "name": "project_id",
-                        "in": "query"
+                        "in": "query",
+                        "required": true
                     },
                     {
                         "type": "string",
@@ -2632,7 +2639,8 @@ const docTemplate = `{
             "type": "object",
             "required": [
                 "account_id",
-                "operation"
+                "operation",
+                "project_id"
             ],
             "properties": {
                 "account_id": {
@@ -2665,6 +2673,7 @@ const docTemplate = `{
             "type": "object",
             "required": [
                 "account_id",
+                "project_id",
                 "type"
             ],
             "properties": {
@@ -2848,6 +2857,8 @@ const docTemplate = `{
                 1000000000,
                 60000000000,
                 3600000000000,
+                -9223372036854775808,
+                9223372036854775807,
                 1,
                 1000,
                 1000000,
@@ -2864,6 +2875,8 @@ const docTemplate = `{
                 "Second",
                 "Minute",
                 "Hour",
+                "minDuration",
+                "maxDuration",
                 "Nanosecond",
                 "Microsecond",
                 "Millisecond",

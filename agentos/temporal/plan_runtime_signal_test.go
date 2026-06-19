@@ -13,7 +13,7 @@ import (
 
 func TestPlanRuntimeSignalPlanValidatesSignalBeforeAudit(t *testing.T) {
 	rt := &planRuntime{}
-	ref := agentos.PlanRef{PlanID: "plan-1", AccountID: "acct-1"}
+	ref := agentos.PlanRef{PlanID: "plan-1", AccountID: "acct-1", ProjectID: "proj-1"}
 
 	err := rt.SignalPlan(t.Context(), ref, agentos.Signal{
 		Type:           agentos.SignalUserMessage,
@@ -68,7 +68,7 @@ func TestPlanRuntimeStatusPlanReadsDurableIndex(t *testing.T) {
 	}
 }
 
-func TestPlanRuntimeStartPlanRequiresAccountScope(t *testing.T) {
+func TestPlanRuntimeStartPlanRequiresTenantScope(t *testing.T) {
 	rt := &planRuntime{planIndex: agentosplan.NewMemoryPlanStore()}
 
 	_, err := rt.StartPlan(t.Context(), agentos.RunPlanSpec{
@@ -76,7 +76,16 @@ func TestPlanRuntimeStartPlanRequiresAccountScope(t *testing.T) {
 		IdempotencyKey: "plan-start-1",
 	})
 	if !errors.Is(err, agentos.ErrInvalidPlanScope) {
-		t.Fatalf("StartPlan error = %v, want ErrInvalidPlanScope", err)
+		t.Fatalf("StartPlan missing account error = %v, want ErrInvalidPlanScope", err)
+	}
+
+	_, err = rt.StartPlan(t.Context(), agentos.RunPlanSpec{
+		PlanID:         "plan-1",
+		AccountID:      "acct-1",
+		IdempotencyKey: "plan-start-1",
+	})
+	if !errors.Is(err, agentos.ErrInvalidPlanScope) {
+		t.Fatalf("StartPlan missing project error = %v, want ErrInvalidPlanScope", err)
 	}
 }
 
@@ -117,16 +126,17 @@ func TestPlanRuntimeNilDurableStoresFailMethods(t *testing.T) {
 	_, err := rt.StartPlan(t.Context(), agentos.RunPlanSpec{
 		PlanID:         "plan-1",
 		AccountID:      "acct-1",
+		ProjectID:      "proj-1",
 		IdempotencyKey: "plan-start-1",
 	})
 	if !errors.Is(err, errPlanRuntimePlanIndexRequired) {
 		t.Fatalf("StartPlan error = %v, want missing durable plan index", err)
 	}
-	_, err = rt.SubscribePlan(t.Context(), agentos.PlanStreamScope{PlanID: "plan-1", AccountID: "acct-1"})
+	_, err = rt.SubscribePlan(t.Context(), agentos.PlanStreamScope{PlanID: "plan-1", AccountID: "acct-1", ProjectID: "proj-1"})
 	if !errors.Is(err, errPlanRuntimePlanEventStoreRequired) {
 		t.Fatalf("SubscribePlan error = %v, want missing durable plan event store", err)
 	}
-	_, err = rt.ListPlanEvents(t.Context(), agentos.PlanEventScope{PlanID: "plan-1", AccountID: "acct-1"})
+	_, err = rt.ListPlanEvents(t.Context(), agentos.PlanEventScope{PlanID: "plan-1", AccountID: "acct-1", ProjectID: "proj-1"})
 	if !errors.Is(err, errPlanRuntimePlanEventStoreRequired) {
 		t.Fatalf("ListPlanEvents error = %v, want missing durable plan event store", err)
 	}
@@ -149,7 +159,7 @@ func TestPlanRuntimeSignalPlanRequiresCommandStore(t *testing.T) {
 func TestPlanRuntimeStatusPlanReportsMissingDurablePlan(t *testing.T) {
 	rt := &planRuntime{planIndex: agentosplan.NewMemoryPlanStore()}
 
-	_, err := rt.StatusPlan(t.Context(), agentos.PlanRef{PlanID: "missing-plan", AccountID: "acct-1"})
+	_, err := rt.StatusPlan(t.Context(), agentos.PlanRef{PlanID: "missing-plan", AccountID: "acct-1", ProjectID: "proj-1"})
 	if !errors.Is(err, agentos.ErrPlanRouteNotFound) {
 		t.Fatalf("StatusPlan error = %v, want ErrPlanRouteNotFound", err)
 	}

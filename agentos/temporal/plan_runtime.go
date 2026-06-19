@@ -145,6 +145,9 @@ func (r *planRuntime) StartPlan(ctx context.Context, spec agentos.RunPlanSpec) (
 	if spec.AccountID == "" {
 		return agentos.RunPlanStatus{}, fmt.Errorf("%w: account id is required", agentos.ErrInvalidPlanScope)
 	}
+	if spec.ProjectID == "" {
+		return agentos.RunPlanStatus{}, fmt.Errorf("%w: project id is required", agentos.ErrInvalidPlanScope)
+	}
 	if spec.IdempotencyKey == "" {
 		return agentos.RunPlanStatus{}, fmt.Errorf("%w: plan idempotency key is required", agentos.ErrInvalidRunPlan)
 	}

@@ -45,7 +45,7 @@ type AgentOSControl struct {
 type AgentOSPlanSignal struct {
 	Type           agentos.SignalType `json:"type" validate:"required"`
 	AccountID      string             `json:"account_id" validate:"required"`
-	ProjectID      string             `json:"project_id,omitempty"`
+	ProjectID      string             `json:"project_id" validate:"required"`
 	IdempotencyKey string             `json:"idempotency_key,omitempty"`
 	ActorID        string             `json:"actor_id,omitempty"`
 	Payload        map[string]any     `json:"payload,omitempty"`
@@ -56,7 +56,7 @@ type AgentOSPlanSignal struct {
 type AgentOSPlanControl struct {
 	Operation      agentos.ControlOperation `json:"operation" validate:"required"`
 	AccountID      string                   `json:"account_id" validate:"required"`
-	ProjectID      string                   `json:"project_id,omitempty"`
+	ProjectID      string                   `json:"project_id" validate:"required"`
 	IdempotencyKey string                   `json:"idempotency_key,omitempty"`
 	RequestedAt    time.Time                `json:"requested_at,omitempty"`
 	ActorID        string                   `json:"actor_id,omitempty"`
@@ -66,7 +66,7 @@ type AgentOSPlanControl struct {
 // AgentOSPlanStreamScope selects plan events for REST streaming.
 type AgentOSPlanStreamScope struct {
 	AccountID     string `query:"account_id" validate:"required"`
-	ProjectID     string `query:"project_id"`
+	ProjectID     string `query:"project_id" validate:"required"`
 	NodeID        string `query:"node_id"`
 	RunID         string `query:"run_id"`
 	AfterSequence int64  `query:"after_sequence"`
@@ -75,7 +75,7 @@ type AgentOSPlanStreamScope struct {
 // AgentOSPlanEventScope selects durable plan events for REST history queries.
 type AgentOSPlanEventScope struct {
 	AccountID     string `query:"account_id" validate:"required"`
-	ProjectID     string `query:"project_id"`
+	ProjectID     string `query:"project_id" validate:"required"`
 	NodeID        string `query:"node_id"`
 	RunID         string `query:"run_id"`
 	AfterSequence int64  `query:"after_sequence"`
@@ -85,7 +85,7 @@ type AgentOSPlanEventScope struct {
 // AgentOSPlanDebugTraceScope selects durable plan debug traces for REST queries.
 type AgentOSPlanDebugTraceScope struct {
 	AccountID     string `query:"account_id" validate:"required"`
-	ProjectID     string `query:"project_id"`
+	ProjectID     string `query:"project_id" validate:"required"`
 	NodeID        string `query:"node_id"`
 	RunID         string `query:"run_id"`
 	AfterSequence int64  `query:"after_sequence"`
@@ -95,7 +95,7 @@ type AgentOSPlanDebugTraceScope struct {
 // AgentOSPlanAuditScope selects plan audit records for REST queries.
 type AgentOSPlanAuditScope struct {
 	AccountID string                  `query:"account_id" validate:"required"`
-	ProjectID string                  `query:"project_id"`
+	ProjectID string                  `query:"project_id" validate:"required"`
 	NodeID    string                  `query:"node_id"`
 	RunID     string                  `query:"run_id"`
 	Action    agentos.PlanAuditAction `query:"action"`
@@ -105,7 +105,7 @@ type AgentOSPlanAuditScope struct {
 // AgentOSPlanArtifactScope selects plan artifacts for REST queries.
 type AgentOSPlanArtifactScope struct {
 	AccountID string `query:"account_id" validate:"required"`
-	ProjectID string `query:"project_id"`
+	ProjectID string `query:"project_id" validate:"required"`
 	NodeID    string `query:"node_id"`
 	RunID     string `query:"run_id"`
 	Limit     int    `query:"limit"`
@@ -114,13 +114,13 @@ type AgentOSPlanArtifactScope struct {
 // AgentOSPlanScope selects one plan inside a tenant boundary.
 type AgentOSPlanScope struct {
 	AccountID string `query:"account_id" validate:"required"`
-	ProjectID string `query:"project_id"`
+	ProjectID string `query:"project_id" validate:"required"`
 }
 
 // AgentOSPlanConsoleScope selects plan data for the operator console.
 type AgentOSPlanConsoleScope struct {
 	AccountID     string `query:"account_id" validate:"required"`
-	ProjectID     string `query:"project_id"`
+	ProjectID     string `query:"project_id" validate:"required"`
 	EventLimit    int    `query:"event_limit"`
 	AuditLimit    int    `query:"audit_limit"`
 	ArtifactLimit int    `query:"artifact_limit"`
