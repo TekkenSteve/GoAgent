@@ -79,6 +79,26 @@ func TestMemoryPlanStoreCreatePlanRejectsPlanIDWithDifferentKey(t *testing.T) {
 	}
 }
 
+func TestMemoryPlanStoreGetAuditRecord(t *testing.T) {
+	store := NewMemoryPlanStore()
+	record := AuditRecord{
+		PlanID:         "plan-1",
+		Action:         AuditActionPlanControl,
+		IdempotencyKey: "control-1",
+	}
+	if _, _, err := store.RecordAudit(context.Background(), record); err != nil {
+		t.Fatalf("RecordAudit: %v", err)
+	}
+
+	got, exists, err := store.GetAuditRecord(context.Background(), "control-1")
+	if err != nil {
+		t.Fatalf("GetAuditRecord: %v", err)
+	}
+	if !exists || got.PlanID != record.PlanID || got.Action != record.Action {
+		t.Fatalf("audit = %#v exists=%v", got, exists)
+	}
+}
+
 func testRunPlanSpec(planID, idempotencyKey string) agentos.RunPlanSpec {
 	ref := agentos.BackendRef{Kind: agentos.BackendKindNative, Name: agentos.BackendNameGoAgentNative}
 

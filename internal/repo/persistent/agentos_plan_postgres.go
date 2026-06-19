@@ -614,6 +614,16 @@ INSERT INTO audit_logs (
 		record.CreatedAt,
 	)
 	if err != nil {
+		if isPostgresUniqueViolation(err) {
+			existing, exists, lookupErr := r.GetAuditRecord(ctx, record.IdempotencyKey)
+			if lookupErr != nil {
+				return agentosplan.AuditRecord{}, false, lookupErr
+			}
+			if exists {
+				return existing, false, nil
+			}
+		}
+
 		return agentosplan.AuditRecord{}, false, fmt.Errorf("AgentOSPlanRepo - RecordAudit - insert: %w", err)
 	}
 
