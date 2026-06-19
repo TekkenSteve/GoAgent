@@ -252,6 +252,9 @@ func (s *State) retryNode(nodeID string, event StateEvent, at time.Time) error {
 	if !ok {
 		return fmt.Errorf("%w: unknown node %q", agentos.ErrInvalidRunPlan, nodeID)
 	}
+	if node.Attempts == 0 && event.Attempt > 1 {
+		node.Attempts = event.Attempt - 1
+	}
 	node.LifecycleState = agentos.PlanNodeReady
 	node.RunID = ""
 	node.Reason = event.Reason

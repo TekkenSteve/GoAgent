@@ -67,6 +67,33 @@ func TestStateRetryScheduledKeepsAttemptsAndClearsActiveRun(t *testing.T) {
 	}
 }
 
+func TestStateRetryScheduledAfterPreStartFailureRecordsFailedAttempt(t *testing.T) {
+	now := time.Date(2026, 6, 19, 12, 0, 0, 0, time.UTC)
+	state := NewState(agentos.RunPlanSpec{
+		PlanID: "plan-1",
+		Nodes: []agentos.PlanNodeSpec{
+			{NodeID: "node-1", Run: agentos.RunSpec{RunID: "run-1"}},
+		},
+	}, now)
+
+	if err := state.Apply(StateEvent{
+		Kind:    EventNodeRetryScheduled,
+		NodeID:  "node-1",
+		Reason:  "input resolution failed",
+		Attempt: 2,
+		At:      now.Add(time.Second),
+	}); err != nil {
+		t.Fatalf("Apply retry: %v", err)
+	}
+	retry, _ := state.NodeStatus("node-1")
+	if retry.Attempts != 1 {
+		t.Fatalf("attempts = %d, want failed attempt recorded", retry.Attempts)
+	}
+	if retry.LifecycleState != agentos.PlanNodeReady {
+		t.Fatalf("lifecycle = %q", retry.LifecycleState)
+	}
+}
+
 func TestStatePlanApprovalAndRejection(t *testing.T) {
 	now := time.Date(2026, 6, 19, 12, 0, 0, 0, time.UTC)
 	state := NewState(agentos.RunPlanSpec{PlanID: "plan-1"}, now)

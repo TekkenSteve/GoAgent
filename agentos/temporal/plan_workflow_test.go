@@ -66,6 +66,56 @@ func TestPlanWorkflowExecutesSuccessEdgeAndPublishesArtifacts(t *testing.T) {
 	require.Equal(t, "research", result.Artifacts[0].NodeID)
 }
 
+func TestPlanWorkflowFailsNodeWhenRequiredInputArtifactIsMissing(t *testing.T) {
+	t.Parallel()
+
+	ref := agentos.BackendRef{Kind: agentos.BackendKindNative, Name: agentos.BackendNameGoAgentNative}
+	spec := agentos.RunPlanSpec{
+		PlanID: "plan-missing-input-artifact",
+		Nodes: []agentos.PlanNodeSpec{
+			{NodeID: "research", Run: agentos.RunSpec{RunID: "run-research", Backend: ref}},
+			{NodeID: "verify", Run: agentos.RunSpec{RunID: "run-verify", Backend: ref}},
+		},
+		Edges: []agentos.PlanEdgeSpec{
+			{
+				EdgeID: "research-verify",
+				From:   "research",
+				To:     "verify",
+				On:     agentos.EdgeOnSuccess,
+				InputMapping: []agentos.InputMapping{
+					{
+						Target:         "summary",
+						SourceNodeID:   "research",
+						SourceArtifact: "summary",
+						Required:       true,
+					},
+				},
+			},
+		},
+	}
+	mocks := &planWorkflowMocks{
+		statuses: map[string]agentos.RunStatus{
+			"run-research": {RunID: "run-research", LifecycleState: "completed"},
+		},
+	}
+	env := newPlanWorkflowTestEnv(mocks)
+
+	env.ExecuteWorkflow(PlanWorkflow, planWorkflowInput{Spec: spec})
+
+	require.True(t, env.IsWorkflowCompleted())
+	require.NoError(t, env.GetWorkflowError())
+
+	var result agentos.RunPlanStatus
+	require.NoError(t, env.GetWorkflowResult(&result))
+	require.Equal(t, agentos.PlanLifecycleFailed, result.LifecycleState)
+	require.Contains(t, result.Reason, agentos.ErrArtifactNotFound.Error())
+	require.Equal(t, []string{"run-research"}, mocks.started)
+	verify := findPlanNodeStatus(result.Nodes, "verify")
+	require.NotNil(t, verify)
+	require.Equal(t, agentos.PlanNodeFailed, verify.LifecycleState)
+	require.Contains(t, verify.Reason, "required artifact")
+}
+
 func TestPlanWorkflowPublishesDebugTraceEvents(t *testing.T) {
 	t.Parallel()
 
@@ -782,6 +832,16 @@ func findPlanEventByType(events []agentos.PlanEvent, eventType agentos.EventType
 	for i := range events {
 		if events[i].EventType == eventType {
 			return &events[i]
+		}
+	}
+
+	return nil
+}
+
+func findPlanNodeStatus(nodes []agentos.PlanNodeStatus, nodeID string) *agentos.PlanNodeStatus {
+	for i := range nodes {
+		if nodes[i].NodeID == nodeID {
+			return &nodes[i]
 		}
 	}
 

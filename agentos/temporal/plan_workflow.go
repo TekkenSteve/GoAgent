@@ -517,8 +517,12 @@ func applyNodeAttemptFailure(activityCtx workflow.Context, workflowCtx workflow.
 	if !ok {
 		return fmt.Errorf("%w: unknown node %q", agentos.ErrInvalidRunPlan, node.NodeID)
 	}
-	nextAttempt := current.Attempts + 1
-	if current.Attempts < maxNodeAttempts(node.Policy) {
+	failedAttempt := current.Attempts
+	if failedAttempt <= 0 {
+		failedAttempt = 1
+	}
+	nextAttempt := failedAttempt + 1
+	if failedAttempt < maxNodeAttempts(node.Policy) {
 		return applyPlanStateEvent(activityCtx, workflowCtx, spec, state, agentosplan.StateEvent{
 			Kind:    agentosplan.EventNodeRetryScheduled,
 			NodeID:  node.NodeID,
