@@ -221,6 +221,20 @@ func TestPlanEventFromDebugTraceEvents(t *testing.T) {
 	if inputEvent.EventType != agentos.EventNodeInputResolved || inputEvent.Payload["input_resolution"] == nil {
 		t.Fatalf("input event = %#v", inputEvent)
 	}
+
+	conditionEvent, _, err := PlanEventFromStateEvent(spec, status, StateEvent{
+		Kind: EventConditionsEvaluated,
+		ConditionTraces: []ConditionEvaluationTrace{
+			{Scope: "node", NodeID: "node-1", Expression: "inputs.enabled", Result: true},
+		},
+		At: at,
+	})
+	if err != nil {
+		t.Fatalf("PlanEventFromStateEvent conditions: %v", err)
+	}
+	if conditionEvent.EventType != agentos.EventConditionEvaluated || conditionEvent.Payload["conditions"] == nil {
+		t.Fatalf("condition event = %#v", conditionEvent)
+	}
 }
 
 func TestNodeStartIdempotencyKeyIncludesAttempt(t *testing.T) {

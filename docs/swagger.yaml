@@ -126,6 +126,7 @@ definitions:
     - node.input.resolved
     - node.output.published
     - capability.selected
+    - condition.evaluated
     - plan.started
     - plan.blocked
     - plan.expanded
@@ -166,6 +167,7 @@ definitions:
     - EventNodeInputResolved
     - EventNodeOutputPublished
     - EventCapabilitySelected
+    - EventConditionEvaluated
     - EventPlanStarted
     - EventPlanBlocked
     - EventPlanExpanded
@@ -884,6 +886,7 @@ definitions:
     - 1000000
     - 1000000000
     - 60000000000
+    - 3600000000000
     format: int64
     type: integer
     x-enum-varnames:
@@ -900,6 +903,7 @@ definitions:
     - Millisecond
     - Second
     - Minute
+    - Hour
   v1.ingestAgentOSEventResponse:
     properties:
       duplicate:

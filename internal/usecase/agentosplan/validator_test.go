@@ -145,6 +145,38 @@ func TestSchedulerReadyNodes(t *testing.T) {
 	}
 }
 
+func TestSchedulerDecisionIncludesConditionTraces(t *testing.T) {
+	ctx := context.Background()
+	compiler, err := NewCELCompiler()
+	if err != nil {
+		t.Fatalf("NewCELCompiler: %v", err)
+	}
+	ref := agentos.BackendRef{Kind: agentos.BackendKindNative, Name: agentos.BackendNameGoAgentNative}
+	spec := samplePlan(ref)
+	plan, err := Validator{Expressions: compiler, Capabilities: sampleCapabilityCatalog(t, ref)}.Validate(ctx, spec)
+	if err != nil {
+		t.Fatalf("Validate: %v", err)
+	}
+	state := NewState(spec, time.Date(2026, 6, 17, 10, 0, 0, 0, time.UTC))
+
+	decision, err := Scheduler{Expressions: compiler}.Decide(ctx, plan, state.Status, map[string]any{
+		"inputs": map[string]any{"enabled": true},
+	})
+	if err != nil {
+		t.Fatalf("Decide: %v", err)
+	}
+	if len(decision.Ready) != 1 || decision.Ready[0].NodeID != "research" {
+		t.Fatalf("ready = %#v", decision.Ready)
+	}
+	if len(decision.ConditionTraces) != 1 {
+		t.Fatalf("condition traces = %#v", decision.ConditionTraces)
+	}
+	trace := decision.ConditionTraces[0]
+	if trace.Scope != "node" || trace.NodeID != "research" || trace.Expression == "" || !trace.Result {
+		t.Fatalf("trace = %#v", trace)
+	}
+}
+
 func TestSchedulerSkipsNodeWhenConditionIsFalse(t *testing.T) {
 	ctx := context.Background()
 	compiler, err := NewCELCompiler()

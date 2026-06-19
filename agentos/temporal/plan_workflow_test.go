@@ -87,6 +87,7 @@ func TestPlanWorkflowPublishesDebugTraceEvents(t *testing.T) {
 				Inputs: []agentos.InputMapping{
 					{Target: "topic", SourcePath: "task.topic", Required: true},
 				},
+				Conditions: []string{"inputs.task.topic == 'durable trace'"},
 			},
 		},
 	}
@@ -117,6 +118,9 @@ func TestPlanWorkflowPublishesDebugTraceEvents(t *testing.T) {
 	require.NotNil(t, inputEvent)
 	require.NotNil(t, inputEvent.Payload["input_resolution"])
 	require.NotNil(t, inputEvent.Payload["transition"])
+	conditionEvent := findPlanEventByType(events, agentos.EventConditionEvaluated)
+	require.NotNil(t, conditionEvent)
+	require.NotNil(t, conditionEvent.Payload["conditions"])
 }
 
 func TestPlanWorkflowErrorEdgeRunsRecoveryButPlanRemainsFailed(t *testing.T) {

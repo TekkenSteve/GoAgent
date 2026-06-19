@@ -818,6 +818,7 @@ const docTemplate = `{
                 "node.input.resolved",
                 "node.output.published",
                 "capability.selected",
+                "condition.evaluated",
                 "plan.started",
                 "plan.blocked",
                 "plan.expanded",
@@ -858,6 +859,7 @@ const docTemplate = `{
                 "EventNodeInputResolved",
                 "EventNodeOutputPublished",
                 "EventCapabilitySelected",
+                "EventConditionEvaluated",
                 "EventPlanStarted",
                 "EventPlanBlocked",
                 "EventPlanExpanded",
@@ -1894,7 +1896,8 @@ const docTemplate = `{
                 1000,
                 1000000,
                 1000000000,
-                60000000000
+                60000000000,
+                3600000000000
             ],
             "x-enum-varnames": [
                 "minDuration",
@@ -1909,7 +1912,8 @@ const docTemplate = `{
                 "Microsecond",
                 "Millisecond",
                 "Second",
-                "Minute"
+                "Minute",
+                "Hour"
             ]
         },
         "v1.ingestAgentOSEventResponse": {

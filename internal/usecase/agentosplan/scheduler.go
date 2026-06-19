@@ -15,8 +15,9 @@ type Scheduler struct {
 
 // SchedulerDecision contains deterministic scheduling transitions for one tick.
 type SchedulerDecision struct {
-	Ready   []agentos.PlanNodeSpec
-	Skipped []SkippedNode
+	Ready           []agentos.PlanNodeSpec
+	Skipped         []SkippedNode
+	ConditionTraces []ConditionEvaluationTrace
 }
 
 // SkippedNode records one node that can no longer become runnable.
@@ -43,8 +44,9 @@ func (s Scheduler) Decide(ctx context.Context, plan ExecutablePlan, status agent
 	}
 
 	decision := SchedulerDecision{
-		Ready:   make([]agentos.PlanNodeSpec, 0),
-		Skipped: make([]SkippedNode, 0),
+		Ready:           make([]agentos.PlanNodeSpec, 0),
+		Skipped:         make([]SkippedNode, 0),
+		ConditionTraces: make([]ConditionEvaluationTrace, 0),
 	}
 	for _, nodeID := range plan.Order {
 		node := plan.NodeByID[nodeID]
@@ -52,10 +54,11 @@ func (s Scheduler) Decide(ctx context.Context, plan ExecutablePlan, status agent
 		if current.LifecycleState != agentos.PlanNodePending && current.LifecycleState != agentos.PlanNodeReady {
 			continue
 		}
-		ok, err := s.nodeConditionsTrue(ctx, node, vars)
+		ok, traces, err := s.nodeConditionsTrue(ctx, node, vars)
 		if err != nil {
 			return SchedulerDecision{}, err
 		}
+		decision.ConditionTraces = append(decision.ConditionTraces, traces...)
 		if !ok {
 			decision.Skipped = append(decision.Skipped, SkippedNode{NodeID: node.NodeID, Reason: "node conditions evaluated false"})
 			continue
@@ -64,6 +67,7 @@ func (s Scheduler) Decide(ctx context.Context, plan ExecutablePlan, status agent
 		if err != nil {
 			return SchedulerDecision{}, err
 		}
+		decision.ConditionTraces = append(decision.ConditionTraces, dependencies.Traces...)
 		if dependencies.Ready {
 			decision.Ready = append(decision.Ready, node)
 		}
@@ -77,21 +81,32 @@ func (s Scheduler) Decide(ctx context.Context, plan ExecutablePlan, status agent
 	return decision, nil
 }
 
-func (s Scheduler) nodeConditionsTrue(ctx context.Context, node agentos.PlanNodeSpec, vars map[string]any) (bool, error) {
+func (s Scheduler) nodeConditionsTrue(ctx context.Context, node agentos.PlanNodeSpec, vars map[string]any) (bool, []ConditionEvaluationTrace, error) {
+	traces := make([]ConditionEvaluationTrace, 0, len(node.Conditions))
 	for _, condition := range node.Conditions {
 		ok, err := s.evaluate(ctx, condition, vars)
-		if err != nil || !ok {
-			return ok, err
+		if err != nil {
+			return false, traces, err
+		}
+		traces = append(traces, ConditionEvaluationTrace{
+			Scope:      "node",
+			NodeID:     node.NodeID,
+			Expression: condition,
+			Result:     ok,
+		})
+		if !ok {
+			return false, traces, nil
 		}
 	}
 
-	return true, nil
+	return true, traces, nil
 }
 
 type dependencyEvaluation struct {
 	Ready      bool
 	Impossible bool
 	Reason     string
+	Traces     []ConditionEvaluationTrace
 }
 
 func (s Scheduler) evaluateDependencies(ctx context.Context, node agentos.PlanNodeSpec, edges []agentos.PlanEdgeSpec, statusByNode map[string]agentos.PlanNodeStatus, vars map[string]any) (dependencyEvaluation, error) {
@@ -104,6 +119,7 @@ func (s Scheduler) evaluateDependencies(ctx context.Context, node agentos.PlanNo
 	active := 0
 	satisfied := 0
 	impossible := 0
+	traces := make([]ConditionEvaluationTrace, 0, len(edges))
 	for _, edge := range edges {
 		parent, ok := statusByNode[edge.From]
 		if !ok {
@@ -116,6 +132,19 @@ func (s Scheduler) evaluateDependencies(ctx context.Context, node agentos.PlanNo
 		isActive, err := s.evaluate(ctx, edge.Condition, vars)
 		if err != nil {
 			return dependencyEvaluation{}, fmt.Errorf("edge %q condition: %w", edge.EdgeID, err)
+		}
+		if edge.Condition != "" {
+			traces = append(traces, ConditionEvaluationTrace{
+				Scope:       "edge",
+				NodeID:      node.NodeID,
+				EdgeID:      edge.EdgeID,
+				From:        edge.From,
+				To:          edge.To,
+				Expression:  edge.Condition,
+				Result:      isActive,
+				On:          edgeTrigger(edge.On),
+				ParentState: parent.LifecycleState,
+			})
 		}
 		if !isActive {
 			continue
@@ -131,31 +160,31 @@ func (s Scheduler) evaluateDependencies(ctx context.Context, node agentos.PlanNo
 	switch join {
 	case agentos.PlanJoinAll:
 		if impossible > 0 {
-			return dependencyEvaluation{Impossible: true, Reason: "required dependency edge cannot be satisfied"}, nil
+			return dependencyEvaluation{Impossible: true, Reason: "required dependency edge cannot be satisfied", Traces: traces}, nil
 		}
 		if waiting > 0 {
-			return dependencyEvaluation{}, nil
+			return dependencyEvaluation{Traces: traces}, nil
 		}
 		if active == 0 {
-			return dependencyEvaluation{Impossible: true, Reason: "no active incoming dependency edges"}, nil
+			return dependencyEvaluation{Impossible: true, Reason: "no active incoming dependency edges", Traces: traces}, nil
 		}
 
-		return dependencyEvaluation{Ready: satisfied == active}, nil
+		return dependencyEvaluation{Ready: satisfied == active, Traces: traces}, nil
 	case agentos.PlanJoinAny, agentos.PlanJoinFirst:
 		if satisfied > 0 {
-			return dependencyEvaluation{Ready: true}, nil
+			return dependencyEvaluation{Ready: true, Traces: traces}, nil
 		}
 		if waiting > 0 {
-			return dependencyEvaluation{}, nil
+			return dependencyEvaluation{Traces: traces}, nil
 		}
 		if active == 0 {
-			return dependencyEvaluation{Impossible: true, Reason: "no active incoming dependency edges"}, nil
+			return dependencyEvaluation{Impossible: true, Reason: "no active incoming dependency edges", Traces: traces}, nil
 		}
 		if impossible == active {
-			return dependencyEvaluation{Impossible: true, Reason: "no dependency edge can be satisfied"}, nil
+			return dependencyEvaluation{Impossible: true, Reason: "no dependency edge can be satisfied", Traces: traces}, nil
 		}
 
-		return dependencyEvaluation{}, nil
+		return dependencyEvaluation{Traces: traces}, nil
 	default:
 		return dependencyEvaluation{}, fmt.Errorf("%w: invalid join strategy %q", agentos.ErrInvalidRunPlan, node.Policy.Join)
 	}

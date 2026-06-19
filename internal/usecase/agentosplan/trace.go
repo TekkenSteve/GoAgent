@@ -39,6 +39,20 @@ type InputMappingTrace struct {
 	Required       bool   `json:"required,omitempty"`
 }
 
+// ConditionEvaluationTrace records one deterministic CEL condition result used
+// by the scheduler.
+type ConditionEvaluationTrace struct {
+	Scope       string              `json:"scope"`
+	NodeID      string              `json:"node_id,omitempty"`
+	EdgeID      string              `json:"edge_id,omitempty"`
+	From        string              `json:"from,omitempty"`
+	To          string              `json:"to,omitempty"`
+	Expression  string              `json:"expression"`
+	Result      bool                `json:"result"`
+	On          agentos.EdgeTrigger `json:"on,omitempty"`
+	ParentState string              `json:"parent_state,omitempty"`
+}
+
 // NewCapabilitySelectionTrace creates the event-safe trace projection for a
 // capability selected during plan validation.
 func NewCapabilitySelectionTrace(capability agentos.Capability) CapabilitySelectionTrace {

@@ -102,6 +102,7 @@ const (
 	EventNodeInputResolved      EventType = "node.input.resolved"
 	EventNodeOutputPublished    EventType = "node.output.published"
 	EventCapabilitySelected     EventType = "capability.selected"
+	EventConditionEvaluated     EventType = "condition.evaluated"
 	EventPlanStarted            EventType = "plan.started"
 	EventPlanBlocked            EventType = "plan.blocked"
 	EventPlanExpanded           EventType = "plan.expanded"

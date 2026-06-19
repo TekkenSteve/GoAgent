@@ -72,6 +72,9 @@ func PlanEventFromStateEvent(spec agentos.RunPlanSpec, status agentos.RunPlanSta
 	if event.Capability.Capability != "" {
 		payload["capability"] = event.Capability
 	}
+	if len(event.ConditionTraces) > 0 {
+		payload["conditions"] = event.ConditionTraces
+	}
 
 	planEvent := agentos.PlanEvent{
 		Event: agentos.Event{
@@ -298,6 +301,8 @@ func planEventType(kind EventKind) (agentos.EventType, error) {
 		return agentos.EventNodeInputResolved, nil
 	case EventCapabilitySelected:
 		return agentos.EventCapabilitySelected, nil
+	case EventConditionsEvaluated:
+		return agentos.EventConditionEvaluated, nil
 	case EventArtifactsPublished:
 		return agentos.EventNodeOutputPublished, nil
 	case EventBudgetReported:

@@ -132,6 +132,11 @@ func PlanWorkflow(ctx workflow.Context, input planWorkflowInput) (agentos.RunPla
 
 			return state.Status, errors.Join(err, persistErr)
 		}
+		if traces := conditionTracesForDecision(decision); len(traces) > 0 {
+			if err := applyPlanStateEvent(activityCtx, ctx, spec, &state, agentosplan.StateEvent{Kind: agentosplan.EventConditionsEvaluated, ConditionTraces: traces}); err != nil {
+				return state.Status, err
+			}
+		}
 		for _, skipped := range decision.Skipped {
 			if !nodeSchedulable(state, skipped.NodeID) {
 				continue
@@ -330,6 +335,30 @@ func startPlanNode(activityCtx workflow.Context, workflowCtx workflow.Context, s
 	}
 
 	return nil
+}
+
+func conditionTracesForDecision(decision agentosplan.SchedulerDecision) []agentosplan.ConditionEvaluationTrace {
+	if len(decision.ConditionTraces) == 0 {
+		return nil
+	}
+	nodeIDs := make(map[string]struct{}, len(decision.Ready)+len(decision.Skipped))
+	for _, node := range decision.Ready {
+		nodeIDs[node.NodeID] = struct{}{}
+	}
+	for _, skipped := range decision.Skipped {
+		nodeIDs[skipped.NodeID] = struct{}{}
+	}
+	if len(nodeIDs) == 0 {
+		return nil
+	}
+	traces := make([]agentosplan.ConditionEvaluationTrace, 0, len(decision.ConditionTraces))
+	for _, trace := range decision.ConditionTraces {
+		if _, ok := nodeIDs[trace.NodeID]; ok {
+			traces = append(traces, trace)
+		}
+	}
+
+	return traces
 }
 
 func pollRunningPlanNodes(activityCtx workflow.Context, workflowCtx workflow.Context, spec *agentos.RunPlanSpec, state *agentosplan.State, validation *validatePlanOutput, expansionCount *int32) (bool, error) {

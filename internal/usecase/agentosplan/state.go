@@ -91,42 +91,44 @@ func NewStateFromStatus(spec agentos.RunPlanSpec, status agentos.RunPlanStatus) 
 type EventKind string
 
 const (
-	EventPlanStarted        EventKind = "plan.started"
-	EventPlanBlocked        EventKind = "plan.blocked"
-	EventPlanExpanded       EventKind = "plan.expanded"
-	EventPlanApproved       EventKind = "plan.approved"
-	EventPlanRejected       EventKind = "plan.rejected"
-	EventPlanSucceeded      EventKind = "plan.succeeded"
-	EventPlanFailed         EventKind = "plan.failed"
-	EventPlanCanceled       EventKind = "plan.canceled"
-	EventNodeReady          EventKind = "node.ready"
-	EventNodeStarted        EventKind = "node.started"
-	EventNodeSucceeded      EventKind = "node.succeeded"
-	EventNodeFailed         EventKind = "node.failed"
-	EventNodeRetryScheduled EventKind = "node.retry_scheduled"
-	EventNodeSkipped        EventKind = "node.skipped"
-	EventNodeCanceled       EventKind = "node.canceled"
-	EventNodeInputResolved  EventKind = "node.input_resolved"
-	EventCapabilitySelected EventKind = "capability.selected"
-	EventArtifactsPublished EventKind = "artifacts.published"
-	EventBudgetReported     EventKind = "budget.reported"
+	EventPlanStarted         EventKind = "plan.started"
+	EventPlanBlocked         EventKind = "plan.blocked"
+	EventPlanExpanded        EventKind = "plan.expanded"
+	EventPlanApproved        EventKind = "plan.approved"
+	EventPlanRejected        EventKind = "plan.rejected"
+	EventPlanSucceeded       EventKind = "plan.succeeded"
+	EventPlanFailed          EventKind = "plan.failed"
+	EventPlanCanceled        EventKind = "plan.canceled"
+	EventNodeReady           EventKind = "node.ready"
+	EventNodeStarted         EventKind = "node.started"
+	EventNodeSucceeded       EventKind = "node.succeeded"
+	EventNodeFailed          EventKind = "node.failed"
+	EventNodeRetryScheduled  EventKind = "node.retry_scheduled"
+	EventNodeSkipped         EventKind = "node.skipped"
+	EventNodeCanceled        EventKind = "node.canceled"
+	EventNodeInputResolved   EventKind = "node.input_resolved"
+	EventCapabilitySelected  EventKind = "capability.selected"
+	EventConditionsEvaluated EventKind = "conditions.evaluated"
+	EventArtifactsPublished  EventKind = "artifacts.published"
+	EventBudgetReported      EventKind = "budget.reported"
 )
 
 // StateEvent transitions plan state.
 type StateEvent struct {
-	Kind                   EventKind                `json:"kind"`
-	NodeID                 string                   `json:"node_id,omitempty"`
-	RunID                  string                   `json:"run_id,omitempty"`
-	Reason                 string                   `json:"reason,omitempty"`
-	Attempt                int32                    `json:"attempt,omitempty"`
-	Expansion              PlanDelta                `json:"expansion,omitempty"`
-	Artifacts              []agentos.ArtifactRef    `json:"artifacts,omitempty"`
-	BudgetDelta            agentos.PlanBudgetUsage  `json:"budget_delta,omitempty"`
-	InputTrace             InputResolutionTrace     `json:"input_trace,omitempty"`
-	Capability             CapabilitySelectionTrace `json:"capability,omitempty"`
-	PreviousLifecycleState string                   `json:"previous_lifecycle_state,omitempty"`
-	NextLifecycleState     string                   `json:"next_lifecycle_state,omitempty"`
-	At                     time.Time                `json:"at,omitempty"`
+	Kind                   EventKind                  `json:"kind"`
+	NodeID                 string                     `json:"node_id,omitempty"`
+	RunID                  string                     `json:"run_id,omitempty"`
+	Reason                 string                     `json:"reason,omitempty"`
+	Attempt                int32                      `json:"attempt,omitempty"`
+	Expansion              PlanDelta                  `json:"expansion,omitempty"`
+	Artifacts              []agentos.ArtifactRef      `json:"artifacts,omitempty"`
+	BudgetDelta            agentos.PlanBudgetUsage    `json:"budget_delta,omitempty"`
+	InputTrace             InputResolutionTrace       `json:"input_trace,omitempty"`
+	Capability             CapabilitySelectionTrace   `json:"capability,omitempty"`
+	ConditionTraces        []ConditionEvaluationTrace `json:"condition_traces,omitempty"`
+	PreviousLifecycleState string                     `json:"previous_lifecycle_state,omitempty"`
+	NextLifecycleState     string                     `json:"next_lifecycle_state,omitempty"`
+	At                     time.Time                  `json:"at,omitempty"`
 }
 
 // Apply applies one deterministic state transition.
@@ -172,7 +174,7 @@ func (s *State) Apply(event StateEvent) error {
 		return s.transitionNode(event.NodeID, agentos.PlanNodeSkipped, event, at)
 	case EventNodeCanceled:
 		return s.transitionNode(event.NodeID, agentos.PlanNodeCanceled, event, at)
-	case EventNodeInputResolved, EventCapabilitySelected:
+	case EventNodeInputResolved, EventCapabilitySelected, EventConditionsEvaluated:
 		return s.touchNode(event.NodeID, at)
 	case EventArtifactsPublished:
 		if event.NodeID != "" {
