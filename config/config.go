@@ -16,6 +16,7 @@ type (
 		Log     Log
 		PG      PG
 		Redis   Redis
+		AgentOS AgentOS
 		AgentFW AgentFW
 		Metrics Metrics
 		Swagger Swagger
@@ -47,6 +48,12 @@ type (
 	// Redis -.
 	Redis struct {
 		URL string `env:"REDIS_URL,required"`
+	}
+
+	// AgentOS -.
+	AgentOS struct {
+		ArtifactStoreRoot string `env:"AGENTOS_ARTIFACT_STORE_ROOT,required"`
+		CapabilitiesJSON  string `env:"AGENTOS_CAPABILITIES_JSON" envDefault:"[]"`
 	}
 
 	// AgentFW -.
@@ -178,6 +185,16 @@ func (c AgentFW) BackendSelectionRules() ([]BackendSelectionRule, error) {
 	}
 
 	return rules, nil
+}
+
+// Capabilities parses configured AgentOS backend capabilities.
+func (c AgentOS) Capabilities() ([]agentos.Capability, error) {
+	var capabilities []agentos.Capability
+	if err := json.Unmarshal([]byte(c.CapabilitiesJSON), &capabilities); err != nil {
+		return nil, fmt.Errorf("parse AGENTOS_CAPABILITIES_JSON: %w", err)
+	}
+
+	return capabilities, nil
 }
 
 // NewConfig returns app config.

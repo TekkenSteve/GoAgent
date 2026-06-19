@@ -116,10 +116,10 @@ func TestBackendSelectionRules(t *testing.T) {
 	rules, err := AgentFW{
 		BackendSelectionRulesJSON: `[
 			{
-				"name":"card-template",
-				"backend":{"kind":"temporal_external","name":"kardcraft-agent-workflow"},
-				"input":{"task_type":"card_template"},
-				"metadata":{"product":"kardcraft"}
+				"name":"research-report",
+				"backend":{"kind":"temporal_external","name":"research-agent-workflow"},
+				"input":{"task_type":"research_report"},
+				"metadata":{"domain":"research"}
 			}
 		]`,
 	}.BackendSelectionRules()
@@ -132,11 +132,42 @@ func TestBackendSelectionRules(t *testing.T) {
 	}
 
 	got := rules[0]
-	if got.Name != "card-template" ||
+	if got.Name != "research-report" ||
 		got.Backend.Kind != agentos.BackendKindTemporalExternal ||
-		got.Backend.Name != "kardcraft-agent-workflow" ||
-		got.Input["task_type"] != "card_template" ||
-		got.Metadata["product"] != "kardcraft" {
+		got.Backend.Name != "research-agent-workflow" ||
+		got.Input["task_type"] != "research_report" ||
+		got.Metadata["domain"] != "research" {
 		t.Fatalf("unexpected rule config: %#v", got)
+	}
+}
+
+func TestAgentOSCapabilities(t *testing.T) {
+	capabilities, err := AgentOS{
+		CapabilitiesJSON: `[
+			{
+				"backend":{"kind":"http","name":"research-http"},
+				"name":"summarize",
+				"description":"Summarize source material",
+				"input_schema":{"type":"object","required":["topic"]},
+				"output_schema":{"type":"object","required":["summary"]},
+				"signals":["user.message"],
+				"controls":["cancel"]
+			}
+		]`,
+	}.Capabilities()
+	if err != nil {
+		t.Fatalf("Capabilities: %v", err)
+	}
+	if len(capabilities) != 1 {
+		t.Fatalf("capability count = %d", len(capabilities))
+	}
+
+	got := capabilities[0]
+	if got.Backend.Kind != agentos.BackendKindHTTP ||
+		got.Backend.Name != "research-http" ||
+		got.Name != "summarize" ||
+		got.Signals[0] != agentos.SignalUserMessage ||
+		got.Controls[0] != agentos.ControlCancel {
+		t.Fatalf("unexpected capability config: %#v", got)
 	}
 }

@@ -30,6 +30,11 @@ x-backend-app-environment: &x-backend-app-environment
   # PG
   PG_POOL_MAX: "2"
   PG_URL: "postgres://user:myAwEsOm3pa55@w0rd@db:5432/db"
+  # Redis
+  REDIS_URL: "redis://redis:6379/0"
+  # AgentOS
+  AGENTOS_ARTIFACT_STORE_ROOT: "/var/lib/goagent/artifacts"
+  AGENTOS_CAPABILITIES_JSON: "[]"
   # Metrics
   METRICS_ENABLED: "true"
   # Swagger
@@ -189,6 +194,8 @@ services:
     ports:
       - "8080:8080"
       - "8081:8081"
+    volumes:
+      - agentos_artifacts:/var/lib/goagent/artifacts
     depends_on:
       - db
       - rabbitmq
@@ -231,3 +238,4 @@ volumes:
   db_data:
   rabbitmq_data:
   nats_data:
+  agentos_artifacts:

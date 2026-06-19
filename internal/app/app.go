@@ -22,6 +22,7 @@ import (
 	"github.com/TekkenSteve/GoAgent/internal/entity"
 	"github.com/TekkenSteve/GoAgent/internal/pkg/postgres"
 	goredis "github.com/TekkenSteve/GoAgent/internal/pkg/redis"
+	artifactrepo "github.com/TekkenSteve/GoAgent/internal/repo/artifact"
 	"github.com/TekkenSteve/GoAgent/internal/repo/cached"
 	"github.com/TekkenSteve/GoAgent/internal/repo/compressor"
 	"github.com/TekkenSteve/GoAgent/internal/repo/framework"
@@ -47,14 +48,16 @@ func Run(cfg *config.Config) { //nolint: gocyclo,cyclop,funlen,gocritic,nolintli
 	l := logger.New(cfg.Log.Level)
 
 	var (
-		temporalRuntime *agentfwruntime.TemporalRuntime
-		agentOSRuntime  agentos.Runtime
-		batchWriter     *pipelinepkg.BatchWriter
-		agentUC         *agent.UseCase
-		cancelWorkflow  restapiv1.CancelWorkflowFn
-		signalWorkflow  restapiv1.SignalWorkflowFn
-		templateUC      *templatepkg.UseCase
-		triggerUC       *triggerpkg.UseCase
+		temporalRuntime  *agentfwruntime.TemporalRuntime
+		agentOSRuntime   agentos.Runtime
+		planRuntime      agentos.PlanRuntime
+		closePlanRuntime func() error
+		batchWriter      *pipelinepkg.BatchWriter
+		agentUC          *agent.UseCase
+		cancelWorkflow   restapiv1.CancelWorkflowFn
+		signalWorkflow   restapiv1.SignalWorkflowFn
+		templateUC       *templatepkg.UseCase
+		triggerUC        *triggerpkg.UseCase
 	)
 
 	fwCfg := agentfwconfig.FromAppConfig(cfg)
@@ -96,6 +99,8 @@ func Run(cfg *config.Config) { //nolint: gocyclo,cyclop,funlen,gocritic,nolintli
 	if tc != nil {
 		temporalRuntime = tc.runtime
 		agentOSRuntime = tc.agentOSRuntime
+		planRuntime = tc.planRuntime
+		closePlanRuntime = tc.closePlanRuntime
 		batchWriter = tc.batchWriter
 		agentUC = tc.agentUC
 		triggerUC = tc.triggerUC
@@ -105,6 +110,14 @@ func Run(cfg *config.Config) { //nolint: gocyclo,cyclop,funlen,gocritic,nolintli
 
 	if temporalRuntime != nil {
 		defer temporalRuntime.Close()
+	}
+
+	if closePlanRuntime != nil {
+		defer func() {
+			if err := closePlanRuntime(); err != nil {
+				l.Error(fmt.Errorf("app - Run - close plan runtime: %w", err))
+			}
+		}()
 	}
 
 	if batchWriter != nil {
@@ -140,7 +153,7 @@ func Run(cfg *config.Config) { //nolint: gocyclo,cyclop,funlen,gocritic,nolintli
 	// HTTP Server
 	httpServer := httpserver.New(l, httpserver.Port(cfg.HTTP.Port), httpserver.Prefork(cfg.HTTP.UsePreforkMode))
 	restapi.NewRouter(httpServer.App, cfg, agentExecutor, orchExecutor, l,
-		cancelWorkflow, signalWorkflow, templateUC, triggerUC, eventIngest, agentOSRuntime)
+		cancelWorkflow, signalWorkflow, templateUC, triggerUC, eventIngest, agentOSRuntime, planRuntime)
 
 	// Start servers
 	httpServer.Start()
@@ -169,15 +182,17 @@ func Run(cfg *config.Config) { //nolint: gocyclo,cyclop,funlen,gocritic,nolintli
 
 // temporalComponents holds the initialized components returned by initTemporalComponents.
 type temporalComponents struct {
-	runtime        *agentfwruntime.TemporalRuntime
-	agentOSRuntime agentos.Runtime
-	batchWriter    *pipelinepkg.BatchWriter
-	agentUC        *agent.UseCase
-	triggerUC      *triggerpkg.UseCase
-	toolRegistry   *toolkit.ToolRegistry
-	cancelWorkflow restapiv1.CancelWorkflowFn
-	signalWorkflow restapiv1.SignalWorkflowFn
-	llmProvider    *webapi.BifrostProvider
+	runtime          *agentfwruntime.TemporalRuntime
+	agentOSRuntime   agentos.Runtime
+	planRuntime      agentos.PlanRuntime
+	closePlanRuntime func() error
+	batchWriter      *pipelinepkg.BatchWriter
+	agentUC          *agent.UseCase
+	triggerUC        *triggerpkg.UseCase
+	toolRegistry     *toolkit.ToolRegistry
+	cancelWorkflow   restapiv1.CancelWorkflowFn
+	signalWorkflow   restapiv1.SignalWorkflowFn
+	llmProvider      *webapi.BifrostProvider
 }
 
 func initTemporalComponents(
@@ -206,11 +221,6 @@ func initTemporalComponents(
 
 	comp := initAgentComponents(l, cfg, fwCfg, pg, rdb, runtime, llmResult, messageRepo, agentRepo, templateRepo, triggerRepo, eventStore)
 
-	registrar := agentfwruntime.NewDefaultRegistrar(comp.activities)
-	if err := agentfwruntime.StartWorker(runtime, registrar); err != nil {
-		l.Fatal(fmt.Errorf("app - Run - agentfw.StartWorker: %w", err))
-	}
-
 	registerToolsOnRegistry(l, comp.toolRegistry, comp.triggerUC, comp.triggerScheduler)
 
 	if err := templateUC.EnsureDefault(context.Background()); err != nil {
@@ -224,8 +234,6 @@ func initTemporalComponents(
 	cancelWorkflow := func(ctx context.Context, workflowID string) error {
 		return runtime.Client.CancelWorkflow(ctx, workflowID, "")
 	}
-
-	l.Info("app - Run - agent framework worker started on task queue: %s", fwCfg.Temporal.TaskQueue)
 
 	agentOSRuntime, err := agentostemporal.NewRuntimeWithClient(context.Background(), agentostemporal.RuntimeConfig{
 		TemporalAddress:          fwCfg.Temporal.Address,
@@ -243,17 +251,94 @@ func initTemporalComponents(
 		l.Fatal(fmt.Errorf("app - Run - agentos temporal runtime: %w", err))
 	}
 
-	return &temporalComponents{
-		runtime:        runtime,
-		agentOSRuntime: agentOSRuntime,
-		batchWriter:    comp.batchWriter,
-		agentUC:        comp.agentUC,
-		triggerUC:      comp.triggerUC,
-		toolRegistry:   comp.toolRegistry,
-		cancelWorkflow: cancelWorkflow,
-		signalWorkflow: signalWorkflow,
-		llmProvider:    comp.llmProvider,
+	planStore := temporalrepo.NewAgentOSPlanRepo(pg)
+	planEventStream := repostream.NewRedisPlanEventStream(rdb)
+	blobStore, err := artifactrepo.NewLocalBlobStore(cfg.AgentOS.ArtifactStoreRoot)
+	if err != nil {
+		l.Fatal(fmt.Errorf("app - Run - artifact store: %w", err))
 	}
+	artifactStore := temporalrepo.NewAgentOSArtifactRepo(pg, blobStore)
+	capabilities, err := cfg.AgentOS.Capabilities()
+	if err != nil {
+		l.Fatal(fmt.Errorf("app - Run - agentos capabilities: %w", err))
+	}
+	planActivities, err := agentostemporal.NewPlanActivitiesWithStores(
+		agentOSRuntime,
+		capabilities,
+		planStore,
+		planStore,
+		planEventStream,
+		runBackendIndex,
+		artifactStore,
+	)
+	if err != nil {
+		l.Fatal(fmt.Errorf("app - Run - agentos plan activities: %w", err))
+	}
+
+	planRuntime, err := agentostemporal.NewPlanRuntimeWithClient(context.Background(), agentostemporal.RuntimeConfig{
+		TemporalAddress:   fwCfg.Temporal.Address,
+		TemporalNamespace: fwCfg.Temporal.Namespace,
+		TemporalTaskQueue: fwCfg.Temporal.TaskQueue,
+		PostgresURL:       cfg.PG.URL,
+		PostgresPoolMax:   cfg.PG.PoolMax,
+		RedisURL:          cfg.Redis.URL,
+	}, runtime.Client)
+	if err != nil {
+		l.Fatal(fmt.Errorf("app - Run - agentos temporal plan runtime: %w", err))
+	}
+
+	registrar := agentOSRegistrar{
+		base:           agentfwruntime.NewDefaultRegistrar(comp.activities),
+		planActivities: planActivities,
+	}
+	if err := agentfwruntime.StartWorker(runtime, registrar); err != nil {
+		l.Fatal(fmt.Errorf("app - Run - agentfw.StartWorker: %w", err))
+	}
+	l.Info("app - Run - agent framework worker started on task queue: %s", fwCfg.Temporal.TaskQueue)
+
+	return &temporalComponents{
+		runtime:          runtime,
+		agentOSRuntime:   agentOSRuntime,
+		planRuntime:      planRuntime,
+		closePlanRuntime: closeAgentOSPlanRuntime(planRuntime),
+		batchWriter:      comp.batchWriter,
+		agentUC:          comp.agentUC,
+		triggerUC:        comp.triggerUC,
+		toolRegistry:     comp.toolRegistry,
+		cancelWorkflow:   cancelWorkflow,
+		signalWorkflow:   signalWorkflow,
+		llmProvider:      comp.llmProvider,
+	}
+}
+
+type agentOSRegistrar struct {
+	base           agentfwruntime.DefaultRegistrar
+	planActivities *agentostemporal.PlanActivities
+}
+
+func (r agentOSRegistrar) RegisterWorkflows(rt *agentfwruntime.TemporalRuntime) {
+	r.base.RegisterWorkflows(rt)
+	if err := agentostemporal.RegisterPlanWorkflow(rt.Worker); err != nil {
+		panic(err)
+	}
+}
+
+func (r agentOSRegistrar) RegisterActivities(rt *agentfwruntime.TemporalRuntime) {
+	r.base.RegisterActivities(rt)
+	if err := agentostemporal.RegisterPlanActivities(rt.Worker, r.planActivities); err != nil {
+		panic(err)
+	}
+}
+
+func closeAgentOSPlanRuntime(planRuntime agentos.PlanRuntime) func() error {
+	closeable, ok := planRuntime.(interface {
+		Close() error
+	})
+	if !ok {
+		return nil
+	}
+
+	return closeable.Close
 }
 
 func httpBackends(l logger.Interface, cfg *config.Config) []agentostemporal.HTTPBackendConfig {

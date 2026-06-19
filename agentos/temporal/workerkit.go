@@ -3,6 +3,7 @@ package temporal
 import (
 	"context"
 	"errors"
+	"fmt"
 
 	"github.com/TekkenSteve/GoAgent/internal/agentfw/orchestration"
 	"go.temporal.io/sdk/activity"
@@ -15,6 +16,62 @@ type WorkerKit struct {
 	activities     *orchestration.AgentActivities
 	planActivities *PlanActivities
 	closeFns       []func() error
+}
+
+// RegisterPlanWorkflow installs the AgentOS RunPlan workflow into an existing worker.
+func RegisterPlanWorkflow(w worker.Worker) error {
+	if w == nil {
+		return errors.New("agentos temporal workerkit: nil worker")
+	}
+
+	w.RegisterWorkflowWithOptions(PlanWorkflow, workflow.RegisterOptions{
+		Name: PlanWorkflowName,
+	})
+
+	return nil
+}
+
+// RegisterPlanActivities installs AgentOS RunPlan activities into an existing worker.
+func RegisterPlanActivities(w worker.Worker, activities *PlanActivities) error {
+	if w == nil {
+		return errors.New("agentos temporal workerkit: nil worker")
+	}
+	if activities == nil {
+		return errors.New("agentos temporal workerkit: plan activities are required")
+	}
+
+	w.RegisterActivityWithOptions(activities.ValidatePlanActivity, activity.RegisterOptions{
+		Name: ValidatePlanActivityName,
+	})
+	w.RegisterActivityWithOptions(activities.StartPlanNodeActivity, activity.RegisterOptions{
+		Name: StartPlanNodeActivityName,
+	})
+	w.RegisterActivityWithOptions(activities.StatusPlanNodeActivity, activity.RegisterOptions{
+		Name: StatusPlanNodeActivityName,
+	})
+	w.RegisterActivityWithOptions(activities.ControlPlanNodeActivity, activity.RegisterOptions{
+		Name: ControlPlanNodeActivityName,
+	})
+	w.RegisterActivityWithOptions(activities.PublishPlanArtifactsActivity, activity.RegisterOptions{
+		Name: PublishPlanArtifactsActivityName,
+	})
+	w.RegisterActivityWithOptions(activities.PersistPlanStateActivity, activity.RegisterOptions{
+		Name: PersistPlanStateActivityName,
+	})
+
+	return nil
+}
+
+// RegisterPlan installs the AgentOS RunPlan workflow and activities into an existing worker.
+func RegisterPlan(w worker.Worker, activities *PlanActivities) error {
+	if err := RegisterPlanWorkflow(w); err != nil {
+		return err
+	}
+	if err := RegisterPlanActivities(w, activities); err != nil {
+		return fmt.Errorf("agentos temporal workerkit - plan activities: %w", err)
+	}
+
+	return nil
 }
 
 // NewWorkerKit creates a worker registration kit backed by the default
@@ -37,9 +94,9 @@ func (k *WorkerKit) Register(w worker.Worker) error {
 	w.RegisterWorkflowWithOptions(orchestration.TriggerFireWorkflow, workflow.RegisterOptions{
 		Name: orchestration.TriggerFireWorkflowName,
 	})
-	w.RegisterWorkflowWithOptions(PlanWorkflow, workflow.RegisterOptions{
-		Name: PlanWorkflowName,
-	})
+	if err := RegisterPlanWorkflow(w); err != nil {
+		return err
+	}
 
 	if k.activities == nil {
 		return k.registerPlanActivities(w)
@@ -74,30 +131,7 @@ func (k *WorkerKit) Register(w worker.Worker) error {
 }
 
 func (k *WorkerKit) registerPlanActivities(w worker.Worker) error {
-	if k.planActivities == nil {
-		return nil
-	}
-
-	w.RegisterActivityWithOptions(k.planActivities.ValidatePlanActivity, activity.RegisterOptions{
-		Name: ValidatePlanActivityName,
-	})
-	w.RegisterActivityWithOptions(k.planActivities.StartPlanNodeActivity, activity.RegisterOptions{
-		Name: StartPlanNodeActivityName,
-	})
-	w.RegisterActivityWithOptions(k.planActivities.StatusPlanNodeActivity, activity.RegisterOptions{
-		Name: StatusPlanNodeActivityName,
-	})
-	w.RegisterActivityWithOptions(k.planActivities.ControlPlanNodeActivity, activity.RegisterOptions{
-		Name: ControlPlanNodeActivityName,
-	})
-	w.RegisterActivityWithOptions(k.planActivities.PublishPlanArtifactsActivity, activity.RegisterOptions{
-		Name: PublishPlanArtifactsActivityName,
-	})
-	w.RegisterActivityWithOptions(k.planActivities.PersistPlanStateActivity, activity.RegisterOptions{
-		Name: PersistPlanStateActivityName,
-	})
-
-	return nil
+	return RegisterPlanActivities(w, k.planActivities)
 }
 
 // Close releases resources owned by the kit.

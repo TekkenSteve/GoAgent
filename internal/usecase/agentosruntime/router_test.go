@@ -62,7 +62,7 @@ func TestRouterRequiresExplicitBackendRef(t *testing.T) {
 
 func TestRouterSelectsBackendWhenSpecOmitsBackend(t *testing.T) {
 	ctx := context.Background()
-	ref := agentos.BackendRef{Kind: agentos.BackendKindHTTP, Name: "card-template"}
+	ref := agentos.BackendRef{Kind: agentos.BackendKindHTTP, Name: "research-http"}
 	stub := &stubBackend{}
 	registry := NewRegistry()
 	if err := registry.Register(ref, stub); err != nil {
@@ -72,7 +72,7 @@ func TestRouterSelectsBackendWhenSpecOmitsBackend(t *testing.T) {
 		{
 			Backend: ref,
 			Input: map[string]any{
-				"task_type": "card_template",
+				"task_type": "research_report",
 			},
 		},
 	})
@@ -89,7 +89,7 @@ func TestRouterSelectsBackendWhenSpecOmitsBackend(t *testing.T) {
 	status, err := router.Start(ctx, agentos.RunSpec{
 		RunID: "run-1",
 		Input: map[string]any{
-			"task_type": "card_template",
+			"task_type": "research_report",
 		},
 	})
 	if err != nil {
@@ -164,9 +164,9 @@ func TestRouterRoutesMixedBackendRunsByOwnership(t *testing.T) {
 func TestRuleBackendSelectorRequiresMatchingRule(t *testing.T) {
 	selector, err := NewRuleBackendSelector([]BackendSelectionRule{
 		{
-			Backend: agentos.BackendRef{Kind: agentos.BackendKindHTTP, Name: "card-template"},
+			Backend: agentos.BackendRef{Kind: agentos.BackendKindHTTP, Name: "research-http"},
 			Input: map[string]any{
-				"task_type": "card_template",
+				"task_type": "research_report",
 			},
 		},
 	})
