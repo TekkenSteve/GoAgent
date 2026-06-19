@@ -40,6 +40,13 @@ type AgentOSControl struct {
 	Metadata       map[string]string        `json:"metadata,omitempty"`
 }
 
+// AgentOSPlanStreamScope selects plan events for REST streaming.
+type AgentOSPlanStreamScope struct {
+	NodeID        string `query:"node_id"`
+	RunID         string `query:"run_id"`
+	AfterSequence int64  `query:"after_sequence"`
+}
+
 // AgentOSEvent is the public REST envelope for external backend event ingest.
 type AgentOSEvent struct {
 	EventID   string            `json:"event_id" validate:"required"`

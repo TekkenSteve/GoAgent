@@ -170,10 +170,18 @@ func agentOSError(ctx *fiber.Ctx, err error) error {
 	case errors.Is(err, agentos.ErrInvalidRunSpec),
 		errors.Is(err, agentos.ErrInvalidBackendRef),
 		errors.Is(err, agentos.ErrInvalidSignal),
-		errors.Is(err, agentos.ErrInvalidControlOperation):
+		errors.Is(err, agentos.ErrInvalidControlOperation),
+		errors.Is(err, agentos.ErrInvalidStreamScope),
+		errors.Is(err, agentos.ErrInvalidRunPlan),
+		errors.Is(err, agentos.ErrInvalidArtifact),
+		errors.Is(err, agentos.ErrInvalidExpression),
+		errors.Is(err, agentos.ErrInvalidPlanEvent):
 		return errorResponse(ctx, http.StatusBadRequest, err.Error())
 	case errors.Is(err, agentos.ErrBackendNotFound),
-		errors.Is(err, agentos.ErrRunRouteNotFound):
+		errors.Is(err, agentos.ErrRunRouteNotFound),
+		errors.Is(err, agentos.ErrPlanRouteNotFound),
+		errors.Is(err, agentos.ErrCapabilityNotFound),
+		errors.Is(err, agentos.ErrArtifactNotFound):
 		return errorResponse(ctx, http.StatusNotFound, err.Error())
 	default:
 		return errorResponse(ctx, http.StatusInternalServerError, err.Error())

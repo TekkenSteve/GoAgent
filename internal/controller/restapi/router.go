@@ -28,6 +28,7 @@ func NewRouter(app *fiber.App, cfg *config.Config, t usecase.AgentExecutor, o us
 	m usecase.TemplateManager, eh usecase.TriggerEventHandler,
 	eventIngest *eventing.Service,
 	agentOSRuntime agentos.Runtime,
+	agentOSPlanRuntime agentos.PlanRuntime,
 ) {
 	// Options
 	app.Use(middleware.Logger(l))
@@ -51,6 +52,6 @@ func NewRouter(app *fiber.App, cfg *config.Config, t usecase.AgentExecutor, o us
 	// Routers
 	apiV1Group := app.Group("/v1")
 	{
-		v1.NewRoutes(apiV1Group, t, o, l, cancelWorkflow, signalWorkflow, m, eh, eventIngest, agentOSRuntime)
+		v1.NewRoutes(apiV1Group, t, o, l, cancelWorkflow, signalWorkflow, m, eh, eventIngest, agentOSRuntime, agentOSPlanRuntime)
 	}
 }

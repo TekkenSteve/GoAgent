@@ -45,6 +45,19 @@ definitions:
       uri:
         type: string
     type: object
+  agentos.ArtifactSpec:
+    properties:
+      kind:
+        $ref: '#/definitions/agentos.ArtifactKind'
+      media_type:
+        type: string
+      name:
+        type: string
+      required:
+        type: boolean
+      schema_ref:
+        type: string
+    type: object
   agentos.BackendKind:
     enum:
     - native
@@ -74,6 +87,18 @@ definitions:
     - ControlPause
     - ControlResume
     - ControlCancel
+  agentos.EdgeTrigger:
+    enum:
+    - success
+    - error
+    - complete
+    - always
+    type: string
+    x-enum-varnames:
+    - EdgeOnSuccess
+    - EdgeOnError
+    - EdgeOnComplete
+    - EdgeOnAlways
   agentos.EventType:
     enum:
     - run.started
@@ -99,6 +124,20 @@ definitions:
     - node.input.resolved
     - node.output.published
     - capability.selected
+    - plan.started
+    - plan.blocked
+    - plan.approved
+    - plan.rejected
+    - plan.succeeded
+    - plan.failed
+    - plan.canceled
+    - plan.node.ready
+    - plan.node.started
+    - plan.node.succeeded
+    - plan.node.failed
+    - plan.node.retry_scheduled
+    - plan.node.skipped
+    - plan.node.canceled
     type: string
     x-enum-varnames:
     - EventRunStarted
@@ -124,6 +163,208 @@ definitions:
     - EventNodeInputResolved
     - EventNodeOutputPublished
     - EventCapabilitySelected
+    - EventPlanStarted
+    - EventPlanBlocked
+    - EventPlanApproved
+    - EventPlanRejected
+    - EventPlanSucceeded
+    - EventPlanFailed
+    - EventPlanCanceled
+    - EventPlanNodeReady
+    - EventPlanNodeStarted
+    - EventPlanNodeSucceeded
+    - EventPlanNodeFailed
+    - EventPlanNodeRetryScheduled
+    - EventPlanNodeSkipped
+    - EventPlanNodeCanceled
+  agentos.InputMapping:
+    properties:
+      expression:
+        type: string
+      required:
+        type: boolean
+      source_artifact:
+        type: string
+      source_node_id:
+        type: string
+      source_path:
+        type: string
+      target:
+        type: string
+    type: object
+  agentos.NodePolicy:
+    properties:
+      join:
+        $ref: '#/definitions/agentos.PlanJoinStrategy'
+      max_attempts:
+        type: integer
+      timeout_seconds:
+        type: integer
+    type: object
+  agentos.PlanBudgetUsage:
+    properties:
+      spent_cents:
+        type: integer
+    type: object
+  agentos.PlanEdgeSpec:
+    properties:
+      condition:
+        type: string
+      edge_id:
+        type: string
+      from:
+        type: string
+      input_mapping:
+        items:
+          $ref: '#/definitions/agentos.InputMapping'
+        type: array
+      "on":
+        $ref: '#/definitions/agentos.EdgeTrigger'
+      to:
+        type: string
+    type: object
+  agentos.PlanJoinStrategy:
+    enum:
+    - all
+    - any
+    - first
+    type: string
+    x-enum-varnames:
+    - PlanJoinAll
+    - PlanJoinAny
+    - PlanJoinFirst
+  agentos.PlanNodeSpec:
+    properties:
+      capability:
+        type: string
+      conditions:
+        items:
+          type: string
+        type: array
+      inputs:
+        items:
+          $ref: '#/definitions/agentos.InputMapping'
+        type: array
+      node_id:
+        type: string
+      outputs:
+        items:
+          $ref: '#/definitions/agentos.ArtifactSpec'
+        type: array
+      policy:
+        $ref: '#/definitions/agentos.NodePolicy'
+      run:
+        $ref: '#/definitions/agentos.RunSpec'
+    type: object
+  agentos.PlanNodeStatus:
+    properties:
+      artifacts:
+        items:
+          $ref: '#/definitions/agentos.ArtifactRef'
+        type: array
+      attempts:
+        type: integer
+      backend:
+        $ref: '#/definitions/agentos.BackendRef'
+      budget_usage:
+        $ref: '#/definitions/agentos.PlanBudgetUsage'
+      completed_at:
+        type: string
+      lifecycle_state:
+        type: string
+      node_id:
+        type: string
+      reason:
+        type: string
+      run_id:
+        type: string
+      started_at:
+        type: string
+      updated_at:
+        type: string
+    type: object
+  agentos.PlanPolicy:
+    properties:
+      budget_cents:
+        type: integer
+      continue_as_new_events:
+        type: integer
+      max_depth:
+        type: integer
+      max_expansions:
+        type: integer
+      max_history_events:
+        type: integer
+      max_iterations:
+        type: integer
+      max_nodes:
+        type: integer
+      max_parallel_nodes:
+        type: integer
+      timeout_seconds:
+        type: integer
+    type: object
+  agentos.RunPlanSpec:
+    properties:
+      account_id:
+        type: string
+      edges:
+        items:
+          $ref: '#/definitions/agentos.PlanEdgeSpec'
+        type: array
+      idempotency_key:
+        type: string
+      inputs:
+        additionalProperties: {}
+        type: object
+      metadata:
+        additionalProperties:
+          type: string
+        type: object
+      nodes:
+        items:
+          $ref: '#/definitions/agentos.PlanNodeSpec'
+        type: array
+      plan_id:
+        type: string
+      policy:
+        $ref: '#/definitions/agentos.PlanPolicy'
+      project_id:
+        type: string
+      requested_at:
+        type: string
+      thread_id:
+        type: string
+    type: object
+  agentos.RunPlanStatus:
+    properties:
+      active_run_ids:
+        items:
+          type: string
+        type: array
+      artifacts:
+        items:
+          $ref: '#/definitions/agentos.ArtifactRef'
+        type: array
+      budget_usage:
+        $ref: '#/definitions/agentos.PlanBudgetUsage'
+      lifecycle_state:
+        type: string
+      metadata:
+        additionalProperties:
+          type: string
+        type: object
+      nodes:
+        items:
+          $ref: '#/definitions/agentos.PlanNodeStatus'
+        type: array
+      plan_id:
+        type: string
+      reason:
+        type: string
+      updated_at:
+        type: string
+    type: object
   agentos.RunProgress:
     properties:
       current:
@@ -133,12 +374,46 @@ definitions:
       total:
         type: integer
     type: object
+  agentos.RunSpec:
+    properties:
+      account_id:
+        type: string
+      agent_id:
+        type: string
+      backend:
+        $ref: '#/definitions/agentos.BackendRef'
+      idempotency_key:
+        type: string
+      input:
+        additionalProperties: {}
+        type: object
+      metadata:
+        additionalProperties:
+          type: string
+        type: object
+      model_ref:
+        type: string
+      project_id:
+        type: string
+      requested_at:
+        type: string
+      run_id:
+        type: string
+      system_prompt:
+        type: string
+      thread_id:
+        type: string
+      user_message:
+        type: string
+    type: object
   agentos.RunStatus:
     properties:
       artifacts:
         items:
           $ref: '#/definitions/agentos.ArtifactRef'
         type: array
+      budget_usage:
+        $ref: '#/definitions/agentos.PlanBudgetUsage'
       lifecycle_state:
         type: string
       progress:
@@ -157,6 +432,9 @@ definitions:
     - control.pause
     - control.resume
     - control.cancel
+    - plan.node.retry
+    - plan.approve
+    - plan.reject
     - user.message
     - user.approval
     - user.reject
@@ -169,6 +447,9 @@ definitions:
     - SignalControlPause
     - SignalControlResume
     - SignalControlCancel
+    - SignalPlanNodeRetry
+    - SignalPlanApprove
+    - SignalPlanReject
     - SignalUserMessage
     - SignalUserApproval
     - SignalUserReject
@@ -399,8 +680,18 @@ definitions:
     type: object
   request.AgentOSControl:
     properties:
+      actor_id:
+        type: string
+      idempotency_key:
+        type: string
+      metadata:
+        additionalProperties:
+          type: string
+        type: object
       operation:
         $ref: '#/definitions/agentos.ControlOperation'
+      requested_at:
+        type: string
     required:
     - operation
     type: object
@@ -584,6 +875,194 @@ info:
   title: GoAgent API
   version: "1.0"
 paths:
+  /agentos/plans:
+    post:
+      consumes:
+      - application/json
+      description: Start a durable cross-backend AgentOS RunPlan.
+      operationId: agentos-start-plan
+      parameters:
+      - description: AgentOS run plan request
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/agentos.RunPlanSpec'
+      produces:
+      - application/json
+      responses:
+        "202":
+          description: Accepted
+          schema:
+            $ref: '#/definitions/agentos.RunPlanStatus'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/response.Error'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/response.Error'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/response.Error'
+      summary: Start AgentOS plan
+      tags:
+      - agentos
+  /agentos/plans/{plan_id}/control:
+    post:
+      consumes:
+      - application/json
+      description: Send lifecycle control such as pause, resume, or cancel to an AgentOS
+        RunPlan.
+      operationId: agentos-control-plan
+      parameters:
+      - description: Plan ID
+        in: path
+        name: plan_id
+        required: true
+        type: string
+      - description: AgentOS plan control operation
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/request.AgentOSControl'
+      produces:
+      - application/json
+      responses:
+        "202":
+          description: Accepted
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/response.Error'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/response.Error'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/response.Error'
+      summary: Control AgentOS plan
+      tags:
+      - agentos
+  /agentos/plans/{plan_id}/events:
+    get:
+      consumes:
+      - application/json
+      description: Stream durable RunPlan events as Server-Sent Events.
+      operationId: agentos-stream-plan-events
+      parameters:
+      - description: Plan ID
+        in: path
+        name: plan_id
+        required: true
+        type: string
+      - description: Node ID
+        in: query
+        name: node_id
+        type: string
+      - description: Child run ID
+        in: query
+        name: run_id
+        type: string
+      - description: Replay events after this sequence
+        in: query
+        name: after_sequence
+        type: integer
+      produces:
+      - text/event-stream
+      responses:
+        "200":
+          description: SSE stream
+          schema:
+            type: string
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/response.Error'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/response.Error'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/response.Error'
+      summary: Stream AgentOS plan events
+      tags:
+      - agentos
+  /agentos/plans/{plan_id}/signals:
+    post:
+      consumes:
+      - application/json
+      description: Send plan-level business input such as retry, approve, or reject.
+      operationId: agentos-signal-plan
+      parameters:
+      - description: Plan ID
+        in: path
+        name: plan_id
+        required: true
+        type: string
+      - description: AgentOS plan signal
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/request.AgentOSSignal'
+      produces:
+      - application/json
+      responses:
+        "202":
+          description: Accepted
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/response.Error'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/response.Error'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/response.Error'
+      summary: Signal AgentOS plan
+      tags:
+      - agentos
+  /agentos/plans/{plan_id}/status:
+    get:
+      consumes:
+      - application/json
+      description: Query the current aggregate status of an AgentOS RunPlan.
+      operationId: agentos-plan-status
+      parameters:
+      - description: Plan ID
+        in: path
+        name: plan_id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/agentos.RunPlanStatus'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/response.Error'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/response.Error'
+      summary: Get AgentOS plan status
+      tags:
+      - agentos
   /agentos/runs:
     post:
       consumes:

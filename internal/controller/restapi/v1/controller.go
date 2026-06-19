@@ -29,4 +29,5 @@ type V1 struct {
 	cancelWorkflow CancelWorkflowFn // non-nil only when running with Temporal
 	signalWorkflow SignalWorkflowFn // non-nil only when running with Temporal
 	agentOSRuntime agentos.Runtime
+	planRuntime    agentos.PlanRuntime
 }

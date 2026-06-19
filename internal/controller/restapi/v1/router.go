@@ -17,12 +17,14 @@ func NewRoutes(apiV1Group fiber.Router, t usecase.AgentExecutor, o usecase.Orche
 	m usecase.TemplateManager, eh usecase.TriggerEventHandler,
 	eventIngest *eventing.Service,
 	agentOSRuntime agentos.Runtime,
+	planRuntime agentos.PlanRuntime,
 ) {
 	r := &V1{
 		t: t, o: o, l: l, v: validator.New(validator.WithRequiredStructEnabled()),
 		cancelWorkflow: cancelWorkflow, signalWorkflow: signalWorkflow,
 		eventIngest:    eventIngest,
 		agentOSRuntime: agentOSRuntime,
+		planRuntime:    planRuntime,
 	}
 
 	// Template routes (optional — requires TemplateManager)
@@ -57,5 +59,12 @@ func NewRoutes(apiV1Group fiber.Router, t usecase.AgentExecutor, o usecase.Orche
 		apiV1Group.Get("/agentos/runs/:run_id/status", r.statusAgentOSRun)
 		apiV1Group.Post("/agentos/runs/:run_id/signals", r.signalAgentOSRun)
 		apiV1Group.Post("/agentos/runs/:run_id/control", r.controlAgentOSRun)
+	}
+	if planRuntime != nil {
+		apiV1Group.Post("/agentos/plans", r.startAgentOSPlan)
+		apiV1Group.Get("/agentos/plans/:plan_id/status", r.statusAgentOSPlan)
+		apiV1Group.Post("/agentos/plans/:plan_id/signals", r.signalAgentOSPlan)
+		apiV1Group.Post("/agentos/plans/:plan_id/control", r.controlAgentOSPlan)
+		apiV1Group.Get("/agentos/plans/:plan_id/events", r.streamAgentOSPlanEvents)
 	}
 }

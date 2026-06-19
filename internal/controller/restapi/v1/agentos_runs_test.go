@@ -17,7 +17,7 @@ import (
 func TestAgentOSRunRoutesUseRuntimeControlPlane(t *testing.T) {
 	runtime := &fakeAgentOSRuntime{}
 	app := fiber.New()
-	NewRoutes(app.Group("/v1"), nil, nil, logger.New("error"), nil, nil, nil, nil, nil, runtime)
+	NewRoutes(app.Group("/v1"), nil, nil, logger.New("error"), nil, nil, nil, nil, nil, runtime, nil)
 
 	startBody := `{
 		"run_id": "run-1",

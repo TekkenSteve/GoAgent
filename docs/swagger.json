@@ -9,6 +9,287 @@
     "host": "localhost:8080",
     "basePath": "/v1",
     "paths": {
+        "/agentos/plans": {
+            "post": {
+                "description": "Start a durable cross-backend AgentOS RunPlan.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "agentos"
+                ],
+                "summary": "Start AgentOS plan",
+                "operationId": "agentos-start-plan",
+                "parameters": [
+                    {
+                        "description": "AgentOS run plan request",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/agentos.RunPlanSpec"
+                        }
+                    }
+                ],
+                "responses": {
+                    "202": {
+                        "description": "Accepted",
+                        "schema": {
+                            "$ref": "#/definitions/agentos.RunPlanStatus"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/response.Error"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/response.Error"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/response.Error"
+                        }
+                    }
+                }
+            }
+        },
+        "/agentos/plans/{plan_id}/control": {
+            "post": {
+                "description": "Send lifecycle control such as pause, resume, or cancel to an AgentOS RunPlan.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "agentos"
+                ],
+                "summary": "Control AgentOS plan",
+                "operationId": "agentos-control-plan",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Plan ID",
+                        "name": "plan_id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "AgentOS plan control operation",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/request.AgentOSControl"
+                        }
+                    }
+                ],
+                "responses": {
+                    "202": {
+                        "description": "Accepted"
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/response.Error"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/response.Error"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/response.Error"
+                        }
+                    }
+                }
+            }
+        },
+        "/agentos/plans/{plan_id}/events": {
+            "get": {
+                "description": "Stream durable RunPlan events as Server-Sent Events.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "text/event-stream"
+                ],
+                "tags": [
+                    "agentos"
+                ],
+                "summary": "Stream AgentOS plan events",
+                "operationId": "agentos-stream-plan-events",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Plan ID",
+                        "name": "plan_id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Node ID",
+                        "name": "node_id",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Child run ID",
+                        "name": "run_id",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "description": "Replay events after this sequence",
+                        "name": "after_sequence",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "SSE stream",
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/response.Error"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/response.Error"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/response.Error"
+                        }
+                    }
+                }
+            }
+        },
+        "/agentos/plans/{plan_id}/signals": {
+            "post": {
+                "description": "Send plan-level business input such as retry, approve, or reject.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "agentos"
+                ],
+                "summary": "Signal AgentOS plan",
+                "operationId": "agentos-signal-plan",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Plan ID",
+                        "name": "plan_id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "AgentOS plan signal",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/request.AgentOSSignal"
+                        }
+                    }
+                ],
+                "responses": {
+                    "202": {
+                        "description": "Accepted"
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/response.Error"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/response.Error"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/response.Error"
+                        }
+                    }
+                }
+            }
+        },
+        "/agentos/plans/{plan_id}/status": {
+            "get": {
+                "description": "Query the current aggregate status of an AgentOS RunPlan.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "agentos"
+                ],
+                "summary": "Get AgentOS plan status",
+                "operationId": "agentos-plan-status",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Plan ID",
+                        "name": "plan_id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/agentos.RunPlanStatus"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/response.Error"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/response.Error"
+                        }
+                    }
+                }
+            }
+        },
         "/agentos/runs": {
             "post": {
                 "description": "Start a generic AgentOS run on the selected backend.",
@@ -429,6 +710,26 @@
                 }
             }
         },
+        "agentos.ArtifactSpec": {
+            "type": "object",
+            "properties": {
+                "kind": {
+                    "$ref": "#/definitions/agentos.ArtifactKind"
+                },
+                "media_type": {
+                    "type": "string"
+                },
+                "name": {
+                    "type": "string"
+                },
+                "required": {
+                    "type": "boolean"
+                },
+                "schema_ref": {
+                    "type": "string"
+                }
+            }
+        },
         "agentos.BackendKind": {
             "type": "string",
             "enum": [
@@ -468,6 +769,21 @@
                 "ControlCancel"
             ]
         },
+        "agentos.EdgeTrigger": {
+            "type": "string",
+            "enum": [
+                "success",
+                "error",
+                "complete",
+                "always"
+            ],
+            "x-enum-varnames": [
+                "EdgeOnSuccess",
+                "EdgeOnError",
+                "EdgeOnComplete",
+                "EdgeOnAlways"
+            ]
+        },
         "agentos.EventType": {
             "type": "string",
             "enum": [
@@ -493,7 +809,21 @@
                 "artifact.created",
                 "node.input.resolved",
                 "node.output.published",
-                "capability.selected"
+                "capability.selected",
+                "plan.started",
+                "plan.blocked",
+                "plan.approved",
+                "plan.rejected",
+                "plan.succeeded",
+                "plan.failed",
+                "plan.canceled",
+                "plan.node.ready",
+                "plan.node.started",
+                "plan.node.succeeded",
+                "plan.node.failed",
+                "plan.node.retry_scheduled",
+                "plan.node.skipped",
+                "plan.node.canceled"
             ],
             "x-enum-varnames": [
                 "EventRunStarted",
@@ -518,8 +848,306 @@
                 "EventArtifactCreated",
                 "EventNodeInputResolved",
                 "EventNodeOutputPublished",
-                "EventCapabilitySelected"
+                "EventCapabilitySelected",
+                "EventPlanStarted",
+                "EventPlanBlocked",
+                "EventPlanApproved",
+                "EventPlanRejected",
+                "EventPlanSucceeded",
+                "EventPlanFailed",
+                "EventPlanCanceled",
+                "EventPlanNodeReady",
+                "EventPlanNodeStarted",
+                "EventPlanNodeSucceeded",
+                "EventPlanNodeFailed",
+                "EventPlanNodeRetryScheduled",
+                "EventPlanNodeSkipped",
+                "EventPlanNodeCanceled"
             ]
+        },
+        "agentos.InputMapping": {
+            "type": "object",
+            "properties": {
+                "expression": {
+                    "type": "string"
+                },
+                "required": {
+                    "type": "boolean"
+                },
+                "source_artifact": {
+                    "type": "string"
+                },
+                "source_node_id": {
+                    "type": "string"
+                },
+                "source_path": {
+                    "type": "string"
+                },
+                "target": {
+                    "type": "string"
+                }
+            }
+        },
+        "agentos.NodePolicy": {
+            "type": "object",
+            "properties": {
+                "join": {
+                    "$ref": "#/definitions/agentos.PlanJoinStrategy"
+                },
+                "max_attempts": {
+                    "type": "integer"
+                },
+                "timeout_seconds": {
+                    "type": "integer"
+                }
+            }
+        },
+        "agentos.PlanBudgetUsage": {
+            "type": "object",
+            "properties": {
+                "spent_cents": {
+                    "type": "integer"
+                }
+            }
+        },
+        "agentos.PlanEdgeSpec": {
+            "type": "object",
+            "properties": {
+                "condition": {
+                    "type": "string"
+                },
+                "edge_id": {
+                    "type": "string"
+                },
+                "from": {
+                    "type": "string"
+                },
+                "input_mapping": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/agentos.InputMapping"
+                    }
+                },
+                "on": {
+                    "$ref": "#/definitions/agentos.EdgeTrigger"
+                },
+                "to": {
+                    "type": "string"
+                }
+            }
+        },
+        "agentos.PlanJoinStrategy": {
+            "type": "string",
+            "enum": [
+                "all",
+                "any",
+                "first"
+            ],
+            "x-enum-varnames": [
+                "PlanJoinAll",
+                "PlanJoinAny",
+                "PlanJoinFirst"
+            ]
+        },
+        "agentos.PlanNodeSpec": {
+            "type": "object",
+            "properties": {
+                "capability": {
+                    "type": "string"
+                },
+                "conditions": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "inputs": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/agentos.InputMapping"
+                    }
+                },
+                "node_id": {
+                    "type": "string"
+                },
+                "outputs": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/agentos.ArtifactSpec"
+                    }
+                },
+                "policy": {
+                    "$ref": "#/definitions/agentos.NodePolicy"
+                },
+                "run": {
+                    "$ref": "#/definitions/agentos.RunSpec"
+                }
+            }
+        },
+        "agentos.PlanNodeStatus": {
+            "type": "object",
+            "properties": {
+                "artifacts": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/agentos.ArtifactRef"
+                    }
+                },
+                "attempts": {
+                    "type": "integer"
+                },
+                "backend": {
+                    "$ref": "#/definitions/agentos.BackendRef"
+                },
+                "budget_usage": {
+                    "$ref": "#/definitions/agentos.PlanBudgetUsage"
+                },
+                "completed_at": {
+                    "type": "string"
+                },
+                "lifecycle_state": {
+                    "type": "string"
+                },
+                "node_id": {
+                    "type": "string"
+                },
+                "reason": {
+                    "type": "string"
+                },
+                "run_id": {
+                    "type": "string"
+                },
+                "started_at": {
+                    "type": "string"
+                },
+                "updated_at": {
+                    "type": "string"
+                }
+            }
+        },
+        "agentos.PlanPolicy": {
+            "type": "object",
+            "properties": {
+                "budget_cents": {
+                    "type": "integer"
+                },
+                "continue_as_new_events": {
+                    "type": "integer"
+                },
+                "max_depth": {
+                    "type": "integer"
+                },
+                "max_expansions": {
+                    "type": "integer"
+                },
+                "max_history_events": {
+                    "type": "integer"
+                },
+                "max_iterations": {
+                    "type": "integer"
+                },
+                "max_nodes": {
+                    "type": "integer"
+                },
+                "max_parallel_nodes": {
+                    "type": "integer"
+                },
+                "timeout_seconds": {
+                    "type": "integer"
+                }
+            }
+        },
+        "agentos.RunPlanSpec": {
+            "type": "object",
+            "properties": {
+                "account_id": {
+                    "type": "string"
+                },
+                "edges": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/agentos.PlanEdgeSpec"
+                    }
+                },
+                "idempotency_key": {
+                    "type": "string"
+                },
+                "inputs": {
+                    "type": "object",
+                    "additionalProperties": {}
+                },
+                "metadata": {
+                    "type": "object",
+                    "additionalProperties": {
+                        "type": "string"
+                    }
+                },
+                "nodes": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/agentos.PlanNodeSpec"
+                    }
+                },
+                "plan_id": {
+                    "type": "string"
+                },
+                "policy": {
+                    "$ref": "#/definitions/agentos.PlanPolicy"
+                },
+                "project_id": {
+                    "type": "string"
+                },
+                "requested_at": {
+                    "type": "string"
+                },
+                "thread_id": {
+                    "type": "string"
+                }
+            }
+        },
+        "agentos.RunPlanStatus": {
+            "type": "object",
+            "properties": {
+                "active_run_ids": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "artifacts": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/agentos.ArtifactRef"
+                    }
+                },
+                "budget_usage": {
+                    "$ref": "#/definitions/agentos.PlanBudgetUsage"
+                },
+                "lifecycle_state": {
+                    "type": "string"
+                },
+                "metadata": {
+                    "type": "object",
+                    "additionalProperties": {
+                        "type": "string"
+                    }
+                },
+                "nodes": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/agentos.PlanNodeStatus"
+                    }
+                },
+                "plan_id": {
+                    "type": "string"
+                },
+                "reason": {
+                    "type": "string"
+                },
+                "updated_at": {
+                    "type": "string"
+                }
+            }
         },
         "agentos.RunProgress": {
             "type": "object",
@@ -535,6 +1163,54 @@
                 }
             }
         },
+        "agentos.RunSpec": {
+            "type": "object",
+            "properties": {
+                "account_id": {
+                    "type": "string"
+                },
+                "agent_id": {
+                    "type": "string"
+                },
+                "backend": {
+                    "$ref": "#/definitions/agentos.BackendRef"
+                },
+                "idempotency_key": {
+                    "type": "string"
+                },
+                "input": {
+                    "type": "object",
+                    "additionalProperties": {}
+                },
+                "metadata": {
+                    "type": "object",
+                    "additionalProperties": {
+                        "type": "string"
+                    }
+                },
+                "model_ref": {
+                    "type": "string"
+                },
+                "project_id": {
+                    "type": "string"
+                },
+                "requested_at": {
+                    "type": "string"
+                },
+                "run_id": {
+                    "type": "string"
+                },
+                "system_prompt": {
+                    "type": "string"
+                },
+                "thread_id": {
+                    "type": "string"
+                },
+                "user_message": {
+                    "type": "string"
+                }
+            }
+        },
         "agentos.RunStatus": {
             "type": "object",
             "properties": {
@@ -543,6 +1219,9 @@
                     "items": {
                         "$ref": "#/definitions/agentos.ArtifactRef"
                     }
+                },
+                "budget_usage": {
+                    "$ref": "#/definitions/agentos.PlanBudgetUsage"
                 },
                 "lifecycle_state": {
                     "type": "string"
@@ -570,6 +1249,9 @@
                 "control.pause",
                 "control.resume",
                 "control.cancel",
+                "plan.node.retry",
+                "plan.approve",
+                "plan.reject",
                 "user.message",
                 "user.approval",
                 "user.reject",
@@ -582,6 +1264,9 @@
                 "SignalControlPause",
                 "SignalControlResume",
                 "SignalControlCancel",
+                "SignalPlanNodeRetry",
+                "SignalPlanApprove",
+                "SignalPlanReject",
                 "SignalUserMessage",
                 "SignalUserApproval",
                 "SignalUserReject",
@@ -911,8 +1596,23 @@
                 "operation"
             ],
             "properties": {
+                "actor_id": {
+                    "type": "string"
+                },
+                "idempotency_key": {
+                    "type": "string"
+                },
+                "metadata": {
+                    "type": "object",
+                    "additionalProperties": {
+                        "type": "string"
+                    }
+                },
                 "operation": {
                     "$ref": "#/definitions/agentos.ControlOperation"
+                },
+                "requested_at": {
+                    "type": "string"
                 }
             }
         },
