@@ -6,6 +6,8 @@ import (
 
 	"github.com/TekkenSteve/GoAgent/agentos"
 	"github.com/google/cel-go/cel"
+	celenv "github.com/google/cel-go/common/env"
+	"github.com/google/cel-go/common/overloads"
 )
 
 // CELCompiler compiles deterministic CEL expressions for RunPlan conditions.
@@ -15,7 +17,8 @@ type CELCompiler struct {
 
 // NewCELCompiler creates a CEL compiler with the fixed AgentOS plan variables.
 func NewCELCompiler() (*CELCompiler, error) {
-	env, err := cel.NewEnv(
+	env, err := cel.NewCustomEnv(
+		cel.StdLib(cel.StdLibSubset(deterministicPlanExpressionSubset())),
 		cel.Variable("plan", cel.DynType),
 		cel.Variable("node", cel.DynType),
 		cel.Variable("inputs", cel.DynType),
@@ -29,6 +32,13 @@ func NewCELCompiler() (*CELCompiler, error) {
 	}
 
 	return &CELCompiler{env: env}, nil
+}
+
+func deterministicPlanExpressionSubset() *celenv.LibrarySubset {
+	return celenv.NewLibrarySubset().AddExcludedFunctions(
+		celenv.NewFunction(overloads.TypeConvertTimestamp),
+		celenv.NewFunction(overloads.TypeConvertDuration),
+	)
 }
 
 // Compile validates one expression.
