@@ -213,6 +213,127 @@ func TestAgentOSPlanPostgresDurablePersistence(t *testing.T) {
 	}
 }
 
+func TestAgentOSPlanPostgresPlanEventIdempotencyDoesNotAdvanceSequence(t *testing.T) {
+	ctx, pg, suffix := newAgentOSPlanPostgresIntegrationDB(t)
+	planRepo := NewAgentOSPlanRepo(pg)
+
+	spec := postgresIntegrationPlanSpec("plan-event-"+suffix, "plan-event-start-"+suffix)
+	status := agentosplan.NewState(spec, time.Now().UTC()).Status
+	if _, _, err := planRepo.CreatePlan(ctx, spec, status); err != nil {
+		t.Fatalf("CreatePlan: %v", err)
+	}
+
+	event := agentos.PlanEvent{
+		Event: agentos.Event{
+			EventType: agentos.EventPlanStarted,
+			Timestamp: time.Date(2026, 6, 19, 12, 0, 0, 0, time.UTC),
+			Payload:   map[string]any{"state": "started"},
+		},
+		PlanID: spec.PlanID,
+	}
+	first, err := planRepo.AppendPlanEvent(ctx, event, "plan-event-key-"+suffix)
+	if err != nil {
+		t.Fatalf("AppendPlanEvent first: %v", err)
+	}
+	replay, err := planRepo.AppendPlanEvent(ctx, event, "plan-event-key-"+suffix)
+	if err != nil {
+		t.Fatalf("AppendPlanEvent replay: %v", err)
+	}
+	if replay.EventID != first.EventID || replay.Sequence != 1 {
+		t.Fatalf("replay = %#v, want first event at sequence 1", replay)
+	}
+
+	changed := event
+	changed.EventType = agentos.EventPlanFailed
+	changed.Payload = map[string]any{"state": "failed"}
+	if _, err := planRepo.AppendPlanEvent(ctx, changed, "plan-event-key-"+suffix); !errors.Is(err, agentos.ErrInvalidPlanEvent) {
+		t.Fatalf("AppendPlanEvent changed replay error = %v, want ErrInvalidPlanEvent", err)
+	}
+
+	next, err := planRepo.AppendPlanEvent(ctx, agentos.PlanEvent{
+		Event: agentos.Event{
+			EventType: agentos.EventPlanSucceeded,
+			Timestamp: time.Date(2026, 6, 19, 12, 1, 0, 0, time.UTC),
+			Payload:   map[string]any{"state": "succeeded"},
+		},
+		PlanID: spec.PlanID,
+	}, "plan-event-next-"+suffix)
+	if err != nil {
+		t.Fatalf("AppendPlanEvent next: %v", err)
+	}
+	if next.Sequence != 2 {
+		t.Fatalf("next sequence = %d, want 2 after failed replay", next.Sequence)
+	}
+	events, err := planRepo.ListPlanEvents(ctx, agentos.PlanStreamScope{PlanID: spec.PlanID}, 0)
+	if err != nil {
+		t.Fatalf("ListPlanEvents: %v", err)
+	}
+	if len(events) != 2 {
+		t.Fatalf("events = %#v, want exactly first and next event", events)
+	}
+}
+
+func TestAgentOSArtifactPostgresRejectsDifferentIdempotencyReplay(t *testing.T) {
+	ctx, pg, suffix := newAgentOSPlanPostgresIntegrationDB(t)
+	blobStore, err := artifactblob.NewLocalBlobStore(t.TempDir())
+	if err != nil {
+		t.Fatalf("NewLocalBlobStore: %v", err)
+	}
+	artifactStore := NewAgentOSArtifactRepo(pg, blobStore)
+
+	ref := agentos.ArtifactRef{
+		PlanID:    "plan-artifact-" + suffix,
+		NodeID:    "node-1",
+		RunID:     "run-1",
+		Name:      "summary",
+		Kind:      agentos.ArtifactKindObject,
+		MediaType: "application/json",
+	}
+	first, err := artifactStore.Put(ctx, ref, map[string]any{"summary": "ok"}, "artifact-key-"+suffix)
+	if err != nil {
+		t.Fatalf("Artifact Put first: %v", err)
+	}
+	replay, err := artifactStore.Put(ctx, ref, map[string]any{"summary": "ok"}, "artifact-key-"+suffix)
+	if err != nil {
+		t.Fatalf("Artifact Put replay: %v", err)
+	}
+	if replay.ArtifactID != first.ArtifactID || replay.Digest != first.Digest {
+		t.Fatalf("Artifact replay = %#v, want %#v", replay, first)
+	}
+
+	if _, err := artifactStore.Put(ctx, ref, map[string]any{"summary": "changed"}, "artifact-key-"+suffix); !errors.Is(err, agentos.ErrInvalidArtifact) {
+		t.Fatalf("Artifact Put changed payload error = %v, want ErrInvalidArtifact", err)
+	}
+	changedID := ref
+	changedID.ArtifactID = "different-artifact-" + suffix
+	if _, err := artifactStore.Put(ctx, changedID, map[string]any{"summary": "ok"}, "artifact-key-"+suffix); !errors.Is(err, agentos.ErrInvalidArtifact) {
+		t.Fatalf("Artifact Put changed id error = %v, want ErrInvalidArtifact", err)
+	}
+	if _, err := artifactStore.Put(ctx, agentos.ArtifactRef{
+		ArtifactID: first.ArtifactID,
+		PlanID:     ref.PlanID,
+		NodeID:     ref.NodeID,
+		RunID:      ref.RunID,
+		Name:       ref.Name,
+		Kind:       ref.Kind,
+		MediaType:  ref.MediaType,
+	}, map[string]any{"summary": "ok"}, "artifact-other-key-"+suffix); !errors.Is(err, agentos.ErrInvalidArtifact) {
+		t.Fatalf("Artifact Put reused artifact id error = %v, want ErrInvalidArtifact", err)
+	}
+
+	loaded, payload, err := artifactStore.Get(ctx, first.ArtifactID)
+	if err != nil {
+		t.Fatalf("Artifact Get: %v", err)
+	}
+	if loaded.Digest != first.Digest {
+		t.Fatalf("loaded digest = %q, want %q", loaded.Digest, first.Digest)
+	}
+	value, ok := payload.(map[string]any)["summary"]
+	if !ok || value != "ok" {
+		t.Fatalf("payload = %#v, want original payload", payload)
+	}
+}
+
 func postgresIntegrationPlanSpec(planID, idempotencyKey string) agentos.RunPlanSpec {
 	ref := agentos.BackendRef{Kind: agentos.BackendKindNative, Name: agentos.BackendNameGoAgentNative}
 
@@ -235,6 +356,24 @@ func postgresIntegrationPlanSpec(planID, idempotencyKey string) agentos.RunPlanS
 			},
 		},
 	}
+}
+
+func newAgentOSPlanPostgresIntegrationDB(t *testing.T) (context.Context, *postgres.Postgres, string) {
+	t.Helper()
+	pgURL := os.Getenv("GOAGENT_POSTGRES_TEST_URL")
+	if pgURL == "" {
+		t.Fatal("GOAGENT_POSTGRES_TEST_URL is required for postgres_integration tests")
+	}
+
+	pg, err := postgres.New(pgURL, postgres.MaxPoolSize(1), postgres.ConnAttempts(1), postgres.ConnTimeout(100*time.Millisecond))
+	if err != nil {
+		t.Fatalf("postgres.New: %v", err)
+	}
+	t.Cleanup(pg.Close)
+	waitForPostgres(t, pg)
+	applyAgentOSPlanMigrations(t, pg)
+
+	return t.Context(), pg, time.Now().UTC().Format("20060102150405.000000000")
 }
 
 func waitForPostgres(t *testing.T, pg *postgres.Postgres) {
