@@ -177,6 +177,7 @@ The `examples/embed/` directory shows how to embed GoAgent through the public Ag
 | [ReAct](examples/embed/react/) | `examples/embed/react/main.go` | Start a generic run with `agentos.Runtime` |
 | [Conversation](examples/embed/conversation/) | `examples/embed/conversation/main.go` | Start a conversational run through `agentos/temporal` |
 | [Tools](examples/embed/tools/) | `examples/embed/tools/main.go` | Start a tool-capable prompt through the runtime boundary |
+| [RunPlan](examples/embed/plan/) | `examples/embed/plan/main.go` | Start a durable cross-backend plan with `agentos.PlanRuntime` |
 
 ### Type-Only Usage (Mode 3)
 
