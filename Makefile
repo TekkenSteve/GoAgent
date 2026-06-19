@@ -111,6 +111,11 @@ integration-test: ### run integration-test
 	go clean -testcache && go test -v ./integration-test/...
 .PHONY: integration-test
 
+postgres-integration-test: ### run Postgres-backed AgentOS persistence integration tests
+	@test -n "$(GOAGENT_POSTGRES_TEST_URL)" || (echo "GOAGENT_POSTGRES_TEST_URL is required" >&2; exit 1)
+	go clean -testcache && go test -tags postgres_integration -v ./internal/repo/persistent
+.PHONY: postgres-integration-test
+
 mock: ### run mockgen
 	mockgen -source ./internal/repo/contracts.go -package usecase_test > ./internal/usecase/mocks_repo_test.go
 	mockgen -source ./internal/usecase/contracts.go -package usecase_test > ./internal/usecase/mocks_usecase_test.go
