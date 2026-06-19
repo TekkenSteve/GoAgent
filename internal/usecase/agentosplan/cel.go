@@ -36,6 +36,16 @@ func (c *CELCompiler) Compile(expression string) (Expression, error) {
 	if expression == "" {
 		return alwaysTrueExpression{}, nil
 	}
+	valueExpression, err := c.CompileValue(expression)
+	if err != nil {
+		return nil, err
+	}
+
+	return boolExpression{value: valueExpression}, nil
+}
+
+// CompileValue validates one expression that may return any deterministic value.
+func (c *CELCompiler) CompileValue(expression string) (ValueExpression, error) {
 	ast, issues := c.env.Compile(expression)
 	if issues != nil && issues.Err() != nil {
 		return nil, fmt.Errorf("%w: %s", agentos.ErrInvalidExpression, issues.Err())
@@ -48,22 +58,36 @@ func (c *CELCompiler) Compile(expression string) (Expression, error) {
 	return celExpression{program: program}, nil
 }
 
-type celExpression struct {
-	program cel.Program
+type boolExpression struct {
+	value ValueExpression
 }
 
 // Evaluate returns a boolean expression result.
-func (e celExpression) Evaluate(_ context.Context, vars map[string]any) (bool, error) {
-	value, _, err := e.program.Eval(vars)
+func (e boolExpression) Evaluate(ctx context.Context, vars map[string]any) (bool, error) {
+	value, err := e.value.EvaluateValue(ctx, vars)
 	if err != nil {
-		return false, fmt.Errorf("%w: %s", agentos.ErrInvalidExpression, err)
+		return false, err
 	}
-	result, ok := value.Value().(bool)
+	result, ok := value.(bool)
 	if !ok {
 		return false, fmt.Errorf("%w: expression result must be bool", agentos.ErrInvalidExpression)
 	}
 
 	return result, nil
+}
+
+type celExpression struct {
+	program cel.Program
+}
+
+// EvaluateValue returns a deterministic expression value.
+func (e celExpression) EvaluateValue(_ context.Context, vars map[string]any) (any, error) {
+	value, _, err := e.program.Eval(vars)
+	if err != nil {
+		return nil, fmt.Errorf("%w: %s", agentos.ErrInvalidExpression, err)
+	}
+
+	return value.Value(), nil
 }
 
 type alwaysTrueExpression struct{}

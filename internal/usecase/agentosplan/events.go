@@ -11,8 +11,9 @@ import (
 )
 
 const (
-	idempotencyOperationNodeStart   = "node_start"
-	idempotencyOperationNodeControl = "node_control"
+	idempotencyOperationNodeStart       = "node_start"
+	idempotencyOperationNodeControl     = "node_control"
+	idempotencyOperationArtifactPublish = "artifact_publish"
 )
 
 // PlanEventFromStateEvent maps a deterministic reducer transition to the public
@@ -104,6 +105,39 @@ func NodeStartIdempotencyKey(planID, nodeID string) (string, error) {
 	})
 	if err != nil {
 		return "", fmt.Errorf("%w: marshal node start key: %s", agentos.ErrInvalidPlanEvent, err)
+	}
+	sum := sha256.Sum256(data)
+
+	return planID + ":" + hex.EncodeToString(sum[:]), nil
+}
+
+// ArtifactPublishIdempotencyKey creates the stable idempotency key for publishing
+// one node output artifact.
+func ArtifactPublishIdempotencyKey(planID, nodeID, runID, artifactName string) (string, error) {
+	if planID == "" {
+		return "", fmt.Errorf("%w: plan id is required", agentos.ErrInvalidRunPlan)
+	}
+	if nodeID == "" {
+		return "", fmt.Errorf("%w: node id is required", agentos.ErrInvalidRunPlan)
+	}
+	if artifactName == "" {
+		return "", fmt.Errorf("%w: artifact name is required", agentos.ErrInvalidArtifact)
+	}
+	data, err := json.Marshal(struct {
+		Operation    string `json:"operation"`
+		PlanID       string `json:"plan_id"`
+		NodeID       string `json:"node_id"`
+		RunID        string `json:"run_id,omitempty"`
+		ArtifactName string `json:"artifact_name"`
+	}{
+		Operation:    idempotencyOperationArtifactPublish,
+		PlanID:       planID,
+		NodeID:       nodeID,
+		RunID:        runID,
+		ArtifactName: artifactName,
+	})
+	if err != nil {
+		return "", fmt.Errorf("%w: marshal artifact publish key: %s", agentos.ErrInvalidPlanEvent, err)
 	}
 	sum := sha256.Sum256(data)
 

@@ -12,9 +12,19 @@ type ExpressionCompiler interface {
 	Compile(expression string) (Expression, error)
 }
 
-// Expression evaluates a deterministic AgentOS expression.
+// Expression evaluates a deterministic AgentOS boolean expression.
 type Expression interface {
 	Evaluate(ctx context.Context, vars map[string]any) (bool, error)
+}
+
+// ValueExpressionCompiler validates and compiles deterministic value expressions.
+type ValueExpressionCompiler interface {
+	CompileValue(expression string) (ValueExpression, error)
+}
+
+// ValueExpression evaluates a deterministic AgentOS expression to a value.
+type ValueExpression interface {
+	EvaluateValue(ctx context.Context, vars map[string]any) (any, error)
 }
 
 // CapabilityCatalog exposes backend capabilities available to RunPlan nodes.
@@ -24,7 +34,7 @@ type CapabilityCatalog interface {
 
 // ArtifactStore stores artifacts outside workflow history.
 type ArtifactStore interface {
-	Put(ctx context.Context, artifact agentos.ArtifactRef, payload any) (agentos.ArtifactRef, error)
+	Put(ctx context.Context, artifact agentos.ArtifactRef, payload any, idempotencyKey string) (agentos.ArtifactRef, error)
 	Get(ctx context.Context, artifactID string) (agentos.ArtifactRef, any, error)
 	List(ctx context.Context, planID string) ([]agentos.ArtifactRef, error)
 }

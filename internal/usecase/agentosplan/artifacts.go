@@ -16,6 +16,7 @@ type MemoryArtifactStore struct {
 	mu        sync.RWMutex
 	artifacts map[string]storedArtifact
 	byPlan    map[string][]string
+	byKey     map[string]string
 	now       func() time.Time
 }
 
@@ -29,12 +30,16 @@ func NewMemoryArtifactStore() *MemoryArtifactStore {
 	return &MemoryArtifactStore{
 		artifacts: make(map[string]storedArtifact),
 		byPlan:    make(map[string][]string),
+		byKey:     make(map[string]string),
 		now:       func() time.Time { return time.Now().UTC() },
 	}
 }
 
 // Put stores one artifact payload.
-func (s *MemoryArtifactStore) Put(_ context.Context, artifact agentos.ArtifactRef, payload any) (agentos.ArtifactRef, error) {
+func (s *MemoryArtifactStore) Put(_ context.Context, artifact agentos.ArtifactRef, payload any, idempotencyKey string) (agentos.ArtifactRef, error) {
+	if idempotencyKey == "" {
+		return agentos.ArtifactRef{}, fmt.Errorf("%w: artifact idempotency key is required", agentos.ErrInvalidArtifact)
+	}
 	if artifact.Name == "" {
 		return agentos.ArtifactRef{}, fmt.Errorf("%w: artifact name is required", agentos.ErrInvalidArtifact)
 	}
@@ -50,7 +55,17 @@ func (s *MemoryArtifactStore) Put(_ context.Context, artifact agentos.ArtifactRe
 
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if idempotencyKey != "" {
+		if artifactID, exists := s.byKey[idempotencyKey]; exists {
+			existing := s.artifacts[artifactID]
+
+			return existing.ref, nil
+		}
+	}
 	s.artifacts[artifact.ArtifactID] = storedArtifact{ref: artifact, payload: payload}
+	if idempotencyKey != "" {
+		s.byKey[idempotencyKey] = artifact.ArtifactID
+	}
 	if artifact.PlanID != "" {
 		s.byPlan[artifact.PlanID] = append(s.byPlan[artifact.PlanID], artifact.ArtifactID)
 	}
