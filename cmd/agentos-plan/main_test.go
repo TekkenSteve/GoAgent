@@ -169,6 +169,93 @@ func TestValidateDeltaCommandRejectsPolicyViolation(t *testing.T) {
 	}
 }
 
+func TestServerlessWorkflowCommandsRoundTrip(t *testing.T) {
+	dir := t.TempDir()
+	planPath := filepath.Join(dir, "plan.yaml")
+	capabilitiesPath := filepath.Join(dir, "capabilities.yaml")
+	workflowPath := filepath.Join(dir, "workflow.yaml")
+	if err := os.WriteFile(planPath, []byte(capabilityPlanYAML), 0o644); err != nil {
+		t.Fatalf("WriteFile plan: %v", err)
+	}
+	if err := os.WriteFile(capabilitiesPath, []byte(capabilityCatalogYAML), 0o644); err != nil {
+		t.Fatalf("WriteFile capabilities: %v", err)
+	}
+
+	var stdout, stderr bytes.Buffer
+	code := run([]string{
+		"export-serverless",
+		"--file", planPath,
+		"--format", "yaml",
+		"--capabilities", capabilitiesPath,
+		"--capabilities-format", "yaml",
+		"--out-format", "yaml",
+		"--out", workflowPath,
+	}, &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("export-serverless code = %d stderr = %s", code, stderr.String())
+	}
+
+	workflowData, err := os.ReadFile(workflowPath)
+	if err != nil {
+		t.Fatalf("ReadFile workflow: %v", err)
+	}
+	if !strings.Contains(string(workflowData), "agentos.io/run_plan") {
+		t.Fatalf("workflow yaml missing AgentOS extension:\n%s", string(workflowData))
+	}
+
+	stdout.Reset()
+	stderr.Reset()
+	code = run([]string{
+		"import-serverless",
+		"--file", workflowPath,
+		"--format", "yaml",
+		"--capabilities", capabilitiesPath,
+		"--capabilities-format", "yaml",
+		"--out-format", "json",
+	}, &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("import-serverless code = %d stderr = %s", code, stderr.String())
+	}
+
+	var output compiledPlanOutput
+	if err := json.Unmarshal(stdout.Bytes(), &output); err != nil {
+		t.Fatalf("imported json: %v\n%s", err, stdout.String())
+	}
+	if output.Spec.PlanID != "plan-cli" {
+		t.Fatalf("plan id = %q", output.Spec.PlanID)
+	}
+	if len(output.Order) != 1 || output.Order[0] != "research" {
+		t.Fatalf("order = %#v", output.Order)
+	}
+}
+
+func TestImportServerlessCommandRejectsMissingAgentOSExtension(t *testing.T) {
+	dir := t.TempDir()
+	workflowPath := filepath.Join(dir, "workflow.yaml")
+	if err := os.WriteFile(workflowPath, []byte(`
+document:
+  dsl: 1.0.3
+  name: missing-agentos-extension
+do: []
+`), 0o644); err != nil {
+		t.Fatalf("WriteFile workflow: %v", err)
+	}
+
+	var stdout, stderr bytes.Buffer
+	code := run([]string{
+		"import-serverless",
+		"--file", workflowPath,
+		"--format", "yaml",
+		"--out-format", "json",
+	}, &stdout, &stderr)
+	if code == 0 {
+		t.Fatalf("import-serverless succeeded; stdout=%s", stdout.String())
+	}
+	if !strings.Contains(stderr.String(), "missing agentos.io/run_plan extension") {
+		t.Fatalf("stderr = %s", stderr.String())
+	}
+}
+
 const capabilityPlanYAML = `
 plan_id: plan-cli
 nodes:
