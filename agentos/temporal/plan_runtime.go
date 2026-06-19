@@ -220,15 +220,12 @@ func (r *planRuntime) authorizePlan(ctx context.Context, ref agentos.PlanRef) (a
 		return agentos.RunPlanSpec{}, agentos.RunPlanStatus{}, errPlanRuntimePlanIndexRequired
 	}
 
-	spec, status, exists, err := r.planIndex.GetPlan(ctx, ref.PlanID)
+	spec, status, exists, err := r.planIndex.GetPlanByRef(ctx, ref)
 	if err != nil {
 		return agentos.RunPlanSpec{}, agentos.RunPlanStatus{}, err
 	}
 	if !exists {
 		return agentos.RunPlanSpec{}, agentos.RunPlanStatus{}, fmt.Errorf("%w: %s", agentos.ErrPlanRouteNotFound, ref.PlanID)
-	}
-	if err := agentosplan.ValidatePlanTenantAccess(ref, spec); err != nil {
-		return agentos.RunPlanSpec{}, agentos.RunPlanStatus{}, err
 	}
 
 	return spec, status, nil

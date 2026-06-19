@@ -68,6 +68,34 @@ func TestPlanRuntimeStatusPlanReadsDurableIndex(t *testing.T) {
 	}
 }
 
+func TestPlanRuntimeStatusPlanUsesScopedPlanIndex(t *testing.T) {
+	ref := agentos.PlanRef{PlanID: "plan-1", AccountID: "acct-1", ProjectID: "proj-1"}
+	index := &scopedOnlyPlanIndex{
+		ref: ref,
+		spec: agentos.RunPlanSpec{
+			PlanID:    ref.PlanID,
+			AccountID: ref.AccountID,
+			ProjectID: ref.ProjectID,
+		},
+		status: agentos.RunPlanStatus{
+			PlanID:         ref.PlanID,
+			LifecycleState: agentos.PlanLifecycleRunning,
+		},
+	}
+	rt := &planRuntime{planIndex: index}
+
+	got, err := rt.StatusPlan(t.Context(), ref)
+	if err != nil {
+		t.Fatalf("StatusPlan: %v", err)
+	}
+	if got.PlanID != ref.PlanID || got.LifecycleState != agentos.PlanLifecycleRunning {
+		t.Fatalf("status = %#v", got)
+	}
+	if index.planOnlyCalled {
+		t.Fatal("StatusPlan used plan-only GetPlan instead of scoped GetPlanByRef")
+	}
+}
+
 func TestPlanRuntimeStartPlanRequiresTenantScope(t *testing.T) {
 	rt := &planRuntime{planIndex: agentosplan.NewMemoryPlanStore()}
 
@@ -694,6 +722,35 @@ func newPlanRuntimeTestStore(t *testing.T) (*agentosplan.MemoryPlanStore, agento
 	}
 
 	return store, agentos.PlanRef{PlanID: spec.PlanID, AccountID: spec.AccountID, ProjectID: spec.ProjectID}
+}
+
+type scopedOnlyPlanIndex struct {
+	ref            agentos.PlanRef
+	spec           agentos.RunPlanSpec
+	status         agentos.RunPlanStatus
+	planOnlyCalled bool
+}
+
+func (i *scopedOnlyPlanIndex) CreatePlan(context.Context, agentos.RunPlanSpec, agentos.RunPlanStatus) (agentos.RunPlanStatus, bool, error) {
+	return agentos.RunPlanStatus{}, false, errors.New("unexpected CreatePlan")
+}
+
+func (i *scopedOnlyPlanIndex) GetPlan(context.Context, string) (agentos.RunPlanSpec, agentos.RunPlanStatus, bool, error) {
+	i.planOnlyCalled = true
+
+	return agentos.RunPlanSpec{}, agentos.RunPlanStatus{}, false, errors.New("unexpected plan-only GetPlan")
+}
+
+func (i *scopedOnlyPlanIndex) GetPlanByRef(_ context.Context, ref agentos.PlanRef) (agentos.RunPlanSpec, agentos.RunPlanStatus, bool, error) {
+	if ref != i.ref {
+		return agentos.RunPlanSpec{}, agentos.RunPlanStatus{}, false, nil
+	}
+
+	return i.spec, i.status, true, nil
+}
+
+func (i *scopedOnlyPlanIndex) UpdatePlanStatus(context.Context, agentos.RunPlanStatus, string) error {
+	return errors.New("unexpected UpdatePlanStatus")
 }
 
 type fakePlanTemporalClient struct {

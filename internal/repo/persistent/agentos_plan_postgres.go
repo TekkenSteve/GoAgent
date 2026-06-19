@@ -90,6 +90,25 @@ func (r *AgentOSPlanRepo) GetPlan(ctx context.Context, planID string) (agentos.R
 	return snapshot.Spec, snapshot.Status, true, nil
 }
 
+func (r *AgentOSPlanRepo) GetPlanByRef(ctx context.Context, ref agentos.PlanRef) (agentos.RunPlanSpec, agentos.RunPlanStatus, bool, error) {
+	if err := agentosplan.ValidatePlanRef(ref); err != nil {
+		return agentos.RunPlanSpec{}, agentos.RunPlanStatus{}, false, err
+	}
+	snapshot, exists, err := r.loadPlanStateByWhere(ctx, sq.Eq{
+		"plan_id":    ref.PlanID,
+		"account_id": ref.AccountID,
+		"project_id": ref.ProjectID,
+	}, "GetPlanByRef")
+	if err != nil || !exists {
+		return agentos.RunPlanSpec{}, agentos.RunPlanStatus{}, exists, err
+	}
+	if err := agentosplan.ValidatePlanTenantAccess(ref, snapshot.Spec); err != nil {
+		return agentos.RunPlanSpec{}, agentos.RunPlanStatus{}, false, err
+	}
+
+	return snapshot.Spec, snapshot.Status, true, nil
+}
+
 func (r *AgentOSPlanRepo) ListPlanRefs(ctx context.Context, scope agentosplan.PlanRefScope) ([]agentos.PlanRef, error) {
 	if scope.Limit < 0 {
 		return nil, fmt.Errorf("%w: plan ref limit must be non-negative", agentos.ErrInvalidPlanScope)
@@ -379,13 +398,17 @@ func (r *AgentOSPlanRepo) LoadPlanState(ctx context.Context, planID string) (age
 		return agentosplan.PlanStateSnapshot{}, false, fmt.Errorf("%w: plan id is required", agentos.ErrInvalidRunPlan)
 	}
 
+	return r.loadPlanStateByWhere(ctx, sq.Eq{"plan_id": planID}, "LoadPlanState")
+}
+
+func (r *AgentOSPlanRepo) loadPlanStateByWhere(ctx context.Context, where sq.Eq, op string) (agentosplan.PlanStateSnapshot, bool, error) {
 	sql, args, err := r.Builder.
 		Select("spec_json", "status_json", "idempotency_key").
 		From("plans").
-		Where(sq.Eq{"plan_id": planID}).
+		Where(where).
 		ToSql()
 	if err != nil {
-		return agentosplan.PlanStateSnapshot{}, false, fmt.Errorf("AgentOSPlanRepo - LoadPlanState - builder: %w", err)
+		return agentosplan.PlanStateSnapshot{}, false, fmt.Errorf("AgentOSPlanRepo - %s - builder: %w", op, err)
 	}
 
 	var specJSON []byte
@@ -397,18 +420,18 @@ func (r *AgentOSPlanRepo) LoadPlanState(ctx context.Context, planID string) (age
 			return agentosplan.PlanStateSnapshot{}, false, nil
 		}
 
-		return agentosplan.PlanStateSnapshot{}, false, fmt.Errorf("AgentOSPlanRepo - LoadPlanState - query: %w", err)
+		return agentosplan.PlanStateSnapshot{}, false, fmt.Errorf("AgentOSPlanRepo - %s - query: %w", op, err)
 	}
 
 	var spec agentos.RunPlanSpec
 	if err := json.Unmarshal(specJSON, &spec); err != nil {
-		return agentosplan.PlanStateSnapshot{}, false, fmt.Errorf("AgentOSPlanRepo - LoadPlanState - decode spec: %w", err)
+		return agentosplan.PlanStateSnapshot{}, false, fmt.Errorf("AgentOSPlanRepo - %s - decode spec: %w", op, err)
 	}
 	var status agentos.RunPlanStatus
 	if err := json.Unmarshal(statusJSON, &status); err != nil {
-		return agentosplan.PlanStateSnapshot{}, false, fmt.Errorf("AgentOSPlanRepo - LoadPlanState - decode status: %w", err)
+		return agentosplan.PlanStateSnapshot{}, false, fmt.Errorf("AgentOSPlanRepo - %s - decode status: %w", op, err)
 	}
-	nodes, err := r.loadPlanNodeStatuses(ctx, planID)
+	nodes, err := r.loadPlanNodeStatuses(ctx, spec.PlanID)
 	if err != nil {
 		return agentosplan.PlanStateSnapshot{}, false, err
 	}

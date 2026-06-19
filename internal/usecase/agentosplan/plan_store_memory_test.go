@@ -37,6 +37,33 @@ func TestMemoryPlanStoreUpdatePlanStatusRejectsMissingPlan(t *testing.T) {
 	}
 }
 
+func TestMemoryPlanStoreGetPlanByRefRequiresTenantScope(t *testing.T) {
+	ctx := context.Background()
+	store := NewMemoryPlanStore()
+	spec := createMemoryPlanForTest(t, ctx, store, "plan-1")
+
+	for _, ref := range []agentos.PlanRef{
+		{PlanID: spec.PlanID},
+		{PlanID: spec.PlanID, AccountID: spec.AccountID},
+		{PlanID: spec.PlanID, ProjectID: spec.ProjectID},
+	} {
+		if _, _, _, err := store.GetPlanByRef(ctx, ref); !errors.Is(err, agentos.ErrInvalidPlanScope) {
+			t.Fatalf("GetPlanByRef ref %#v error = %v, want ErrInvalidPlanScope", ref, err)
+		}
+	}
+
+	if _, _, _, err := store.GetPlanByRef(ctx, agentos.PlanRef{PlanID: spec.PlanID, AccountID: "acct-other", ProjectID: spec.ProjectID}); !errors.Is(err, agentos.ErrPlanRouteNotFound) {
+		t.Fatalf("GetPlanByRef tenant mismatch error = %v, want ErrPlanRouteNotFound", err)
+	}
+	loaded, status, exists, err := store.GetPlanByRef(ctx, agentos.PlanRef{PlanID: spec.PlanID, AccountID: spec.AccountID, ProjectID: spec.ProjectID})
+	if err != nil {
+		t.Fatalf("GetPlanByRef scoped: %v", err)
+	}
+	if !exists || loaded.PlanID != spec.PlanID || status.PlanID != spec.PlanID {
+		t.Fatalf("GetPlanByRef = spec=%#v status=%#v exists=%v", loaded, status, exists)
+	}
+}
+
 func TestMemoryPlanStoreRecordAuditRejectsMissingPlan(t *testing.T) {
 	store := NewMemoryPlanStore()
 

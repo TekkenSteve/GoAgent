@@ -112,6 +112,24 @@ func (s *MemoryPlanStore) GetPlan(_ context.Context, planID string) (agentos.Run
 	return spec, s.statuses[planID], true, nil
 }
 
+func (s *MemoryPlanStore) GetPlanByRef(_ context.Context, ref agentos.PlanRef) (agentos.RunPlanSpec, agentos.RunPlanStatus, bool, error) {
+	if err := ValidatePlanRef(ref); err != nil {
+		return agentos.RunPlanSpec{}, agentos.RunPlanStatus{}, false, err
+	}
+
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	spec, ok := s.specs[ref.PlanID]
+	if !ok {
+		return agentos.RunPlanSpec{}, agentos.RunPlanStatus{}, false, nil
+	}
+	if err := ValidatePlanTenantAccess(ref, spec); err != nil {
+		return agentos.RunPlanSpec{}, agentos.RunPlanStatus{}, false, err
+	}
+
+	return spec, s.statuses[ref.PlanID], true, nil
+}
+
 func (s *MemoryPlanStore) ListPlanRefs(_ context.Context, scope PlanRefScope) ([]agentos.PlanRef, error) {
 	if scope.Limit < 0 {
 		return nil, fmt.Errorf("%w: plan ref limit must be non-negative", agentos.ErrInvalidPlanScope)

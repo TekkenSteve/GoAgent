@@ -49,6 +49,7 @@ type ArtifactStore interface {
 // PlanIndex stores durable plan identity and the latest aggregate status.
 type PlanIndex interface {
 	CreatePlan(ctx context.Context, spec agentos.RunPlanSpec, status agentos.RunPlanStatus) (agentos.RunPlanStatus, bool, error)
+	GetPlanByRef(ctx context.Context, ref agentos.PlanRef) (agentos.RunPlanSpec, agentos.RunPlanStatus, bool, error)
 	GetPlan(ctx context.Context, planID string) (agentos.RunPlanSpec, agentos.RunPlanStatus, bool, error)
 	UpdatePlanStatus(ctx context.Context, status agentos.RunPlanStatus, idempotencyKey string) error
 }
