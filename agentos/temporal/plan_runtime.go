@@ -200,6 +200,15 @@ func (r *planRuntime) StatusPlan(ctx context.Context, ref agentos.PlanRef) (agen
 	return status, err
 }
 
+func (r *planRuntime) DescribePlan(ctx context.Context, ref agentos.PlanRef) (agentos.RunPlanDescription, error) {
+	spec, status, err := r.authorizePlan(ctx, ref)
+	if err != nil {
+		return agentos.RunPlanDescription{}, err
+	}
+
+	return agentosplan.DescribeRunPlan(spec, status)
+}
+
 func (r *planRuntime) authorizePlan(ctx context.Context, ref agentos.PlanRef) (agentos.RunPlanSpec, agentos.RunPlanStatus, error) {
 	if err := agentosplan.ValidatePlanRef(ref); err != nil {
 		return agentos.RunPlanSpec{}, agentos.RunPlanStatus{}, err

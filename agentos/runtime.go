@@ -16,6 +16,7 @@ type Runtime interface {
 type PlanRuntime interface {
 	StartPlan(ctx context.Context, spec RunPlanSpec) (RunPlanStatus, error)
 	StatusPlan(ctx context.Context, ref PlanRef) (RunPlanStatus, error)
+	DescribePlan(ctx context.Context, ref PlanRef) (RunPlanDescription, error)
 	SignalPlan(ctx context.Context, ref PlanRef, signal Signal) error
 	ControlPlan(ctx context.Context, ref PlanRef, control ControlRequest) error
 	SubscribePlan(ctx context.Context, scope PlanStreamScope) (Subscription, error)

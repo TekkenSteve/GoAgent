@@ -98,6 +98,23 @@ func TestAgentOSPlanRoutesUsePlanRuntime(t *testing.T) {
 		t.Fatalf("unexpected status: %#v", status)
 	}
 
+	resp = doAgentOSRouteRequest(t, app, http.MethodGet, "/v1/agentos/plans/plan-1/description?account_id=acct-1", "")
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("description status = %d", resp.StatusCode)
+	}
+	var description agentos.RunPlanDescription
+	if err := json.NewDecoder(resp.Body).Decode(&description); err != nil {
+		t.Fatalf("decode description: %v", err)
+	}
+	if description.PlanID != "plan-1" ||
+		len(description.Topology.Nodes) != 2 ||
+		len(description.Topology.Edges) != 1 ||
+		description.Topology.Edges[0].From != "research" ||
+		description.Topology.Edges[0].To != "write" {
+		t.Fatalf("unexpected description: %#v", description)
+	}
+
 	resp = doAgentOSRouteRequest(t, app, http.MethodGet, "/v1/agentos/plans/plan-1/audits?account_id=acct-1&action=plan.control&limit=25", "")
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
@@ -244,6 +261,8 @@ func TestAgentOSPlanConsoleRendersRuntimeData(t *testing.T) {
 		"research",
 		"http:research-http",
 		"run-research",
+		"Plan Graph",
+		"research -&gt; write",
 		"artifact-1",
 		"plan.node.started",
 		"plan.control",
@@ -256,10 +275,10 @@ func TestAgentOSPlanConsoleRendersRuntimeData(t *testing.T) {
 		}
 	}
 
-	if planRuntime.statusRef.PlanID != "plan-1" ||
-		planRuntime.statusRef.AccountID != "acct-1" ||
-		planRuntime.statusRef.ProjectID != "proj-1" {
-		t.Fatalf("unexpected status ref: %#v", planRuntime.statusRef)
+	if planRuntime.descriptionRef.PlanID != "plan-1" ||
+		planRuntime.descriptionRef.AccountID != "acct-1" ||
+		planRuntime.descriptionRef.ProjectID != "proj-1" {
+		t.Fatalf("unexpected description ref: %#v", planRuntime.descriptionRef)
 	}
 	if planRuntime.eventScope.Limit != agentOSPlanConsoleDefaultEventLimit ||
 		planRuntime.artifactScope.Limit != agentOSPlanConsoleDefaultArtifactLimit ||
@@ -283,6 +302,7 @@ func TestAgentOSPlanConsoleRequiresAccountScope(t *testing.T) {
 type fakePlanRuntime struct {
 	started          agentos.RunPlanSpec
 	statusRef        agentos.PlanRef
+	descriptionRef   agentos.PlanRef
 	signalRef        agentos.PlanRef
 	signal           agentos.Signal
 	controlRef       agentos.PlanRef
@@ -307,8 +327,47 @@ func (r *fakePlanRuntime) StartPlan(_ context.Context, spec agentos.RunPlanSpec)
 func (r *fakePlanRuntime) StatusPlan(_ context.Context, ref agentos.PlanRef) (agentos.RunPlanStatus, error) {
 	r.statusRef = ref
 
+	return fakePlanStatus(ref.PlanID), nil
+}
+
+func (r *fakePlanRuntime) DescribePlan(_ context.Context, ref agentos.PlanRef) (agentos.RunPlanDescription, error) {
+	r.descriptionRef = ref
+	status := fakePlanStatus(ref.PlanID)
+
+	return agentos.RunPlanDescription{
+		PlanID:    ref.PlanID,
+		AccountID: ref.AccountID,
+		ProjectID: ref.ProjectID,
+		Status:    status,
+		Topology: agentos.PlanTopology{
+			Nodes: []agentos.PlanTopologyNode{
+				{
+					NodeID:     "research",
+					RunID:      "run-research",
+					Backend:    agentos.BackendRef{Kind: agentos.BackendKindHTTP, Name: "research-http"},
+					Capability: "run",
+					Status:     status.Nodes[0],
+				},
+				{
+					NodeID:     "write",
+					RunID:      "run-write",
+					Backend:    agentos.BackendRef{Kind: agentos.BackendKindHTTP, Name: "writer-http"},
+					Capability: "run",
+					Status:     status.Nodes[1],
+				},
+			},
+			Edges: []agentos.PlanTopologyEdge{
+				{EdgeID: "research-write", From: "research", To: "write", On: agentos.EdgeOnSuccess},
+			},
+			Order: []string{"research", "write"},
+		},
+		UpdatedAt: status.UpdatedAt,
+	}, nil
+}
+
+func fakePlanStatus(planID string) agentos.RunPlanStatus {
 	return agentos.RunPlanStatus{
-		PlanID:         ref.PlanID,
+		PlanID:         planID,
 		LifecycleState: agentos.PlanLifecycleRunning,
 		Nodes: []agentos.PlanNodeStatus{
 			{
@@ -320,14 +379,21 @@ func (r *fakePlanRuntime) StatusPlan(_ context.Context, ref agentos.PlanRef) (ag
 				Reason:         "needs manual retry",
 				UpdatedAt:      time.Now(),
 			},
+			{
+				NodeID:         "write",
+				RunID:          "run-write",
+				Backend:        agentos.BackendRef{Kind: agentos.BackendKindHTTP, Name: "writer-http"},
+				LifecycleState: agentos.PlanNodePending,
+				UpdatedAt:      time.Now(),
+			},
 		},
 		ActiveRunIDs: []string{"run-research"},
 		Artifacts: []agentos.ArtifactRef{
-			{ArtifactID: "artifact-1", PlanID: ref.PlanID, NodeID: "research", RunID: "run-research", Name: "summary", Kind: agentos.ArtifactKindObject},
+			{ArtifactID: "artifact-1", PlanID: planID, NodeID: "research", RunID: "run-research", Name: "summary", Kind: agentos.ArtifactKindObject},
 		},
 		BudgetUsage: agentos.PlanBudgetUsage{SpentCents: 7},
 		UpdatedAt:   time.Now(),
-	}, nil
+	}
 }
 
 func (r *fakePlanRuntime) SignalPlan(_ context.Context, ref agentos.PlanRef, signal agentos.Signal) error {

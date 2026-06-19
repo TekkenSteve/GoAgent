@@ -189,6 +189,53 @@ type RunPlanStatus struct {
 	UpdatedAt      time.Time         `json:"updated_at,omitempty"`
 }
 
+// RunPlanDescription is the public, read-oriented view of a RunPlan. Topology
+// is built from the latest durable plan snapshot, including workflow-owned
+// dynamic expansion that has already been validated and persisted.
+type RunPlanDescription struct {
+	PlanID    string            `json:"plan_id"`
+	ThreadID  string            `json:"thread_id,omitempty"`
+	AccountID string            `json:"account_id,omitempty"`
+	ProjectID string            `json:"project_id,omitempty"`
+	Status    RunPlanStatus     `json:"status"`
+	Topology  PlanTopology      `json:"topology"`
+	Policy    PlanPolicy        `json:"policy,omitempty"`
+	Metadata  map[string]string `json:"metadata,omitempty"`
+	UpdatedAt time.Time         `json:"updated_at,omitempty"`
+}
+
+// PlanTopology is a public graph view where each node is one backend-owned
+// child run. Backend-internal steps or framework graph nodes are intentionally
+// not represented here.
+type PlanTopology struct {
+	Nodes []PlanTopologyNode `json:"nodes"`
+	Edges []PlanTopologyEdge `json:"edges,omitempty"`
+	Order []string           `json:"order,omitempty"`
+}
+
+// PlanTopologyNode describes one backend-owned child run in the public graph.
+type PlanTopologyNode struct {
+	NodeID     string         `json:"node_id"`
+	RunID      string         `json:"run_id,omitempty"`
+	Backend    BackendRef     `json:"backend"`
+	Capability string         `json:"capability,omitempty"`
+	Conditions []string       `json:"conditions,omitempty"`
+	Inputs     []InputMapping `json:"inputs,omitempty"`
+	Outputs    []ArtifactSpec `json:"outputs,omitempty"`
+	Policy     NodePolicy     `json:"policy,omitempty"`
+	Status     PlanNodeStatus `json:"status"`
+}
+
+// PlanTopologyEdge describes a dependency between backend-owned child runs.
+type PlanTopologyEdge struct {
+	EdgeID       string         `json:"edge_id,omitempty"`
+	From         string         `json:"from"`
+	To           string         `json:"to"`
+	On           EdgeTrigger    `json:"on,omitempty"`
+	Condition    string         `json:"condition,omitempty"`
+	InputMapping []InputMapping `json:"input_mapping,omitempty"`
+}
+
 // PlanNodeStatus is the public lifecycle view for one plan node.
 type PlanNodeStatus struct {
 	NodeID         string          `json:"node_id"`

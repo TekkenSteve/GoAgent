@@ -83,6 +83,45 @@ func (r *V1) statusAgentOSPlan(ctx *fiber.Ctx) error {
 	return ctx.Status(http.StatusOK).JSON(status)
 }
 
+// @Summary     Describe AgentOS plan
+// @Description Query the current public topology and aggregate status of an AgentOS RunPlan.
+// @ID          agentos-plan-description
+// @Tags        agentos
+// @Accept      json
+// @Produce     json
+// @Param       plan_id path string true "Plan ID"
+// @Param       account_id query string true "Account ID"
+// @Param       project_id query string false "Project ID"
+// @Success     200 {object} agentos.RunPlanDescription
+// @Failure     400 {object} response.Error
+// @Failure     404 {object} response.Error
+// @Failure     500 {object} response.Error
+// @Router      /agentos/plans/{plan_id}/description [get]
+func (r *V1) describeAgentOSPlan(ctx *fiber.Ctx) error {
+	if r.planRuntime == nil {
+		return errorResponse(ctx, http.StatusNotFound, "agentos plan runtime is not configured")
+	}
+
+	var req request.AgentOSPlanScope
+	if err := ctx.QueryParser(&req); err != nil {
+		return errorResponse(ctx, http.StatusBadRequest, "invalid plan scope")
+	}
+	if err := r.v.Struct(&req); err != nil {
+		return errorResponse(ctx, http.StatusBadRequest, err.Error())
+	}
+
+	description, err := r.planRuntime.DescribePlan(ctx.UserContext(), agentos.PlanRef{
+		PlanID:    ctx.Params("plan_id"),
+		AccountID: req.AccountID,
+		ProjectID: req.ProjectID,
+	})
+	if err != nil {
+		return agentOSError(ctx, err)
+	}
+
+	return ctx.Status(http.StatusOK).JSON(description)
+}
+
 // @Summary     Signal AgentOS plan
 // @Description Send plan-level business input such as retry, approve, or reject.
 // @ID          agentos-signal-plan

@@ -74,7 +74,7 @@ func (r *V1) agentOSPlanConsole(ctx *fiber.Ctx) error {
 		AccountID: req.AccountID,
 		ProjectID: req.ProjectID,
 	}
-	status, err := r.planRuntime.StatusPlan(ctx.UserContext(), ref)
+	description, err := r.planRuntime.DescribePlan(ctx.UserContext(), ref)
 	if err != nil {
 		return agentOSError(ctx, err)
 	}
@@ -106,7 +106,7 @@ func (r *V1) agentOSPlanConsole(ctx *fiber.Ctx) error {
 		return agentOSError(ctx, err)
 	}
 
-	view := newAgentOSPlanConsoleView(ref, status, events, artifacts, audits)
+	view := newAgentOSPlanConsoleView(ref, description, events, artifacts, audits)
 	var body bytes.Buffer
 	if err := agentOSPlanConsoleTemplate.Execute(&body, view); err != nil {
 		return errorResponse(ctx, http.StatusInternalServerError, fmt.Sprintf("render plan console: %v", err))
@@ -131,25 +131,27 @@ func agentOSPlanConsoleLimit(name string, requested, defaultValue, maxValue int)
 }
 
 type agentOSPlanConsoleView struct {
-	PlanID            string
-	AccountID         string
-	ProjectID         string
-	Status            agentOSPlanConsoleStatusView
-	Nodes             []agentOSPlanConsoleNodeView
-	ActiveRunIDs      []string
-	Artifacts         []agentOSPlanConsoleArtifactView
-	Events            []agentOSPlanConsoleEventView
-	Audits            []agentOSPlanConsoleAuditView
-	ControlEndpoint   string
-	SignalEndpoint    string
-	StatusEndpoint    string
-	EventsEndpoint    string
-	ArtifactsEndpoint string
-	RetrySignalType   agentos.SignalType
-	PayloadNodeIDKey  string
-	PayloadReasonKey  string
-	Controls          []agentOSPlanConsoleControlAction
-	PlanSignals       []agentOSPlanConsoleSignalAction
+	PlanID              string
+	AccountID           string
+	ProjectID           string
+	Status              agentOSPlanConsoleStatusView
+	Nodes               []agentOSPlanConsoleNodeView
+	GraphEdges          []agentOSPlanConsoleEdgeView
+	ActiveRunIDs        []string
+	Artifacts           []agentOSPlanConsoleArtifactView
+	Events              []agentOSPlanConsoleEventView
+	Audits              []agentOSPlanConsoleAuditView
+	ControlEndpoint     string
+	SignalEndpoint      string
+	DescriptionEndpoint string
+	StatusEndpoint      string
+	EventsEndpoint      string
+	ArtifactsEndpoint   string
+	RetrySignalType     agentos.SignalType
+	PayloadNodeIDKey    string
+	PayloadReasonKey    string
+	Controls            []agentOSPlanConsoleControlAction
+	PlanSignals         []agentOSPlanConsoleSignalAction
 }
 
 type agentOSPlanConsoleStatusView struct {
@@ -167,6 +169,7 @@ type agentOSPlanConsoleNodeView struct {
 	NodeID         string
 	RunID          string
 	Backend        string
+	Capability     string
 	LifecycleState string
 	StateClass     string
 	Attempts       string
@@ -177,6 +180,15 @@ type agentOSPlanConsoleNodeView struct {
 	CompletedAt    string
 	UpdatedAt      string
 	CanRetry       bool
+}
+
+type agentOSPlanConsoleEdgeView struct {
+	EdgeID       string
+	From         string
+	To           string
+	On           string
+	Condition    string
+	MappingCount int
 }
 
 type agentOSPlanConsoleArtifactView struct {
@@ -229,27 +241,30 @@ type agentOSPlanConsoleSignalAction struct {
 	Class      string
 }
 
-func newAgentOSPlanConsoleView(ref agentos.PlanRef, status agentos.RunPlanStatus, events []agentos.PlanEvent, artifacts []agentos.ArtifactRef, audits []agentos.PlanAuditRecord) agentOSPlanConsoleView {
+func newAgentOSPlanConsoleView(ref agentos.PlanRef, description agentos.RunPlanDescription, events []agentos.PlanEvent, artifacts []agentos.ArtifactRef, audits []agentos.PlanAuditRecord) agentOSPlanConsoleView {
 	scopeQuery := agentOSPlanConsoleScopeQuery(ref)
+	status := description.Status
 
 	return agentOSPlanConsoleView{
-		PlanID:            ref.PlanID,
-		AccountID:         ref.AccountID,
-		ProjectID:         ref.ProjectID,
-		Status:            newAgentOSPlanConsoleStatusView(status),
-		Nodes:             newAgentOSPlanConsoleNodeViews(status.Nodes),
-		ActiveRunIDs:      append([]string(nil), status.ActiveRunIDs...),
-		Artifacts:         newAgentOSPlanConsoleArtifactViews(ref, artifacts),
-		Events:            newAgentOSPlanConsoleEventViews(events),
-		Audits:            newAgentOSPlanConsoleAuditViews(audits),
-		ControlEndpoint:   "control",
-		SignalEndpoint:    "signals",
-		StatusEndpoint:    "status?" + scopeQuery,
-		EventsEndpoint:    "events/history?" + scopeQuery,
-		ArtifactsEndpoint: "artifacts?" + scopeQuery,
-		RetrySignalType:   agentos.SignalPlanNodeRetry,
-		PayloadNodeIDKey:  agentos.SignalPayloadNodeID,
-		PayloadReasonKey:  agentos.SignalPayloadReason,
+		PlanID:              ref.PlanID,
+		AccountID:           ref.AccountID,
+		ProjectID:           ref.ProjectID,
+		Status:              newAgentOSPlanConsoleStatusView(status),
+		Nodes:               newAgentOSPlanConsoleNodeViews(description.Topology.Nodes),
+		GraphEdges:          newAgentOSPlanConsoleEdgeViews(description.Topology.Edges),
+		ActiveRunIDs:        append([]string(nil), status.ActiveRunIDs...),
+		Artifacts:           newAgentOSPlanConsoleArtifactViews(ref, artifacts),
+		Events:              newAgentOSPlanConsoleEventViews(events),
+		Audits:              newAgentOSPlanConsoleAuditViews(audits),
+		ControlEndpoint:     "control",
+		SignalEndpoint:      "signals",
+		DescriptionEndpoint: "description?" + scopeQuery,
+		StatusEndpoint:      "status?" + scopeQuery,
+		EventsEndpoint:      "events/history?" + scopeQuery,
+		ArtifactsEndpoint:   "artifacts?" + scopeQuery,
+		RetrySignalType:     agentos.SignalPlanNodeRetry,
+		PayloadNodeIDKey:    agentos.SignalPayloadNodeID,
+		PayloadReasonKey:    agentos.SignalPayloadReason,
 		Controls: []agentOSPlanConsoleControlAction{
 			{Label: "Pause", Title: "Pause plan", Operation: agentos.ControlPause, Class: "neutral"},
 			{Label: "Resume", Title: "Resume plan", Operation: agentos.ControlResume, Class: "primary"},
@@ -275,23 +290,41 @@ func newAgentOSPlanConsoleStatusView(status agentos.RunPlanStatus) agentOSPlanCo
 	}
 }
 
-func newAgentOSPlanConsoleNodeViews(nodes []agentos.PlanNodeStatus) []agentOSPlanConsoleNodeView {
+func newAgentOSPlanConsoleNodeViews(nodes []agentos.PlanTopologyNode) []agentOSPlanConsoleNodeView {
 	views := make([]agentOSPlanConsoleNodeView, 0, len(nodes))
 	for _, node := range nodes {
+		status := node.Status
 		views = append(views, agentOSPlanConsoleNodeView{
 			NodeID:         node.NodeID,
 			RunID:          node.RunID,
 			Backend:        agentOSPlanConsoleBackend(node.Backend),
-			LifecycleState: node.LifecycleState,
-			StateClass:     agentOSPlanConsoleStateClass(node.LifecycleState),
-			Attempts:       strconv.FormatInt(int64(node.Attempts), 10),
-			SpentCents:     strconv.FormatInt(node.BudgetUsage.SpentCents, 10),
-			Reason:         node.Reason,
-			ArtifactCount:  len(node.Artifacts),
-			StartedAt:      agentOSPlanConsoleTime(node.StartedAt),
-			CompletedAt:    agentOSPlanConsoleTime(node.CompletedAt),
-			UpdatedAt:      agentOSPlanConsoleTime(node.UpdatedAt),
-			CanRetry:       node.LifecycleState == agentos.PlanNodeFailed,
+			Capability:     node.Capability,
+			LifecycleState: status.LifecycleState,
+			StateClass:     agentOSPlanConsoleStateClass(status.LifecycleState),
+			Attempts:       strconv.FormatInt(int64(status.Attempts), 10),
+			SpentCents:     strconv.FormatInt(status.BudgetUsage.SpentCents, 10),
+			Reason:         status.Reason,
+			ArtifactCount:  len(status.Artifacts),
+			StartedAt:      agentOSPlanConsoleTime(status.StartedAt),
+			CompletedAt:    agentOSPlanConsoleTime(status.CompletedAt),
+			UpdatedAt:      agentOSPlanConsoleTime(status.UpdatedAt),
+			CanRetry:       status.LifecycleState == agentos.PlanNodeFailed,
+		})
+	}
+
+	return views
+}
+
+func newAgentOSPlanConsoleEdgeViews(edges []agentos.PlanTopologyEdge) []agentOSPlanConsoleEdgeView {
+	views := make([]agentOSPlanConsoleEdgeView, 0, len(edges))
+	for _, edge := range edges {
+		views = append(views, agentOSPlanConsoleEdgeView{
+			EdgeID:       edge.EdgeID,
+			From:         edge.From,
+			To:           edge.To,
+			On:           string(edge.On),
+			Condition:    edge.Condition,
+			MappingCount: len(edge.InputMapping),
 		})
 	}
 
@@ -590,6 +623,11 @@ h2 {
   gap: 8px;
   margin-bottom: 12px;
 }
+.graph-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 2fr) minmax(280px, 1fr);
+  gap: 12px;
+}
 .node-lane {
   min-height: 74px;
   border: 1px solid var(--line);
@@ -603,6 +641,27 @@ h2 {
 }
 .node-lane .meta {
   margin-top: 4px;
+  color: var(--muted);
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+.edge-list {
+  display: grid;
+  gap: 8px;
+}
+.edge-row {
+  min-height: 42px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--surface);
+  padding: 8px 10px;
+}
+.edge-row .route {
+  font-weight: 700;
+  overflow-wrap: anywhere;
+}
+.edge-row .meta {
+  margin-top: 3px;
   color: var(--muted);
   font-size: 12px;
   overflow-wrap: anywhere;
@@ -685,6 +744,7 @@ pre {
   .toolbar { justify-content: flex-start; min-width: 0; }
   .action-status { text-align: left; }
   .summary { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .graph-grid { grid-template-columns: 1fr; }
   .shell { padding: 14px; }
 }
 </style>
@@ -737,19 +797,45 @@ pre {
 
   <section class="section">
     <div class="section-head">
+      <h2>Plan Graph</h2>
+      <a class="mono" href="{{ .DescriptionEndpoint }}">description json</a>
+    </div>
+    {{ if .Nodes }}
+    <div class="graph-grid">
+      <div class="node-lanes" aria-label="Graph nodes">
+        {{ range .Nodes }}
+        <div class="node-lane">
+          <div class="chips"><span class="pill {{ .StateClass }}">{{ .LifecycleState }}</span></div>
+          <div class="name">{{ .NodeID }}</div>
+          <div class="meta">{{ .Backend }}</div>
+          {{ if .Capability }}<div class="meta">capability: {{ .Capability }}</div>{{ end }}
+        </div>
+        {{ end }}
+      </div>
+      <div class="edge-list" aria-label="Graph edges">
+        {{ if .GraphEdges }}
+        {{ range .GraphEdges }}
+        <div class="edge-row">
+          <div class="route mono">{{ .From }} -&gt; {{ .To }}</div>
+          <div class="meta">{{ .On }} {{ if .Condition }}condition: {{ .Condition }}{{ end }} {{ if .MappingCount }}mappings: {{ .MappingCount }}{{ end }}</div>
+        </div>
+        {{ end }}
+        {{ else }}
+        <div class="empty">No edges.</div>
+        {{ end }}
+      </div>
+    </div>
+    {{ else }}
+    <div class="empty">No graph nodes.</div>
+    {{ end }}
+  </section>
+
+  <section class="section">
+    <div class="section-head">
       <h2>Nodes</h2>
       <a class="mono" href="{{ .StatusEndpoint }}">status json</a>
     </div>
     {{ if .Nodes }}
-    <div class="node-lanes" aria-label="Node lanes">
-      {{ range .Nodes }}
-      <div class="node-lane">
-        <div class="chips"><span class="pill {{ .StateClass }}">{{ .LifecycleState }}</span></div>
-        <div class="name">{{ .NodeID }}</div>
-        <div class="meta">{{ .Backend }}</div>
-      </div>
-      {{ end }}
-    </div>
     <div class="table-wrap">
       <table>
         <thead>
@@ -757,6 +843,7 @@ pre {
             <th>Node</th>
             <th>State</th>
             <th>Backend</th>
+            <th>Capability</th>
             <th>Run</th>
             <th>Attempts</th>
             <th>Budget</th>
@@ -772,6 +859,7 @@ pre {
             <td class="mono">{{ .NodeID }}</td>
             <td><span class="pill {{ .StateClass }}">{{ .LifecycleState }}</span></td>
             <td>{{ .Backend }}</td>
+            <td>{{ .Capability }}</td>
             <td class="mono">{{ .RunID }}</td>
             <td>{{ .Attempts }}</td>
             <td>{{ .SpentCents }}</td>
