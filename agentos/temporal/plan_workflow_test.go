@@ -2,6 +2,7 @@ package temporal
 
 import (
 	"context"
+	"sync"
 	"testing"
 	"time"
 
@@ -216,6 +217,73 @@ func TestPlanWorkflowCancelsActiveNodesWhenBudgetExceeded(t *testing.T) {
 	require.Len(t, mocks.controls, 1)
 	require.Equal(t, "run-slow", mocks.controls[0].RunID)
 	require.Equal(t, agentos.ControlCancel, mocks.controls[0].Control.Operation)
+}
+
+func TestPlanWorkflowOrchestratesMixedBackendsThroughRuntime(t *testing.T) {
+	t.Parallel()
+
+	refs := []agentos.BackendRef{
+		{Kind: agentos.BackendKindNative, Name: agentos.BackendNameGoAgentNative},
+		{Kind: agentos.BackendKindTemporalExternal, Name: "langgraph"},
+		{Kind: agentos.BackendKindHTTP, Name: "claude-code"},
+		{Kind: agentos.BackendKindGRPC, Name: "grpc-agent"},
+	}
+	spec := agentos.RunPlanSpec{
+		PlanID: "plan-mixed-backends",
+		Policy: agentos.PlanPolicy{
+			MaxParallelNodes: 2,
+		},
+		Nodes: []agentos.PlanNodeSpec{
+			{NodeID: "native", Capability: "run", Run: agentos.RunSpec{RunID: "run-native", Backend: refs[0]}},
+			{NodeID: "external", Capability: "run", Run: agentos.RunSpec{RunID: "run-external", Backend: refs[1]}},
+			{NodeID: "http", Capability: "run", Run: agentos.RunSpec{RunID: "run-http", Backend: refs[2]}},
+			{NodeID: "grpc", Capability: "run", Run: agentos.RunSpec{RunID: "run-grpc", Backend: refs[3]}},
+		},
+		Edges: []agentos.PlanEdgeSpec{
+			{EdgeID: "native-external", From: "native", To: "external", On: agentos.EdgeOnSuccess},
+			{EdgeID: "external-http", From: "external", To: "http", On: agentos.EdgeOnSuccess},
+			{EdgeID: "http-grpc", From: "http", To: "grpc", On: agentos.EdgeOnSuccess},
+		},
+	}
+	runtime := newMixedBackendRuntime()
+	store := agentosplan.NewMemoryPlanStore()
+	binder := &mixedBackendBinder{}
+	activities, err := NewPlanActivitiesWithStores(
+		runtime,
+		mixedBackendCapabilities(refs),
+		store,
+		store,
+		nil,
+		binder,
+		agentosplan.NewMemoryArtifactStore(),
+	)
+	require.NoError(t, err)
+
+	env := (&testsuite.WorkflowTestSuite{}).NewTestWorkflowEnvironment()
+	env.RegisterWorkflowWithOptions(PlanWorkflow, workflow.RegisterOptions{Name: PlanWorkflowName})
+	env.RegisterActivityWithOptions(activities.ValidatePlanActivity, activity.RegisterOptions{Name: ValidatePlanActivityName})
+	env.RegisterActivityWithOptions(activities.PersistPlanStateActivity, activity.RegisterOptions{Name: PersistPlanStateActivityName})
+	env.RegisterActivityWithOptions(activities.StartPlanNodeActivity, activity.RegisterOptions{Name: StartPlanNodeActivityName})
+	env.RegisterActivityWithOptions(activities.StatusPlanNodeActivity, activity.RegisterOptions{Name: StatusPlanNodeActivityName})
+	env.RegisterActivityWithOptions(activities.ControlPlanNodeActivity, activity.RegisterOptions{Name: ControlPlanNodeActivityName})
+	env.RegisterActivityWithOptions(activities.PublishPlanArtifactsActivity, activity.RegisterOptions{Name: PublishPlanArtifactsActivityName})
+
+	env.ExecuteWorkflow(PlanWorkflow, planWorkflowInput{Spec: spec})
+
+	require.True(t, env.IsWorkflowCompleted())
+	require.NoError(t, env.GetWorkflowError())
+
+	var result agentos.RunPlanStatus
+	require.NoError(t, env.GetWorkflowResult(&result))
+	require.Equal(t, agentos.PlanLifecycleSucceeded, result.LifecycleState)
+	require.Equal(t, []agentos.BackendRef{refs[0], refs[1], refs[2], refs[3]}, runtime.startedBackends())
+	require.Equal(t, []agentos.BackendRef{refs[0], refs[1], refs[2], refs[3]}, binder.boundBackends())
+
+	events, err := store.ListPlanEvents(context.Background(), agentos.PlanStreamScope{PlanID: spec.PlanID}, 0)
+	require.NoError(t, err)
+	require.NotEmpty(t, events)
+	require.Equal(t, agentos.EventPlanStarted, events[0].EventType)
+	require.Equal(t, agentos.EventPlanSucceeded, events[len(events)-1].EventType)
 }
 
 func TestPlanWorkflowRetriesFailedNodeFromSignal(t *testing.T) {
@@ -457,4 +525,106 @@ func (m *planWorkflowMocks) publishArtifacts(_ context.Context, input publishPla
 	}
 
 	return publishPlanArtifactsOutput{Artifacts: refs}, nil
+}
+
+type mixedBackendRuntime struct {
+	mu       sync.Mutex
+	started  []agentos.RunSpec
+	statuses map[string]agentos.RunStatus
+}
+
+func newMixedBackendRuntime() *mixedBackendRuntime {
+	return &mixedBackendRuntime{
+		statuses: map[string]agentos.RunStatus{
+			"run-native":   {RunID: "run-native", LifecycleState: "completed"},
+			"run-external": {RunID: "run-external", LifecycleState: "completed"},
+			"run-http":     {RunID: "run-http", LifecycleState: "completed"},
+			"run-grpc":     {RunID: "run-grpc", LifecycleState: "completed"},
+		},
+	}
+}
+
+func (r *mixedBackendRuntime) Start(_ context.Context, spec agentos.RunSpec) (agentos.RunStatus, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.started = append(r.started, spec)
+
+	return agentos.RunStatus{RunID: spec.RunID, LifecycleState: "running"}, nil
+}
+
+func (r *mixedBackendRuntime) Signal(context.Context, string, agentos.Signal) error {
+	return nil
+}
+
+func (r *mixedBackendRuntime) Status(_ context.Context, runID string) (agentos.RunStatus, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	status := r.statuses[runID]
+	if status.RunID == "" {
+		status.RunID = runID
+	}
+	if status.LifecycleState == "" {
+		status.LifecycleState = "running"
+	}
+
+	return status, nil
+}
+
+func (r *mixedBackendRuntime) Control(context.Context, string, agentos.ControlRequest) error {
+	return nil
+}
+
+func (r *mixedBackendRuntime) Subscribe(context.Context, agentos.StreamScope) (agentos.Subscription, error) {
+	return nil, nil
+}
+
+func (r *mixedBackendRuntime) Close() error {
+	return nil
+}
+
+func (r *mixedBackendRuntime) startedBackends() []agentos.BackendRef {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	backends := make([]agentos.BackendRef, 0, len(r.started))
+	for _, spec := range r.started {
+		backends = append(backends, spec.Backend)
+	}
+
+	return backends
+}
+
+type mixedBackendBinder struct {
+	mu    sync.Mutex
+	bound []agentos.RunSpec
+}
+
+func (b *mixedBackendBinder) BindPlanNode(_ context.Context, _ string, _ string, spec agentos.RunSpec, _ agentos.RunStatus) error {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	b.bound = append(b.bound, spec)
+
+	return nil
+}
+
+func (b *mixedBackendBinder) boundBackends() []agentos.BackendRef {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	backends := make([]agentos.BackendRef, 0, len(b.bound))
+	for _, spec := range b.bound {
+		backends = append(backends, spec.Backend)
+	}
+
+	return backends
+}
+
+func mixedBackendCapabilities(refs []agentos.BackendRef) []agentos.Capability {
+	capabilities := make([]agentos.Capability, 0, len(refs))
+	for _, ref := range refs {
+		capabilities = append(capabilities, agentos.Capability{
+			Backend: ref,
+			Name:    "run",
+		})
+	}
+
+	return capabilities
 }

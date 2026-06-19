@@ -107,6 +107,60 @@ func TestRouterSelectsBackendWhenSpecOmitsBackend(t *testing.T) {
 	}
 }
 
+func TestRouterRoutesMixedBackendRunsByOwnership(t *testing.T) {
+	ctx := context.Background()
+	refs := []agentos.BackendRef{
+		{Kind: agentos.BackendKindNative, Name: agentos.BackendNameGoAgentNative},
+		{Kind: agentos.BackendKindTemporalExternal, Name: "langgraph"},
+		{Kind: agentos.BackendKindHTTP, Name: "claude-code"},
+		{Kind: agentos.BackendKindGRPC, Name: "grpc-agent"},
+	}
+	registry := NewRegistry()
+	backends := make(map[agentos.BackendRef]*stubBackend, len(refs))
+	for _, ref := range refs {
+		backend := &stubBackend{}
+		backends[ref] = backend
+		if err := registry.Register(ref, backend); err != nil {
+			t.Fatalf("register %s/%s: %v", ref.Kind, ref.Name, err)
+		}
+	}
+	router, err := NewRouter(registry, newStubRunIndex())
+	if err != nil {
+		t.Fatalf("new router: %v", err)
+	}
+
+	for i, ref := range refs {
+		runID := "run-" + string(ref.Kind)
+		if ref.Kind == agentos.BackendKindNative {
+			runID = "run-native"
+		}
+		_, err := router.Start(ctx, agentos.RunSpec{
+			RunID:   runID,
+			Backend: ref,
+			Input: map[string]any{
+				"ordinal": i,
+			},
+		})
+		if err != nil {
+			t.Fatalf("start %s/%s: %v", ref.Kind, ref.Name, err)
+		}
+		if _, err := router.Status(ctx, runID); err != nil {
+			t.Fatalf("status %s: %v", runID, err)
+		}
+		if err := router.Control(ctx, runID, agentos.ControlRequest{Operation: agentos.ControlCancel}); err != nil {
+			t.Fatalf("control %s: %v", runID, err)
+		}
+		if err := router.Signal(ctx, runID, agentos.Signal{Type: agentos.SignalUserMessage}); err != nil {
+			t.Fatalf("signal %s: %v", runID, err)
+		}
+
+		backend := backends[ref]
+		if backend.startBackend != ref || backend.statusRunID != runID || backend.controlRunID != runID || backend.signalRunID != runID {
+			t.Fatalf("backend %s/%s calls = %#v, runID=%s", ref.Kind, ref.Name, backend, runID)
+		}
+	}
+}
+
 func TestRuleBackendSelectorRequiresMatchingRule(t *testing.T) {
 	selector, err := NewRuleBackendSelector([]BackendSelectionRule{
 		{
