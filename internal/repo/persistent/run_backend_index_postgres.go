@@ -32,7 +32,7 @@ func (r *RunBackendIndexRepo) Bind(ctx context.Context, spec agentos.RunSpec) er
 		BackendName:    spec.Backend.Name,
 		IdempotencyKey: spec.IdempotencyKey,
 		LifecycleState: "created",
-	}, false)
+	}, true)
 }
 
 func (r *RunBackendIndexRepo) BindPlanNode(ctx context.Context, planID, nodeID string, spec agentos.RunSpec, status agentos.RunStatus) error {

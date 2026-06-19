@@ -43,7 +43,7 @@ func TestPlanEventFromStateEventMapsPublicEvent(t *testing.T) {
 func TestMemoryPlanStoreAppendPlanEventIsIdempotent(t *testing.T) {
 	ctx := context.Background()
 	store := NewMemoryPlanStore()
-	spec := agentos.RunPlanSpec{PlanID: "plan-1"}
+	spec := agentos.RunPlanSpec{PlanID: "plan-1", IdempotencyKey: "plan-start-1"}
 	status := agentos.RunPlanStatus{PlanID: "plan-1", LifecycleState: agentos.PlanLifecycleRunning}
 	if err := store.SavePlanState(ctx, PlanStateSnapshot{Spec: spec, Status: status}); err != nil {
 		t.Fatalf("SavePlanState: %v", err)
@@ -77,7 +77,7 @@ func TestMemoryPlanStoreAppendPlanEventRequiresIdempotencyKey(t *testing.T) {
 	ctx := context.Background()
 	store := NewMemoryPlanStore()
 	if err := store.SavePlanState(ctx, PlanStateSnapshot{
-		Spec:   agentos.RunPlanSpec{PlanID: "plan-1"},
+		Spec:   agentos.RunPlanSpec{PlanID: "plan-1", IdempotencyKey: "plan-start-1"},
 		Status: agentos.RunPlanStatus{PlanID: "plan-1", LifecycleState: agentos.PlanLifecycleRunning},
 	}); err != nil {
 		t.Fatalf("SavePlanState: %v", err)
@@ -95,7 +95,7 @@ func TestMemoryPlanStoreAppendPlanEventRequiresIdempotencyKey(t *testing.T) {
 func TestMemoryPlanStoreAppendPlanEventRejectsDifferentReplay(t *testing.T) {
 	ctx := context.Background()
 	store := NewMemoryPlanStore()
-	spec := agentos.RunPlanSpec{PlanID: "plan-1"}
+	spec := agentos.RunPlanSpec{PlanID: "plan-1", IdempotencyKey: "plan-start-1"}
 	status := agentos.RunPlanStatus{PlanID: "plan-1", LifecycleState: agentos.PlanLifecycleRunning}
 	if err := store.SavePlanState(ctx, PlanStateSnapshot{Spec: spec, Status: status}); err != nil {
 		t.Fatalf("SavePlanState: %v", err)

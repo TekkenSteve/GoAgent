@@ -46,6 +46,9 @@ func (r *Router) WithBackendSelector(selector BackendSelector) *Router {
 
 // Start routes a new run to the selected backend and records run ownership.
 func (r *Router) Start(ctx context.Context, spec agentos.RunSpec) (agentos.RunStatus, error) {
+	if spec.IdempotencyKey == "" {
+		return agentos.RunStatus{}, fmt.Errorf("%w: run idempotency key is required", agentos.ErrInvalidRunSpec)
+	}
 	selectedBackend, err := r.selectBackend(ctx, spec)
 	if err != nil {
 		return agentos.RunStatus{}, err

@@ -22,9 +22,10 @@ func TestRouterRoutesRunOperationsToRegisteredBackend(t *testing.T) {
 	}
 
 	status, err := router.Start(ctx, agentos.RunSpec{
-		RunID:       "run-1",
-		UserMessage: "hello",
-		Backend:     ref,
+		RunID:          "run-1",
+		UserMessage:    "hello",
+		Backend:        ref,
+		IdempotencyKey: "run-start-1",
 	})
 	if err != nil {
 		t.Fatalf("start: %v", err)
@@ -54,9 +55,30 @@ func TestRouterRequiresExplicitBackendRef(t *testing.T) {
 		t.Fatalf("new router: %v", err)
 	}
 
-	_, err = router.Start(context.Background(), agentos.RunSpec{RunID: "run-1"})
+	_, err = router.Start(context.Background(), agentos.RunSpec{RunID: "run-1", IdempotencyKey: "run-start-1"})
 	if err == nil {
 		t.Fatal("expected error")
+	}
+}
+
+func TestRouterStartRequiresIdempotencyKey(t *testing.T) {
+	ref := agentos.BackendRef{Kind: agentos.BackendKindNative, Name: agentos.BackendNameGoAgentNative}
+	stub := &stubBackend{}
+	registry := NewRegistry()
+	if err := registry.Register(ref, stub); err != nil {
+		t.Fatalf("register backend: %v", err)
+	}
+	router, err := NewRouter(registry, newStubRunIndex())
+	if err != nil {
+		t.Fatalf("new router: %v", err)
+	}
+
+	_, err = router.Start(context.Background(), agentos.RunSpec{RunID: "run-1", Backend: ref})
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	if stub.startBackend != (agentos.BackendRef{}) {
+		t.Fatalf("backend was started before idempotency validation: %#v", stub.startBackend)
 	}
 }
 
@@ -87,7 +109,8 @@ func TestRouterSelectsBackendWhenSpecOmitsBackend(t *testing.T) {
 	router.WithBackendSelector(selector)
 
 	status, err := router.Start(ctx, agentos.RunSpec{
-		RunID: "run-1",
+		RunID:          "run-1",
+		IdempotencyKey: "run-start-1",
 		Input: map[string]any{
 			"task_type": "research_report",
 		},
@@ -135,8 +158,9 @@ func TestRouterRoutesMixedBackendRunsByOwnership(t *testing.T) {
 			runID = "run-native"
 		}
 		_, err := router.Start(ctx, agentos.RunSpec{
-			RunID:   runID,
-			Backend: ref,
+			RunID:          runID,
+			Backend:        ref,
+			IdempotencyKey: "run-start-" + runID,
 			Input: map[string]any{
 				"ordinal": i,
 			},

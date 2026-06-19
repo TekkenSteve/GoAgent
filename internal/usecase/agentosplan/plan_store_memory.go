@@ -103,6 +103,9 @@ func (s *MemoryPlanStore) SavePlanState(_ context.Context, snapshot PlanStateSna
 	if snapshot.Spec.PlanID == "" {
 		return fmt.Errorf("%w: plan id is required", agentos.ErrInvalidRunPlan)
 	}
+	if snapshot.Spec.IdempotencyKey == "" {
+		return fmt.Errorf("%w: plan idempotency key is required", agentos.ErrInvalidRunPlan)
+	}
 	if snapshot.Status.PlanID == "" {
 		snapshot.Status.PlanID = snapshot.Spec.PlanID
 	}
@@ -112,19 +115,17 @@ func (s *MemoryPlanStore) SavePlanState(_ context.Context, snapshot PlanStateSna
 
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if existingSpec, ok := s.specs[snapshot.Spec.PlanID]; ok && existingSpec.IdempotencyKey != "" && snapshot.Spec.IdempotencyKey != "" {
-		if err := ValidatePlanStartIdempotency(existingSpec, snapshot.Spec); err != nil {
+	if existingSpec, ok := s.specs[snapshot.Spec.PlanID]; ok {
+		if err := ValidatePlanStateIdentity(existingSpec, snapshot.Spec); err != nil {
 			return err
 		}
 	}
-	if existingPlanID, ok := s.planKeys[snapshot.Spec.IdempotencyKey]; snapshot.Spec.IdempotencyKey != "" && ok && existingPlanID != snapshot.Spec.PlanID {
+	if existingPlanID, ok := s.planKeys[snapshot.Spec.IdempotencyKey]; ok && existingPlanID != snapshot.Spec.PlanID {
 		return fmt.Errorf("%w: plan idempotency key belongs to plan %q", agentos.ErrInvalidRunPlan, existingPlanID)
 	}
 	s.specs[snapshot.Spec.PlanID] = snapshot.Spec
 	s.statuses[snapshot.Spec.PlanID] = snapshot.Status
-	if snapshot.Spec.IdempotencyKey != "" {
-		s.planKeys[snapshot.Spec.IdempotencyKey] = snapshot.Spec.PlanID
-	}
+	s.planKeys[snapshot.Spec.IdempotencyKey] = snapshot.Spec.PlanID
 
 	return nil
 }

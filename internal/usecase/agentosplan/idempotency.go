@@ -36,6 +36,59 @@ func ValidatePlanStartIdempotency(existing agentos.RunPlanSpec, requested agento
 	return nil
 }
 
+// ValidatePlanStateIdentity verifies that a workflow-owned state snapshot keeps
+// the immutable plan identity and request envelope unchanged. Topology may
+// evolve through validated PlanDelta application, so Nodes and Edges are not
+// part of this comparison.
+func ValidatePlanStateIdentity(existing agentos.RunPlanSpec, requested agentos.RunPlanSpec) error {
+	if existing.PlanID != requested.PlanID {
+		return fmt.Errorf("%w: plan state belongs to plan %q", agentos.ErrInvalidRunPlan, existing.PlanID)
+	}
+	if existing.IdempotencyKey != requested.IdempotencyKey {
+		return fmt.Errorf("%w: plan %q state has a different idempotency key", agentos.ErrInvalidRunPlan, existing.PlanID)
+	}
+
+	existingJSON, err := json.Marshal(planStateIdentity(existing))
+	if err != nil {
+		return fmt.Errorf("%w: marshal existing plan state identity: %s", agentos.ErrInvalidRunPlan, err)
+	}
+	requestedJSON, err := json.Marshal(planStateIdentity(requested))
+	if err != nil {
+		return fmt.Errorf("%w: marshal requested plan state identity: %s", agentos.ErrInvalidRunPlan, err)
+	}
+	if !bytes.Equal(existingJSON, requestedJSON) {
+		return fmt.Errorf("%w: plan %q state changed immutable fields", agentos.ErrInvalidRunPlan, existing.PlanID)
+	}
+
+	return nil
+}
+
+type planStateIdentityFields struct {
+	PlanID         string             `json:"plan_id"`
+	ThreadID       string             `json:"thread_id,omitempty"`
+	AccountID      string             `json:"account_id,omitempty"`
+	ProjectID      string             `json:"project_id,omitempty"`
+	IdempotencyKey string             `json:"idempotency_key,omitempty"`
+	RequestedAt    time.Time          `json:"requested_at,omitempty"`
+	Inputs         map[string]any     `json:"inputs,omitempty"`
+	Metadata       map[string]string  `json:"metadata,omitempty"`
+	Policy         agentos.PlanPolicy `json:"policy,omitempty"`
+}
+
+func planStateIdentity(spec agentos.RunPlanSpec) planStateIdentityFields {
+	return planStateIdentityFields{
+		PlanID:         spec.PlanID,
+		ThreadID:       spec.ThreadID,
+		AccountID:      spec.AccountID,
+		ProjectID:      spec.ProjectID,
+		IdempotencyKey: spec.IdempotencyKey,
+		RequestedAt:    spec.RequestedAt,
+		Inputs:         spec.Inputs,
+		Metadata:       spec.Metadata,
+		Policy:         spec.Policy,
+	}
+}
+
 // ValidateAuditIdempotency verifies that an audit idempotency key is replayed
 // for the same control-plane action.
 func ValidateAuditIdempotency(existing AuditRecord, requested AuditRecord) error {

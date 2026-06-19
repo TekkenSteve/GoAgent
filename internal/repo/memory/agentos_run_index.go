@@ -24,6 +24,9 @@ func (i *AgentOSRunIndex) Bind(_ context.Context, spec agentos.RunSpec) error {
 	if spec.RunID == "" {
 		return fmt.Errorf("%w: run id is required", agentos.ErrInvalidRunSpec)
 	}
+	if spec.IdempotencyKey == "" {
+		return fmt.Errorf("%w: run idempotency key is required", agentos.ErrInvalidRunSpec)
+	}
 	if spec.Backend.Kind == "" {
 		return fmt.Errorf("%w: kind is required", agentos.ErrInvalidBackendRef)
 	}

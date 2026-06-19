@@ -113,6 +113,9 @@ func (r *AgentOSPlanRepo) SavePlanState(ctx context.Context, snapshot agentospla
 	if snapshot.Spec.PlanID == "" {
 		return fmt.Errorf("%w: plan id is required", agentos.ErrInvalidRunPlan)
 	}
+	if snapshot.Spec.IdempotencyKey == "" {
+		return fmt.Errorf("%w: plan idempotency key is required", agentos.ErrInvalidRunPlan)
+	}
 	if snapshot.Status.PlanID == "" {
 		snapshot.Status.PlanID = snapshot.Spec.PlanID
 	}
@@ -145,7 +148,7 @@ func (r *AgentOSPlanRepo) SavePlanState(ctx context.Context, snapshot agentospla
 		return err
 	}
 	if exists {
-		if err := agentosplan.ValidatePlanStartIdempotency(existingSpec, snapshot.Spec); err != nil {
+		if err := agentosplan.ValidatePlanStateIdentity(existingSpec, snapshot.Spec); err != nil {
 			return err
 		}
 	}

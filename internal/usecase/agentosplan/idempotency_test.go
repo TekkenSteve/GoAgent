@@ -37,6 +37,42 @@ func TestValidatePlanStartIdempotencyRejectsDifferentRequest(t *testing.T) {
 	}
 }
 
+func TestValidatePlanStateIdentityAllowsWorkflowOwnedTopologyExpansion(t *testing.T) {
+	ref := agentos.BackendRef{Kind: agentos.BackendKindNative, Name: agentos.BackendNameGoAgentNative}
+	existing := agentos.RunPlanSpec{
+		PlanID:         "plan-1",
+		AccountID:      "account-1",
+		ProjectID:      "project-1",
+		IdempotencyKey: "start-key",
+		Nodes: []agentos.PlanNodeSpec{
+			{NodeID: "seed", Run: agentos.RunSpec{RunID: "run-seed", Backend: ref}},
+		},
+	}
+	expanded := existing
+	expanded.Nodes = append(expanded.Nodes, agentos.PlanNodeSpec{NodeID: "expanded", Run: agentos.RunSpec{RunID: "run-expanded", Backend: ref}})
+	expanded.Edges = []agentos.PlanEdgeSpec{{EdgeID: "seed-expanded", From: "seed", To: "expanded", On: agentos.EdgeOnSuccess}}
+
+	if err := ValidatePlanStateIdentity(existing, expanded); err != nil {
+		t.Fatalf("ValidatePlanStateIdentity: %v", err)
+	}
+}
+
+func TestValidatePlanStateIdentityRejectsImmutableFieldChange(t *testing.T) {
+	existing := agentos.RunPlanSpec{
+		PlanID:         "plan-1",
+		AccountID:      "account-1",
+		IdempotencyKey: "start-key",
+		Inputs:         map[string]any{"topic": "agentos"},
+	}
+	requested := existing
+	requested.Inputs = map[string]any{"topic": "changed"}
+
+	err := ValidatePlanStateIdentity(existing, requested)
+	if !errors.Is(err, agentos.ErrInvalidRunPlan) {
+		t.Fatalf("error = %v, want ErrInvalidRunPlan", err)
+	}
+}
+
 func TestValidateAuditIdempotencyRejectsDifferentPayload(t *testing.T) {
 	existing := AuditRecord{
 		PlanID:         "plan-1",

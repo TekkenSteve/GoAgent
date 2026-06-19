@@ -19,7 +19,8 @@ func TestPlanWorkflowExecutesSuccessEdgeAndPublishesArtifacts(t *testing.T) {
 
 	ref := agentos.BackendRef{Kind: agentos.BackendKindNative, Name: agentos.BackendNameGoAgentNative}
 	spec := agentos.RunPlanSpec{
-		PlanID: "plan-success",
+		PlanID:         "plan-success",
+		IdempotencyKey: "plan-start-success",
 		Policy: agentos.PlanPolicy{
 			MaxParallelNodes: 2,
 		},
@@ -71,7 +72,8 @@ func TestPlanWorkflowFailsNodeWhenRequiredInputArtifactIsMissing(t *testing.T) {
 
 	ref := agentos.BackendRef{Kind: agentos.BackendKindNative, Name: agentos.BackendNameGoAgentNative}
 	spec := agentos.RunPlanSpec{
-		PlanID: "plan-missing-input-artifact",
+		PlanID:         "plan-missing-input-artifact",
+		IdempotencyKey: "plan-start-missing-input-artifact",
 		Nodes: []agentos.PlanNodeSpec{
 			{NodeID: "research", Run: agentos.RunSpec{RunID: "run-research", Backend: ref}},
 			{NodeID: "verify", Run: agentos.RunSpec{RunID: "run-verify", Backend: ref}},
@@ -121,7 +123,8 @@ func TestPlanWorkflowPublishesDebugTraceEvents(t *testing.T) {
 
 	ref := agentos.BackendRef{Kind: agentos.BackendKindNative, Name: agentos.BackendNameGoAgentNative}
 	spec := agentos.RunPlanSpec{
-		PlanID: "plan-debug-trace",
+		PlanID:         "plan-debug-trace",
+		IdempotencyKey: "plan-start-debug-trace",
 		Inputs: map[string]any{
 			"task": map[string]any{"topic": "durable trace"},
 		},
@@ -178,7 +181,8 @@ func TestPlanWorkflowErrorEdgeRunsRecoveryButPlanRemainsFailed(t *testing.T) {
 
 	ref := agentos.BackendRef{Kind: agentos.BackendKindNative, Name: agentos.BackendNameGoAgentNative}
 	spec := agentos.RunPlanSpec{
-		PlanID: "plan-error",
+		PlanID:         "plan-error",
+		IdempotencyKey: "plan-start-error",
 		Nodes: []agentos.PlanNodeSpec{
 			{NodeID: "attempt", Run: agentos.RunSpec{RunID: "run-attempt", Backend: ref}},
 			{NodeID: "recover", Run: agentos.RunSpec{RunID: "run-recover", Backend: ref}},
@@ -211,7 +215,8 @@ func TestPlanWorkflowRetriesFailedNodeAttempt(t *testing.T) {
 
 	ref := agentos.BackendRef{Kind: agentos.BackendKindNative, Name: agentos.BackendNameGoAgentNative}
 	spec := agentos.RunPlanSpec{
-		PlanID: "plan-retry",
+		PlanID:         "plan-retry",
+		IdempotencyKey: "plan-start-retry",
 		Nodes: []agentos.PlanNodeSpec{
 			{
 				NodeID: "flaky",
@@ -249,7 +254,8 @@ func TestPlanWorkflowAppliesPlanDeltaArtifact(t *testing.T) {
 
 	ref := agentos.BackendRef{Kind: agentos.BackendKindNative, Name: agentos.BackendNameGoAgentNative}
 	spec := agentos.RunPlanSpec{
-		PlanID: "plan-expand",
+		PlanID:         "plan-expand",
+		IdempotencyKey: "plan-start-expand",
 		Policy: agentos.PlanPolicy{
 			MaxNodes:      2,
 			MaxExpansions: 1,
@@ -316,7 +322,8 @@ func TestPlanWorkflowCancelsTimedOutNode(t *testing.T) {
 
 	ref := agentos.BackendRef{Kind: agentos.BackendKindNative, Name: agentos.BackendNameGoAgentNative}
 	spec := agentos.RunPlanSpec{
-		PlanID: "plan-timeout",
+		PlanID:         "plan-timeout",
+		IdempotencyKey: "plan-start-timeout",
 		Nodes: []agentos.PlanNodeSpec{
 			{
 				NodeID: "slow",
@@ -355,7 +362,8 @@ func TestPlanWorkflowCancelsActiveNodesWhenBudgetExceeded(t *testing.T) {
 
 	ref := agentos.BackendRef{Kind: agentos.BackendKindNative, Name: agentos.BackendNameGoAgentNative}
 	spec := agentos.RunPlanSpec{
-		PlanID: "plan-budget",
+		PlanID:         "plan-budget",
+		IdempotencyKey: "plan-start-budget",
 		Policy: agentos.PlanPolicy{
 			BudgetCents:      50,
 			MaxParallelNodes: 2,
@@ -403,7 +411,8 @@ func TestPlanWorkflowOrchestratesMixedBackendsThroughRuntime(t *testing.T) {
 		{Kind: agentos.BackendKindGRPC, Name: "grpc-agent"},
 	}
 	spec := agentos.RunPlanSpec{
-		PlanID: "plan-mixed-backends",
+		PlanID:         "plan-mixed-backends",
+		IdempotencyKey: "plan-start-mixed-backends",
 		Policy: agentos.PlanPolicy{
 			MaxParallelNodes: 2,
 		},
@@ -467,7 +476,8 @@ func TestPlanWorkflowRetriesFailedNodeFromSignal(t *testing.T) {
 
 	ref := agentos.BackendRef{Kind: agentos.BackendKindNative, Name: agentos.BackendNameGoAgentNative}
 	spec := agentos.RunPlanSpec{
-		PlanID: "plan-manual-retry",
+		PlanID:         "plan-manual-retry",
+		IdempotencyKey: "plan-start-manual-retry",
 		Nodes: []agentos.PlanNodeSpec{
 			{NodeID: "flaky", Run: agentos.RunSpec{RunID: "run-flaky", Backend: ref}},
 			{NodeID: "slow", Run: agentos.RunSpec{RunID: "run-slow", Backend: ref}},
@@ -517,7 +527,8 @@ func TestPlanWorkflowRejectSignalFailsRunningPlan(t *testing.T) {
 
 	ref := agentos.BackendRef{Kind: agentos.BackendKindNative, Name: agentos.BackendNameGoAgentNative}
 	spec := agentos.RunPlanSpec{
-		PlanID: "plan-reject",
+		PlanID:         "plan-reject",
+		IdempotencyKey: "plan-start-reject",
 		Nodes: []agentos.PlanNodeSpec{
 			{NodeID: "slow", Run: agentos.RunSpec{RunID: "run-slow", Backend: ref}},
 		},
@@ -559,7 +570,8 @@ func TestPlanWorkflowApproveSignalUnblocksPausedPlan(t *testing.T) {
 
 	ref := agentos.BackendRef{Kind: agentos.BackendKindNative, Name: agentos.BackendNameGoAgentNative}
 	spec := agentos.RunPlanSpec{
-		PlanID: "plan-approve",
+		PlanID:         "plan-approve",
+		IdempotencyKey: "plan-start-approve",
 		Nodes: []agentos.PlanNodeSpec{
 			{NodeID: "slow", Capability: "pausable", Run: agentos.RunSpec{RunID: "run-slow", Backend: ref}},
 		},
@@ -608,7 +620,8 @@ func TestPlanWorkflowContinuedInputRestoresSnapshotStatus(t *testing.T) {
 
 	ref := agentos.BackendRef{Kind: agentos.BackendKindNative, Name: agentos.BackendNameGoAgentNative}
 	spec := agentos.RunPlanSpec{
-		PlanID: "plan-continued",
+		PlanID:         "plan-continued",
+		IdempotencyKey: "plan-start-continued",
 		Nodes: []agentos.PlanNodeSpec{
 			{NodeID: "running", Run: agentos.RunSpec{RunID: "run-running", Backend: ref}},
 		},

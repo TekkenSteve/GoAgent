@@ -161,8 +161,9 @@ func TestAgentOSPlanPostgresDurablePersistence(t *testing.T) {
 		t.Fatalf("BindPlanNode changed run error = %v, want ErrInvalidRunSpec", err)
 	}
 	standaloneRun := agentos.RunSpec{
-		RunID:   "standalone-" + suffix,
-		Backend: runSpec.Backend,
+		RunID:          "standalone-" + suffix,
+		Backend:        runSpec.Backend,
+		IdempotencyKey: "standalone-run-start-" + suffix,
 	}
 	if err := routeIndex.Bind(ctx, standaloneRun); err != nil {
 		t.Fatalf("Bind standalone first: %v", err)
@@ -241,6 +242,19 @@ func TestAgentOSPlanPostgresDurablePersistence(t *testing.T) {
 	}
 	if _, _, err := capabilityCatalog.RegisterCapability(ctx, changedCapability, changedKey); !errors.Is(err, agentos.ErrInvalidRunPlan) {
 		t.Fatalf("RegisterCapability changed error = %v, want ErrInvalidRunPlan", err)
+	}
+}
+
+func TestAgentOSPlanPostgresSavePlanStateRequiresIdempotencyKey(t *testing.T) {
+	ctx, pg, suffix := newAgentOSPlanPostgresIntegrationDB(t)
+	planRepo := NewAgentOSPlanRepo(pg)
+
+	err := planRepo.SavePlanState(ctx, agentosplan.PlanStateSnapshot{
+		Spec:   agentos.RunPlanSpec{PlanID: "plan-state-key-required-" + suffix},
+		Status: agentos.RunPlanStatus{PlanID: "plan-state-key-required-" + suffix},
+	})
+	if !errors.Is(err, agentos.ErrInvalidRunPlan) {
+		t.Fatalf("SavePlanState empty key error = %v, want ErrInvalidRunPlan", err)
 	}
 }
 
@@ -448,6 +462,7 @@ func applyAgentOSPlanMigrations(t *testing.T, pg *postgres.Postgres) {
 		"20260618000001_add_artifact_idempotency.up.sql",
 		"20260619000001_create_agentos_capabilities.up.sql",
 		"20260619000002_require_plan_event_idempotency.up.sql",
+		"20260619000003_require_control_plane_idempotency.up.sql",
 	} {
 		path := filepath.Join("..", "..", "..", "migrations", migration)
 		data, err := os.ReadFile(path)

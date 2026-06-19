@@ -17,6 +17,17 @@ func TestMemoryPlanStoreCreatePlanRequiresIdempotencyKey(t *testing.T) {
 	}
 }
 
+func TestMemoryPlanStoreSavePlanStateRequiresIdempotencyKey(t *testing.T) {
+	store := NewMemoryPlanStore()
+	err := store.SavePlanState(context.Background(), PlanStateSnapshot{
+		Spec:   agentos.RunPlanSpec{PlanID: "plan-1"},
+		Status: agentos.RunPlanStatus{PlanID: "plan-1"},
+	})
+	if !errors.Is(err, agentos.ErrInvalidRunPlan) {
+		t.Fatalf("error = %v, want ErrInvalidRunPlan", err)
+	}
+}
+
 func TestMemoryPlanStoreCreatePlanIsIdempotentForSameRequest(t *testing.T) {
 	store := NewMemoryPlanStore()
 	spec := testRunPlanSpec("plan-1", "start-key")
