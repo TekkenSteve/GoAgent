@@ -227,6 +227,98 @@ func TestAgentOSPlanRoutesUsePlanRuntime(t *testing.T) {
 	}
 }
 
+func TestAgentOSPlanRoutesRequireProjectScope(t *testing.T) {
+	app := fiber.New()
+	planRuntime := newFakePlanRuntime()
+	NewRoutes(app.Group("/v1"), nil, nil, logger.New("error"), nil, nil, nil, nil, nil, nil, planRuntime)
+
+	tests := []struct {
+		name   string
+		method string
+		path   string
+		body   string
+	}{
+		{
+			name:   "status",
+			method: http.MethodGet,
+			path:   "/v1/agentos/plans/plan-1/status?account_id=acct-1",
+		},
+		{
+			name:   "description",
+			method: http.MethodGet,
+			path:   "/v1/agentos/plans/plan-1/description?account_id=acct-1",
+		},
+		{
+			name:   "stream events",
+			method: http.MethodGet,
+			path:   "/v1/agentos/plans/plan-1/events?account_id=acct-1",
+		},
+		{
+			name:   "event history",
+			method: http.MethodGet,
+			path:   "/v1/agentos/plans/plan-1/events/history?account_id=acct-1",
+		},
+		{
+			name:   "debug traces",
+			method: http.MethodGet,
+			path:   "/v1/agentos/plans/plan-1/debug/traces?account_id=acct-1",
+		},
+		{
+			name:   "audits",
+			method: http.MethodGet,
+			path:   "/v1/agentos/plans/plan-1/audits?account_id=acct-1",
+		},
+		{
+			name:   "artifacts",
+			method: http.MethodGet,
+			path:   "/v1/agentos/plans/plan-1/artifacts?account_id=acct-1",
+		},
+		{
+			name:   "artifact",
+			method: http.MethodGet,
+			path:   "/v1/agentos/plans/plan-1/artifacts/artifact-1?account_id=acct-1",
+		},
+		{
+			name:   "console",
+			method: http.MethodGet,
+			path:   "/v1/agentos/plans/plan-1/console?account_id=acct-1",
+		},
+		{
+			name:   "signal",
+			method: http.MethodPost,
+			path:   "/v1/agentos/plans/plan-1/signals",
+			body:   `{"type":"plan.approve","account_id":"acct-1"}`,
+		},
+		{
+			name:   "control",
+			method: http.MethodPost,
+			path:   "/v1/agentos/plans/plan-1/control",
+			body:   `{"operation":"pause","account_id":"acct-1"}`,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			resp := doAgentOSRouteRequest(t, app, tt.method, tt.path, tt.body)
+			defer resp.Body.Close()
+			if resp.StatusCode != http.StatusBadRequest {
+				t.Fatalf("status = %d, want %d", resp.StatusCode, http.StatusBadRequest)
+			}
+		})
+	}
+	if planRuntime.statusRef.PlanID != "" ||
+		planRuntime.descriptionRef.PlanID != "" ||
+		planRuntime.signalRef.PlanID != "" ||
+		planRuntime.controlRef.PlanID != "" ||
+		planRuntime.scope.PlanID != "" ||
+		planRuntime.eventScope.PlanID != "" ||
+		planRuntime.debugScope.PlanID != "" ||
+		planRuntime.auditScope.PlanID != "" ||
+		planRuntime.artifactScope.PlanID != "" ||
+		planRuntime.artifactGetScope.PlanID != "" {
+		t.Fatalf("runtime was called despite missing project scope: %#v", planRuntime)
+	}
+}
+
 func TestAgentOSPlanEventRouteStreamsSSE(t *testing.T) {
 	planRuntime := newFakePlanRuntime()
 	app := fiber.New()
@@ -325,15 +417,21 @@ func TestAgentOSPlanConsoleRendersRuntimeData(t *testing.T) {
 	}
 }
 
-func TestAgentOSPlanConsoleRequiresAccountScope(t *testing.T) {
+func TestAgentOSPlanConsoleRequiresTenantScope(t *testing.T) {
 	planRuntime := newFakePlanRuntime()
 	app := fiber.New()
 	NewRoutes(app.Group("/v1"), nil, nil, logger.New("error"), nil, nil, nil, nil, nil, nil, planRuntime)
 
-	resp := doAgentOSRouteRequest(t, app, http.MethodGet, "/v1/agentos/plans/plan-1/console", "")
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusBadRequest {
-		t.Fatalf("console status = %d", resp.StatusCode)
+	for _, path := range []string{
+		"/v1/agentos/plans/plan-1/console",
+		"/v1/agentos/plans/plan-1/console?account_id=acct-1",
+		"/v1/agentos/plans/plan-1/console?project_id=proj-1",
+	} {
+		resp := doAgentOSRouteRequest(t, app, http.MethodGet, path, "")
+		defer resp.Body.Close()
+		if resp.StatusCode != http.StatusBadRequest {
+			t.Fatalf("console path %q status = %d", path, resp.StatusCode)
+		}
 	}
 }
 
