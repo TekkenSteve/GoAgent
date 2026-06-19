@@ -134,6 +134,9 @@ func (r *planRuntime) StartPlan(ctx context.Context, spec agentos.RunPlanSpec) (
 
 	status.LifecycleState = agentos.PlanLifecycleRunning
 	status.UpdatedAt = time.Now().UTC()
+	if err := r.planIndex.UpdatePlanStatus(ctx, status, spec.IdempotencyKey); err != nil {
+		return agentos.RunPlanStatus{}, err
+	}
 
 	return status, nil
 }
@@ -142,14 +145,16 @@ func (r *planRuntime) StatusPlan(ctx context.Context, planID string) (agentos.Ru
 	if planID == "" {
 		return agentos.RunPlanStatus{}, fmt.Errorf("%w: plan id is required", agentos.ErrInvalidRunPlan)
 	}
-	value, err := r.temporalClient.QueryWorkflow(ctx, planWorkflowID(planID), "", PlanStatusQueryName)
-	if err != nil {
-		return agentos.RunPlanStatus{}, fmt.Errorf("agentos temporal plan runtime - query plan workflow: %w", err)
+	if r.planIndex == nil {
+		return agentos.RunPlanStatus{}, errors.New("agentos temporal plan runtime: plan index is not configured")
 	}
 
-	var status agentos.RunPlanStatus
-	if err := value.Get(&status); err != nil {
-		return agentos.RunPlanStatus{}, fmt.Errorf("agentos temporal plan runtime - decode status: %w", err)
+	_, status, exists, err := r.planIndex.GetPlan(ctx, planID)
+	if err != nil {
+		return agentos.RunPlanStatus{}, err
+	}
+	if !exists {
+		return agentos.RunPlanStatus{}, fmt.Errorf("%w: %s", agentos.ErrPlanRouteNotFound, planID)
 	}
 
 	return status, nil
