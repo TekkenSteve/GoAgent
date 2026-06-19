@@ -159,11 +159,8 @@ func (r *planRuntime) SignalPlan(ctx context.Context, planID string, signal agen
 	if planID == "" {
 		return fmt.Errorf("%w: plan id is required", agentos.ErrInvalidRunPlan)
 	}
-	if signal.Type == "" {
-		return fmt.Errorf("%w: type is required", agentos.ErrInvalidSignal)
-	}
-	if signal.IdempotencyKey == "" {
-		return fmt.Errorf("%w: signal idempotency key is required", agentos.ErrInvalidSignal)
+	if err := agentosplan.ValidatePlanSignal(signal); err != nil {
+		return err
 	}
 	created, err := r.recordPlanAudit(ctx, agentosplan.AuditRecord{
 		PlanID:         planID,

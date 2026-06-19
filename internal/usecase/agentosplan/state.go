@@ -44,6 +44,8 @@ type EventKind string
 const (
 	EventPlanStarted        EventKind = "plan.started"
 	EventPlanBlocked        EventKind = "plan.blocked"
+	EventPlanApproved       EventKind = "plan.approved"
+	EventPlanRejected       EventKind = "plan.rejected"
 	EventPlanSucceeded      EventKind = "plan.succeeded"
 	EventPlanFailed         EventKind = "plan.failed"
 	EventPlanCanceled       EventKind = "plan.canceled"
@@ -77,8 +79,15 @@ func (s *State) Apply(event StateEvent) error {
 	switch event.Kind {
 	case EventPlanStarted:
 		s.Status.LifecycleState = agentos.PlanLifecycleRunning
+		s.Status.Reason = event.Reason
 	case EventPlanBlocked:
 		s.Status.LifecycleState = agentos.PlanLifecycleBlocked
+		s.Status.Reason = event.Reason
+	case EventPlanApproved:
+		s.Status.LifecycleState = agentos.PlanLifecycleRunning
+		s.Status.Reason = event.Reason
+	case EventPlanRejected:
+		s.Status.LifecycleState = agentos.PlanLifecycleFailed
 		s.Status.Reason = event.Reason
 	case EventPlanSucceeded:
 		s.Status.LifecycleState = agentos.PlanLifecycleSucceeded

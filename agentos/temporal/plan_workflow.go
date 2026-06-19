@@ -80,10 +80,15 @@ func PlanWorkflow(ctx workflow.Context, spec agentos.RunPlanSpec) (agentos.RunPl
 		if canceled {
 			return state.Status, nil
 		}
-		if err := drainPlanSignals(signalCh, processedSignals); err != nil {
+		rejected, nextPaused, signalProgressed, err := drainPlanSignals(activityCtx, ctx, spec, signalCh, &state, paused, validation.Plan.NodeByID, processedSignals)
+		paused = nextPaused
+		if err != nil {
 			persistErr := applyPlanStateEvent(activityCtx, ctx, spec, &state, agentosplan.StateEvent{Kind: agentosplan.EventPlanFailed, Reason: err.Error()})
 
 			return state.Status, errors.Join(err, persistErr)
+		}
+		if rejected {
+			return state.Status, nil
 		}
 
 		if planNodesTerminal(state.Status) {
@@ -100,7 +105,7 @@ func PlanWorkflow(ctx workflow.Context, spec agentos.RunPlanSpec) (agentos.RunPl
 			continue
 		}
 
-		progressed := false
+		progressed := signalProgressed
 		decision, err := scheduler.Decide(context.Background(), validation.Plan, state.Status, agentosplan.Variables(spec, state.Status))
 		if err != nil {
 			persistErr := applyPlanStateEvent(activityCtx, ctx, spec, &state, agentosplan.StateEvent{Kind: agentosplan.EventPlanFailed, Reason: err.Error()})
@@ -497,22 +502,87 @@ func nodeSupportsControl(controlsByNode map[string][]agentos.ControlOperation, n
 	return false
 }
 
-func drainPlanSignals(ch workflow.ReceiveChannel, processed map[string]bool) error {
+func drainPlanSignals(activityCtx workflow.Context, workflowCtx workflow.Context, spec agentos.RunPlanSpec, ch workflow.ReceiveChannel, state *agentosplan.State, paused bool, nodes map[string]agentos.PlanNodeSpec, processed map[string]bool) (bool, bool, bool, error) {
 	var signal agentos.Signal
+	progressed := false
 	for ch.ReceiveAsync(&signal) {
-		if signal.Type == "" {
-			return fmt.Errorf("%w: type is required", agentos.ErrInvalidSignal)
-		}
-		if signal.IdempotencyKey == "" {
-			return fmt.Errorf("%w: signal idempotency key is required", agentos.ErrInvalidSignal)
+		if err := agentosplan.ValidatePlanSignal(signal); err != nil {
+			return false, paused, progressed, err
 		}
 		if processed[signal.IdempotencyKey] {
 			continue
 		}
 		processed[signal.IdempotencyKey] = true
+		switch signal.Type {
+		case agentos.SignalPlanNodeRetry:
+			if err := applyManualNodeRetry(activityCtx, workflowCtx, spec, state, nodes, signal); err != nil {
+				return false, paused, progressed, err
+			}
+			paused = false
+			progressed = true
+		case agentos.SignalPlanApprove:
+			if state.Status.LifecycleState != agentos.PlanLifecycleBlocked {
+				return false, paused, progressed, fmt.Errorf("%w: approve requires blocked plan state", agentos.ErrInvalidSignal)
+			}
+			reason := agentosplan.PlanSignalReason(signal)
+			if err := applyPlanStateEvent(activityCtx, workflowCtx, spec, state, agentosplan.StateEvent{Kind: agentosplan.EventPlanApproved, Reason: reason}); err != nil {
+				return false, paused, progressed, err
+			}
+			paused = false
+			progressed = true
+		case agentos.SignalPlanReject:
+			reason := agentosplan.PlanSignalReason(signal)
+			if reason == "" {
+				reason = "plan rejected"
+			}
+			if err := applyPlanStateEvent(activityCtx, workflowCtx, spec, state, agentosplan.StateEvent{Kind: agentosplan.EventPlanRejected, Reason: reason}); err != nil {
+				return false, paused, progressed, err
+			}
+
+			return true, paused, true, nil
+		}
 	}
 
-	return nil
+	return false, paused, progressed, nil
+}
+
+func applyManualNodeRetry(activityCtx workflow.Context, workflowCtx workflow.Context, spec agentos.RunPlanSpec, state *agentosplan.State, nodes map[string]agentos.PlanNodeSpec, signal agentos.Signal) error {
+	nodeID, err := agentosplan.PlanSignalNodeID(signal)
+	if err != nil {
+		return err
+	}
+	nodeSpec, ok := nodes[nodeID]
+	if !ok {
+		return fmt.Errorf("%w: unknown node %q", agentos.ErrInvalidRunPlan, nodeID)
+	}
+	current, ok := state.NodeStatus(nodeID)
+	if !ok {
+		return fmt.Errorf("%w: unknown node %q", agentos.ErrInvalidRunPlan, nodeID)
+	}
+	if current.LifecycleState != agentos.PlanNodeFailed {
+		return fmt.Errorf("%w: node %q is %s, not failed", agentos.ErrInvalidSignal, nodeID, current.LifecycleState)
+	}
+	reason := agentosplan.PlanSignalReason(signal)
+	if reason == "" {
+		reason = "manual retry requested"
+	}
+	if state.Status.LifecycleState == agentos.PlanLifecycleBlocked || state.Status.LifecycleState == agentos.PlanLifecycleFailed {
+		if err := applyPlanStateEvent(activityCtx, workflowCtx, spec, state, agentosplan.StateEvent{Kind: agentosplan.EventPlanApproved, Reason: reason}); err != nil {
+			return err
+		}
+	}
+	nextAttempt := current.Attempts + 1
+	if nextAttempt <= 0 {
+		nextAttempt = 1
+	}
+
+	return applyPlanStateEvent(activityCtx, workflowCtx, spec, state, agentosplan.StateEvent{
+		Kind:    agentosplan.EventNodeRetryScheduled,
+		NodeID:  nodeSpec.NodeID,
+		RunID:   current.RunID,
+		Reason:  reason,
+		Attempt: nextAttempt,
+	})
 }
 
 func normalizePlanParallelism(maxParallel int32) int {

@@ -3,8 +3,10 @@ package temporal
 import (
 	"context"
 	"testing"
+	"time"
 
 	"github.com/TekkenSteve/GoAgent/agentos"
+	"github.com/TekkenSteve/GoAgent/internal/usecase/agentosplan"
 	"github.com/stretchr/testify/require"
 	"go.temporal.io/sdk/activity"
 	"go.temporal.io/sdk/testsuite"
@@ -173,17 +175,163 @@ func TestPlanWorkflowCancelsTimedOutNode(t *testing.T) {
 	require.NotEmpty(t, mocks.controls[0].Control.IdempotencyKey)
 }
 
+func TestPlanWorkflowRetriesFailedNodeFromSignal(t *testing.T) {
+	t.Parallel()
+
+	ref := agentos.BackendRef{Kind: agentos.BackendKindNative, Name: agentos.BackendNameGoAgentNative}
+	spec := agentos.RunPlanSpec{
+		PlanID: "plan-manual-retry",
+		Nodes: []agentos.PlanNodeSpec{
+			{NodeID: "flaky", Run: agentos.RunSpec{RunID: "run-flaky", Backend: ref}},
+			{NodeID: "slow", Run: agentos.RunSpec{RunID: "run-slow", Backend: ref}},
+		},
+	}
+	mocks := &planWorkflowMocks{
+		statuses: map[string]agentos.RunStatus{
+			"run-flaky":           {RunID: "run-flaky", LifecycleState: "failed", Reason: "needs manual retry"},
+			"run-flaky-attempt-2": {RunID: "run-flaky-attempt-2", LifecycleState: "completed"},
+		},
+		statusSequences: map[string][]agentos.RunStatus{
+			"run-slow": {
+				{RunID: "run-slow", LifecycleState: "running"},
+				{RunID: "run-slow", LifecycleState: "running"},
+				{RunID: "run-slow", LifecycleState: "completed"},
+			},
+		},
+	}
+	env := newPlanWorkflowTestEnv(mocks)
+	env.RegisterDelayedCallback(func() {
+		env.SignalWorkflow(PlanSignalName, agentos.Signal{
+			Type:           agentos.SignalPlanNodeRetry,
+			IdempotencyKey: "retry-flaky",
+			Payload: map[string]any{
+				agentosplan.SignalPayloadNodeID: "flaky",
+			},
+		})
+	}, time.Second)
+
+	env.ExecuteWorkflow(PlanWorkflow, spec)
+
+	require.True(t, env.IsWorkflowCompleted())
+	require.NoError(t, env.GetWorkflowError())
+
+	var result agentos.RunPlanStatus
+	require.NoError(t, env.GetWorkflowResult(&result))
+	require.Equal(t, agentos.PlanLifecycleSucceeded, result.LifecycleState)
+	require.Equal(t, []string{"run-flaky", "run-slow", "run-flaky-attempt-2"}, mocks.started)
+	require.Len(t, result.Nodes, 2)
+	require.Equal(t, int32(2), result.Nodes[0].Attempts)
+	require.Equal(t, "run-flaky-attempt-2", result.Nodes[0].RunID)
+}
+
+func TestPlanWorkflowRejectSignalFailsRunningPlan(t *testing.T) {
+	t.Parallel()
+
+	ref := agentos.BackendRef{Kind: agentos.BackendKindNative, Name: agentos.BackendNameGoAgentNative}
+	spec := agentos.RunPlanSpec{
+		PlanID: "plan-reject",
+		Nodes: []agentos.PlanNodeSpec{
+			{NodeID: "slow", Run: agentos.RunSpec{RunID: "run-slow", Backend: ref}},
+		},
+	}
+	mocks := &planWorkflowMocks{
+		statusSequences: map[string][]agentos.RunStatus{
+			"run-slow": {
+				{RunID: "run-slow", LifecycleState: "running"},
+				{RunID: "run-slow", LifecycleState: "running"},
+			},
+		},
+	}
+	env := newPlanWorkflowTestEnv(mocks)
+	env.RegisterDelayedCallback(func() {
+		env.SignalWorkflow(PlanSignalName, agentos.Signal{
+			Type:           agentos.SignalPlanReject,
+			IdempotencyKey: "reject-plan",
+			Payload: map[string]any{
+				agentosplan.SignalPayloadReason: "operator rejected",
+			},
+		})
+	}, time.Second)
+
+	env.ExecuteWorkflow(PlanWorkflow, spec)
+
+	require.True(t, env.IsWorkflowCompleted())
+	require.NoError(t, env.GetWorkflowError())
+
+	var result agentos.RunPlanStatus
+	require.NoError(t, env.GetWorkflowResult(&result))
+	require.Equal(t, agentos.PlanLifecycleFailed, result.LifecycleState)
+	require.Equal(t, "operator rejected", result.Reason)
+	require.Equal(t, []string{"run-slow"}, mocks.started)
+}
+
+func TestPlanWorkflowApproveSignalUnblocksPausedPlan(t *testing.T) {
+	t.Parallel()
+
+	ref := agentos.BackendRef{Kind: agentos.BackendKindNative, Name: agentos.BackendNameGoAgentNative}
+	spec := agentos.RunPlanSpec{
+		PlanID: "plan-approve",
+		Nodes: []agentos.PlanNodeSpec{
+			{NodeID: "slow", Capability: "pausable", Run: agentos.RunSpec{RunID: "run-slow", Backend: ref}},
+		},
+	}
+	mocks := &planWorkflowMocks{
+		statusSequences: map[string][]agentos.RunStatus{
+			"run-slow": {
+				{RunID: "run-slow", LifecycleState: "running"},
+				{RunID: "run-slow", LifecycleState: "running"},
+				{RunID: "run-slow", LifecycleState: "completed"},
+			},
+		},
+	}
+	env := newPlanWorkflowTestEnvWithCapabilities(mocks, []agentos.Capability{
+		{Backend: ref, Name: "pausable", Controls: []agentos.ControlOperation{agentos.ControlPause}},
+	})
+	env.RegisterDelayedCallback(func() {
+		env.SignalWorkflow(PlanControlSignalName, agentos.ControlRequest{
+			Operation:      agentos.ControlPause,
+			IdempotencyKey: "pause-plan",
+		})
+	}, time.Second)
+	env.RegisterDelayedCallback(func() {
+		env.SignalWorkflow(PlanSignalName, agentos.Signal{
+			Type:           agentos.SignalPlanApprove,
+			IdempotencyKey: "approve-plan",
+		})
+	}, 2*time.Second)
+
+	env.ExecuteWorkflow(PlanWorkflow, spec)
+
+	require.True(t, env.IsWorkflowCompleted())
+	require.NoError(t, env.GetWorkflowError())
+
+	var result agentos.RunPlanStatus
+	require.NoError(t, env.GetWorkflowResult(&result))
+	require.Equal(t, agentos.PlanLifecycleSucceeded, result.LifecycleState)
+	require.Equal(t, []string{"run-slow"}, mocks.started)
+	require.Len(t, mocks.controls, 1)
+	require.Equal(t, agentos.ControlPause, mocks.controls[0].Control.Operation)
+}
+
 type planWorkflowMocks struct {
-	started  []string
-	statuses map[string]agentos.RunStatus
-	controls []controlPlanNodeInput
+	started         []string
+	statuses        map[string]agentos.RunStatus
+	statusSequences map[string][]agentos.RunStatus
+	controls        []controlPlanNodeInput
 }
 
 func newPlanWorkflowTestEnv(mocks *planWorkflowMocks) *testsuite.TestWorkflowEnvironment {
+	return newPlanWorkflowTestEnvWithCapabilities(mocks, nil)
+}
+
+func newPlanWorkflowTestEnvWithCapabilities(mocks *planWorkflowMocks, capabilities []agentos.Capability) *testsuite.TestWorkflowEnvironment {
 	env := (&testsuite.WorkflowTestSuite{}).NewTestWorkflowEnvironment()
 	env.RegisterWorkflowWithOptions(PlanWorkflow, workflow.RegisterOptions{Name: PlanWorkflowName})
 
-	activities := NewPlanActivities(&fakePlanRuntime{})
+	activities, err := NewPlanActivitiesWithCapabilities(&fakePlanRuntime{}, capabilities)
+	if err != nil {
+		panic(err)
+	}
 	env.RegisterActivityWithOptions(activities.ValidatePlanActivity, activity.RegisterOptions{Name: ValidatePlanActivityName})
 	env.RegisterActivityWithOptions(activities.PersistPlanStateActivity, activity.RegisterOptions{Name: PersistPlanStateActivityName})
 	env.RegisterActivityWithOptions(mocks.start, activity.RegisterOptions{Name: StartPlanNodeActivityName})
@@ -201,6 +349,17 @@ func (m *planWorkflowMocks) start(_ context.Context, input startPlanNodeInput) (
 }
 
 func (m *planWorkflowMocks) status(_ context.Context, input statusPlanNodeInput) (statusPlanNodeOutput, error) {
+	if sequence := m.statusSequences[input.RunID]; len(sequence) > 0 {
+		status := sequence[0]
+		if len(sequence) > 1 {
+			m.statusSequences[input.RunID] = sequence[1:]
+		}
+		if status.RunID == "" {
+			status.RunID = input.RunID
+		}
+
+		return statusPlanNodeOutput{Status: status}, nil
+	}
 	status := m.statuses[input.RunID]
 	if status.RunID == "" {
 		status.RunID = input.RunID

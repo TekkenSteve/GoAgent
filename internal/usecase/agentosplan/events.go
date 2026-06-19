@@ -223,6 +223,10 @@ func planEventType(kind EventKind) (agentos.EventType, error) {
 		return agentos.EventPlanStarted, nil
 	case EventPlanBlocked:
 		return agentos.EventPlanBlocked, nil
+	case EventPlanApproved:
+		return agentos.EventPlanApproved, nil
+	case EventPlanRejected:
+		return agentos.EventPlanRejected, nil
 	case EventPlanSucceeded:
 		return agentos.EventPlanSucceeded, nil
 	case EventPlanFailed:

@@ -66,3 +66,24 @@ func TestStateRetryScheduledKeepsAttemptsAndClearsActiveRun(t *testing.T) {
 		t.Fatalf("second attempt node = %#v", second)
 	}
 }
+
+func TestStatePlanApprovalAndRejection(t *testing.T) {
+	now := time.Date(2026, 6, 19, 12, 0, 0, 0, time.UTC)
+	state := NewState(agentos.RunPlanSpec{PlanID: "plan-1"}, now)
+
+	if err := state.Apply(StateEvent{Kind: EventPlanBlocked, Reason: "waiting approval", At: now}); err != nil {
+		t.Fatalf("Apply blocked: %v", err)
+	}
+	if err := state.Apply(StateEvent{Kind: EventPlanApproved, At: now.Add(time.Second)}); err != nil {
+		t.Fatalf("Apply approved: %v", err)
+	}
+	if state.Status.LifecycleState != agentos.PlanLifecycleRunning || state.Status.Reason != "" {
+		t.Fatalf("approved status = %#v", state.Status)
+	}
+	if err := state.Apply(StateEvent{Kind: EventPlanRejected, Reason: "operator rejected", At: now.Add(2 * time.Second)}); err != nil {
+		t.Fatalf("Apply rejected: %v", err)
+	}
+	if state.Status.LifecycleState != agentos.PlanLifecycleFailed || state.Status.Reason != "operator rejected" {
+		t.Fatalf("rejected status = %#v", state.Status)
+	}
+}

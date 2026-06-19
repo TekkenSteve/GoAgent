@@ -97,6 +97,33 @@ func TestPlanEventFromRetryScheduledIncludesAttempt(t *testing.T) {
 	}
 }
 
+func TestPlanEventFromApprovalSignals(t *testing.T) {
+	at := time.Date(2026, 6, 19, 12, 0, 0, 0, time.UTC)
+	tests := []struct {
+		name string
+		kind EventKind
+		want agentos.EventType
+	}{
+		{name: "approved", kind: EventPlanApproved, want: agentos.EventPlanApproved},
+		{name: "rejected", kind: EventPlanRejected, want: agentos.EventPlanRejected},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			event, _, err := PlanEventFromStateEvent(
+				agentos.RunPlanSpec{PlanID: "plan-1"},
+				agentos.RunPlanStatus{PlanID: "plan-1", LifecycleState: agentos.PlanLifecycleRunning, UpdatedAt: at},
+				StateEvent{Kind: tt.kind, Reason: "operator decision", At: at},
+			)
+			if err != nil {
+				t.Fatalf("PlanEventFromStateEvent: %v", err)
+			}
+			if event.EventType != tt.want {
+				t.Fatalf("event type = %q, want %q", event.EventType, tt.want)
+			}
+		})
+	}
+}
+
 func TestNodeStartIdempotencyKeyIncludesAttempt(t *testing.T) {
 	first, err := NodeStartIdempotencyKey("plan-1", "node-1", 1)
 	if err != nil {
