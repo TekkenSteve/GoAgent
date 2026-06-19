@@ -261,6 +261,15 @@ func normalizeEventPayload(payload map[string]any) map[string]any {
 	return payload
 }
 
+// NormalizePlanEventAppendRequest removes durable-store-owned identity fields
+// before an append request is persisted or compared for idempotency.
+func NormalizePlanEventAppendRequest(event agentos.PlanEvent) agentos.PlanEvent {
+	event.EventID = ""
+	event.Sequence = 0
+
+	return event
+}
+
 // ValidateArtifactPublishIdempotency verifies that a repeated artifact publish
 // request is the same durable artifact request that originally claimed the key.
 func ValidateArtifactPublishIdempotency(existing agentos.ArtifactRef, requested agentos.ArtifactRef) error {

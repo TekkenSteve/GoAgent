@@ -76,6 +76,74 @@ func TestMemoryPlanStoreAppendPlanEventIsIdempotent(t *testing.T) {
 	}
 }
 
+func TestMemoryPlanStoreAppendPlanEventScopesIdempotencyKeyByPlan(t *testing.T) {
+	ctx := context.Background()
+	store := NewMemoryPlanStore()
+	for _, planID := range []string{"plan-1", "plan-2"} {
+		if err := store.SavePlanState(ctx, PlanStateSnapshot{
+			Spec: agentos.RunPlanSpec{
+				PlanID:         planID,
+				IdempotencyKey: planID + "-start",
+			},
+			Status: agentos.RunPlanStatus{PlanID: planID, LifecycleState: agentos.PlanLifecycleRunning},
+		}); err != nil {
+			t.Fatalf("SavePlanState %s: %v", planID, err)
+		}
+	}
+
+	first, err := store.AppendPlanEvent(ctx, agentos.PlanEvent{
+		Event:  agentos.Event{EventType: agentos.EventPlanStarted},
+		PlanID: "plan-1",
+	}, "shared-key")
+	if err != nil {
+		t.Fatalf("AppendPlanEvent first plan: %v", err)
+	}
+	second, err := store.AppendPlanEvent(ctx, agentos.PlanEvent{
+		Event:  agentos.Event{EventType: agentos.EventPlanStarted},
+		PlanID: "plan-2",
+	}, "shared-key")
+	if err != nil {
+		t.Fatalf("AppendPlanEvent second plan: %v", err)
+	}
+	if first.Sequence != 1 || second.Sequence != 1 || first.EventID != "plan-1:1" || second.EventID != "plan-2:1" {
+		t.Fatalf("events = %#v %#v, want independent plan-scoped event identities", first, second)
+	}
+}
+
+func TestMemoryPlanStoreAppendPlanEventAssignsStoreOwnedIdentity(t *testing.T) {
+	ctx := context.Background()
+	store := NewMemoryPlanStore()
+	if err := store.SavePlanState(ctx, PlanStateSnapshot{
+		Spec:   agentos.RunPlanSpec{PlanID: "plan-1", IdempotencyKey: "plan-start-1"},
+		Status: agentos.RunPlanStatus{PlanID: "plan-1", LifecycleState: agentos.PlanLifecycleRunning},
+	}); err != nil {
+		t.Fatalf("SavePlanState: %v", err)
+	}
+	event := agentos.PlanEvent{
+		Event: agentos.Event{
+			EventID:   "caller-event",
+			EventType: agentos.EventPlanStarted,
+			Sequence:  99,
+		},
+		PlanID: "plan-1",
+	}
+
+	first, err := store.AppendPlanEvent(ctx, event, "event-key")
+	if err != nil {
+		t.Fatalf("AppendPlanEvent first: %v", err)
+	}
+	replay, err := store.AppendPlanEvent(ctx, event, "event-key")
+	if err != nil {
+		t.Fatalf("AppendPlanEvent replay: %v", err)
+	}
+	if first.EventID != "plan-1:1" || first.Sequence != 1 {
+		t.Fatalf("first event identity = %s/%d, want plan-1:1/1", first.EventID, first.Sequence)
+	}
+	if replay.EventID != first.EventID || replay.Sequence != first.Sequence {
+		t.Fatalf("replay = %#v, want %#v", replay, first)
+	}
+}
+
 func TestMemoryPlanStoreAppendPlanEventRequiresIdempotencyKey(t *testing.T) {
 	ctx := context.Background()
 	store := NewMemoryPlanStore()

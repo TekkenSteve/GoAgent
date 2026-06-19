@@ -18,10 +18,15 @@ type MemoryPlanStore struct {
 	statuses  map[string]agentos.RunPlanStatus
 	planKeys  map[string]string
 	events    map[string][]agentos.PlanEvent
-	eventKeys map[string]agentos.PlanEvent
+	eventKeys map[planEventIdempotencyKey]agentos.PlanEvent
 	commands  map[string]PlanCommandRecord
 	auditKeys map[string]AuditRecord
 	metrics   map[planMetricCheckpointKey]PlanMetricCheckpoint
+}
+
+type planEventIdempotencyKey struct {
+	PlanID         string
+	IdempotencyKey string
 }
 
 type planMetricCheckpointKey struct {
@@ -47,7 +52,7 @@ func NewMemoryPlanStore() *MemoryPlanStore {
 		statuses:  make(map[string]agentos.RunPlanStatus),
 		planKeys:  make(map[string]string),
 		events:    make(map[string][]agentos.PlanEvent),
-		eventKeys: make(map[string]agentos.PlanEvent),
+		eventKeys: make(map[planEventIdempotencyKey]agentos.PlanEvent),
 		commands:  make(map[string]PlanCommandRecord),
 		auditKeys: make(map[string]AuditRecord),
 		metrics:   make(map[planMetricCheckpointKey]PlanMetricCheckpoint),
@@ -229,30 +234,29 @@ func (s *MemoryPlanStore) AppendPlanEvent(_ context.Context, event agentos.PlanE
 	if idempotencyKey == "" {
 		return agentos.PlanEvent{}, fmt.Errorf("%w: plan event idempotency key is required", agentos.ErrInvalidPlanEvent)
 	}
+	requestedEvent := NormalizePlanEventAppendRequest(event)
+	event = requestedEvent
 
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if _, ok := s.specs[event.PlanID]; !ok {
 		return agentos.PlanEvent{}, fmt.Errorf("%w: %s", agentos.ErrPlanRouteNotFound, event.PlanID)
 	}
-	if existing, ok := s.eventKeys[idempotencyKey]; ok {
-		if err := ValidatePlanEventIdempotency(existing, event); err != nil {
+	key := planEventIdempotencyKey{PlanID: event.PlanID, IdempotencyKey: idempotencyKey}
+	if existing, ok := s.eventKeys[key]; ok {
+		if err := ValidatePlanEventIdempotency(existing, requestedEvent); err != nil {
 			return agentos.PlanEvent{}, err
 		}
 
 		return existing, nil
 	}
-	if event.Sequence == 0 {
-		event.Sequence = int64(len(s.events[event.PlanID]) + 1)
-	}
-	if event.EventID == "" {
-		event.EventID = fmt.Sprintf("%s:%d", event.PlanID, event.Sequence)
-	}
+	event.Sequence = int64(len(s.events[event.PlanID]) + 1)
+	event.EventID = fmt.Sprintf("%s:%d", event.PlanID, event.Sequence)
 	if event.Timestamp.IsZero() {
 		event.Timestamp = time.Now().UTC()
 	}
 	s.events[event.PlanID] = append(s.events[event.PlanID], event)
-	s.eventKeys[idempotencyKey] = event
+	s.eventKeys[key] = event
 
 	return event, nil
 }

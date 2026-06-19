@@ -370,7 +370,9 @@ func TestAgentOSPlanPostgresPlanEventIdempotencyDoesNotAdvanceSequence(t *testin
 
 	event := agentos.PlanEvent{
 		Event: agentos.Event{
+			EventID:   "caller-event-" + suffix,
 			EventType: agentos.EventPlanStarted,
+			Sequence:  99,
 			Timestamp: time.Date(2026, 6, 19, 12, 0, 0, 0, time.UTC),
 			Payload:   map[string]any{"state": "started"},
 		},
@@ -383,6 +385,9 @@ func TestAgentOSPlanPostgresPlanEventIdempotencyDoesNotAdvanceSequence(t *testin
 	replay, err := planRepo.AppendPlanEvent(ctx, event, "plan-event-key-"+suffix)
 	if err != nil {
 		t.Fatalf("AppendPlanEvent replay: %v", err)
+	}
+	if first.EventID != spec.PlanID+":1" || first.Sequence != 1 {
+		t.Fatalf("first event = %#v, want store-owned identity %s:1", first, spec.PlanID)
 	}
 	if replay.EventID != first.EventID || replay.Sequence != 1 {
 		t.Fatalf("replay = %#v, want first event at sequence 1", replay)

@@ -531,7 +531,8 @@ func (r *AgentOSPlanRepo) AppendPlanEvent(ctx context.Context, event agentos.Pla
 	if idempotencyKey == "" {
 		return agentos.PlanEvent{}, fmt.Errorf("%w: plan event idempotency key is required", agentos.ErrInvalidPlanEvent)
 	}
-	requestedEvent := event
+	requestedEvent := agentosplan.NormalizePlanEventAppendRequest(event)
+	event = requestedEvent
 
 	tx, err := r.Pool.Begin(ctx)
 	if err != nil {
@@ -561,7 +562,7 @@ FOR UPDATE`, event.PlanID).Scan(&currentSequence, &scope.AccountID, &scope.Proje
 		return agentos.PlanEvent{}, err
 	}
 	if exists {
-		if err := agentosplan.ValidatePlanEventIdempotency(existing, event); err != nil {
+		if err := agentosplan.ValidatePlanEventIdempotency(existing, requestedEvent); err != nil {
 			return agentos.PlanEvent{}, err
 		}
 
@@ -575,9 +576,7 @@ SET event_sequence = $2
 WHERE plan_id = $1`, event.PlanID, event.Sequence); err != nil {
 		return agentos.PlanEvent{}, fmt.Errorf("AgentOSPlanRepo - AppendPlanEvent - update sequence: %w", err)
 	}
-	if event.EventID == "" {
-		event.EventID = fmt.Sprintf("%s:%d", event.PlanID, event.Sequence)
-	}
+	event.EventID = fmt.Sprintf("%s:%d", event.PlanID, event.Sequence)
 	if event.Timestamp.IsZero() {
 		event.Timestamp = time.Now().UTC()
 	}
