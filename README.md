@@ -75,6 +75,10 @@ make compose-up-all
   - `POST /v1/agentos/plans/{plan_id}/signals` — Send plan signals such as retry, approve, or reject
   - `POST /v1/agentos/plans/{plan_id}/control` — Send pause, resume, or cancel to a RunPlan
   - `GET /v1/agentos/plans/{plan_id}/events` — Stream RunPlan events as SSE
+  - `GET /v1/agentos/plans/{plan_id}/events/history` — Query durable RunPlan event history
+  - `GET /v1/agentos/plans/{plan_id}/audits` — Query durable plan audit records
+  - `GET /v1/agentos/plans/{plan_id}/artifacts` — Query plan artifact refs
+  - `GET /v1/agentos/plans/{plan_id}/artifacts/{artifact_id}` — Read one plan artifact document
 - **Orchestration API**:
   - `POST /v1/orchestration/execute` — Start multi-step orchestration workflow
   - `GET /v1/orchestration/status/{run_id}` — Poll orchestration status
@@ -185,6 +189,8 @@ AgentOS supports durable cross-backend orchestration through `agentos.PlanRuntim
 `RunPlan` is the public control-plane model for coordinating backend-owned child runs. A `PlanNodeSpec` is a full `agentos.RunSpec` plus backend, capability, input, output, condition, and policy contracts. It is not a native GoAgent step, not a Temporal activity, and not a LangGraph node.
 
 Native GoAgent `entity.Step` remains an internal detail of the GoAgent native backend. Backend-specific step, graph, loop, and tool execution details should be emitted through events or artifacts, not promoted into the public AgentOS API.
+
+Plan runtime query APIs are durable: status comes from the plan index, event history comes from the plan event store, audits come from the audit store, and artifact payloads come from the artifact store. SSE is only the live streaming transport layered on top of the durable event history.
 
 External Go projects should import only:
 
