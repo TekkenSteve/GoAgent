@@ -102,6 +102,7 @@ func newWorkerKit(ctx context.Context, cfg WorkerConfig) (*WorkerKit, error) {
 		return nil, fmt.Errorf("agentos temporal worker - artifact blob store: %w", err)
 	}
 	artifactStore := temporalrepo.NewAgentOSArtifactRepo(pg, blobStore)
+	planEventStream := repostream.NewRedisPlanEventStream(rdb)
 	planRuntime, err := NewRuntimeWithClient(ctx, RuntimeConfig{
 		TemporalAddress:          cfg.TemporalAddress,
 		TemporalNamespace:        cfg.TemporalNamespace,
@@ -117,7 +118,7 @@ func newWorkerKit(ctx context.Context, cfg WorkerConfig) (*WorkerKit, error) {
 
 		return nil, fmt.Errorf("agentos temporal worker - plan runtime: %w", err)
 	}
-	planActivities, err := NewPlanActivitiesWithStores(planRuntime, cfg.Capabilities, planStore, planStore, runBackendIndex, artifactStore)
+	planActivities, err := NewPlanActivitiesWithStores(planRuntime, cfg.Capabilities, planStore, planStore, planEventStream, runBackendIndex, artifactStore)
 	if err != nil {
 		temporalClient.Close()
 		_ = rdb.Close()

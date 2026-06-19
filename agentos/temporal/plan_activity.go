@@ -10,13 +10,14 @@ import (
 
 // PlanActivities bridge Temporal PlanWorkflow decisions to AgentOS runtime calls.
 type PlanActivities struct {
-	Runtime          agentos.Runtime
-	Validator        agentosplan.Validator
-	PlanStateStore   agentosplan.PlanStateStore
-	PlanEventStore   agentosplan.PlanEventStore
-	RunBackendBinder PlanRunBackendBinder
-	ArtifactStore    agentosplan.ArtifactStore
-	Expressions      agentosplan.ValueExpressionCompiler
+	Runtime            agentos.Runtime
+	Validator          agentosplan.Validator
+	PlanStateStore     agentosplan.PlanStateStore
+	PlanEventStore     agentosplan.PlanEventStore
+	PlanEventPublisher agentosplan.PlanEventPublisher
+	RunBackendBinder   PlanRunBackendBinder
+	ArtifactStore      agentosplan.ArtifactStore
+	Expressions        agentosplan.ValueExpressionCompiler
 }
 
 // PlanRunBackendBinder records plan-node ownership into the run route index.
@@ -40,7 +41,7 @@ func NewPlanActivitiesWithCapabilities(runtime agentos.Runtime, capabilities []a
 	store := agentosplan.NewMemoryPlanStore()
 	artifactStore := agentosplan.NewMemoryArtifactStore()
 
-	return NewPlanActivitiesWithStores(runtime, capabilities, store, store, nil, artifactStore)
+	return NewPlanActivitiesWithStores(runtime, capabilities, store, store, nil, nil, artifactStore)
 }
 
 // NewPlanActivitiesWithStores creates plan activities with explicit durable
@@ -50,6 +51,7 @@ func NewPlanActivitiesWithStores(
 	capabilities []agentos.Capability,
 	stateStore agentosplan.PlanStateStore,
 	eventStore agentosplan.PlanEventStore,
+	eventPublisher agentosplan.PlanEventPublisher,
 	runBackendBinder PlanRunBackendBinder,
 	artifactStore agentosplan.ArtifactStore,
 ) (*PlanActivities, error) {
@@ -68,11 +70,12 @@ func NewPlanActivitiesWithStores(
 			Expressions:  compiler,
 			Capabilities: catalog,
 		},
-		PlanStateStore:   stateStore,
-		PlanEventStore:   eventStore,
-		RunBackendBinder: runBackendBinder,
-		ArtifactStore:    artifactStore,
-		Expressions:      compiler,
+		PlanStateStore:     stateStore,
+		PlanEventStore:     eventStore,
+		PlanEventPublisher: eventPublisher,
+		RunBackendBinder:   runBackendBinder,
+		ArtifactStore:      artifactStore,
+		Expressions:        compiler,
 	}, nil
 }
 
@@ -193,6 +196,11 @@ func (a *PlanActivities) PersistPlanStateActivity(ctx context.Context, input per
 	event, err := a.PlanEventStore.AppendPlanEvent(ctx, input.Event, input.IdempotencyKey)
 	if err != nil {
 		return persistPlanStateOutput{}, err
+	}
+	if a.PlanEventPublisher != nil {
+		if err := a.PlanEventPublisher.PublishPlanEvent(ctx, event); err != nil {
+			return persistPlanStateOutput{}, err
+		}
 	}
 
 	return persistPlanStateOutput{Event: event}, nil

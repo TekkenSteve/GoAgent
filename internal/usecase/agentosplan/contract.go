@@ -65,6 +65,17 @@ type PlanEventStore interface {
 	ListPlanEvents(ctx context.Context, scope agentos.PlanStreamScope, limit int) ([]agentos.PlanEvent, error)
 }
 
+// PlanEventPublisher publishes live PlanEvents after the durable event source
+// has assigned sequence and event identity.
+type PlanEventPublisher interface {
+	PublishPlanEvent(ctx context.Context, event agentos.PlanEvent) error
+}
+
+// PlanEventSubscriber subscribes to the live PlanEvent tail.
+type PlanEventSubscriber interface {
+	SubscribePlanEvents(ctx context.Context, scope agentos.PlanStreamScope) (agentos.Subscription, error)
+}
+
 // AuditAction identifies durable control-plane actions.
 type AuditAction string
 

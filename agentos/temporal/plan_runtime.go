@@ -20,9 +20,9 @@ type planRuntime struct {
 	temporalClient client.Client
 	closeTemporal  bool
 	redis          *goredis.Redis
-	subscriber     *repostream.RedisSubscriber
 	postgres       *postgres.Postgres
 	planEvents     agentosplan.PlanEventStore
+	planLiveEvents agentosplan.PlanEventSubscriber
 	planIndex      agentosplan.PlanIndex
 	auditStore     agentosplan.AuditStore
 	taskQueue      string
@@ -71,7 +71,7 @@ func newPlanRuntimeWithClient(ctx context.Context, cfg RuntimeConfig, c client.C
 			return nil, fmt.Errorf("agentos temporal plan runtime redis: %w", err)
 		}
 		rt.redis = rdb
-		rt.subscriber = repostream.NewRedisSubscriber(rdb.Hub())
+		rt.planLiveEvents = repostream.NewRedisPlanEventStream(rdb)
 	}
 	if cfg.PostgresURL != "" {
 		pg, err := newRuntimePostgres(cfg)
@@ -233,8 +233,18 @@ func (r *planRuntime) SubscribePlan(ctx context.Context, scope agentos.PlanStrea
 	if err != nil {
 		return nil, err
 	}
+	if r.planLiveEvents == nil {
+		return newPlanReplaySubscription(events), nil
+	}
 
-	return newPlanReplaySubscription(events), nil
+	liveScope := scope
+	liveScope.AfterSequence = lastPlanEventSequence(scope.AfterSequence, events)
+	live, err := r.planLiveEvents.SubscribePlanEvents(ctx, liveScope)
+	if err != nil {
+		return nil, err
+	}
+
+	return newPlanReplayThenLiveSubscription(events, live), nil
 }
 
 func (r *planRuntime) Close() error {

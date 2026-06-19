@@ -71,3 +71,61 @@ func TestNewPlanReplaySubscriptionPreservesPlanScopeInPayload(t *testing.T) {
 		t.Fatal("subscription should close after replay")
 	}
 }
+
+func TestNewPlanReplayThenLiveSubscription(t *testing.T) {
+	liveEvents := make(chan agentos.Event, 1)
+	live := &fakeAgentOSSubscription{events: liveEvents}
+	sub := newPlanReplayThenLiveSubscription([]agentos.PlanEvent{
+		{
+			Event: agentos.Event{
+				EventID:   "evt-replay",
+				EventType: agentos.EventPlanStarted,
+				Sequence:  1,
+			},
+			PlanID: "plan-1",
+		},
+	}, live)
+
+	replay := <-sub.Events()
+	if replay.EventID != "evt-replay" || replay.Payload["plan_id"] != "plan-1" {
+		t.Fatalf("replay event = %#v", replay)
+	}
+
+	liveEvents <- agentos.Event{EventID: "evt-live", EventType: agentos.EventPlanNodeStarted, Sequence: 2}
+	gotLive := <-sub.Events()
+	if gotLive.EventID != "evt-live" {
+		t.Fatalf("live event = %#v", gotLive)
+	}
+
+	if err := sub.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+	if !live.closed {
+		t.Fatal("live subscription was not closed")
+	}
+}
+
+func TestLastPlanEventSequence(t *testing.T) {
+	last := lastPlanEventSequence(3, []agentos.PlanEvent{
+		{Event: agentos.Event{Sequence: 2}},
+		{Event: agentos.Event{Sequence: 5}},
+	})
+	if last != 5 {
+		t.Fatalf("last = %d, want 5", last)
+	}
+}
+
+type fakeAgentOSSubscription struct {
+	events <-chan agentos.Event
+	closed bool
+}
+
+func (s *fakeAgentOSSubscription) Events() <-chan agentos.Event {
+	return s.events
+}
+
+func (s *fakeAgentOSSubscription) Close() error {
+	s.closed = true
+
+	return nil
+}

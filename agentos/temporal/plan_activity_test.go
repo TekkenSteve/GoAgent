@@ -118,6 +118,39 @@ func TestPlanActivitiesPublishArtifactsIsIdempotent(t *testing.T) {
 	}
 }
 
+func TestPlanActivitiesPersistPlanStatePublishesStoredEvent(t *testing.T) {
+	activities := NewPlanActivities(&fakePlanRuntime{})
+	publisher := &fakePlanEventPublisher{}
+	activities.PlanEventPublisher = publisher
+
+	output, err := activities.PersistPlanStateActivity(context.Background(), persistPlanStateInput{
+		Spec: agentos.RunPlanSpec{
+			PlanID:         "plan-1",
+			IdempotencyKey: "plan-start-key",
+		},
+		Status: agentos.RunPlanStatus{
+			PlanID:         "plan-1",
+			LifecycleState: agentos.PlanLifecycleRunning,
+		},
+		Event: agentos.PlanEvent{
+			Event: agentos.Event{
+				EventType: agentos.EventPlanStarted,
+			},
+			PlanID: "plan-1",
+		},
+		IdempotencyKey: "event-key",
+	})
+	if err != nil {
+		t.Fatalf("PersistPlanStateActivity: %v", err)
+	}
+	if output.Event.Sequence == 0 {
+		t.Fatalf("persisted event sequence = %d", output.Event.Sequence)
+	}
+	if publisher.event.Sequence != output.Event.Sequence || publisher.event.EventID != output.Event.EventID {
+		t.Fatalf("published event = %#v, want %#v", publisher.event, output.Event)
+	}
+}
+
 func TestPlanActivitiesValidatePlanUsesCapabilityCatalog(t *testing.T) {
 	ref := agentos.BackendRef{Kind: agentos.BackendKindHTTP, Name: "research"}
 	activities, err := NewPlanActivitiesWithCapabilities(&fakePlanRuntime{}, []agentos.Capability{
@@ -204,6 +237,16 @@ func TestPlanActivitiesValidatePlanReturnsCapabilityControls(t *testing.T) {
 type fakePlanRuntime struct {
 	started agentos.RunSpec
 	control agentos.ControlOperation
+}
+
+type fakePlanEventPublisher struct {
+	event agentos.PlanEvent
+}
+
+func (p *fakePlanEventPublisher) PublishPlanEvent(_ context.Context, event agentos.PlanEvent) error {
+	p.event = event
+
+	return nil
 }
 
 func (r *fakePlanRuntime) Start(_ context.Context, spec agentos.RunSpec) (agentos.RunStatus, error) {
