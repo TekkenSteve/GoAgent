@@ -6,55 +6,59 @@ import (
 	"sync"
 
 	"github.com/TekkenSteve/GoAgent/agentos"
+	"github.com/TekkenSteve/GoAgent/internal/entity"
+	"github.com/TekkenSteve/GoAgent/internal/usecase/agentosruntime"
 )
 
 // AgentOSRunIndex is a process-local AgentOS run route index.
 type AgentOSRunIndex struct {
-	mu     sync.RWMutex
-	routes map[string]agentos.BackendRef
+	mu      sync.RWMutex
+	records map[string]entity.RunBackendIndexRecord
+	keys    map[string]string
 }
 
 // NewAgentOSRunIndex creates an empty in-memory AgentOS run route index.
 func NewAgentOSRunIndex() *AgentOSRunIndex {
-	return &AgentOSRunIndex{routes: make(map[string]agentos.BackendRef)}
+	return &AgentOSRunIndex{
+		records: make(map[string]entity.RunBackendIndexRecord),
+		keys:    make(map[string]string),
+	}
 }
 
 // Bind stores the backend reference for a run.
 func (i *AgentOSRunIndex) Bind(_ context.Context, spec agentos.RunSpec) error {
-	if spec.RunID == "" {
-		return fmt.Errorf("%w: run id is required", agentos.ErrInvalidRunSpec)
-	}
-	if spec.IdempotencyKey == "" {
-		return fmt.Errorf("%w: run idempotency key is required", agentos.ErrInvalidRunSpec)
-	}
-	if spec.Backend.Kind == "" {
-		return fmt.Errorf("%w: kind is required", agentos.ErrInvalidBackendRef)
-	}
-	if spec.Backend.Name == "" {
-		return fmt.Errorf("%w: name is required", agentos.ErrInvalidBackendRef)
+	return i.bind(agentosruntime.RunBackendIndexRecordFromRunSpec(spec), true)
+}
+
+// BindPlanNode stores the backend reference for a plan-owned child run.
+func (i *AgentOSRunIndex) BindPlanNode(_ context.Context, planID string, nodeID string, spec agentos.RunSpec, status agentos.RunStatus) error {
+	return i.bind(agentosruntime.RunBackendIndexRecordFromPlanNode(planID, nodeID, spec, status), true)
+}
+
+func (i *AgentOSRunIndex) bind(record entity.RunBackendIndexRecord, requireIdempotencyKey bool) error {
+	record = agentosruntime.NormalizeRunBackendIndexRecord(record)
+	if err := agentosruntime.ValidateRunBackendIndexRecord(record, requireIdempotencyKey); err != nil {
+		return err
 	}
 
 	i.mu.Lock()
 	defer i.mu.Unlock()
-	if existing, exists := i.routes[spec.RunID]; exists {
-		if existing != spec.Backend {
-			return fmt.Errorf("%w: run %q is already owned by %s/%s", agentos.ErrInvalidBackendRef, spec.RunID, existing.Kind, existing.Name)
-		}
+	if record.IdempotencyKey != "" {
+		if existingRunID, exists := i.keys[record.IdempotencyKey]; exists {
+			existing := i.records[existingRunID]
 
-		return nil
+			return agentosruntime.ValidateRunBackendIndexIdempotency(existing, record)
+		}
 	}
-	i.routes[spec.RunID] = spec.Backend
+	if existing, exists := i.records[record.RunID]; exists {
+		return agentosruntime.ValidateRunBackendIndexIdempotency(existing, record)
+	}
+	i.records[record.RunID] = record
+	if record.IdempotencyKey != "" {
+		i.keys[record.IdempotencyKey] = record.RunID
+	}
 
 	return nil
-}
-
-// BindPlanNode stores the backend reference for a plan-owned child run.
-func (i *AgentOSRunIndex) BindPlanNode(ctx context.Context, _ string, _ string, spec agentos.RunSpec, status agentos.RunStatus) error {
-	if status.RunID != "" {
-		spec.RunID = status.RunID
-	}
-
-	return i.Bind(ctx, spec)
 }
 
 // Resolve returns the backend reference that owns a run.
@@ -66,10 +70,13 @@ func (i *AgentOSRunIndex) Resolve(_ context.Context, runID string) (agentos.Back
 	i.mu.RLock()
 	defer i.mu.RUnlock()
 
-	ref, ok := i.routes[runID]
+	record, ok := i.records[runID]
 	if !ok {
 		return agentos.BackendRef{}, fmt.Errorf("%w: %s", agentos.ErrRunRouteNotFound, runID)
 	}
 
-	return ref, nil
+	return agentos.BackendRef{
+		Kind: agentos.BackendKind(record.BackendKind),
+		Name: record.BackendName,
+	}, nil
 }

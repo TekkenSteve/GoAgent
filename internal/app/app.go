@@ -281,7 +281,6 @@ func initTemporalComponents(
 		planStore,
 		planStore,
 		planEventStream,
-		runBackendIndex,
 		artifactStore,
 	)
 	if err != nil {

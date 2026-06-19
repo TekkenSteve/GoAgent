@@ -101,6 +101,10 @@ func (r *runtime) Start(ctx context.Context, spec agentos.RunSpec) (agentos.RunS
 	return r.router.Start(ctx, spec)
 }
 
+func (r *runtime) StartPlanNode(ctx context.Context, planID, nodeID string, spec agentos.RunSpec) (agentos.RunStatus, error) {
+	return r.router.StartPlanNode(ctx, planID, nodeID, spec)
+}
+
 func (r *runtime) Signal(ctx context.Context, runID string, signal agentos.Signal) error {
 	return r.router.Signal(ctx, runID, signal)
 }

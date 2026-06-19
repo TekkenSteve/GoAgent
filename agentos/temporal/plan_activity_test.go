@@ -352,7 +352,6 @@ func TestPlanActivitiesEvaluatePlanExpansionValidatesDelta(t *testing.T) {
 		agentosplan.NewMemoryPlanStore(),
 		agentosplan.NewMemoryPlanStore(),
 		nil,
-		nil,
 		artifactStore,
 	)
 	if err != nil {
@@ -489,7 +488,6 @@ func TestPlanActivitiesValidatePlanUsesInjectedCapabilityCatalog(t *testing.T) {
 		store,
 		store,
 		nil,
-		nil,
 		agentosplan.NewMemoryArtifactStore(),
 	)
 	if err != nil {
@@ -538,6 +536,10 @@ func (r *fakePlanRuntime) Start(_ context.Context, spec agentos.RunSpec) (agento
 	r.started = spec
 
 	return agentos.RunStatus{RunID: spec.RunID, LifecycleState: "running", UpdatedAt: time.Now()}, nil
+}
+
+func (r *fakePlanRuntime) StartPlanNode(ctx context.Context, _ string, _ string, spec agentos.RunSpec) (agentos.RunStatus, error) {
+	return r.Start(ctx, spec)
 }
 
 func (r *fakePlanRuntime) Signal(context.Context, string, agentos.Signal) error {

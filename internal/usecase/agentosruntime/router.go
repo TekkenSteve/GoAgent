@@ -10,6 +10,7 @@ import (
 // RunBackendIndex records which backend owns each run.
 type RunBackendIndex interface {
 	Bind(ctx context.Context, spec agentos.RunSpec) error
+	BindPlanNode(ctx context.Context, planID, nodeID string, spec agentos.RunSpec, status agentos.RunStatus) error
 	Resolve(ctx context.Context, runID string) (agentos.BackendRef, error)
 }
 
@@ -49,18 +50,7 @@ func (r *Router) Start(ctx context.Context, spec agentos.RunSpec) (agentos.RunSt
 	if spec.IdempotencyKey == "" {
 		return agentos.RunStatus{}, fmt.Errorf("%w: run idempotency key is required", agentos.ErrInvalidRunSpec)
 	}
-	selectedBackend, err := r.selectBackend(ctx, spec)
-	if err != nil {
-		return agentos.RunStatus{}, err
-	}
-	spec.Backend = selectedBackend
-
-	backend, err := r.registry.Get(spec.Backend)
-	if err != nil {
-		return agentos.RunStatus{}, err
-	}
-
-	status, err := backend.Start(ctx, spec)
+	spec, status, err := r.startBackend(ctx, spec)
 	if err != nil {
 		return agentos.RunStatus{}, err
 	}
@@ -69,6 +59,49 @@ func (r *Router) Start(ctx context.Context, spec agentos.RunSpec) (agentos.RunSt
 	}
 
 	return status, nil
+}
+
+// StartPlanNode starts a backend-owned child run and records plan-node
+// ownership without first creating a standalone route.
+func (r *Router) StartPlanNode(ctx context.Context, planID, nodeID string, spec agentos.RunSpec) (agentos.RunStatus, error) {
+	if planID == "" {
+		return agentos.RunStatus{}, fmt.Errorf("%w: plan id is required", agentos.ErrInvalidRunPlan)
+	}
+	if nodeID == "" {
+		return agentos.RunStatus{}, fmt.Errorf("%w: node id is required", agentos.ErrInvalidRunPlan)
+	}
+	if spec.IdempotencyKey == "" {
+		return agentos.RunStatus{}, fmt.Errorf("%w: run idempotency key is required", agentos.ErrInvalidRunSpec)
+	}
+	spec, status, err := r.startBackend(ctx, spec)
+	if err != nil {
+		return agentos.RunStatus{}, err
+	}
+	if err := r.index.BindPlanNode(ctx, planID, nodeID, spec, status); err != nil {
+		return agentos.RunStatus{}, err
+	}
+
+	return status, nil
+}
+
+func (r *Router) startBackend(ctx context.Context, spec agentos.RunSpec) (agentos.RunSpec, agentos.RunStatus, error) {
+	selectedBackend, err := r.selectBackend(ctx, spec)
+	if err != nil {
+		return agentos.RunSpec{}, agentos.RunStatus{}, err
+	}
+	spec.Backend = selectedBackend
+
+	backend, err := r.registry.Get(spec.Backend)
+	if err != nil {
+		return agentos.RunSpec{}, agentos.RunStatus{}, err
+	}
+
+	status, err := backend.Start(ctx, spec)
+	if err != nil {
+		return agentos.RunSpec{}, agentos.RunStatus{}, err
+	}
+
+	return spec, status, nil
 }
 
 func (r *Router) selectBackend(ctx context.Context, spec agentos.RunSpec) (agentos.BackendRef, error) {

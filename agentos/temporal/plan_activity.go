@@ -11,19 +11,20 @@ import (
 // PlanActivities bridge Temporal PlanWorkflow decisions to AgentOS runtime calls.
 type PlanActivities struct {
 	Runtime            agentos.Runtime
+	PlanNodeStarter    PlanNodeStarter
 	Validator          agentosplan.Validator
 	PlanStateStore     agentosplan.PlanStateStore
 	PlanEventStore     agentosplan.PlanEventStore
 	PlanEventPublisher agentosplan.PlanEventPublisher
-	RunBackendBinder   PlanRunBackendBinder
 	ArtifactStore      agentosplan.ArtifactStore
 	PlanDeltaProvider  agentosplan.PlanDeltaProvider
 	Expressions        agentosplan.ValueExpressionCompiler
 }
 
-// PlanRunBackendBinder records plan-node ownership into the run route index.
-type PlanRunBackendBinder interface {
-	BindPlanNode(ctx context.Context, planID, nodeID string, spec agentos.RunSpec, status agentos.RunStatus) error
+// PlanNodeStarter starts backend-owned child runs and records plan-node route
+// ownership atomically at the AgentOS runtime boundary.
+type PlanNodeStarter interface {
+	StartPlanNode(ctx context.Context, planID, nodeID string, spec agentos.RunSpec) (agentos.RunStatus, error)
 }
 
 // NewPlanActivities creates plan activities backed by an AgentOS runtime.
@@ -42,7 +43,7 @@ func NewPlanActivitiesWithCapabilities(runtime agentos.Runtime, capabilities []a
 	store := agentosplan.NewMemoryPlanStore()
 	artifactStore := agentosplan.NewMemoryArtifactStore()
 
-	return NewPlanActivitiesWithStores(runtime, capabilities, store, store, nil, nil, artifactStore)
+	return NewPlanActivitiesWithStores(runtime, capabilities, store, store, nil, artifactStore)
 }
 
 // NewPlanActivitiesWithStores creates plan activities with explicit durable
@@ -53,7 +54,6 @@ func NewPlanActivitiesWithStores(
 	stateStore agentosplan.PlanStateStore,
 	eventStore agentosplan.PlanEventStore,
 	eventPublisher agentosplan.PlanEventPublisher,
-	runBackendBinder PlanRunBackendBinder,
 	artifactStore agentosplan.ArtifactStore,
 ) (*PlanActivities, error) {
 	catalog, err := agentosplan.NewStaticCapabilityCatalog(capabilities)
@@ -61,7 +61,7 @@ func NewPlanActivitiesWithStores(
 		return nil, err
 	}
 
-	return NewPlanActivitiesWithCatalog(runtime, catalog, stateStore, eventStore, eventPublisher, runBackendBinder, artifactStore)
+	return NewPlanActivitiesWithCatalog(runtime, catalog, stateStore, eventStore, eventPublisher, artifactStore)
 }
 
 // NewPlanActivitiesWithCatalog creates plan activities with an explicit
@@ -72,16 +72,23 @@ func NewPlanActivitiesWithCatalog(
 	stateStore agentosplan.PlanStateStore,
 	eventStore agentosplan.PlanEventStore,
 	eventPublisher agentosplan.PlanEventPublisher,
-	runBackendBinder PlanRunBackendBinder,
 	artifactStore agentosplan.ArtifactStore,
 ) (*PlanActivities, error) {
+	if runtime == nil {
+		return nil, fmt.Errorf("%w: plan activity runtime is required", agentos.ErrInvalidRunPlan)
+	}
+	planNodeStarter, ok := runtime.(PlanNodeStarter)
+	if !ok {
+		return nil, fmt.Errorf("%w: plan activity runtime must support plan-node start", agentos.ErrInvalidRunPlan)
+	}
 	compiler, err := agentosplan.NewCELCompiler()
 	if err != nil {
 		return nil, err
 	}
 
 	return &PlanActivities{
-		Runtime: runtime,
+		Runtime:         runtime,
+		PlanNodeStarter: planNodeStarter,
 		Validator: agentosplan.Validator{
 			Expressions:  compiler,
 			Capabilities: catalog,
@@ -89,7 +96,6 @@ func NewPlanActivitiesWithCatalog(
 		PlanStateStore:     stateStore,
 		PlanEventStore:     eventStore,
 		PlanEventPublisher: eventPublisher,
-		RunBackendBinder:   runBackendBinder,
 		ArtifactStore:      artifactStore,
 		PlanDeltaProvider:  agentosplan.NewArtifactPlanDeltaProvider(artifactStore),
 		Expressions:        compiler,
@@ -223,14 +229,9 @@ func (a *PlanActivities) StartPlanNodeActivity(ctx context.Context, input startP
 		}
 		input.Node.Run.IdempotencyKey = key
 	}
-	status, err := a.Runtime.Start(ctx, input.Node.Run)
+	status, err := a.PlanNodeStarter.StartPlanNode(ctx, input.PlanID, input.Node.NodeID, input.Node.Run)
 	if err != nil {
 		return startPlanNodeOutput{}, err
-	}
-	if a.RunBackendBinder != nil {
-		if err := a.RunBackendBinder.BindPlanNode(ctx, input.PlanID, input.Node.NodeID, input.Node.Run, status); err != nil {
-			return startPlanNodeOutput{}, err
-		}
 	}
 
 	return startPlanNodeOutput{Status: status}, nil

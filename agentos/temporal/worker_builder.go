@@ -134,7 +134,7 @@ func newWorkerKit(ctx context.Context, cfg WorkerConfig) (*WorkerKit, error) {
 
 		return nil, fmt.Errorf("agentos temporal worker - plan runtime: %w", err)
 	}
-	planActivities, err := NewPlanActivitiesWithCatalog(planRuntime, capabilityCatalog, planStore, planStore, planEventStream, runBackendIndex, artifactStore)
+	planActivities, err := NewPlanActivitiesWithCatalog(planRuntime, capabilityCatalog, planStore, planStore, planEventStream, artifactStore)
 	if err != nil {
 		temporalClient.Close()
 		_ = rdb.Close()

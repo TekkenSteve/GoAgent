@@ -95,6 +95,7 @@ type S3ArtifactStoreConfig struct {
 // RunBackendIndex persists run ownership for Signal/Control/Status routing.
 type RunBackendIndex interface {
 	Bind(ctx context.Context, spec agentos.RunSpec) error
+	BindPlanNode(ctx context.Context, planID, nodeID string, spec agentos.RunSpec, status agentos.RunStatus) error
 	Resolve(ctx context.Context, runID string) (agentos.BackendRef, error)
 }
 

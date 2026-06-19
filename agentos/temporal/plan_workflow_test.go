@@ -430,14 +430,12 @@ func TestPlanWorkflowOrchestratesMixedBackendsThroughRuntime(t *testing.T) {
 	}
 	runtime := newMixedBackendRuntime()
 	store := agentosplan.NewMemoryPlanStore()
-	binder := &mixedBackendBinder{}
 	activities, err := NewPlanActivitiesWithStores(
 		runtime,
 		mixedBackendCapabilities(refs),
 		store,
 		store,
 		nil,
-		binder,
 		agentosplan.NewMemoryArtifactStore(),
 	)
 	require.NoError(t, err)
@@ -462,7 +460,6 @@ func TestPlanWorkflowOrchestratesMixedBackendsThroughRuntime(t *testing.T) {
 	require.NoError(t, env.GetWorkflowResult(&result))
 	require.Equal(t, agentos.PlanLifecycleSucceeded, result.LifecycleState)
 	require.Equal(t, []agentos.BackendRef{refs[0], refs[1], refs[2], refs[3]}, runtime.startedBackends())
-	require.Equal(t, []agentos.BackendRef{refs[0], refs[1], refs[2], refs[3]}, binder.boundBackends())
 
 	events, err := store.ListPlanEvents(context.Background(), agentos.PlanStreamScope{PlanID: spec.PlanID}, 0)
 	require.NoError(t, err)
@@ -731,7 +728,6 @@ func newPlanWorkflowTestEnvWithStores(mocks *planWorkflowMocks, capabilities []a
 		store,
 		eventStore,
 		nil,
-		nil,
 		artifactStore,
 	)
 	if err != nil {
@@ -819,6 +815,10 @@ func (r *mixedBackendRuntime) Start(_ context.Context, spec agentos.RunSpec) (ag
 	return agentos.RunStatus{RunID: spec.RunID, LifecycleState: "running"}, nil
 }
 
+func (r *mixedBackendRuntime) StartPlanNode(ctx context.Context, _ string, _ string, spec agentos.RunSpec) (agentos.RunStatus, error) {
+	return r.Start(ctx, spec)
+}
+
 func (r *mixedBackendRuntime) Signal(context.Context, string, agentos.Signal) error {
 	return nil
 }
@@ -854,30 +854,6 @@ func (r *mixedBackendRuntime) startedBackends() []agentos.BackendRef {
 	defer r.mu.Unlock()
 	backends := make([]agentos.BackendRef, 0, len(r.started))
 	for _, spec := range r.started {
-		backends = append(backends, spec.Backend)
-	}
-
-	return backends
-}
-
-type mixedBackendBinder struct {
-	mu    sync.Mutex
-	bound []agentos.RunSpec
-}
-
-func (b *mixedBackendBinder) BindPlanNode(_ context.Context, _ string, _ string, spec agentos.RunSpec, _ agentos.RunStatus) error {
-	b.mu.Lock()
-	defer b.mu.Unlock()
-	b.bound = append(b.bound, spec)
-
-	return nil
-}
-
-func (b *mixedBackendBinder) boundBackends() []agentos.BackendRef {
-	b.mu.Lock()
-	defer b.mu.Unlock()
-	backends := make([]agentos.BackendRef, 0, len(b.bound))
-	for _, spec := range b.bound {
 		backends = append(backends, spec.Backend)
 	}
 

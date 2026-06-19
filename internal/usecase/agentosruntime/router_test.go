@@ -130,6 +130,40 @@ func TestRouterSelectsBackendWhenSpecOmitsBackend(t *testing.T) {
 	}
 }
 
+func TestRouterStartPlanNodeBindsPlanOwnership(t *testing.T) {
+	ctx := context.Background()
+	ref := agentos.BackendRef{Kind: agentos.BackendKindNative, Name: agentos.BackendNameGoAgentNative}
+	stub := &stubBackend{}
+	registry := NewRegistry()
+	if err := registry.Register(ref, stub); err != nil {
+		t.Fatalf("register backend: %v", err)
+	}
+	index := newStubRunIndex()
+	router, err := NewRouter(registry, index)
+	if err != nil {
+		t.Fatalf("new router: %v", err)
+	}
+
+	status, err := router.StartPlanNode(ctx, "plan-1", "node-1", agentos.RunSpec{
+		RunID:          "run-1",
+		Backend:        ref,
+		IdempotencyKey: "node-start-1",
+	})
+	if err != nil {
+		t.Fatalf("StartPlanNode: %v", err)
+	}
+	if status.RunID != "run-1" {
+		t.Fatalf("status run id = %q", status.RunID)
+	}
+	record := index.planRoutes["run-1"]
+	if record.PlanID != "plan-1" || record.NodeID != "node-1" || record.Backend != ref {
+		t.Fatalf("plan route = %#v", record)
+	}
+	if _, ok := index.routes["run-1"]; ok {
+		t.Fatalf("standalone route was written for plan node")
+	}
+}
+
 func TestRouterRoutesMixedBackendRunsByOwnership(t *testing.T) {
 	ctx := context.Background()
 	refs := []agentos.BackendRef{
@@ -229,11 +263,21 @@ type stubBackend struct {
 }
 
 type stubRunIndex struct {
-	routes map[string]agentos.BackendRef
+	routes     map[string]agentos.BackendRef
+	planRoutes map[string]stubPlanRoute
+}
+
+type stubPlanRoute struct {
+	PlanID  string
+	NodeID  string
+	Backend agentos.BackendRef
 }
 
 func newStubRunIndex() *stubRunIndex {
-	return &stubRunIndex{routes: make(map[string]agentos.BackendRef)}
+	return &stubRunIndex{
+		routes:     make(map[string]agentos.BackendRef),
+		planRoutes: make(map[string]stubPlanRoute),
+	}
 }
 
 func (i *stubRunIndex) Bind(_ context.Context, spec agentos.RunSpec) error {
@@ -242,7 +286,25 @@ func (i *stubRunIndex) Bind(_ context.Context, spec agentos.RunSpec) error {
 	return nil
 }
 
+func (i *stubRunIndex) BindPlanNode(_ context.Context, planID, nodeID string, spec agentos.RunSpec, status agentos.RunStatus) error {
+	runID := status.RunID
+	if runID == "" {
+		runID = spec.RunID
+	}
+	i.planRoutes[runID] = stubPlanRoute{
+		PlanID:  planID,
+		NodeID:  nodeID,
+		Backend: spec.Backend,
+	}
+
+	return nil
+}
+
 func (i *stubRunIndex) Resolve(_ context.Context, runID string) (agentos.BackendRef, error) {
+	if route, ok := i.planRoutes[runID]; ok {
+		return route.Backend, nil
+	}
+
 	return i.routes[runID], nil
 }
 

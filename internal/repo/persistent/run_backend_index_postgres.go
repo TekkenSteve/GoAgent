@@ -9,6 +9,7 @@ import (
 	"github.com/TekkenSteve/GoAgent/agentos"
 	"github.com/TekkenSteve/GoAgent/internal/entity"
 	"github.com/TekkenSteve/GoAgent/internal/pkg/postgres"
+	"github.com/TekkenSteve/GoAgent/internal/usecase/agentosruntime"
 	"github.com/jackc/pgx/v5"
 )
 
@@ -23,40 +24,11 @@ func NewRunBackendIndexRepo(pg *postgres.Postgres) *RunBackendIndexRepo {
 }
 
 func (r *RunBackendIndexRepo) Bind(ctx context.Context, spec agentos.RunSpec) error {
-	return r.upsert(ctx, entity.RunBackendIndexRecord{
-		RunID:          spec.RunID,
-		ThreadID:       spec.ThreadID,
-		AccountID:      spec.AccountID,
-		ProjectID:      spec.ProjectID,
-		BackendKind:    string(spec.Backend.Kind),
-		BackendName:    spec.Backend.Name,
-		IdempotencyKey: spec.IdempotencyKey,
-		LifecycleState: "created",
-	}, true)
+	return r.upsert(ctx, agentosruntime.RunBackendIndexRecordFromRunSpec(spec), true)
 }
 
 func (r *RunBackendIndexRepo) BindPlanNode(ctx context.Context, planID, nodeID string, spec agentos.RunSpec, status agentos.RunStatus) error {
-	runID := status.RunID
-	if runID == "" {
-		runID = spec.RunID
-	}
-	lifecycle := status.LifecycleState
-	if lifecycle == "" {
-		lifecycle = "created"
-	}
-
-	return r.upsert(ctx, entity.RunBackendIndexRecord{
-		RunID:          runID,
-		PlanID:         planID,
-		NodeID:         nodeID,
-		ThreadID:       spec.ThreadID,
-		AccountID:      spec.AccountID,
-		ProjectID:      spec.ProjectID,
-		BackendKind:    string(spec.Backend.Kind),
-		BackendName:    spec.Backend.Name,
-		IdempotencyKey: spec.IdempotencyKey,
-		LifecycleState: lifecycle,
-	}, true)
+	return r.upsert(ctx, agentosruntime.RunBackendIndexRecordFromPlanNode(planID, nodeID, spec, status), true)
 }
 
 func (r *RunBackendIndexRepo) Resolve(ctx context.Context, runID string) (agentos.BackendRef, error) {
@@ -114,17 +86,9 @@ func (r *RunBackendIndexRepo) runByIdempotencyKey(ctx context.Context, idempoten
 }
 
 func (r *RunBackendIndexRepo) upsert(ctx context.Context, record entity.RunBackendIndexRecord, requireIdempotencyKey bool) error {
-	if record.RunID == "" {
-		return fmt.Errorf("%w: run id is required", agentos.ErrInvalidRunSpec)
-	}
-	if record.BackendKind == "" || record.BackendName == "" {
-		return fmt.Errorf("%w: kind and name are required", agentos.ErrInvalidBackendRef)
-	}
-	if requireIdempotencyKey && record.IdempotencyKey == "" {
-		return fmt.Errorf("%w: run backend idempotency key is required", agentos.ErrInvalidRunSpec)
-	}
-	if record.LifecycleState == "" {
-		record.LifecycleState = "created"
+	record = agentosruntime.NormalizeRunBackendIndexRecord(record)
+	if err := agentosruntime.ValidateRunBackendIndexRecord(record, requireIdempotencyKey); err != nil {
+		return err
 	}
 	if record.IdempotencyKey != "" {
 		existing, exists, err := r.runByIdempotencyKey(ctx, record.IdempotencyKey)
@@ -132,7 +96,7 @@ func (r *RunBackendIndexRepo) upsert(ctx context.Context, record entity.RunBacke
 			return err
 		}
 		if exists {
-			return validateRunBackendIndexIdempotency(existing, record)
+			return agentosruntime.ValidateRunBackendIndexIdempotency(existing, record)
 		}
 	}
 
@@ -175,7 +139,7 @@ func (r *RunBackendIndexRepo) upsert(ctx context.Context, record entity.RunBacke
 				return lookupErr
 			}
 			if exists {
-				return validateRunBackendIndexIdempotency(existing, record)
+				return agentosruntime.ValidateRunBackendIndexIdempotency(existing, record)
 			}
 		}
 
@@ -190,7 +154,7 @@ func (r *RunBackendIndexRepo) upsert(ctx context.Context, record entity.RunBacke
 			return fmt.Errorf("%w: run %q conflict did not leave an ownership record", agentos.ErrRunRouteNotFound, record.RunID)
 		}
 
-		return validateRunBackendIndexIdempotency(existing, record)
+		return agentosruntime.ValidateRunBackendIndexIdempotency(existing, record)
 	}
 
 	return nil
@@ -242,24 +206,4 @@ func scanRunBackendIndexRecord(scanner runBackendIndexScanner) (entity.RunBacken
 	}
 
 	return record, true, nil
-}
-
-func validateRunBackendIndexIdempotency(existing entity.RunBackendIndexRecord, requested entity.RunBackendIndexRecord) error {
-	if existing.RunID != requested.RunID {
-		return fmt.Errorf("%w: run backend idempotency key belongs to run %q", agentos.ErrInvalidRunSpec, existing.RunID)
-	}
-	if existing.PlanID != requested.PlanID || existing.NodeID != requested.NodeID {
-		return fmt.Errorf("%w: run %q idempotency key was reused for a different plan node", agentos.ErrInvalidRunPlan, existing.RunID)
-	}
-	if existing.ThreadID != requested.ThreadID || existing.AccountID != requested.AccountID || existing.ProjectID != requested.ProjectID {
-		return fmt.Errorf("%w: run %q idempotency key was reused for a different scope", agentos.ErrInvalidRunSpec, existing.RunID)
-	}
-	if existing.BackendKind != requested.BackendKind || existing.BackendName != requested.BackendName {
-		return fmt.Errorf("%w: run %q idempotency key was reused for a different backend", agentos.ErrInvalidBackendRef, existing.RunID)
-	}
-	if existing.IdempotencyKey != "" && requested.IdempotencyKey != "" && existing.IdempotencyKey != requested.IdempotencyKey {
-		return fmt.Errorf("%w: run %q was already bound with a different idempotency key", agentos.ErrInvalidRunSpec, existing.RunID)
-	}
-
-	return nil
 }
