@@ -138,8 +138,11 @@ func (v Validator) validateNode(ctx context.Context, spec agentos.RunPlanSpec, n
 			return fmt.Errorf("%w: node %q artifact %q kind is required", agentos.ErrInvalidArtifact, node.NodeID, artifact.Name)
 		}
 	}
-	if node.Capability == "" || v.Capabilities == nil {
+	if node.Capability == "" {
 		return nil
+	}
+	if v.Capabilities == nil {
+		return fmt.Errorf("%w: node %q capability catalog is required", agentos.ErrCapabilityNotFound, node.NodeID)
 	}
 
 	capability, ok, err := v.Capabilities.GetCapability(ctx, node.Run.Backend, node.Capability)

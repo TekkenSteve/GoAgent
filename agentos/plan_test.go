@@ -3,6 +3,7 @@ package agentos
 import (
 	"encoding/json"
 	"errors"
+	"os"
 	"reflect"
 	"strings"
 	"testing"
@@ -21,6 +22,20 @@ func TestRunPlanSpecJSONSchema(t *testing.T) {
 	}
 	if len(schema) == 0 {
 		t.Fatal("schema is empty")
+	}
+}
+
+func TestRunPlanSpecJSONSchemaFileIsCurrent(t *testing.T) {
+	generated, err := RunPlanSpecJSONSchema()
+	if err != nil {
+		t.Fatalf("RunPlanSpecJSONSchema: %v", err)
+	}
+	stored, err := os.ReadFile("../docs/schemas/run_plan.schema.json")
+	if err != nil {
+		t.Fatalf("ReadFile schema: %v", err)
+	}
+	if string(stored) != string(generated) {
+		t.Fatal("docs/schemas/run_plan.schema.json is stale; run make agentos-plan-schema")
 	}
 }
 

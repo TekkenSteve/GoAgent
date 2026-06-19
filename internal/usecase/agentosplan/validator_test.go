@@ -51,9 +51,17 @@ func TestValidatorRejectsCycle(t *testing.T) {
 		To:     "research",
 	})
 
-	_, err := Validator{}.Validate(context.Background(), spec)
+	_, err := Validator{Capabilities: sampleCapabilityCatalog(t, ref)}.Validate(context.Background(), spec)
 	if !errors.Is(err, agentos.ErrInvalidRunPlan) {
 		t.Fatalf("error = %v, want ErrInvalidRunPlan", err)
+	}
+}
+
+func TestValidatorRejectsCapabilityWithoutCatalog(t *testing.T) {
+	ref := agentos.BackendRef{Kind: agentos.BackendKindNative, Name: agentos.BackendNameGoAgentNative}
+	_, err := Validator{}.Validate(context.Background(), samplePlan(ref))
+	if !errors.Is(err, agentos.ErrCapabilityNotFound) {
+		t.Fatalf("error = %v, want ErrCapabilityNotFound", err)
 	}
 }
 
@@ -90,7 +98,7 @@ func TestValidatorRejectsContinuationThresholdAboveHistoryGuard(t *testing.T) {
 		MaxHistoryEvents:    10,
 	}
 
-	_, err := Validator{}.Validate(context.Background(), spec)
+	_, err := Validator{Capabilities: sampleCapabilityCatalog(t, ref)}.Validate(context.Background(), spec)
 	if !errors.Is(err, agentos.ErrInvalidRunPlan) {
 		t.Fatalf("error = %v, want ErrInvalidRunPlan", err)
 	}
@@ -104,7 +112,7 @@ func TestSchedulerReadyNodes(t *testing.T) {
 	}
 	ref := agentos.BackendRef{Kind: agentos.BackendKindNative, Name: agentos.BackendNameGoAgentNative}
 	spec := samplePlan(ref)
-	plan, err := Validator{Expressions: compiler}.Validate(ctx, spec)
+	plan, err := Validator{Expressions: compiler, Capabilities: sampleCapabilityCatalog(t, ref)}.Validate(ctx, spec)
 	if err != nil {
 		t.Fatalf("Validate: %v", err)
 	}
@@ -145,7 +153,7 @@ func TestSchedulerSkipsNodeWhenConditionIsFalse(t *testing.T) {
 	}
 	ref := agentos.BackendRef{Kind: agentos.BackendKindNative, Name: agentos.BackendNameGoAgentNative}
 	spec := samplePlan(ref)
-	plan, err := Validator{Expressions: compiler}.Validate(ctx, spec)
+	plan, err := Validator{Expressions: compiler, Capabilities: sampleCapabilityCatalog(t, ref)}.Validate(ctx, spec)
 	if err != nil {
 		t.Fatalf("Validate: %v", err)
 	}
@@ -356,4 +364,24 @@ func samplePlan(ref agentos.BackendRef) agentos.RunPlanSpec {
 			},
 		},
 	}
+}
+
+func sampleCapabilityCatalog(t *testing.T, ref agentos.BackendRef) *StaticCapabilityCatalog {
+	t.Helper()
+	catalog, err := NewStaticCapabilityCatalog([]agentos.Capability{
+		{
+			Backend: ref,
+			Name:    "research",
+			InputSchema: json.RawMessage(`{
+				"type":"object",
+				"properties":{"topic":{"type":"string"}},
+				"required":["topic"]
+			}`),
+		},
+	})
+	if err != nil {
+		t.Fatalf("catalog: %v", err)
+	}
+
+	return catalog
 }

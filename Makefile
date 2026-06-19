@@ -94,6 +94,10 @@ check-workflow-determinism: ### prevent forbidden non-determinism in workflow co
 	./scripts/agentfw/check_workflow_determinism.sh .
 .PHONY: check-workflow-determinism
 
+agentos-plan-schema: ### generate AgentOS RunPlan JSON Schema
+	go run ./cmd/agentos-plan schema --out docs/schemas/run_plan.schema.json
+.PHONY: agentos-plan-schema
+
 agentfw-load-suite: ### run reproducible agent framework load/soak suites
 	./scripts/agentfw/run_load_suites.sh
 .PHONY: agentfw-load-suite
