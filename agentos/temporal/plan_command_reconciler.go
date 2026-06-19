@@ -91,14 +91,14 @@ func commandDeliveryPayload(command agentosplan.PlanCommandRecord) (string, any,
 			return "", nil, agentosplan.AuditRecord{}, err
 		}
 
-		return PlanSignalName, signal, planSignalAuditRecord(command.PlanID, signal), nil
+		return PlanSignalName, signal, planSignalAuditRecord(planRefFromCommand(command), signal), nil
 	case agentosplan.AuditActionPlanControl:
 		control, err := controlFromPlanCommand(command)
 		if err != nil {
 			return "", nil, agentosplan.AuditRecord{}, err
 		}
 
-		return PlanControlSignalName, control, planControlAuditRecord(command.PlanID, control), nil
+		return PlanControlSignalName, control, planControlAuditRecord(planRefFromCommand(command), control), nil
 	default:
 		return "", nil, agentosplan.AuditRecord{}, fmt.Errorf("%w: unsupported plan command action %q", agentos.ErrInvalidRunPlan, command.Action)
 	}
@@ -227,9 +227,19 @@ func stringMapPayload(payload map[string]any, key string) (map[string]string, er
 	}
 }
 
-func planControlAuditRecord(planID string, control agentos.ControlRequest) agentosplan.AuditRecord {
+func planRefFromCommand(command agentosplan.PlanCommandRecord) agentos.PlanRef {
+	return agentos.PlanRef{
+		PlanID:    command.PlanID,
+		AccountID: command.AccountID,
+		ProjectID: command.ProjectID,
+	}
+}
+
+func planControlAuditRecord(ref agentos.PlanRef, control agentos.ControlRequest) agentosplan.AuditRecord {
 	return agentosplan.AuditRecord{
-		PlanID:         planID,
+		PlanID:         ref.PlanID,
+		AccountID:      ref.AccountID,
+		ProjectID:      ref.ProjectID,
 		ActorID:        control.ActorID,
 		Action:         agentosplan.AuditActionPlanControl,
 		IdempotencyKey: control.IdempotencyKey,

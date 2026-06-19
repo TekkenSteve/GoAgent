@@ -444,7 +444,7 @@ func TestPlanRuntimeSignalPlanSkipsDeliveryWhenCommandDelivered(t *testing.T) {
 		IdempotencyKey: "approve-1",
 		ActorID:        "operator-1",
 	}
-	command, _, err := store.RecordPlanCommand(t.Context(), planCommandFromAuditRecord(planSignalAuditRecord("plan-1", signal)))
+	command, _, err := store.RecordPlanCommand(t.Context(), planCommandFromAuditRecord(planSignalAuditRecord(ref, signal)))
 	if err != nil {
 		t.Fatalf("RecordPlanCommand: %v", err)
 	}
@@ -467,7 +467,7 @@ func TestPlanRuntimeSignalPlanSkipsDeliveryWhenCommandDelivered(t *testing.T) {
 
 func TestPlanRuntimeSignalPlanRejectsCommandKeyReuseWithDifferentSignal(t *testing.T) {
 	store, ref := newPlanRuntimeTestStore(t)
-	if _, _, err := store.RecordPlanCommand(t.Context(), planCommandFromAuditRecord(planSignalAuditRecord("plan-1", agentos.Signal{
+	if _, _, err := store.RecordPlanCommand(t.Context(), planCommandFromAuditRecord(planSignalAuditRecord(ref, agentos.Signal{
 		Type:           agentos.SignalPlanApprove,
 		IdempotencyKey: "signal-1",
 		ActorID:        "operator-1",

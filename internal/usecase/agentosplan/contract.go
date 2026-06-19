@@ -40,8 +40,8 @@ type CapabilityRegistry interface {
 // ArtifactStore stores artifacts outside workflow history.
 type ArtifactStore interface {
 	Put(ctx context.Context, artifact agentos.ArtifactRef, payload any, idempotencyKey string) (agentos.ArtifactRef, error)
-	Get(ctx context.Context, artifactID string) (agentos.ArtifactRef, any, error)
-	List(ctx context.Context, planID string) ([]agentos.ArtifactRef, error)
+	Get(ctx context.Context, scope agentos.PlanArtifactScope) (agentos.ArtifactRef, any, error)
+	List(ctx context.Context, scope agentos.PlanArtifactScope) ([]agentos.ArtifactRef, error)
 }
 
 // PlanIndex stores durable plan identity and the latest aggregate status.
@@ -94,6 +94,8 @@ const (
 type AuditRecord struct {
 	AuditID        string
 	PlanID         string
+	AccountID      string
+	ProjectID      string
 	RunID          string
 	NodeID         string
 	ActorID        string
@@ -124,6 +126,8 @@ const (
 type PlanCommandRecord struct {
 	CommandID      string
 	PlanID         string
+	AccountID      string
+	ProjectID      string
 	ActorID        string
 	Action         AuditAction
 	IdempotencyKey string

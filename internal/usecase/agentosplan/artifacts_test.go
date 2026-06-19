@@ -46,7 +46,10 @@ func TestMemoryArtifactStorePutIsIdempotent(t *testing.T) {
 		t.Fatalf("artifact payload metadata = %#v", first)
 	}
 
-	_, payload, err := store.Get(context.Background(), first.ArtifactID)
+	_, payload, err := store.Get(context.Background(), agentos.PlanArtifactScope{
+		PlanID:     "plan-1",
+		ArtifactID: first.ArtifactID,
+	})
 	if err != nil {
 		t.Fatalf("Get: %v", err)
 	}
@@ -110,7 +113,10 @@ func TestMemoryArtifactStoreIdempotentRefPublishKeepsPayload(t *testing.T) {
 		t.Fatalf("ref publish replay = %#v, want %#v", replayed, first)
 	}
 
-	_, payload, err := store.Get(ctx, first.ArtifactID)
+	_, payload, err := store.Get(ctx, agentos.PlanArtifactScope{
+		PlanID:     first.PlanID,
+		ArtifactID: first.ArtifactID,
+	})
 	if err != nil {
 		t.Fatalf("Get: %v", err)
 	}

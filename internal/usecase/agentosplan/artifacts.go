@@ -87,29 +87,55 @@ func (s *MemoryArtifactStore) Put(_ context.Context, artifact agentos.ArtifactRe
 	return artifact, nil
 }
 
-// Get retrieves one artifact.
-func (s *MemoryArtifactStore) Get(_ context.Context, artifactID string) (agentos.ArtifactRef, any, error) {
+// Get retrieves one artifact inside a plan scope.
+func (s *MemoryArtifactStore) Get(_ context.Context, scope agentos.PlanArtifactScope) (agentos.ArtifactRef, any, error) {
+	if scope.ArtifactID == "" {
+		return agentos.ArtifactRef{}, nil, fmt.Errorf("%w: artifact id is required", agentos.ErrInvalidArtifact)
+	}
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	artifact, ok := s.artifacts[artifactID]
-	if !ok {
-		return agentos.ArtifactRef{}, nil, fmt.Errorf("%w: %s", agentos.ErrArtifactNotFound, artifactID)
+	artifact, ok := s.artifacts[scope.ArtifactID]
+	if !ok || !artifactRefMatchesScope(artifact.ref, scope) {
+		return agentos.ArtifactRef{}, nil, fmt.Errorf("%w: %s", agentos.ErrArtifactNotFound, scope.ArtifactID)
 	}
 
 	return artifact.ref, artifact.payload, nil
 }
 
-// List returns artifacts associated with a plan.
-func (s *MemoryArtifactStore) List(_ context.Context, planID string) ([]agentos.ArtifactRef, error) {
+// List returns artifacts associated with a plan scope.
+func (s *MemoryArtifactStore) List(_ context.Context, scope agentos.PlanArtifactScope) ([]agentos.ArtifactRef, error) {
+	if scope.PlanID == "" {
+		return nil, fmt.Errorf("%w: plan id is required", agentos.ErrInvalidArtifact)
+	}
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	ids := s.byPlan[planID]
+	ids := s.byPlan[scope.PlanID]
 	refs := make([]agentos.ArtifactRef, 0, len(ids))
 	for _, id := range ids {
-		if artifact, ok := s.artifacts[id]; ok {
+		if artifact, ok := s.artifacts[id]; ok && artifactRefMatchesScope(artifact.ref, scope) {
 			refs = append(refs, artifact.ref)
+			if scope.Limit > 0 && len(refs) >= scope.Limit {
+				break
+			}
 		}
 	}
 
 	return refs, nil
+}
+
+func artifactRefMatchesScope(ref agentos.ArtifactRef, scope agentos.PlanArtifactScope) bool {
+	if ref.PlanID != scope.PlanID {
+		return false
+	}
+	if scope.ArtifactID != "" && ref.ArtifactID != scope.ArtifactID {
+		return false
+	}
+	if scope.NodeID != "" && ref.NodeID != scope.NodeID {
+		return false
+	}
+	if scope.RunID != "" && ref.RunID != scope.RunID {
+		return false
+	}
+
+	return true
 }

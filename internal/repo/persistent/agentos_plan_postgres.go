@@ -372,6 +372,32 @@ func (r *AgentOSPlanRepo) planByIdempotencyKey(ctx context.Context, idempotencyK
 	return spec, status, true, nil
 }
 
+type planTenantScope struct {
+	AccountID string
+	ProjectID string
+}
+
+type planTenantScopeQuerier interface {
+	QueryRow(ctx context.Context, sql string, args ...any) pgx.Row
+}
+
+func planTenantScopeByPlanID(ctx context.Context, querier planTenantScopeQuerier, planID string) (planTenantScope, bool, error) {
+	var scope planTenantScope
+	err := querier.QueryRow(ctx, `
+SELECT account_id, project_id
+FROM plans
+WHERE plan_id = $1`, planID).Scan(&scope.AccountID, &scope.ProjectID)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return planTenantScope{}, false, nil
+		}
+
+		return planTenantScope{}, false, fmt.Errorf("planTenantScopeByPlanID - query: %w", err)
+	}
+
+	return scope, true, nil
+}
+
 func (r *AgentOSPlanRepo) AppendPlanEvent(ctx context.Context, event agentos.PlanEvent, idempotencyKey string) (agentos.PlanEvent, error) {
 	if event.PlanID == "" {
 		return agentos.PlanEvent{}, fmt.Errorf("%w: plan id is required", agentos.ErrInvalidPlanEvent)
@@ -390,11 +416,12 @@ func (r *AgentOSPlanRepo) AppendPlanEvent(ctx context.Context, event agentos.Pla
 	}()
 
 	var currentSequence int64
+	var scope planTenantScope
 	err = tx.QueryRow(ctx, `
-SELECT event_sequence
+SELECT event_sequence, account_id, project_id
 FROM plans
 WHERE plan_id = $1
-FOR UPDATE`, event.PlanID).Scan(&currentSequence)
+FOR UPDATE`, event.PlanID).Scan(&currentSequence, &scope.AccountID, &scope.ProjectID)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return agentos.PlanEvent{}, fmt.Errorf("%w: %s", agentos.ErrPlanRouteNotFound, event.PlanID)
@@ -445,6 +472,8 @@ WHERE plan_id = $1`, event.PlanID, event.Sequence); err != nil {
 INSERT INTO plan_events (
     event_id,
     plan_id,
+    account_id,
+    project_id,
     node_id,
     run_id,
     event_type,
@@ -453,13 +482,15 @@ INSERT INTO plan_events (
     payload_json,
     event_json,
     timestamp
-) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
+) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)
 RETURNING event_json`
 
 	var storedJSON []byte
 	err = tx.QueryRow(ctx, insertSQL,
 		event.EventID,
 		event.PlanID,
+		scope.AccountID,
+		scope.ProjectID,
 		event.NodeID,
 		event.RunID,
 		string(event.EventType),
@@ -557,6 +588,12 @@ func (r *AgentOSPlanRepo) ListPlanEvents(ctx context.Context, scope agentos.Plan
 		Where(sq.Eq{"plan_id": scope.PlanID}).
 		Where(sq.Gt{"sequence": scope.AfterSequence}).
 		OrderBy("sequence ASC")
+	if scope.AccountID != "" {
+		builder = builder.Where(sq.Eq{"account_id": scope.AccountID})
+	}
+	if scope.ProjectID != "" {
+		builder = builder.Where(sq.Eq{"project_id": scope.ProjectID})
+	}
 	if scope.NodeID != "" {
 		builder = builder.Where(sq.Eq{"node_id": scope.NodeID})
 	}
@@ -606,6 +643,15 @@ func (r *AgentOSPlanRepo) RecordAudit(ctx context.Context, record agentosplan.Au
 	if record.IdempotencyKey == "" {
 		return agentosplan.AuditRecord{}, false, fmt.Errorf("%w: audit idempotency key is required", agentos.ErrInvalidRunPlan)
 	}
+	scope, exists, err := planTenantScopeByPlanID(ctx, r.Pool, record.PlanID)
+	if err != nil {
+		return agentosplan.AuditRecord{}, false, err
+	}
+	if !exists {
+		return agentosplan.AuditRecord{}, false, fmt.Errorf("%w: %s", agentos.ErrPlanRouteNotFound, record.PlanID)
+	}
+	record.AccountID = scope.AccountID
+	record.ProjectID = scope.ProjectID
 	existing, exists, err := r.GetAuditRecord(ctx, record.IdempotencyKey)
 	if err != nil {
 		return agentosplan.AuditRecord{}, false, err
@@ -635,6 +681,8 @@ func (r *AgentOSPlanRepo) RecordAudit(ctx context.Context, record agentosplan.Au
 INSERT INTO audit_logs (
     audit_id,
     plan_id,
+    account_id,
+    project_id,
     run_id,
     node_id,
     actor_id,
@@ -642,9 +690,11 @@ INSERT INTO audit_logs (
     idempotency_key,
     payload_json,
     created_at
-) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)`,
+) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)`,
 		record.AuditID,
 		record.PlanID,
+		record.AccountID,
+		record.ProjectID,
 		record.RunID,
 		record.NodeID,
 		record.ActorID,
@@ -680,7 +730,7 @@ func (r *AgentOSPlanRepo) GetAuditRecord(ctx context.Context, idempotencyKey str
 	}
 
 	sql, args, err := r.Builder.
-		Select("audit_id", "plan_id", "run_id", "node_id", "actor_id", "action", "idempotency_key", "payload_json", "created_at").
+		Select("audit_id", "plan_id", "account_id", "project_id", "run_id", "node_id", "actor_id", "action", "idempotency_key", "payload_json", "created_at").
 		From("audit_logs").
 		Where(sq.Eq{"idempotency_key": idempotencyKey}).
 		ToSql()
@@ -694,6 +744,8 @@ func (r *AgentOSPlanRepo) GetAuditRecord(ctx context.Context, idempotencyKey str
 	err = r.Pool.QueryRow(ctx, sql, args...).Scan(
 		&record.AuditID,
 		&record.PlanID,
+		&record.AccountID,
+		&record.ProjectID,
 		&record.RunID,
 		&record.NodeID,
 		&record.ActorID,
@@ -735,10 +787,16 @@ func (r *AgentOSPlanRepo) ListAuditRecords(ctx context.Context, scope agentos.Pl
 	}
 
 	builder := r.Builder.
-		Select("audit_id", "plan_id", "run_id", "node_id", "actor_id", "action", "idempotency_key", "payload_json", "created_at").
+		Select("audit_id", "plan_id", "account_id", "project_id", "run_id", "node_id", "actor_id", "action", "idempotency_key", "payload_json", "created_at").
 		From("audit_logs").
 		Where(sq.Eq{"plan_id": scope.PlanID}).
 		OrderBy("created_at ASC", "audit_id ASC")
+	if scope.AccountID != "" {
+		builder = builder.Where(sq.Eq{"account_id": scope.AccountID})
+	}
+	if scope.ProjectID != "" {
+		builder = builder.Where(sq.Eq{"project_id": scope.ProjectID})
+	}
 	if scope.NodeID != "" {
 		builder = builder.Where(sq.Eq{"node_id": scope.NodeID})
 	}
@@ -784,6 +842,8 @@ func scanPlanAuditRecord(scanner interface{ Scan(dest ...any) error }) (agentos.
 	if err := scanner.Scan(
 		&record.AuditID,
 		&record.PlanID,
+		&record.AccountID,
+		&record.ProjectID,
 		&record.RunID,
 		&record.NodeID,
 		&record.ActorID,
@@ -814,6 +874,15 @@ func (r *AgentOSPlanRepo) RecordPlanCommand(ctx context.Context, command agentos
 	if command.IdempotencyKey == "" {
 		return agentosplan.PlanCommandRecord{}, false, fmt.Errorf("%w: command idempotency key is required", agentos.ErrInvalidRunPlan)
 	}
+	scope, exists, err := planTenantScopeByPlanID(ctx, r.Pool, command.PlanID)
+	if err != nil {
+		return agentosplan.PlanCommandRecord{}, false, err
+	}
+	if !exists {
+		return agentosplan.PlanCommandRecord{}, false, fmt.Errorf("%w: %s", agentos.ErrPlanRouteNotFound, command.PlanID)
+	}
+	command.AccountID = scope.AccountID
+	command.ProjectID = scope.ProjectID
 	existing, exists, err := r.GetPlanCommand(ctx, command.IdempotencyKey)
 	if err != nil {
 		return agentosplan.PlanCommandRecord{}, false, err
@@ -849,6 +918,8 @@ func (r *AgentOSPlanRepo) RecordPlanCommand(ctx context.Context, command agentos
 INSERT INTO plan_commands (
     command_id,
     plan_id,
+    account_id,
+    project_id,
     actor_id,
     action,
     idempotency_key,
@@ -857,9 +928,11 @@ INSERT INTO plan_commands (
     failure_reason,
     created_at,
     updated_at
-) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)`,
+) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)`,
 		command.CommandID,
 		command.PlanID,
+		command.AccountID,
+		command.ProjectID,
 		command.ActorID,
 		string(command.Action),
 		command.IdempotencyKey,
@@ -896,7 +969,7 @@ func (r *AgentOSPlanRepo) GetPlanCommand(ctx context.Context, idempotencyKey str
 	}
 
 	sql, args, err := r.Builder.
-		Select("command_id", "plan_id", "actor_id", "action", "idempotency_key", "payload_json", "status", "failure_reason", "created_at", "updated_at").
+		Select("command_id", "plan_id", "account_id", "project_id", "actor_id", "action", "idempotency_key", "payload_json", "status", "failure_reason", "created_at", "updated_at").
 		From("plan_commands").
 		Where(sq.Eq{"idempotency_key": idempotencyKey}).
 		ToSql()
@@ -927,7 +1000,7 @@ func (r *AgentOSPlanRepo) ListRecoverablePlanCommands(ctx context.Context, scope
 	}
 
 	builder := r.Builder.
-		Select("command_id", "plan_id", "actor_id", "action", "idempotency_key", "payload_json", "status", "failure_reason", "created_at", "updated_at").
+		Select("command_id", "plan_id", "account_id", "project_id", "actor_id", "action", "idempotency_key", "payload_json", "status", "failure_reason", "created_at", "updated_at").
 		From("plan_commands").
 		Where(sq.Eq{"status": statusValues}).
 		OrderBy("updated_at ASC", "command_id ASC")
@@ -996,7 +1069,7 @@ SET status = $2,
     failure_reason = $3,
     updated_at = $4
 WHERE idempotency_key = $1
-RETURNING command_id, plan_id, actor_id, action, idempotency_key, payload_json, status, failure_reason, created_at, updated_at`
+RETURNING command_id, plan_id, account_id, project_id, actor_id, action, idempotency_key, payload_json, status, failure_reason, created_at, updated_at`
 
 	return r.scanPlanCommandRow(ctx, r.Pool.QueryRow(ctx, sql, idempotencyKey, string(command.Status), command.FailureReason, command.UpdatedAt))
 }
@@ -1009,6 +1082,8 @@ func (r *AgentOSPlanRepo) scanPlanCommandRow(_ context.Context, scanner interfac
 	err := scanner.Scan(
 		&command.CommandID,
 		&command.PlanID,
+		&command.AccountID,
+		&command.ProjectID,
 		&command.ActorID,
 		&action,
 		&command.IdempotencyKey,

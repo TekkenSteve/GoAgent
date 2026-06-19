@@ -35,11 +35,21 @@ func (r *AgentOSArtifactRepo) Put(ctx context.Context, ref agentos.ArtifactRef, 
 	if idempotencyKey == "" {
 		return agentos.ArtifactRef{}, fmt.Errorf("%w: artifact idempotency key is required", agentos.ErrInvalidArtifact)
 	}
+	if ref.PlanID == "" {
+		return agentos.ArtifactRef{}, fmt.Errorf("%w: plan id is required", agentos.ErrInvalidArtifact)
+	}
 	if ref.Name == "" {
 		return agentos.ArtifactRef{}, fmt.Errorf("%w: artifact name is required", agentos.ErrInvalidArtifact)
 	}
 	if ref.Kind == "" {
 		return agentos.ArtifactRef{}, fmt.Errorf("%w: artifact kind is required", agentos.ErrInvalidArtifact)
+	}
+	scope, exists, err := planTenantScopeByPlanID(ctx, r.Pool, ref.PlanID)
+	if err != nil {
+		return agentos.ArtifactRef{}, err
+	}
+	if !exists {
+		return agentos.ArtifactRef{}, fmt.Errorf("%w: %s", agentos.ErrPlanRouteNotFound, ref.PlanID)
 	}
 	if ref.ArtifactID == "" {
 		ref.ArtifactID = agentosplan.ArtifactIDFromIdempotencyKey(idempotencyKey)
@@ -92,6 +102,8 @@ func (r *AgentOSArtifactRepo) Put(ctx context.Context, ref agentos.ArtifactRef, 
 INSERT INTO artifacts (
     artifact_id,
     plan_id,
+    account_id,
+    project_id,
     node_id,
     run_id,
     name,
@@ -103,13 +115,15 @@ INSERT INTO artifacts (
     metadata_json,
     idempotency_key,
     created_at
-) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)
+) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)
 ON CONFLICT (artifact_id) DO UPDATE SET
     artifact_id = artifacts.artifact_id
 WHERE artifacts.idempotency_key = EXCLUDED.idempotency_key
 RETURNING `+strings.Join(artifactColumns(), ", "),
 		ref.ArtifactID,
 		ref.PlanID,
+		scope.AccountID,
+		scope.ProjectID,
 		ref.NodeID,
 		ref.RunID,
 		ref.Name,
@@ -150,11 +164,14 @@ RETURNING `+strings.Join(artifactColumns(), ", "),
 	return stored, nil
 }
 
-func (r *AgentOSArtifactRepo) Get(ctx context.Context, artifactID string) (agentos.ArtifactRef, any, error) {
-	ref, exists, err := r.getRef(ctx, sq.Eq{"artifact_id": artifactID})
+func (r *AgentOSArtifactRepo) Get(ctx context.Context, scope agentos.PlanArtifactScope) (agentos.ArtifactRef, any, error) {
+	if scope.ArtifactID == "" {
+		return agentos.ArtifactRef{}, nil, fmt.Errorf("%w: artifact id is required", agentos.ErrInvalidArtifact)
+	}
+	ref, exists, err := r.getRef(ctx, artifactScopeWhere(scope))
 	if err != nil || !exists {
 		if !exists {
-			return agentos.ArtifactRef{}, nil, fmt.Errorf("%w: %s", agentos.ErrArtifactNotFound, artifactID)
+			return agentos.ArtifactRef{}, nil, fmt.Errorf("%w: %s", agentos.ErrArtifactNotFound, scope.ArtifactID)
 		}
 
 		return agentos.ArtifactRef{}, nil, err
@@ -174,13 +191,19 @@ func (r *AgentOSArtifactRepo) Get(ctx context.Context, artifactID string) (agent
 	return ref, payload, nil
 }
 
-func (r *AgentOSArtifactRepo) List(ctx context.Context, planID string) ([]agentos.ArtifactRef, error) {
-	sql, args, err := r.Builder.
+func (r *AgentOSArtifactRepo) List(ctx context.Context, scope agentos.PlanArtifactScope) ([]agentos.ArtifactRef, error) {
+	if scope.PlanID == "" {
+		return nil, fmt.Errorf("%w: plan id is required", agentos.ErrInvalidArtifact)
+	}
+	builder := r.Builder.
 		Select(artifactColumns()...).
 		From("artifacts").
-		Where(sq.Eq{"plan_id": planID}).
 		OrderBy("created_at ASC").
-		ToSql()
+		Where(artifactScopeWhere(scope))
+	if scope.Limit > 0 {
+		builder = builder.Limit(uint64(scope.Limit))
+	}
+	sql, args, err := builder.ToSql()
 	if err != nil {
 		return nil, fmt.Errorf("AgentOSArtifactRepo - List - builder: %w", err)
 	}
@@ -207,6 +230,27 @@ func (r *AgentOSArtifactRepo) List(ctx context.Context, planID string) ([]agento
 
 func (r *AgentOSArtifactRepo) artifactByIdempotencyKey(ctx context.Context, key string) (agentos.ArtifactRef, bool, error) {
 	return r.getRef(ctx, sq.Eq{"idempotency_key": key})
+}
+
+func artifactScopeWhere(scope agentos.PlanArtifactScope) sq.Eq {
+	where := sq.Eq{"plan_id": scope.PlanID}
+	if scope.AccountID != "" {
+		where["account_id"] = scope.AccountID
+	}
+	if scope.ProjectID != "" {
+		where["project_id"] = scope.ProjectID
+	}
+	if scope.ArtifactID != "" {
+		where["artifact_id"] = scope.ArtifactID
+	}
+	if scope.NodeID != "" {
+		where["node_id"] = scope.NodeID
+	}
+	if scope.RunID != "" {
+		where["run_id"] = scope.RunID
+	}
+
+	return where
 }
 
 func (r *AgentOSArtifactRepo) getRef(ctx context.Context, where sq.Eq) (agentos.ArtifactRef, bool, error) {

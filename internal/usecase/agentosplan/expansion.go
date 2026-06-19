@@ -48,7 +48,10 @@ func (p ArtifactPlanDeltaProvider) NextPlanDelta(ctx context.Context, input Plan
 		if ref.ArtifactID == "" {
 			return PlanDelta{}, false, fmt.Errorf("%w: plan delta artifact %q has no artifact id", agentos.ErrInvalidArtifact, ref.Name)
 		}
-		_, payload, err := p.Store.Get(ctx, ref.ArtifactID)
+		_, payload, err := p.Store.Get(ctx, agentos.PlanArtifactScope{
+			PlanID:     input.Spec.PlanID,
+			ArtifactID: ref.ArtifactID,
+		})
 		if err != nil {
 			return PlanDelta{}, false, err
 		}

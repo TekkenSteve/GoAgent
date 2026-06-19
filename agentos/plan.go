@@ -283,6 +283,8 @@ type PlanAuditScope struct {
 type PlanAuditRecord struct {
 	AuditID        string          `json:"audit_id"`
 	PlanID         string          `json:"plan_id"`
+	AccountID      string          `json:"account_id,omitempty"`
+	ProjectID      string          `json:"project_id,omitempty"`
 	RunID          string          `json:"run_id,omitempty"`
 	NodeID         string          `json:"node_id,omitempty"`
 	ActorID        string          `json:"actor_id,omitempty"`

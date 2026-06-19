@@ -95,6 +95,12 @@ func ValidateAuditIdempotency(existing AuditRecord, requested AuditRecord) error
 	if existing.PlanID != requested.PlanID {
 		return fmt.Errorf("%w: audit idempotency key belongs to plan %q", agentos.ErrInvalidRunPlan, existing.PlanID)
 	}
+	if existing.AccountID != requested.AccountID {
+		return fmt.Errorf("%w: audit idempotency key belongs to account %q", agentos.ErrInvalidRunPlan, existing.AccountID)
+	}
+	if existing.ProjectID != requested.ProjectID {
+		return fmt.Errorf("%w: audit idempotency key belongs to project %q", agentos.ErrInvalidRunPlan, existing.ProjectID)
+	}
 	if existing.RunID != requested.RunID {
 		return fmt.Errorf("%w: audit idempotency key belongs to run %q", agentos.ErrInvalidRunPlan, existing.RunID)
 	}
@@ -131,6 +137,12 @@ func ValidateAuditIdempotency(existing AuditRecord, requested AuditRecord) error
 func ValidatePlanCommandIdempotency(existing PlanCommandRecord, requested PlanCommandRecord) error {
 	if existing.PlanID != requested.PlanID {
 		return fmt.Errorf("%w: command idempotency key belongs to plan %q", agentos.ErrInvalidRunPlan, existing.PlanID)
+	}
+	if existing.AccountID != requested.AccountID {
+		return fmt.Errorf("%w: command idempotency key belongs to account %q", agentos.ErrInvalidRunPlan, existing.AccountID)
+	}
+	if existing.ProjectID != requested.ProjectID {
+		return fmt.Errorf("%w: command idempotency key belongs to project %q", agentos.ErrInvalidRunPlan, existing.ProjectID)
 	}
 	if existing.ActorID != requested.ActorID {
 		return fmt.Errorf("%w: command idempotency key belongs to actor %q", agentos.ErrInvalidRunPlan, existing.ActorID)

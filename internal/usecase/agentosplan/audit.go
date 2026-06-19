@@ -8,6 +8,8 @@ func PlanAuditRecordFromAuditRecord(record AuditRecord) agentos.PlanAuditRecord 
 	return agentos.PlanAuditRecord{
 		AuditID:        record.AuditID,
 		PlanID:         record.PlanID,
+		AccountID:      record.AccountID,
+		ProjectID:      record.ProjectID,
 		RunID:          record.RunID,
 		NodeID:         record.NodeID,
 		ActorID:        record.ActorID,

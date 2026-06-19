@@ -15,7 +15,7 @@ func TestPlanCommandReconcilerDeliversRecoverableCommands(t *testing.T) {
 		IdempotencyKey: "approve-1",
 		ActorID:        "operator-1",
 	}
-	if _, _, err := store.RecordPlanCommand(t.Context(), planCommandFromAuditRecord(planSignalAuditRecord(ref.PlanID, signal))); err != nil {
+	if _, _, err := store.RecordPlanCommand(t.Context(), planCommandFromAuditRecord(planSignalAuditRecord(ref, signal))); err != nil {
 		t.Fatalf("RecordPlanCommand signal: %v", err)
 	}
 	if _, err := store.MarkPlanCommandFailed(t.Context(), signal.IdempotencyKey, "previous delivery failed"); err != nil {
@@ -27,7 +27,7 @@ func TestPlanCommandReconcilerDeliversRecoverableCommands(t *testing.T) {
 		ActorID:        "operator-1",
 		Metadata:       map[string]string{"reason": "operator"},
 	}
-	if _, _, err := store.RecordPlanCommand(t.Context(), planCommandFromAuditRecord(planControlAuditRecord(ref.PlanID, control))); err != nil {
+	if _, _, err := store.RecordPlanCommand(t.Context(), planCommandFromAuditRecord(planControlAuditRecord(ref, control))); err != nil {
 		t.Fatalf("RecordPlanCommand control: %v", err)
 	}
 
@@ -61,6 +61,8 @@ func TestPlanCommandReconcilerMarksInvalidPayloadFailed(t *testing.T) {
 	store, ref := newPlanRuntimeTestStore(t)
 	if _, _, err := store.RecordPlanCommand(t.Context(), agentosplan.PlanCommandRecord{
 		PlanID:         ref.PlanID,
+		AccountID:      ref.AccountID,
+		ProjectID:      ref.ProjectID,
 		ActorID:        "operator-1",
 		Action:         agentosplan.AuditActionPlanSignal,
 		IdempotencyKey: "invalid-signal-1",
@@ -99,7 +101,7 @@ func TestWorkerKitRecoverPlanCommandsUsesReconciler(t *testing.T) {
 		IdempotencyKey: "approve-1",
 		ActorID:        "operator-1",
 	}
-	if _, _, err := store.RecordPlanCommand(t.Context(), planCommandFromAuditRecord(planSignalAuditRecord(ref.PlanID, signal))); err != nil {
+	if _, _, err := store.RecordPlanCommand(t.Context(), planCommandFromAuditRecord(planSignalAuditRecord(ref, signal))); err != nil {
 		t.Fatalf("RecordPlanCommand: %v", err)
 	}
 
@@ -120,7 +122,7 @@ func TestPlanRuntimeRecoverPlanCommandsUsesReconciler(t *testing.T) {
 		IdempotencyKey: "approve-runtime-1",
 		ActorID:        "operator-1",
 	}
-	if _, _, err := store.RecordPlanCommand(t.Context(), planCommandFromAuditRecord(planSignalAuditRecord(ref.PlanID, signal))); err != nil {
+	if _, _, err := store.RecordPlanCommand(t.Context(), planCommandFromAuditRecord(planSignalAuditRecord(ref, signal))); err != nil {
 		t.Fatalf("RecordPlanCommand: %v", err)
 	}
 

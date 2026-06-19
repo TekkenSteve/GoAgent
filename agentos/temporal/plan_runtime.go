@@ -163,6 +163,8 @@ func (r *planRuntime) StartPlan(ctx context.Context, spec agentos.RunPlanSpec) (
 	if created {
 		if _, err := r.recordPlanAudit(ctx, agentosplan.AuditRecord{
 			PlanID:         spec.PlanID,
+			AccountID:      spec.AccountID,
+			ProjectID:      spec.ProjectID,
 			Action:         agentosplan.AuditActionPlanStart,
 			IdempotencyKey: spec.IdempotencyKey,
 			Payload: map[string]any{
@@ -230,7 +232,7 @@ func (r *planRuntime) SignalPlan(ctx context.Context, ref agentos.PlanRef, signa
 	if _, _, err := r.authorizePlan(ctx, ref); err != nil {
 		return err
 	}
-	record := planSignalAuditRecord(ref.PlanID, signal)
+	record := planSignalAuditRecord(ref, signal)
 	command, err := r.recordPlanCommand(ctx, planCommandFromAuditRecord(record))
 	if err != nil {
 		return err
@@ -272,7 +274,7 @@ func (r *planRuntime) ControlPlan(ctx context.Context, ref agentos.PlanRef, cont
 	if _, _, err := r.authorizePlan(ctx, ref); err != nil {
 		return err
 	}
-	record := planControlAuditRecord(ref.PlanID, control)
+	record := planControlAuditRecord(ref, control)
 	command, err := r.recordPlanCommand(ctx, planCommandFromAuditRecord(record))
 	if err != nil {
 		return err
@@ -366,12 +368,7 @@ func (r *planRuntime) ListPlanArtifacts(ctx context.Context, scope agentos.PlanA
 		return nil, err
 	}
 
-	refs, err := r.artifactStore.List(ctx, scope.PlanID)
-	if err != nil {
-		return nil, err
-	}
-
-	return filterPlanArtifactRefs(refs, scope), nil
+	return r.artifactStore.List(ctx, scope)
 }
 
 func (r *planRuntime) GetPlanArtifact(ctx context.Context, scope agentos.PlanArtifactScope) (agentos.Artifact, error) {
@@ -388,12 +385,9 @@ func (r *planRuntime) GetPlanArtifact(ctx context.Context, scope agentos.PlanArt
 		return agentos.Artifact{}, err
 	}
 
-	ref, payload, err := r.artifactStore.Get(ctx, scope.ArtifactID)
+	ref, payload, err := r.artifactStore.Get(ctx, scope)
 	if err != nil {
 		return agentos.Artifact{}, err
-	}
-	if !planArtifactRefMatches(ref, scope) {
-		return agentos.Artifact{}, fmt.Errorf("%w: %s", agentos.ErrArtifactNotFound, scope.ArtifactID)
 	}
 
 	return agentos.Artifact{Ref: ref, Payload: payload}, nil
@@ -465,9 +459,11 @@ func planWorkflowID(planID string) string {
 	return "agentos-plan-" + planID
 }
 
-func planSignalAuditRecord(planID string, signal agentos.Signal) agentosplan.AuditRecord {
+func planSignalAuditRecord(ref agentos.PlanRef, signal agentos.Signal) agentosplan.AuditRecord {
 	return agentosplan.AuditRecord{
-		PlanID:         planID,
+		PlanID:         ref.PlanID,
+		AccountID:      ref.AccountID,
+		ProjectID:      ref.ProjectID,
 		ActorID:        signal.ActorID,
 		Action:         agentosplan.AuditActionPlanSignal,
 		IdempotencyKey: signal.IdempotencyKey,
@@ -481,27 +477,14 @@ func planSignalAuditRecord(planID string, signal agentos.Signal) agentosplan.Aud
 func planCommandFromAuditRecord(record agentosplan.AuditRecord) agentosplan.PlanCommandRecord {
 	return agentosplan.PlanCommandRecord{
 		PlanID:         record.PlanID,
+		AccountID:      record.AccountID,
+		ProjectID:      record.ProjectID,
 		ActorID:        record.ActorID,
 		Action:         record.Action,
 		IdempotencyKey: record.IdempotencyKey,
 		Payload:        record.Payload,
 		Status:         agentosplan.PlanCommandPending,
 	}
-}
-
-func filterPlanArtifactRefs(refs []agentos.ArtifactRef, scope agentos.PlanArtifactScope) []agentos.ArtifactRef {
-	filtered := make([]agentos.ArtifactRef, 0, len(refs))
-	for _, ref := range refs {
-		if !planArtifactRefMatches(ref, scope) {
-			continue
-		}
-		filtered = append(filtered, ref)
-		if scope.Limit > 0 && len(filtered) >= scope.Limit {
-			break
-		}
-	}
-
-	return filtered
 }
 
 func planEventStreamScope(scope agentos.PlanEventScope) agentos.PlanStreamScope {
@@ -513,23 +496,6 @@ func planEventStreamScope(scope agentos.PlanEventScope) agentos.PlanStreamScope 
 		RunID:         scope.RunID,
 		AfterSequence: scope.AfterSequence,
 	}
-}
-
-func planArtifactRefMatches(ref agentos.ArtifactRef, scope agentos.PlanArtifactScope) bool {
-	if ref.PlanID != scope.PlanID {
-		return false
-	}
-	if scope.ArtifactID != "" && ref.ArtifactID != scope.ArtifactID {
-		return false
-	}
-	if scope.NodeID != "" && ref.NodeID != scope.NodeID {
-		return false
-	}
-	if scope.RunID != "" && ref.RunID != scope.RunID {
-		return false
-	}
-
-	return true
 }
 
 func validatePlanRuntimeConfig(cfg RuntimeConfig) error {

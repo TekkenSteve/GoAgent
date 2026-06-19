@@ -73,7 +73,10 @@ func resolveMappingValue(ctx context.Context, store ArtifactStore, expressions V
 
 			return nil, nil
 		}
-		_, payload, err := store.Get(ctx, ref.ArtifactID)
+		_, payload, err := store.Get(ctx, agentos.PlanArtifactScope{
+			PlanID:     status.PlanID,
+			ArtifactID: ref.ArtifactID,
+		})
 		if err != nil {
 			return nil, err
 		}

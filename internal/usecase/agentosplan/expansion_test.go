@@ -40,6 +40,7 @@ func TestArtifactPlanDeltaProviderDecodesPlanDeltaArtifact(t *testing.T) {
 	}
 
 	delta, ok, err := NewArtifactPlanDeltaProvider(store).NextPlanDelta(context.Background(), PlanDeltaInput{
+		Spec:      agentos.RunPlanSpec{PlanID: "plan-1"},
 		Artifacts: []agentos.ArtifactRef{ref},
 	})
 	if err != nil {

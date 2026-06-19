@@ -256,7 +256,12 @@ func TestAgentOSPlanPostgresDurablePersistence(t *testing.T) {
 	if replayedArtifact.ArtifactID != storedArtifact.ArtifactID {
 		t.Fatalf("Artifact replay = %#v, want %#v", replayedArtifact, storedArtifact)
 	}
-	loadedArtifact, payload, err := artifactStore.Get(ctx, storedArtifact.ArtifactID)
+	loadedArtifact, payload, err := artifactStore.Get(ctx, agentos.PlanArtifactScope{
+		PlanID:     spec.PlanID,
+		AccountID:  spec.AccountID,
+		ProjectID:  spec.ProjectID,
+		ArtifactID: storedArtifact.ArtifactID,
+	})
 	if err != nil {
 		t.Fatalf("Artifact Get: %v", err)
 	}
@@ -404,9 +409,16 @@ func TestAgentOSArtifactPostgresRejectsDifferentIdempotencyReplay(t *testing.T) 
 		t.Fatalf("NewLocalBlobStore: %v", err)
 	}
 	artifactStore := NewAgentOSArtifactRepo(pg, blobStore)
+	planRepo := NewAgentOSPlanRepo(pg)
+
+	spec := postgresIntegrationPlanSpec("plan-artifact-"+suffix, "plan-artifact-start-"+suffix)
+	status := agentosplan.NewState(spec, time.Now().UTC()).Status
+	if _, _, err := planRepo.CreatePlan(ctx, spec, status); err != nil {
+		t.Fatalf("CreatePlan: %v", err)
+	}
 
 	ref := agentos.ArtifactRef{
-		PlanID:    "plan-artifact-" + suffix,
+		PlanID:    spec.PlanID,
 		NodeID:    "node-1",
 		RunID:     "run-1",
 		Name:      "summary",
@@ -445,7 +457,12 @@ func TestAgentOSArtifactPostgresRejectsDifferentIdempotencyReplay(t *testing.T) 
 		t.Fatalf("Artifact Put reused artifact id error = %v, want ErrInvalidArtifact", err)
 	}
 
-	loaded, payload, err := artifactStore.Get(ctx, first.ArtifactID)
+	loaded, payload, err := artifactStore.Get(ctx, agentos.PlanArtifactScope{
+		PlanID:     spec.PlanID,
+		AccountID:  spec.AccountID,
+		ProjectID:  spec.ProjectID,
+		ArtifactID: first.ArtifactID,
+	})
 	if err != nil {
 		t.Fatalf("Artifact Get: %v", err)
 	}
@@ -524,6 +541,7 @@ func applyAgentOSPlanMigrations(t *testing.T, pg *postgres.Postgres) {
 		"20260619000002_require_plan_event_idempotency.up.sql",
 		"20260619000003_require_control_plane_idempotency.up.sql",
 		"20260619000004_create_plan_commands.up.sql",
+		"20260619000005_scope_plan_control_plane_records.up.sql",
 	} {
 		path := filepath.Join("..", "..", "..", "migrations", migration)
 		data, err := os.ReadFile(path)

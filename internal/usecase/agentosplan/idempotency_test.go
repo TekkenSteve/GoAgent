@@ -89,6 +89,24 @@ func TestValidateAuditIdempotencyRejectsDifferentPayload(t *testing.T) {
 	}
 }
 
+func TestValidateAuditIdempotencyRejectsDifferentTenantScope(t *testing.T) {
+	existing := AuditRecord{
+		PlanID:         "plan-1",
+		AccountID:      "account-1",
+		ProjectID:      "project-1",
+		Action:         AuditActionPlanSignal,
+		IdempotencyKey: "signal-key",
+		Payload:        map[string]any{"type": string(agentos.SignalPlanApprove)},
+	}
+	requested := existing
+	requested.AccountID = "account-2"
+
+	err := ValidateAuditIdempotency(existing, requested)
+	if !errors.Is(err, agentos.ErrInvalidRunPlan) {
+		t.Fatalf("error = %v, want ErrInvalidRunPlan", err)
+	}
+}
+
 func TestValidatePlanCommandIdempotencyRejectsDifferentPayload(t *testing.T) {
 	existing := PlanCommandRecord{
 		PlanID:         "plan-1",
@@ -105,16 +123,39 @@ func TestValidatePlanCommandIdempotencyRejectsDifferentPayload(t *testing.T) {
 	}
 }
 
+func TestValidatePlanCommandIdempotencyRejectsDifferentTenantScope(t *testing.T) {
+	existing := PlanCommandRecord{
+		PlanID:         "plan-1",
+		AccountID:      "account-1",
+		ProjectID:      "project-1",
+		Action:         AuditActionPlanControl,
+		IdempotencyKey: "control-key",
+		Payload:        map[string]any{"operation": string(agentos.ControlCancel)},
+	}
+	requested := existing
+	requested.ProjectID = "project-2"
+
+	err := ValidatePlanCommandIdempotency(existing, requested)
+	if !errors.Is(err, agentos.ErrInvalidRunPlan) {
+		t.Fatalf("error = %v, want ErrInvalidRunPlan", err)
+	}
+}
+
 func TestPlanAuditRecordFromAuditRecordUsesPublicAction(t *testing.T) {
 	record := PlanAuditRecordFromAuditRecord(AuditRecord{
 		AuditID:        "audit-1",
 		PlanID:         "plan-1",
+		AccountID:      "account-1",
+		ProjectID:      "project-1",
 		ActorID:        "operator-1",
 		Action:         AuditActionPlanControl,
 		IdempotencyKey: "control-1",
 		Payload:        map[string]any{"operation": string(agentos.ControlCancel)},
 	})
-	if record.Action != agentos.PlanAuditActionControl || record.Payload["operation"] != string(agentos.ControlCancel) {
+	if record.Action != agentos.PlanAuditActionControl ||
+		record.AccountID != "account-1" ||
+		record.ProjectID != "project-1" ||
+		record.Payload["operation"] != string(agentos.ControlCancel) {
 		t.Fatalf("record = %#v", record)
 	}
 }

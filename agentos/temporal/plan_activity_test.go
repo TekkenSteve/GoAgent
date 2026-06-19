@@ -196,7 +196,10 @@ func TestPlanActivitiesPublishArtifactsRetainsStoredPayload(t *testing.T) {
 	if len(output.Artifacts) != 1 || output.Artifacts[0].Digest != ref.Digest {
 		t.Fatalf("published artifacts = %#v, want %#v", output.Artifacts, ref)
 	}
-	_, payload, err := activities.ArtifactStore.Get(ctx, ref.ArtifactID)
+	_, payload, err := activities.ArtifactStore.Get(ctx, agentos.PlanArtifactScope{
+		PlanID:     "plan-1",
+		ArtifactID: ref.ArtifactID,
+	})
 	if err != nil {
 		t.Fatalf("Get artifact: %v", err)
 	}
