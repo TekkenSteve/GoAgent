@@ -299,11 +299,86 @@ type PlanEventScope struct {
 	Limit         int    `json:"limit,omitempty"`
 }
 
+// PlanDebugTraceScope selects durable debug traces projected from PlanEvents.
+type PlanDebugTraceScope struct {
+	PlanID        string `json:"plan_id"`
+	AccountID     string `json:"account_id"`
+	ProjectID     string `json:"project_id,omitempty"`
+	NodeID        string `json:"node_id,omitempty"`
+	RunID         string `json:"run_id,omitempty"`
+	AfterSequence int64  `json:"after_sequence,omitempty"`
+	Limit         int    `json:"limit,omitempty"`
+}
+
 // PlanEvent is the public event envelope for plan-level events.
 type PlanEvent struct {
 	Event
 	PlanID string `json:"plan_id"`
 	NodeID string `json:"node_id,omitempty"`
+}
+
+// PlanDebugTrace is a typed debug projection over durable plan events. It keeps
+// UI/debug clients away from raw event payload parsing.
+type PlanDebugTrace struct {
+	EventID         string                    `json:"event_id"`
+	EventType       EventType                 `json:"event_type"`
+	PlanID          string                    `json:"plan_id"`
+	NodeID          string                    `json:"node_id,omitempty"`
+	RunID           string                    `json:"run_id,omitempty"`
+	ThreadID        string                    `json:"thread_id,omitempty"`
+	Sequence        int64                     `json:"sequence,omitempty"`
+	Timestamp       time.Time                 `json:"timestamp,omitempty"`
+	Transition      *PlanStateTransition      `json:"transition,omitempty"`
+	Capability      *PlanCapabilityTrace      `json:"capability,omitempty"`
+	InputResolution *PlanInputResolutionTrace `json:"input_resolution,omitempty"`
+	Conditions      []PlanConditionTrace      `json:"conditions,omitempty"`
+}
+
+// PlanStateTransition records a reducer lifecycle transition.
+type PlanStateTransition struct {
+	PreviousLifecycleState string `json:"previous_lifecycle_state,omitempty"`
+	NextLifecycleState     string `json:"next_lifecycle_state,omitempty"`
+}
+
+// PlanCapabilityTrace records backend capability selected for one node.
+type PlanCapabilityTrace struct {
+	Backend         BackendRef         `json:"backend"`
+	Capability      string             `json:"capability"`
+	Signals         []SignalType       `json:"signals,omitempty"`
+	Controls        []ControlOperation `json:"controls,omitempty"`
+	HasInputSchema  bool               `json:"has_input_schema,omitempty"`
+	HasOutputSchema bool               `json:"has_output_schema,omitempty"`
+}
+
+// PlanInputResolutionTrace records redacted input mapping details.
+type PlanInputResolutionTrace struct {
+	InputDigest  string                  `json:"input_digest,omitempty"`
+	InputKeys    []string                `json:"input_keys,omitempty"`
+	MappingCount int                     `json:"mapping_count,omitempty"`
+	Mappings     []PlanInputMappingTrace `json:"mappings,omitempty"`
+}
+
+// PlanInputMappingTrace records one input mapping rule without payload values.
+type PlanInputMappingTrace struct {
+	Target         string `json:"target"`
+	SourceNodeID   string `json:"source_node_id,omitempty"`
+	SourceArtifact string `json:"source_artifact,omitempty"`
+	SourcePath     string `json:"source_path,omitempty"`
+	Expression     string `json:"expression,omitempty"`
+	Required       bool   `json:"required,omitempty"`
+}
+
+// PlanConditionTrace records one deterministic condition evaluation result.
+type PlanConditionTrace struct {
+	Scope       string      `json:"scope"`
+	NodeID      string      `json:"node_id,omitempty"`
+	EdgeID      string      `json:"edge_id,omitempty"`
+	From        string      `json:"from,omitempty"`
+	To          string      `json:"to,omitempty"`
+	Expression  string      `json:"expression"`
+	Result      bool        `json:"result"`
+	On          EdgeTrigger `json:"on,omitempty"`
+	ParentState string      `json:"parent_state,omitempty"`
 }
 
 // PlanAuditAction identifies durable control-plane actions.

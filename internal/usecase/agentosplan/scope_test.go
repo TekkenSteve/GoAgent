@@ -33,3 +33,10 @@ func TestValidatePlanAuditScopeRejectsNegativeLimit(t *testing.T) {
 		t.Fatalf("error = %v, want ErrInvalidPlanScope", err)
 	}
 }
+
+func TestValidatePlanDebugTraceScopeRejectsNegativeLimit(t *testing.T) {
+	err := ValidatePlanDebugTraceScope(agentos.PlanDebugTraceScope{PlanID: "plan-1", AccountID: "acct-1", Limit: -1})
+	if !errors.Is(err, agentos.ErrInvalidPlanScope) {
+		t.Fatalf("error = %v, want ErrInvalidPlanScope", err)
+	}
+}

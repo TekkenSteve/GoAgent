@@ -44,6 +44,22 @@ func ValidatePlanEventScope(scope agentos.PlanEventScope) error {
 	return nil
 }
 
+// ValidatePlanDebugTraceScope validates durable debug trace query scope.
+func ValidatePlanDebugTraceScope(scope agentos.PlanDebugTraceScope) error {
+	if err := ValidatePlanRef(agentos.PlanRef{
+		PlanID:    scope.PlanID,
+		AccountID: scope.AccountID,
+		ProjectID: scope.ProjectID,
+	}); err != nil {
+		return err
+	}
+	if scope.Limit < 0 {
+		return fmt.Errorf("%w: debug trace limit must be non-negative", agentos.ErrInvalidPlanScope)
+	}
+
+	return nil
+}
+
 // ValidatePlanAuditScope validates durable audit query scope.
 func ValidatePlanAuditScope(scope agentos.PlanAuditScope) error {
 	if err := ValidatePlanRef(agentos.PlanRef{

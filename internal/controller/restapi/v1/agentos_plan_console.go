@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/url"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/TekkenSteve/GoAgent/agentos"
@@ -87,6 +88,15 @@ func (r *V1) agentOSPlanConsole(ctx *fiber.Ctx) error {
 	if err != nil {
 		return agentOSError(ctx, err)
 	}
+	debugTraces, err := r.planRuntime.ListPlanDebugTraces(ctx.UserContext(), agentos.PlanDebugTraceScope{
+		PlanID:    ref.PlanID,
+		AccountID: ref.AccountID,
+		ProjectID: ref.ProjectID,
+		Limit:     eventLimit,
+	})
+	if err != nil {
+		return agentOSError(ctx, err)
+	}
 	artifacts, err := r.planRuntime.ListPlanArtifacts(ctx.UserContext(), agentos.PlanArtifactScope{
 		PlanID:    ref.PlanID,
 		AccountID: ref.AccountID,
@@ -106,7 +116,7 @@ func (r *V1) agentOSPlanConsole(ctx *fiber.Ctx) error {
 		return agentOSError(ctx, err)
 	}
 
-	view := newAgentOSPlanConsoleView(ref, description, events, artifacts, audits)
+	view := newAgentOSPlanConsoleView(ref, description, events, debugTraces, artifacts, audits)
 	var body bytes.Buffer
 	if err := agentOSPlanConsoleTemplate.Execute(&body, view); err != nil {
 		return errorResponse(ctx, http.StatusInternalServerError, fmt.Sprintf("render plan console: %v", err))
@@ -140,12 +150,14 @@ type agentOSPlanConsoleView struct {
 	ActiveRunIDs        []string
 	Artifacts           []agentOSPlanConsoleArtifactView
 	Events              []agentOSPlanConsoleEventView
+	DebugTraces         []agentOSPlanConsoleDebugTraceView
 	Audits              []agentOSPlanConsoleAuditView
 	ControlEndpoint     string
 	SignalEndpoint      string
 	DescriptionEndpoint string
 	StatusEndpoint      string
 	EventsEndpoint      string
+	DebugEndpoint       string
 	ArtifactsEndpoint   string
 	RetrySignalType     agentos.SignalType
 	PayloadNodeIDKey    string
@@ -216,6 +228,17 @@ type agentOSPlanConsoleEventView struct {
 	Payload   string
 }
 
+type agentOSPlanConsoleDebugTraceView struct {
+	Sequence        string
+	EventType       string
+	NodeID          string
+	RunID           string
+	Transition      string
+	Capability      string
+	InputResolution string
+	Conditions      string
+}
+
 type agentOSPlanConsoleAuditView struct {
 	AuditID        string
 	Action         string
@@ -241,7 +264,7 @@ type agentOSPlanConsoleSignalAction struct {
 	Class      string
 }
 
-func newAgentOSPlanConsoleView(ref agentos.PlanRef, description agentos.RunPlanDescription, events []agentos.PlanEvent, artifacts []agentos.ArtifactRef, audits []agentos.PlanAuditRecord) agentOSPlanConsoleView {
+func newAgentOSPlanConsoleView(ref agentos.PlanRef, description agentos.RunPlanDescription, events []agentos.PlanEvent, debugTraces []agentos.PlanDebugTrace, artifacts []agentos.ArtifactRef, audits []agentos.PlanAuditRecord) agentOSPlanConsoleView {
 	scopeQuery := agentOSPlanConsoleScopeQuery(ref)
 	status := description.Status
 
@@ -255,12 +278,14 @@ func newAgentOSPlanConsoleView(ref agentos.PlanRef, description agentos.RunPlanD
 		ActiveRunIDs:        append([]string(nil), status.ActiveRunIDs...),
 		Artifacts:           newAgentOSPlanConsoleArtifactViews(ref, artifacts),
 		Events:              newAgentOSPlanConsoleEventViews(events),
+		DebugTraces:         newAgentOSPlanConsoleDebugTraceViews(debugTraces),
 		Audits:              newAgentOSPlanConsoleAuditViews(audits),
 		ControlEndpoint:     "control",
 		SignalEndpoint:      "signals",
 		DescriptionEndpoint: "description?" + scopeQuery,
 		StatusEndpoint:      "status?" + scopeQuery,
 		EventsEndpoint:      "events/history?" + scopeQuery,
+		DebugEndpoint:       "debug/traces?" + scopeQuery,
 		ArtifactsEndpoint:   "artifacts?" + scopeQuery,
 		RetrySignalType:     agentos.SignalPlanNodeRetry,
 		PayloadNodeIDKey:    agentos.SignalPayloadNodeID,
@@ -369,6 +394,87 @@ func newAgentOSPlanConsoleEventViews(events []agentos.PlanEvent) []agentOSPlanCo
 	}
 
 	return views
+}
+
+func newAgentOSPlanConsoleDebugTraceViews(traces []agentos.PlanDebugTrace) []agentOSPlanConsoleDebugTraceView {
+	views := make([]agentOSPlanConsoleDebugTraceView, 0, len(traces))
+	for _, trace := range traces {
+		views = append(views, agentOSPlanConsoleDebugTraceView{
+			Sequence:        strconv.FormatInt(trace.Sequence, 10),
+			EventType:       string(trace.EventType),
+			NodeID:          trace.NodeID,
+			RunID:           trace.RunID,
+			Transition:      agentOSPlanConsoleTransition(trace.Transition),
+			Capability:      agentOSPlanConsoleCapability(trace.Capability),
+			InputResolution: agentOSPlanConsoleInputResolution(trace.InputResolution),
+			Conditions:      agentOSPlanConsoleConditions(trace.Conditions),
+		})
+	}
+
+	return views
+}
+
+func agentOSPlanConsoleTransition(transition *agentos.PlanStateTransition) string {
+	if transition == nil {
+		return ""
+	}
+	if transition.PreviousLifecycleState == "" {
+		return transition.NextLifecycleState
+	}
+	if transition.NextLifecycleState == "" {
+		return transition.PreviousLifecycleState
+	}
+
+	return transition.PreviousLifecycleState + " -> " + transition.NextLifecycleState
+}
+
+func agentOSPlanConsoleCapability(capability *agentos.PlanCapabilityTrace) string {
+	if capability == nil {
+		return ""
+	}
+	parts := []string{agentOSPlanConsoleBackend(capability.Backend), capability.Capability}
+	if len(capability.Controls) > 0 {
+		parts = append(parts, "controls:"+strconv.Itoa(len(capability.Controls)))
+	}
+	if len(capability.Signals) > 0 {
+		parts = append(parts, "signals:"+strconv.Itoa(len(capability.Signals)))
+	}
+	if capability.HasInputSchema {
+		parts = append(parts, "input-schema")
+	}
+	if capability.HasOutputSchema {
+		parts = append(parts, "output-schema")
+	}
+
+	return strings.Join(parts, " ")
+}
+
+func agentOSPlanConsoleInputResolution(input *agentos.PlanInputResolutionTrace) string {
+	if input == nil {
+		return ""
+	}
+	parts := make([]string, 0, 3)
+	if input.InputDigest != "" {
+		parts = append(parts, "digest:"+input.InputDigest)
+	}
+	if len(input.InputKeys) > 0 {
+		parts = append(parts, "keys:"+strings.Join(input.InputKeys, ","))
+	}
+	parts = append(parts, "mappings:"+strconv.Itoa(input.MappingCount))
+
+	return strings.Join(parts, " ")
+}
+
+func agentOSPlanConsoleConditions(conditions []agentos.PlanConditionTrace) string {
+	if len(conditions) == 0 {
+		return ""
+	}
+	items := make([]string, 0, len(conditions))
+	for _, condition := range conditions {
+		items = append(items, condition.Expression+"="+strconv.FormatBool(condition.Result))
+	}
+
+	return strings.Join(items, "; ")
 }
 
 func newAgentOSPlanConsoleAuditViews(audits []agentos.PlanAuditRecord) []agentOSPlanConsoleAuditView {
@@ -934,6 +1040,47 @@ pre {
     </div>
     {{ else }}
     <div class="empty">No artifacts.</div>
+    {{ end }}
+  </section>
+
+  <section class="section">
+    <div class="section-head">
+      <h2>Debug Traces</h2>
+      <a class="mono" href="{{ .DebugEndpoint }}">debug json</a>
+    </div>
+    {{ if .DebugTraces }}
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th>Seq</th>
+            <th>Type</th>
+            <th>Node</th>
+            <th>Run</th>
+            <th>Transition</th>
+            <th>Capability</th>
+            <th>Input</th>
+            <th>Conditions</th>
+          </tr>
+        </thead>
+        <tbody>
+          {{ range .DebugTraces }}
+          <tr>
+            <td class="mono">{{ .Sequence }}</td>
+            <td>{{ .EventType }}</td>
+            <td class="mono">{{ .NodeID }}</td>
+            <td class="mono">{{ .RunID }}</td>
+            <td>{{ .Transition }}</td>
+            <td>{{ .Capability }}</td>
+            <td>{{ .InputResolution }}</td>
+            <td>{{ .Conditions }}</td>
+          </tr>
+          {{ end }}
+        </tbody>
+      </table>
+    </div>
+    {{ else }}
+    <div class="empty">No debug traces.</div>
     {{ end }}
   </section>
 

@@ -191,6 +191,29 @@ func TestAgentOSPlanRoutesUsePlanRuntime(t *testing.T) {
 	if len(planEvents) != 1 || planEvents[0].PlanID != "plan-1" || planEvents[0].NodeID != "research" {
 		t.Fatalf("unexpected event history: %#v", planEvents)
 	}
+
+	resp = doAgentOSRouteRequest(t, app, http.MethodGet, "/v1/agentos/plans/plan-1/debug/traces?account_id=acct-1&node_id=research&after_sequence=7&limit=3", "")
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("debug traces status = %d", resp.StatusCode)
+	}
+	if planRuntime.debugScope.PlanID != "plan-1" ||
+		planRuntime.debugScope.AccountID != "acct-1" ||
+		planRuntime.debugScope.NodeID != "research" ||
+		planRuntime.debugScope.AfterSequence != 7 ||
+		planRuntime.debugScope.Limit != 3 {
+		t.Fatalf("unexpected debug scope: %#v", planRuntime.debugScope)
+	}
+	var traces []agentos.PlanDebugTrace
+	if err := json.NewDecoder(resp.Body).Decode(&traces); err != nil {
+		t.Fatalf("decode debug traces: %v", err)
+	}
+	if len(traces) != 1 ||
+		traces[0].EventType != agentos.EventNodeInputResolved ||
+		traces[0].InputResolution == nil ||
+		traces[0].InputResolution.MappingCount != 1 {
+		t.Fatalf("unexpected debug traces: %#v", traces)
+	}
 }
 
 func TestAgentOSPlanEventRouteStreamsSSE(t *testing.T) {
@@ -263,6 +286,8 @@ func TestAgentOSPlanConsoleRendersRuntimeData(t *testing.T) {
 		"run-research",
 		"Plan Graph",
 		"research -&gt; write",
+		"Debug Traces",
+		"digest:digest-1",
 		"artifact-1",
 		"plan.node.started",
 		"plan.control",
@@ -281,9 +306,10 @@ func TestAgentOSPlanConsoleRendersRuntimeData(t *testing.T) {
 		t.Fatalf("unexpected description ref: %#v", planRuntime.descriptionRef)
 	}
 	if planRuntime.eventScope.Limit != agentOSPlanConsoleDefaultEventLimit ||
+		planRuntime.debugScope.Limit != agentOSPlanConsoleDefaultEventLimit ||
 		planRuntime.artifactScope.Limit != agentOSPlanConsoleDefaultArtifactLimit ||
 		planRuntime.auditScope.Limit != agentOSPlanConsoleDefaultAuditLimit {
-		t.Fatalf("unexpected console limits: events=%d artifacts=%d audits=%d", planRuntime.eventScope.Limit, planRuntime.artifactScope.Limit, planRuntime.auditScope.Limit)
+		t.Fatalf("unexpected console limits: events=%d debug=%d artifacts=%d audits=%d", planRuntime.eventScope.Limit, planRuntime.debugScope.Limit, planRuntime.artifactScope.Limit, planRuntime.auditScope.Limit)
 	}
 }
 
@@ -309,6 +335,7 @@ type fakePlanRuntime struct {
 	control          agentos.ControlRequest
 	scope            agentos.PlanStreamScope
 	eventScope       agentos.PlanEventScope
+	debugScope       agentos.PlanDebugTraceScope
 	auditScope       agentos.PlanAuditScope
 	artifactScope    agentos.PlanArtifactScope
 	artifactGetScope agentos.PlanArtifactScope
@@ -443,6 +470,29 @@ func (r *fakePlanRuntime) ListPlanEvents(_ context.Context, scope agentos.PlanEv
 			},
 			PlanID: scope.PlanID,
 			NodeID: "research",
+		},
+	}, nil
+}
+
+func (r *fakePlanRuntime) ListPlanDebugTraces(_ context.Context, scope agentos.PlanDebugTraceScope) ([]agentos.PlanDebugTrace, error) {
+	r.debugScope = scope
+
+	return []agentos.PlanDebugTrace{
+		{
+			EventID:   "debug-1",
+			EventType: agentos.EventNodeInputResolved,
+			PlanID:    scope.PlanID,
+			NodeID:    "research",
+			RunID:     "run-research",
+			Sequence:  9,
+			InputResolution: &agentos.PlanInputResolutionTrace{
+				InputDigest:  "digest-1",
+				InputKeys:    []string{"topic"},
+				MappingCount: 1,
+				Mappings: []agentos.PlanInputMappingTrace{
+					{Target: "topic", SourceArtifact: "summary", Required: true},
+				},
+			},
 		},
 	}, nil
 }

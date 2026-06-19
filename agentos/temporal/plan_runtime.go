@@ -352,6 +352,33 @@ func (r *planRuntime) ListPlanEvents(ctx context.Context, scope agentos.PlanEven
 	return r.planEvents.ListPlanEvents(ctx, planEventStreamScope(scope), scope.Limit)
 }
 
+func (r *planRuntime) ListPlanDebugTraces(ctx context.Context, scope agentos.PlanDebugTraceScope) ([]agentos.PlanDebugTrace, error) {
+	if r.planEvents == nil {
+		return nil, errPlanRuntimePlanEventStoreRequired
+	}
+	if err := agentosplan.ValidatePlanDebugTraceScope(scope); err != nil {
+		return nil, err
+	}
+	if _, _, err := r.authorizePlan(ctx, agentos.PlanRef{PlanID: scope.PlanID, AccountID: scope.AccountID, ProjectID: scope.ProjectID}); err != nil {
+		return nil, err
+	}
+
+	events, err := r.planEvents.ListPlanEvents(ctx, planDebugTraceStreamScope(scope), 0)
+	if err != nil {
+		return nil, err
+	}
+
+	traces, err := agentosplan.BuildPlanDebugTraces(events)
+	if err != nil {
+		return nil, err
+	}
+	if scope.Limit > 0 && len(traces) > scope.Limit {
+		traces = traces[:scope.Limit]
+	}
+
+	return traces, nil
+}
+
 func (r *planRuntime) ListPlanAudits(ctx context.Context, scope agentos.PlanAuditScope) ([]agentos.PlanAuditRecord, error) {
 	if r.auditStore == nil {
 		return nil, errPlanRuntimeAuditStoreRequired
@@ -497,6 +524,17 @@ func planCommandFromAuditRecord(record agentosplan.AuditRecord) agentosplan.Plan
 }
 
 func planEventStreamScope(scope agentos.PlanEventScope) agentos.PlanStreamScope {
+	return agentos.PlanStreamScope{
+		PlanID:        scope.PlanID,
+		AccountID:     scope.AccountID,
+		ProjectID:     scope.ProjectID,
+		NodeID:        scope.NodeID,
+		RunID:         scope.RunID,
+		AfterSequence: scope.AfterSequence,
+	}
+}
+
+func planDebugTraceStreamScope(scope agentos.PlanDebugTraceScope) agentos.PlanStreamScope {
 	return agentos.PlanStreamScope{
 		PlanID:        scope.PlanID,
 		AccountID:     scope.AccountID,

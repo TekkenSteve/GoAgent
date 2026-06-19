@@ -18,6 +18,23 @@ const (
 	idempotencyOperationBudgetExceeded  = "budget_exceeded"
 )
 
+const (
+	planEventPayloadLifecycleState  = "lifecycle_state"
+	planEventPayloadPlanID          = "plan_id"
+	planEventPayloadNodeID          = "node_id"
+	planEventPayloadRunID           = "run_id"
+	planEventPayloadReason          = "reason"
+	planEventPayloadAttempt         = "attempt"
+	planEventPayloadExpansion       = "expansion"
+	planEventPayloadArtifacts       = "artifacts"
+	planEventPayloadBudgetDelta     = "budget_delta"
+	planEventPayloadBudgetUsage     = "budget_usage"
+	planEventPayloadTransition      = "transition"
+	planEventPayloadInputResolution = "input_resolution"
+	planEventPayloadCapability      = "capability"
+	planEventPayloadConditions      = "conditions"
+)
+
 // PlanEventFromStateEvent maps a deterministic reducer transition to the public
 // PlanEvent envelope used by durable event stores and UI timelines.
 func PlanEventFromStateEvent(spec agentos.RunPlanSpec, status agentos.RunPlanStatus, event StateEvent) (agentos.PlanEvent, string, error) {
@@ -35,45 +52,45 @@ func PlanEventFromStateEvent(spec agentos.RunPlanSpec, status agentos.RunPlanSta
 	}
 
 	payload := map[string]any{
-		"lifecycle_state": status.LifecycleState,
-		"plan_id":         spec.PlanID,
+		planEventPayloadLifecycleState: status.LifecycleState,
+		planEventPayloadPlanID:         spec.PlanID,
 	}
 	if event.NodeID != "" {
-		payload["node_id"] = event.NodeID
+		payload[planEventPayloadNodeID] = event.NodeID
 	}
 	if event.RunID != "" {
-		payload["run_id"] = event.RunID
+		payload[planEventPayloadRunID] = event.RunID
 	}
 	if event.Reason != "" {
-		payload["reason"] = event.Reason
+		payload[planEventPayloadReason] = event.Reason
 	}
 	if event.Attempt > 0 {
-		payload["attempt"] = event.Attempt
+		payload[planEventPayloadAttempt] = event.Attempt
 	}
 	if len(event.Expansion.Nodes) > 0 || len(event.Expansion.Edges) > 0 {
-		payload["expansion"] = planExpansionPayload(event.Expansion)
+		payload[planEventPayloadExpansion] = planExpansionPayload(event.Expansion)
 	}
 	if len(event.Artifacts) > 0 {
-		payload["artifacts"] = event.Artifacts
+		payload[planEventPayloadArtifacts] = event.Artifacts
 	}
 	if event.BudgetDelta.SpentCents != 0 {
-		payload["budget_delta"] = event.BudgetDelta
-		payload["budget_usage"] = status.BudgetUsage
+		payload[planEventPayloadBudgetDelta] = event.BudgetDelta
+		payload[planEventPayloadBudgetUsage] = status.BudgetUsage
 	}
 	if event.PreviousLifecycleState != "" || event.NextLifecycleState != "" {
-		payload["transition"] = map[string]any{
+		payload[planEventPayloadTransition] = map[string]any{
 			"previous_lifecycle_state": event.PreviousLifecycleState,
 			"next_lifecycle_state":     event.NextLifecycleState,
 		}
 	}
 	if event.InputTrace.InputDigest != "" || event.InputTrace.MappingCount > 0 {
-		payload["input_resolution"] = event.InputTrace
+		payload[planEventPayloadInputResolution] = event.InputTrace
 	}
 	if event.Capability.Capability != "" {
-		payload["capability"] = event.Capability
+		payload[planEventPayloadCapability] = event.Capability
 	}
 	if len(event.ConditionTraces) > 0 {
-		payload["conditions"] = event.ConditionTraces
+		payload[planEventPayloadConditions] = event.ConditionTraces
 	}
 
 	planEvent := agentos.PlanEvent{

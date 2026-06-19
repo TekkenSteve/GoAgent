@@ -242,6 +242,81 @@ func TestPlanRuntimeListPlanEventsEnforcesTenantScopeAndFilters(t *testing.T) {
 	}
 }
 
+func TestPlanRuntimeListPlanDebugTracesProjectsDurableEvents(t *testing.T) {
+	store, ref := newPlanRuntimeTestStore(t)
+	debugEvent, _, err := agentosplan.PlanEventFromStateEvent(
+		agentos.RunPlanSpec{PlanID: ref.PlanID},
+		agentos.RunPlanStatus{PlanID: ref.PlanID, LifecycleState: agentos.PlanLifecycleRunning},
+		agentosplan.StateEvent{
+			Kind:   agentosplan.EventNodeInputResolved,
+			NodeID: "research",
+			RunID:  "run-research",
+			InputTrace: agentosplan.InputResolutionTrace{
+				InputDigest:  "digest-1",
+				InputKeys:    []string{"topic"},
+				MappingCount: 1,
+				Mappings: []agentosplan.InputMappingTrace{
+					{Target: "topic", SourceArtifact: "summary", Required: true},
+				},
+			},
+			PreviousLifecycleState: agentos.PlanNodeReady,
+			NextLifecycleState:     agentos.PlanNodeRunning,
+		},
+	)
+	if err != nil {
+		t.Fatalf("PlanEventFromStateEvent: %v", err)
+	}
+	events := []agentos.PlanEvent{
+		{
+			Event: agentos.Event{
+				EventType: agentos.EventPlanStarted,
+			},
+			PlanID: ref.PlanID,
+		},
+		{
+			Event: agentos.Event{
+				EventType: agentos.EventPlanNodeStarted,
+				RunID:     "run-research",
+			},
+			PlanID: ref.PlanID,
+			NodeID: "research",
+		},
+		debugEvent,
+	}
+	for i, event := range events {
+		if _, err := store.AppendPlanEvent(t.Context(), event, []string{"debug-event-1", "debug-event-2", "debug-event-3"}[i]); err != nil {
+			t.Fatalf("AppendPlanEvent %d: %v", i, err)
+		}
+	}
+	rt := &planRuntime{planIndex: store, planEvents: store}
+
+	_, err = rt.ListPlanDebugTraces(t.Context(), agentos.PlanDebugTraceScope{PlanID: ref.PlanID, AccountID: "acct-other", ProjectID: ref.ProjectID})
+	if !errors.Is(err, agentos.ErrPlanRouteNotFound) {
+		t.Fatalf("ListPlanDebugTraces mismatch error = %v, want ErrPlanRouteNotFound", err)
+	}
+
+	traces, err := rt.ListPlanDebugTraces(t.Context(), agentos.PlanDebugTraceScope{
+		PlanID:        ref.PlanID,
+		AccountID:     ref.AccountID,
+		ProjectID:     ref.ProjectID,
+		NodeID:        "research",
+		RunID:         "run-research",
+		AfterSequence: 1,
+		Limit:         1,
+	})
+	if err != nil {
+		t.Fatalf("ListPlanDebugTraces: %v", err)
+	}
+	if len(traces) != 1 ||
+		traces[0].EventType != agentos.EventNodeInputResolved ||
+		traces[0].InputResolution == nil ||
+		traces[0].InputResolution.MappingCount != 1 ||
+		traces[0].Transition == nil ||
+		traces[0].Transition.NextLifecycleState != agentos.PlanNodeRunning {
+		t.Fatalf("traces = %#v", traces)
+	}
+}
+
 func TestPlanRuntimeListPlanAuditsEnforcesTenantScope(t *testing.T) {
 	store, ref := newPlanRuntimeTestStore(t)
 	if _, _, err := store.RecordAudit(t.Context(), agentosplan.AuditRecord{

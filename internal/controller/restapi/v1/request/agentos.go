@@ -82,6 +82,16 @@ type AgentOSPlanEventScope struct {
 	Limit         int    `query:"limit"`
 }
 
+// AgentOSPlanDebugTraceScope selects durable plan debug traces for REST queries.
+type AgentOSPlanDebugTraceScope struct {
+	AccountID     string `query:"account_id" validate:"required"`
+	ProjectID     string `query:"project_id"`
+	NodeID        string `query:"node_id"`
+	RunID         string `query:"run_id"`
+	AfterSequence int64  `query:"after_sequence"`
+	Limit         int    `query:"limit"`
+}
+
 // AgentOSPlanAuditScope selects plan audit records for REST queries.
 type AgentOSPlanAuditScope struct {
 	AccountID string                  `query:"account_id" validate:"required"`

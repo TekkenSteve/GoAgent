@@ -35,7 +35,7 @@ func TestPlanEventFromStateEventMapsPublicEvent(t *testing.T) {
 	if event.EventType != agentos.EventPlanNodeStarted || event.PlanID != "plan-1" || event.NodeID != "node-1" || event.RunID != "run-1" {
 		t.Fatalf("event = %#v", event)
 	}
-	if event.Payload["plan_id"] != "plan-1" || event.Payload["node_id"] != "node-1" || event.Payload["run_id"] != "run-1" {
+	if event.Payload[planEventPayloadPlanID] != "plan-1" || event.Payload[planEventPayloadNodeID] != "node-1" || event.Payload[planEventPayloadRunID] != "run-1" {
 		t.Fatalf("payload = %#v", event.Payload)
 	}
 }
@@ -236,10 +236,10 @@ func TestPlanEventFromDebugTraceEvents(t *testing.T) {
 	if err != nil {
 		t.Fatalf("PlanEventFromStateEvent capability: %v", err)
 	}
-	if capabilityEvent.EventType != agentos.EventCapabilitySelected || capabilityEvent.Payload["capability"] == nil {
+	if capabilityEvent.EventType != agentos.EventCapabilitySelected || capabilityEvent.Payload[planEventPayloadCapability] == nil {
 		t.Fatalf("capability event = %#v", capabilityEvent)
 	}
-	if capabilityEvent.Payload["transition"] == nil {
+	if capabilityEvent.Payload[planEventPayloadTransition] == nil {
 		t.Fatalf("capability event missing transition = %#v", capabilityEvent.Payload)
 	}
 
@@ -260,7 +260,7 @@ func TestPlanEventFromDebugTraceEvents(t *testing.T) {
 	if err != nil {
 		t.Fatalf("PlanEventFromStateEvent input: %v", err)
 	}
-	if inputEvent.EventType != agentos.EventNodeInputResolved || inputEvent.Payload["input_resolution"] == nil {
+	if inputEvent.EventType != agentos.EventNodeInputResolved || inputEvent.Payload[planEventPayloadInputResolution] == nil {
 		t.Fatalf("input event = %#v", inputEvent)
 	}
 
@@ -274,7 +274,7 @@ func TestPlanEventFromDebugTraceEvents(t *testing.T) {
 	if err != nil {
 		t.Fatalf("PlanEventFromStateEvent conditions: %v", err)
 	}
-	if conditionEvent.EventType != agentos.EventConditionEvaluated || conditionEvent.Payload["conditions"] == nil {
+	if conditionEvent.EventType != agentos.EventConditionEvaluated || conditionEvent.Payload[planEventPayloadConditions] == nil {
 		t.Fatalf("condition event = %#v", conditionEvent)
 	}
 }

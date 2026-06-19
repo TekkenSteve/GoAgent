@@ -21,6 +21,7 @@ type PlanRuntime interface {
 	ControlPlan(ctx context.Context, ref PlanRef, control ControlRequest) error
 	SubscribePlan(ctx context.Context, scope PlanStreamScope) (Subscription, error)
 	ListPlanEvents(ctx context.Context, scope PlanEventScope) ([]PlanEvent, error)
+	ListPlanDebugTraces(ctx context.Context, scope PlanDebugTraceScope) ([]PlanDebugTrace, error)
 	ListPlanArtifacts(ctx context.Context, scope PlanArtifactScope) ([]ArtifactRef, error)
 	GetPlanArtifact(ctx context.Context, scope PlanArtifactScope) (Artifact, error)
 	ListPlanAudits(ctx context.Context, scope PlanAuditScope) ([]PlanAuditRecord, error)
