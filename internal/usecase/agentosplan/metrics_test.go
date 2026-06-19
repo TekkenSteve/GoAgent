@@ -122,6 +122,55 @@ func TestBuildPlanMetricSamplesProjectsArtifactsBudgetExpansionAndRetries(t *tes
 	}
 }
 
+func TestBuildPlanMetricSamplesAfterUsesEarlierHistoryForDurations(t *testing.T) {
+	requestedAt := time.Date(2026, 6, 19, 12, 0, 0, 0, time.UTC)
+	planStartedAt := requestedAt.Add(1 * time.Second)
+	nodeStartedAt := requestedAt.Add(3 * time.Second)
+	nodeSucceededAt := requestedAt.Add(13 * time.Second)
+	planSucceededAt := requestedAt.Add(21 * time.Second)
+	spec := agentos.RunPlanSpec{
+		PlanID:      "plan-metrics-checkpoint",
+		AccountID:   "acct-1",
+		ProjectID:   "proj-1",
+		RequestedAt: requestedAt,
+		Nodes: []agentos.PlanNodeSpec{
+			{
+				NodeID: "draft",
+				Run: agentos.RunSpec{
+					RunID:   "run-draft",
+					Backend: agentos.BackendRef{Kind: agentos.BackendKindNative, Name: agentos.BackendNameGoAgentNative},
+				},
+			},
+		},
+	}
+	events := []agentos.PlanEvent{
+		metricEvent(1, agentos.EventPlanStarted, spec.PlanID, "", "", planStartedAt, nil),
+		metricEvent(2, agentos.EventPlanNodeStarted, spec.PlanID, "draft", "run-draft", nodeStartedAt, nil),
+		metricEvent(3, agentos.EventPlanNodeSucceeded, spec.PlanID, "draft", "run-draft", nodeSucceededAt, nil),
+		metricEvent(4, agentos.EventPlanSucceeded, spec.PlanID, "", "", planSucceededAt, nil),
+	}
+
+	samples, err := BuildPlanMetricSamplesAfter(context.Background(), spec, events, 2)
+	if err != nil {
+		t.Fatalf("BuildPlanMetricSamplesAfter: %v", err)
+	}
+
+	requireNoMetric(t, samples, PlanMetricPlanStartedTotal, "")
+	requireNoMetric(t, samples, PlanMetricPlanQueueLatencySeconds, "")
+	requireNoMetric(t, samples, PlanMetricNodeStartedTotal, "draft")
+	requireNoMetric(t, samples, PlanMetricNodeQueueLatencySeconds, "draft")
+	requireMetric(t, samples, PlanMetricNodeCompletedTotal, "draft", 1)
+	requireMetric(t, samples, PlanMetricNodeDurationSeconds, "draft", 10)
+	requireMetric(t, samples, PlanMetricPlanCompletedTotal, "", 1)
+	requireMetric(t, samples, PlanMetricPlanDurationSeconds, "", 20)
+
+	for _, sample := range samples {
+		if sample.Sequence <= 2 {
+			t.Fatalf("sample crossed checkpoint: %#v", sample)
+		}
+	}
+}
+
 func metricEvent(sequence int64, eventType agentos.EventType, planID string, nodeID string, runID string, at time.Time, payload map[string]any) agentos.PlanEvent {
 	return agentos.PlanEvent{
 		Event: agentos.Event{
@@ -148,6 +197,13 @@ func requireMetric(t *testing.T, samples []PlanMetricSample, name PlanMetricName
 	}
 
 	return sample
+}
+
+func requireNoMetric(t *testing.T, samples []PlanMetricSample, name PlanMetricName, nodeID string) {
+	t.Helper()
+	if sample := findMetric(samples, name, nodeID); sample.Name != "" {
+		t.Fatalf("unexpected metric %s node=%q in %#v", name, nodeID, samples)
+	}
 }
 
 func findMetric(samples []PlanMetricSample, name PlanMetricName, nodeID string) PlanMetricSample {

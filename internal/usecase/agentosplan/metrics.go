@@ -57,9 +57,16 @@ type PlanMetricSample struct {
 }
 
 // BuildPlanMetricSamples projects operational metrics from a durable RunPlan
-// event batch. The input may be a full history or an ordered tail; samples keep
-// event identity so downstream exporters can de-duplicate on EventID/Sequence.
-func BuildPlanMetricSamples(_ context.Context, spec agentos.RunPlanSpec, events []agentos.PlanEvent) ([]PlanMetricSample, error) {
+// event history. Samples keep event identity so downstream exporters can
+// de-duplicate on EventID/Sequence.
+func BuildPlanMetricSamples(ctx context.Context, spec agentos.RunPlanSpec, events []agentos.PlanEvent) ([]PlanMetricSample, error) {
+	return BuildPlanMetricSamplesAfter(ctx, spec, events, 0)
+}
+
+// BuildPlanMetricSamplesAfter projects metrics for events after a durable
+// checkpoint while still reading earlier history to reconstruct durations and
+// other stateful measurements.
+func BuildPlanMetricSamplesAfter(_ context.Context, spec agentos.RunPlanSpec, events []agentos.PlanEvent, afterSequence int64) ([]PlanMetricSample, error) {
 	ordered := orderedPlanEvents(events)
 	nodeByID := planNodeByID(spec)
 	planStart := time.Time{}
@@ -67,14 +74,20 @@ func BuildPlanMetricSamples(_ context.Context, spec agentos.RunPlanSpec, events 
 	samples := make([]PlanMetricSample, 0, len(ordered))
 
 	for _, event := range ordered {
+		emit := shouldEmitMetricSample(event, afterSequence)
 		switch event.EventType {
 		case agentos.EventPlanStarted:
 			planStart = event.Timestamp
-			samples = append(samples, metricSample(spec, event, PlanMetricPlanStartedTotal, 1, metricUnitCount, nil))
-			if !spec.RequestedAt.IsZero() && !event.Timestamp.IsZero() {
+			if emit {
+				samples = append(samples, metricSample(spec, event, PlanMetricPlanStartedTotal, 1, metricUnitCount, nil))
+			}
+			if emit && !spec.RequestedAt.IsZero() && !event.Timestamp.IsZero() {
 				samples = append(samples, metricSample(spec, event, PlanMetricPlanQueueLatencySeconds, secondsBetween(spec.RequestedAt, event.Timestamp), metricUnitSeconds, nil))
 			}
 		case agentos.EventPlanSucceeded, agentos.EventPlanFailed, agentos.EventPlanCanceled:
+			if !emit {
+				continue
+			}
 			labels := map[string]string{"lifecycle_state": planLifecycleForEvent(event.EventType)}
 			samples = append(samples, metricSample(spec, event, PlanMetricPlanCompletedTotal, 1, metricUnitCount, labels))
 			if !planStart.IsZero() && !event.Timestamp.IsZero() {
@@ -82,12 +95,18 @@ func BuildPlanMetricSamples(_ context.Context, spec agentos.RunPlanSpec, events 
 			}
 		case agentos.EventPlanNodeStarted:
 			nodeStarts[nodeMetricKey(event.NodeID, event.RunID)] = event.Timestamp
+			if !emit {
+				continue
+			}
 			labels := backendLabels(nodeByID[event.NodeID])
 			samples = append(samples, metricSample(spec, event, PlanMetricNodeStartedTotal, 1, metricUnitCount, labels))
 			if requestedAt := nodeRequestedAt(spec, nodeByID[event.NodeID]); !requestedAt.IsZero() && !event.Timestamp.IsZero() {
 				samples = append(samples, metricSample(spec, event, PlanMetricNodeQueueLatencySeconds, secondsBetween(requestedAt, event.Timestamp), metricUnitSeconds, labels))
 			}
 		case agentos.EventPlanNodeSucceeded, agentos.EventPlanNodeFailed, agentos.EventPlanNodeCanceled, agentos.EventPlanNodeSkipped:
+			if !emit {
+				continue
+			}
 			labels := mergeLabels(backendLabels(nodeByID[event.NodeID]), map[string]string{"lifecycle_state": nodeLifecycleForEvent(event.EventType)})
 			samples = append(samples, metricSample(spec, event, PlanMetricNodeCompletedTotal, 1, metricUnitCount, labels))
 			if start := nodeStarts[nodeMetricKey(event.NodeID, event.RunID)]; !start.IsZero() && !event.Timestamp.IsZero() {
@@ -97,25 +116,41 @@ func BuildPlanMetricSamples(_ context.Context, spec agentos.RunPlanSpec, events 
 				samples = append(samples, metricSample(spec, event, PlanMetricBackendErrorsTotal, 1, metricUnitCount, backendLabels(nodeByID[event.NodeID])))
 			}
 		case agentos.EventNodeOutputPublished:
+			if !emit {
+				continue
+			}
 			artifactSamples, err := artifactMetricSamples(spec, event)
 			if err != nil {
 				return nil, err
 			}
 			samples = append(samples, artifactSamples...)
 		case agentos.EventUsageReported:
+			if !emit {
+				continue
+			}
 			budgetSamples, err := budgetMetricSamples(spec, event)
 			if err != nil {
 				return nil, err
 			}
 			samples = append(samples, budgetSamples...)
 		case agentos.EventPlanExpanded:
+			if !emit {
+				continue
+			}
 			samples = append(samples, metricSample(spec, event, PlanMetricDynamicExpansionsTotal, 1, metricUnitCount, nil))
 		case agentos.EventPlanNodeRetryScheduled:
+			if !emit {
+				continue
+			}
 			samples = append(samples, metricSample(spec, event, PlanMetricNodeRetryScheduledTotal, 1, metricUnitCount, backendLabels(nodeByID[event.NodeID])))
 		}
 	}
 
 	return samples, nil
+}
+
+func shouldEmitMetricSample(event agentos.PlanEvent, afterSequence int64) bool {
+	return afterSequence == 0 || event.Sequence > afterSequence
 }
 
 func artifactMetricSamples(spec agentos.RunPlanSpec, event agentos.PlanEvent) ([]PlanMetricSample, error) {
