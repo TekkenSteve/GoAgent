@@ -17,7 +17,7 @@ func TestEvaluateContinuationPolicy(t *testing.T) {
 
 	decision = EvaluateContinuationPolicy(agentos.PlanPolicy{
 		MaxHistoryEvents: 5,
-	}, ContinuationSnapshot{AppliedTransitions: 5})
+	}, ContinuationSnapshot{HistoryEvents: 5})
 	if !decision.ShouldContinue || decision.Reason != "max_history_events" {
 		t.Fatalf("decision = %#v", decision)
 	}
@@ -26,6 +26,22 @@ func TestEvaluateContinuationPolicy(t *testing.T) {
 		ContinueAsNewEvents: 3,
 	}, ContinuationSnapshot{AppliedTransitions: 2})
 	if decision.ShouldContinue {
+		t.Fatalf("decision = %#v", decision)
+	}
+}
+
+func TestEvaluateIterationPolicy(t *testing.T) {
+	decision := EvaluateIterationPolicy(agentos.PlanPolicy{
+		MaxIterations: 2,
+	}, IterationSnapshot{Iterations: 3})
+	if !decision.ShouldFail || decision.Reason != "max_iterations" {
+		t.Fatalf("decision = %#v", decision)
+	}
+
+	decision = EvaluateIterationPolicy(agentos.PlanPolicy{
+		MaxIterations: 2,
+	}, IterationSnapshot{Iterations: 2})
+	if decision.ShouldFail {
 		t.Fatalf("decision = %#v", decision)
 	}
 }

@@ -34,6 +34,7 @@ type planWorkflowInput struct {
 	Status            agentos.RunPlanStatus `json:"status,omitempty"`
 	Continued         bool                  `json:"continued,omitempty"`
 	ContinuationCount int32                 `json:"continuation_count,omitempty"`
+	IterationCount    int32                 `json:"iteration_count,omitempty"`
 	ExpansionCount    int32                 `json:"expansion_count,omitempty"`
 }
 
@@ -82,11 +83,17 @@ func PlanWorkflow(ctx workflow.Context, input planWorkflowInput) (agentos.RunPla
 	scheduler := agentosplan.Scheduler{Expressions: compiler}
 	maxParallel := normalizePlanParallelism(spec.Policy.MaxParallelNodes)
 	expansionCount := input.ExpansionCount
+	iterationCount := input.IterationCount
 	paused := state.Status.LifecycleState == agentos.PlanLifecycleBlocked
 	processedControls := make(map[string]bool)
 	processedSignals := make(map[string]bool)
 
 	for {
+		iterationCount++
+		if err := applyPlanIterationGuard(activityCtx, ctx, spec, &state, iterationCount); err != nil {
+			return state.Status, err
+		}
+
 		canceled, nextPaused, err := drainPlanControl(activityCtx, ctx, spec, controlCh, &state, paused, validation.ControlsByNode, processedControls)
 		paused = nextPaused
 		if err != nil {
@@ -116,7 +123,7 @@ func PlanWorkflow(ctx workflow.Context, input planWorkflowInput) (agentos.RunPla
 			return state.Status, nil
 		}
 		if paused {
-			if err := continuePlanWorkflowIfNeeded(ctx, input, spec, state, expansionCount); err != nil {
+			if err := continuePlanWorkflowIfNeeded(ctx, input, spec, state, expansionCount, iterationCount); err != nil {
 				return state.Status, err
 			}
 			if err := workflow.Sleep(ctx, planNodePollInterval); err != nil {
@@ -206,7 +213,7 @@ func PlanWorkflow(ctx workflow.Context, input planWorkflowInput) (agentos.RunPla
 
 			return state.Status, fmt.Errorf("%w: %s", agentos.ErrInvalidRunPlan, reason)
 		}
-		if err := continuePlanWorkflowIfNeeded(ctx, input, spec, state, expansionCount); err != nil {
+		if err := continuePlanWorkflowIfNeeded(ctx, input, spec, state, expansionCount, iterationCount); err != nil {
 			return state.Status, err
 		}
 		if !progressed {
@@ -225,12 +232,13 @@ func initialPlanWorkflowState(input planWorkflowInput, now time.Time) (agentospl
 	return agentosplan.NewState(input.Spec, now), nil
 }
 
-func continuePlanWorkflowIfNeeded(ctx workflow.Context, input planWorkflowInput, spec agentos.RunPlanSpec, state agentosplan.State, expansionCount int32) error {
+func continuePlanWorkflowIfNeeded(ctx workflow.Context, input planWorkflowInput, spec agentos.RunPlanSpec, state agentosplan.State, expansionCount int32, iterationCount int32) error {
 	if planTerminal(state.Status.LifecycleState) {
 		return nil
 	}
 	decision := agentosplan.EvaluateContinuationPolicy(spec.Policy, agentosplan.ContinuationSnapshot{
 		AppliedTransitions: state.AppliedTransitions(),
+		HistoryEvents:      workflow.GetInfo(ctx).GetCurrentHistoryLength(),
 	})
 	if !decision.ShouldContinue {
 		return nil
@@ -241,9 +249,24 @@ func continuePlanWorkflowIfNeeded(ctx workflow.Context, input planWorkflowInput,
 	nextInput.Status = state.Status
 	nextInput.Continued = true
 	nextInput.ContinuationCount++
+	nextInput.IterationCount = iterationCount
 	nextInput.ExpansionCount = expansionCount
 
 	return workflow.NewContinueAsNewError(ctx, PlanWorkflowName, nextInput)
+}
+
+func applyPlanIterationGuard(activityCtx workflow.Context, workflowCtx workflow.Context, spec agentos.RunPlanSpec, state *agentosplan.State, iterationCount int32) error {
+	decision := agentosplan.EvaluateIterationPolicy(spec.Policy, agentosplan.IterationSnapshot{
+		Iterations: iterationCount,
+	})
+	if !decision.ShouldFail {
+		return nil
+	}
+
+	reason := fmt.Sprintf("plan exceeded max iterations: %d exceeds max %d", iterationCount, spec.Policy.MaxIterations)
+	persistErr := applyPlanStateEvent(activityCtx, workflowCtx, spec, state, agentosplan.StateEvent{Kind: agentosplan.EventPlanFailed, Reason: reason})
+
+	return errors.Join(fmt.Errorf("%w: %s", agentos.ErrInvalidRunPlan, reason), persistErr)
 }
 
 func applyPlanStateEvent(activityCtx workflow.Context, workflowCtx workflow.Context, spec agentos.RunPlanSpec, state *agentosplan.State, event agentosplan.StateEvent) error {

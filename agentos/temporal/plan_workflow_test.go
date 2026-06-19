@@ -646,6 +646,61 @@ func TestPlanWorkflowContinuedInputRestoresSnapshotStatus(t *testing.T) {
 	require.Equal(t, []string{"run-running"}, state.Status.ActiveRunIDs)
 }
 
+func TestPlanWorkflowContinuesAsNewWhenHistoryLimitReached(t *testing.T) {
+	t.Parallel()
+
+	ref := agentos.BackendRef{Kind: agentos.BackendKindNative, Name: agentos.BackendNameGoAgentNative}
+	spec := agentos.RunPlanSpec{
+		PlanID:         "plan-history-continue",
+		IdempotencyKey: "plan-start-history-continue",
+		Policy: agentos.PlanPolicy{
+			MaxHistoryEvents: 10,
+		},
+		Nodes: []agentos.PlanNodeSpec{
+			{NodeID: "running", Run: agentos.RunSpec{RunID: "run-running", Backend: ref}},
+		},
+	}
+	mocks := &planWorkflowMocks{}
+	env := newPlanWorkflowTestEnv(mocks)
+	env.SetCurrentHistoryLength(10)
+
+	env.ExecuteWorkflow(PlanWorkflow, planWorkflowInput{Spec: spec})
+
+	require.True(t, env.IsWorkflowCompleted())
+	require.Error(t, env.GetWorkflowError())
+	require.True(t, workflow.IsContinueAsNewError(env.GetWorkflowError()))
+}
+
+func TestPlanWorkflowFailsWhenMaxIterationsExceeded(t *testing.T) {
+	t.Parallel()
+
+	ref := agentos.BackendRef{Kind: agentos.BackendKindNative, Name: agentos.BackendNameGoAgentNative}
+	spec := agentos.RunPlanSpec{
+		PlanID:         "plan-max-iterations",
+		IdempotencyKey: "plan-start-max-iterations",
+		Policy: agentos.PlanPolicy{
+			MaxIterations: 1,
+		},
+		Nodes: []agentos.PlanNodeSpec{
+			{NodeID: "running", Run: agentos.RunSpec{RunID: "run-running", Backend: ref}},
+		},
+	}
+	store := agentosplan.NewMemoryPlanStore()
+	mocks := &planWorkflowMocks{}
+	env := newPlanWorkflowTestEnvWithStores(mocks, nil, store, agentosplan.NewMemoryArtifactStore())
+
+	env.ExecuteWorkflow(PlanWorkflow, planWorkflowInput{Spec: spec})
+
+	require.True(t, env.IsWorkflowCompleted())
+	require.Error(t, env.GetWorkflowError())
+
+	snapshot, ok, err := store.LoadPlanState(context.Background(), spec.PlanID)
+	require.NoError(t, err)
+	require.True(t, ok)
+	require.Equal(t, agentos.PlanLifecycleFailed, snapshot.Status.LifecycleState)
+	require.Equal(t, "plan exceeded max iterations: 2 exceeds max 1", snapshot.Status.Reason)
+}
+
 type planWorkflowMocks struct {
 	started         []string
 	startedInputs   []map[string]any

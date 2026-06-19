@@ -9,6 +9,12 @@ import (
 // ContinuationSnapshot is deterministic input for RunPlan continuation policy.
 type ContinuationSnapshot struct {
 	AppliedTransitions int32
+	HistoryEvents      int
+}
+
+// IterationSnapshot is deterministic input for RunPlan loop guard policy.
+type IterationSnapshot struct {
+	Iterations int32
 }
 
 // ContinuationDecision explains whether the current workflow run should
@@ -18,20 +24,33 @@ type ContinuationDecision struct {
 	Reason         string
 }
 
-// EvaluateContinuationPolicy evaluates PlanPolicy history guards using reducer
-// transitions as the deterministic proxy for workflow history growth.
+// IterationDecision explains whether the current workflow run exceeded its
+// bounded execution policy.
+type IterationDecision struct {
+	ShouldFail bool
+	Reason     string
+}
+
+// EvaluateContinuationPolicy evaluates PlanPolicy history guards from
+// deterministic workflow snapshots.
 func EvaluateContinuationPolicy(policy agentos.PlanPolicy, snapshot ContinuationSnapshot) ContinuationDecision {
-	if snapshot.AppliedTransitions <= 0 {
-		return ContinuationDecision{}
-	}
 	if policy.ContinueAsNewEvents > 0 && snapshot.AppliedTransitions >= policy.ContinueAsNewEvents {
 		return ContinuationDecision{ShouldContinue: true, Reason: "continue_as_new_events"}
 	}
-	if policy.MaxHistoryEvents > 0 && snapshot.AppliedTransitions >= policy.MaxHistoryEvents {
+	if policy.MaxHistoryEvents > 0 && snapshot.HistoryEvents >= int(policy.MaxHistoryEvents) {
 		return ContinuationDecision{ShouldContinue: true, Reason: "max_history_events"}
 	}
 
 	return ContinuationDecision{}
+}
+
+// EvaluateIterationPolicy evaluates PlanPolicy loop guards.
+func EvaluateIterationPolicy(policy agentos.PlanPolicy, snapshot IterationSnapshot) IterationDecision {
+	if policy.MaxIterations > 0 && snapshot.Iterations > policy.MaxIterations {
+		return IterationDecision{ShouldFail: true, Reason: "max_iterations"}
+	}
+
+	return IterationDecision{}
 }
 
 // BudgetExceeded reports whether a plan has spent beyond its configured budget.
