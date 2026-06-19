@@ -207,6 +207,38 @@ definitions:
       timeout_seconds:
         type: integer
     type: object
+  agentos.PlanAuditAction:
+    enum:
+    - plan.start
+    - plan.signal
+    - plan.control
+    type: string
+    x-enum-varnames:
+    - PlanAuditActionStart
+    - PlanAuditActionSignal
+    - PlanAuditActionControl
+  agentos.PlanAuditRecord:
+    properties:
+      action:
+        $ref: '#/definitions/agentos.PlanAuditAction'
+      actor_id:
+        type: string
+      audit_id:
+        type: string
+      created_at:
+        type: string
+      idempotency_key:
+        type: string
+      node_id:
+        type: string
+      payload:
+        additionalProperties: {}
+        type: object
+      plan_id:
+        type: string
+      run_id:
+        type: string
+    type: object
   agentos.PlanBudgetUsage:
     properties:
       spent_cents:
@@ -881,23 +913,11 @@ definitions:
     - 1000000000
     - 60000000000
     - 3600000000000
-    - 1
-    - 1000
-    - 1000000
-    - 1000000000
-    - 60000000000
-    - 3600000000000
     format: int64
     type: integer
     x-enum-varnames:
     - minDuration
     - maxDuration
-    - Nanosecond
-    - Microsecond
-    - Millisecond
-    - Second
-    - Minute
-    - Hour
     - Nanosecond
     - Microsecond
     - Millisecond
@@ -955,6 +975,67 @@ paths:
           schema:
             $ref: '#/definitions/response.Error'
       summary: Start AgentOS plan
+      tags:
+      - agentos
+  /agentos/plans/{plan_id}/audits:
+    get:
+      consumes:
+      - application/json
+      description: Query durable audit records for plan control-plane actions.
+      operationId: agentos-list-plan-audits
+      parameters:
+      - description: Plan ID
+        in: path
+        name: plan_id
+        required: true
+        type: string
+      - description: Account ID
+        in: query
+        name: account_id
+        required: true
+        type: string
+      - description: Project ID
+        in: query
+        name: project_id
+        type: string
+      - description: Node ID
+        in: query
+        name: node_id
+        type: string
+      - description: Child run ID
+        in: query
+        name: run_id
+        type: string
+      - description: Audit action
+        in: query
+        name: action
+        type: string
+      - description: Maximum records
+        in: query
+        name: limit
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            items:
+              $ref: '#/definitions/agentos.PlanAuditRecord'
+            type: array
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/response.Error'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/response.Error'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/response.Error'
+      summary: List AgentOS plan audits
       tags:
       - agentos
   /agentos/plans/{plan_id}/control:

@@ -230,6 +230,39 @@ type PlanEvent struct {
 	NodeID string `json:"node_id,omitempty"`
 }
 
+// PlanAuditAction identifies durable control-plane actions.
+type PlanAuditAction string
+
+const (
+	PlanAuditActionStart   PlanAuditAction = "plan.start"
+	PlanAuditActionSignal  PlanAuditAction = "plan.signal"
+	PlanAuditActionControl PlanAuditAction = "plan.control"
+)
+
+// PlanAuditScope selects durable audit records for a plan.
+type PlanAuditScope struct {
+	PlanID    string          `json:"plan_id"`
+	AccountID string          `json:"account_id"`
+	ProjectID string          `json:"project_id,omitempty"`
+	NodeID    string          `json:"node_id,omitempty"`
+	RunID     string          `json:"run_id,omitempty"`
+	Action    PlanAuditAction `json:"action,omitempty"`
+	Limit     int             `json:"limit,omitempty"`
+}
+
+// PlanAuditRecord is a durable audit entry for plan control-plane actions.
+type PlanAuditRecord struct {
+	AuditID        string          `json:"audit_id"`
+	PlanID         string          `json:"plan_id"`
+	RunID          string          `json:"run_id,omitempty"`
+	NodeID         string          `json:"node_id,omitempty"`
+	ActorID        string          `json:"actor_id,omitempty"`
+	Action         PlanAuditAction `json:"action"`
+	IdempotencyKey string          `json:"idempotency_key,omitempty"`
+	Payload        map[string]any  `json:"payload,omitempty"`
+	CreatedAt      time.Time       `json:"created_at,omitempty"`
+}
+
 // RunPlanSpecJSONSchema returns a JSON Schema inferred from RunPlanSpec.
 func RunPlanSpecJSONSchema() ([]byte, error) {
 	schema, err := jsonschema.For[RunPlanSpec](nil)

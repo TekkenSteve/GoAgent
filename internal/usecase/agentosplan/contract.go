@@ -107,6 +107,7 @@ type AuditRecord struct {
 type AuditStore interface {
 	RecordAudit(ctx context.Context, record AuditRecord) (AuditRecord, bool, error)
 	GetAuditRecord(ctx context.Context, idempotencyKey string) (AuditRecord, bool, error)
+	ListAuditRecords(ctx context.Context, scope agentos.PlanAuditScope) ([]agentos.PlanAuditRecord, error)
 }
 
 // Runner starts and controls backend-owned child runs.

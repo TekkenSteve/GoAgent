@@ -72,6 +72,16 @@ type AgentOSPlanStreamScope struct {
 	AfterSequence int64  `query:"after_sequence"`
 }
 
+// AgentOSPlanAuditScope selects plan audit records for REST queries.
+type AgentOSPlanAuditScope struct {
+	AccountID string                  `query:"account_id" validate:"required"`
+	ProjectID string                  `query:"project_id"`
+	NodeID    string                  `query:"node_id"`
+	RunID     string                  `query:"run_id"`
+	Action    agentos.PlanAuditAction `query:"action"`
+	Limit     int                     `query:"limit"`
+}
+
 // AgentOSPlanScope selects one plan inside a tenant boundary.
 type AgentOSPlanScope struct {
 	AccountID string `query:"account_id" validate:"required"`

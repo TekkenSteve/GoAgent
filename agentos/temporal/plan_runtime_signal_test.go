@@ -146,6 +146,41 @@ func TestPlanRuntimeSubscribePlanEnforcesTenantScope(t *testing.T) {
 	}
 }
 
+func TestPlanRuntimeListPlanAuditsEnforcesTenantScope(t *testing.T) {
+	store, ref := newPlanRuntimeTestStore(t)
+	if _, _, err := store.RecordAudit(t.Context(), agentosplan.AuditRecord{
+		AuditID:        "audit-1",
+		PlanID:         ref.PlanID,
+		ActorID:        "operator-1",
+		Action:         agentosplan.AuditActionPlanControl,
+		IdempotencyKey: "control-1",
+		Payload:        map[string]any{"operation": string(agentos.ControlCancel)},
+		CreatedAt:      time.Date(2026, 6, 19, 12, 0, 0, 0, time.UTC),
+	}); err != nil {
+		t.Fatalf("RecordAudit: %v", err)
+	}
+	rt := &planRuntime{planIndex: store, auditStore: store}
+
+	_, err := rt.ListPlanAudits(t.Context(), agentos.PlanAuditScope{PlanID: ref.PlanID, AccountID: "acct-other", ProjectID: ref.ProjectID})
+	if !errors.Is(err, agentos.ErrPlanRouteNotFound) {
+		t.Fatalf("ListPlanAudits mismatch error = %v, want ErrPlanRouteNotFound", err)
+	}
+
+	records, err := rt.ListPlanAudits(t.Context(), agentos.PlanAuditScope{
+		PlanID:    ref.PlanID,
+		AccountID: ref.AccountID,
+		ProjectID: ref.ProjectID,
+		Action:    agentos.PlanAuditActionControl,
+		Limit:     1,
+	})
+	if err != nil {
+		t.Fatalf("ListPlanAudits: %v", err)
+	}
+	if len(records) != 1 || records[0].AuditID != "audit-1" || records[0].Action != agentos.PlanAuditActionControl {
+		t.Fatalf("records = %#v", records)
+	}
+}
+
 func TestPlanRuntimeSignalPlanDoesNotAuditFailedDelivery(t *testing.T) {
 	store, ref := newPlanRuntimeTestStore(t)
 	temporalClient := &fakePlanTemporalClient{signalErr: errors.New("temporal unavailable")}

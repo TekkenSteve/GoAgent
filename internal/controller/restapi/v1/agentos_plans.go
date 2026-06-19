@@ -169,6 +169,53 @@ func (r *V1) controlAgentOSPlan(ctx *fiber.Ctx) error {
 	return ctx.SendStatus(http.StatusAccepted)
 }
 
+// @Summary     List AgentOS plan audits
+// @Description Query durable audit records for plan control-plane actions.
+// @ID          agentos-list-plan-audits
+// @Tags        agentos
+// @Accept      json
+// @Produce     json
+// @Param       plan_id path string true "Plan ID"
+// @Param       account_id query string true "Account ID"
+// @Param       project_id query string false "Project ID"
+// @Param       node_id query string false "Node ID"
+// @Param       run_id query string false "Child run ID"
+// @Param       action query string false "Audit action"
+// @Param       limit query int false "Maximum records"
+// @Success     200 {array} agentos.PlanAuditRecord
+// @Failure     400 {object} response.Error
+// @Failure     404 {object} response.Error
+// @Failure     500 {object} response.Error
+// @Router      /agentos/plans/{plan_id}/audits [get]
+func (r *V1) listAgentOSPlanAudits(ctx *fiber.Ctx) error {
+	if r.planRuntime == nil {
+		return errorResponse(ctx, http.StatusNotFound, "agentos plan runtime is not configured")
+	}
+
+	var req request.AgentOSPlanAuditScope
+	if err := ctx.QueryParser(&req); err != nil {
+		return errorResponse(ctx, http.StatusBadRequest, "invalid audit scope")
+	}
+	if err := r.v.Struct(&req); err != nil {
+		return errorResponse(ctx, http.StatusBadRequest, err.Error())
+	}
+
+	records, err := r.planRuntime.ListPlanAudits(ctx.UserContext(), agentos.PlanAuditScope{
+		PlanID:    ctx.Params("plan_id"),
+		AccountID: req.AccountID,
+		ProjectID: req.ProjectID,
+		NodeID:    req.NodeID,
+		RunID:     req.RunID,
+		Action:    req.Action,
+		Limit:     req.Limit,
+	})
+	if err != nil {
+		return agentOSError(ctx, err)
+	}
+
+	return ctx.Status(http.StatusOK).JSON(records)
+}
+
 // @Summary     Stream AgentOS plan events
 // @Description Stream durable RunPlan events as Server-Sent Events.
 // @ID          agentos-stream-plan-events

@@ -96,6 +96,25 @@ func TestAgentOSPlanRoutesUsePlanRuntime(t *testing.T) {
 	if status.PlanID != "plan-1" || status.LifecycleState != agentos.PlanLifecycleRunning {
 		t.Fatalf("unexpected status: %#v", status)
 	}
+
+	resp = doAgentOSRouteRequest(t, app, http.MethodGet, "/v1/agentos/plans/plan-1/audits?account_id=acct-1&action=plan.control&limit=25", "")
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("audits status = %d", resp.StatusCode)
+	}
+	if planRuntime.auditScope.PlanID != "plan-1" ||
+		planRuntime.auditScope.AccountID != "acct-1" ||
+		planRuntime.auditScope.Action != agentos.PlanAuditActionControl ||
+		planRuntime.auditScope.Limit != 25 {
+		t.Fatalf("unexpected audit scope: %#v", planRuntime.auditScope)
+	}
+	var audits []agentos.PlanAuditRecord
+	if err := json.NewDecoder(resp.Body).Decode(&audits); err != nil {
+		t.Fatalf("decode audits: %v", err)
+	}
+	if len(audits) != 1 || audits[0].Action != agentos.PlanAuditActionControl {
+		t.Fatalf("unexpected audits: %#v", audits)
+	}
 }
 
 func TestAgentOSPlanEventRouteStreamsSSE(t *testing.T) {
@@ -148,6 +167,7 @@ type fakePlanRuntime struct {
 	controlRef agentos.PlanRef
 	control    agentos.ControlRequest
 	scope      agentos.PlanStreamScope
+	auditScope agentos.PlanAuditScope
 }
 
 func newFakePlanRuntime() *fakePlanRuntime {
@@ -193,6 +213,21 @@ func (r *fakePlanRuntime) SubscribePlan(_ context.Context, scope agentos.PlanStr
 	close(events)
 
 	return fakeSubscription{events: events}, nil
+}
+
+func (r *fakePlanRuntime) ListPlanAudits(_ context.Context, scope agentos.PlanAuditScope) ([]agentos.PlanAuditRecord, error) {
+	r.auditScope = scope
+
+	return []agentos.PlanAuditRecord{
+		{
+			AuditID:        "audit-1",
+			PlanID:         scope.PlanID,
+			Action:         agentos.PlanAuditActionControl,
+			IdempotencyKey: "control-1",
+			Payload:        map[string]any{"operation": string(agentos.ControlPause)},
+			CreatedAt:      time.Now(),
+		},
+	}, nil
 }
 
 type fakeSubscription struct {

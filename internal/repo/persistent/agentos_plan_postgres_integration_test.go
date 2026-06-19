@@ -119,6 +119,22 @@ func TestAgentOSPlanPostgresDurablePersistence(t *testing.T) {
 	if created || auditReplay.AuditID != audit.AuditID {
 		t.Fatalf("RecordAudit replay = %#v created=%v, want %#v created=false", auditReplay, created, audit)
 	}
+	audits, err := planRepo.ListAuditRecords(ctx, agentos.PlanAuditScope{
+		PlanID:    spec.PlanID,
+		AccountID: spec.AccountID,
+		ProjectID: spec.ProjectID,
+		Action:    agentos.PlanAuditActionControl,
+		Limit:     10,
+	})
+	if err != nil {
+		t.Fatalf("ListAuditRecords: %v", err)
+	}
+	if len(audits) != 1 || audits[0].AuditID != audit.AuditID || audits[0].Action != agentos.PlanAuditActionControl {
+		t.Fatalf("ListAuditRecords = %#v", audits)
+	}
+	if _, err := planRepo.ListAuditRecords(ctx, agentos.PlanAuditScope{PlanID: spec.PlanID, AccountID: "acct-other", ProjectID: spec.ProjectID}); !errors.Is(err, agentos.ErrPlanRouteNotFound) {
+		t.Fatalf("ListAuditRecords mismatch error = %v, want ErrPlanRouteNotFound", err)
+	}
 
 	runSpec := spec.Nodes[0].Run
 	runSpec.IdempotencyKey, err = agentosplan.NodeStartIdempotencyKey(spec.PlanID, spec.Nodes[0].NodeID, 1)

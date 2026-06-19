@@ -68,6 +68,97 @@ const docTemplate = `{
                 }
             }
         },
+        "/agentos/plans/{plan_id}/audits": {
+            "get": {
+                "description": "Query durable audit records for plan control-plane actions.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "agentos"
+                ],
+                "summary": "List AgentOS plan audits",
+                "operationId": "agentos-list-plan-audits",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Plan ID",
+                        "name": "plan_id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Account ID",
+                        "name": "account_id",
+                        "in": "query",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Project ID",
+                        "name": "project_id",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Node ID",
+                        "name": "node_id",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Child run ID",
+                        "name": "run_id",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Audit action",
+                        "name": "action",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "description": "Maximum records",
+                        "name": "limit",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "array",
+                            "items": {
+                                "$ref": "#/definitions/agentos.PlanAuditRecord"
+                            }
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/response.Error"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/response.Error"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/response.Error"
+                        }
+                    }
+                }
+            }
+        },
         "/agentos/plans/{plan_id}/control": {
             "post": {
                 "description": "Send lifecycle control such as pause, resume, or cancel to an AgentOS RunPlan.",
@@ -911,6 +1002,52 @@ const docTemplate = `{
                 },
                 "timeout_seconds": {
                     "type": "integer"
+                }
+            }
+        },
+        "agentos.PlanAuditAction": {
+            "type": "string",
+            "enum": [
+                "plan.start",
+                "plan.signal",
+                "plan.control"
+            ],
+            "x-enum-varnames": [
+                "PlanAuditActionStart",
+                "PlanAuditActionSignal",
+                "PlanAuditActionControl"
+            ]
+        },
+        "agentos.PlanAuditRecord": {
+            "type": "object",
+            "properties": {
+                "action": {
+                    "$ref": "#/definitions/agentos.PlanAuditAction"
+                },
+                "actor_id": {
+                    "type": "string"
+                },
+                "audit_id": {
+                    "type": "string"
+                },
+                "created_at": {
+                    "type": "string"
+                },
+                "idempotency_key": {
+                    "type": "string"
+                },
+                "node_id": {
+                    "type": "string"
+                },
+                "payload": {
+                    "type": "object",
+                    "additionalProperties": {}
+                },
+                "plan_id": {
+                    "type": "string"
+                },
+                "run_id": {
+                    "type": "string"
                 }
             }
         },
@@ -1891,23 +2028,11 @@ const docTemplate = `{
                 1000000,
                 1000000000,
                 60000000000,
-                3600000000000,
-                1,
-                1000,
-                1000000,
-                1000000000,
-                60000000000,
                 3600000000000
             ],
             "x-enum-varnames": [
                 "minDuration",
                 "maxDuration",
-                "Nanosecond",
-                "Microsecond",
-                "Millisecond",
-                "Second",
-                "Minute",
-                "Hour",
                 "Nanosecond",
                 "Microsecond",
                 "Millisecond",

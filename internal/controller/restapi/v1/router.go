@@ -66,5 +66,6 @@ func NewRoutes(apiV1Group fiber.Router, t usecase.AgentExecutor, o usecase.Orche
 		apiV1Group.Post("/agentos/plans/:plan_id/signals", r.signalAgentOSPlan)
 		apiV1Group.Post("/agentos/plans/:plan_id/control", r.controlAgentOSPlan)
 		apiV1Group.Get("/agentos/plans/:plan_id/events", r.streamAgentOSPlanEvents)
+		apiV1Group.Get("/agentos/plans/:plan_id/audits", r.listAgentOSPlanAudits)
 	}
 }

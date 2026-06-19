@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"testing"
+	"time"
 
 	"github.com/TekkenSteve/GoAgent/agentos"
 )
@@ -116,6 +117,63 @@ func TestMemoryPlanStoreRejectsAuditKeyReuseWithDifferentRequest(t *testing.T) {
 	_, _, err := store.RecordAudit(context.Background(), changed)
 	if !errors.Is(err, agentos.ErrInvalidRunPlan) {
 		t.Fatalf("error = %v, want ErrInvalidRunPlan", err)
+	}
+}
+
+func TestMemoryPlanStoreListAuditRecordsFiltersAndLimits(t *testing.T) {
+	ctx := context.Background()
+	store := NewMemoryPlanStore()
+	spec := agentos.RunPlanSpec{PlanID: "plan-1", AccountID: "acct-1", ProjectID: "proj-1", IdempotencyKey: "start-1"}
+	if _, _, err := store.CreatePlan(ctx, spec, agentos.RunPlanStatus{PlanID: spec.PlanID, LifecycleState: agentos.PlanLifecycleRunning}); err != nil {
+		t.Fatalf("CreatePlan: %v", err)
+	}
+	records := []AuditRecord{
+		{
+			AuditID:        "audit-2",
+			PlanID:         spec.PlanID,
+			NodeID:         "node-1",
+			Action:         AuditActionPlanSignal,
+			IdempotencyKey: "signal-1",
+			CreatedAt:      time.Date(2026, 6, 19, 12, 1, 0, 0, time.UTC),
+		},
+		{
+			AuditID:        "audit-1",
+			PlanID:         spec.PlanID,
+			NodeID:         "node-1",
+			Action:         AuditActionPlanControl,
+			IdempotencyKey: "control-1",
+			CreatedAt:      time.Date(2026, 6, 19, 12, 0, 0, 0, time.UTC),
+		},
+		{
+			AuditID:        "audit-other-node",
+			PlanID:         spec.PlanID,
+			NodeID:         "node-2",
+			Action:         AuditActionPlanControl,
+			IdempotencyKey: "control-2",
+			CreatedAt:      time.Date(2026, 6, 19, 12, 2, 0, 0, time.UTC),
+		},
+	}
+	for _, record := range records {
+		if _, _, err := store.RecordAudit(ctx, record); err != nil {
+			t.Fatalf("RecordAudit %s: %v", record.AuditID, err)
+		}
+	}
+
+	got, err := store.ListAuditRecords(ctx, agentos.PlanAuditScope{
+		PlanID:    spec.PlanID,
+		AccountID: spec.AccountID,
+		ProjectID: spec.ProjectID,
+		NodeID:    "node-1",
+		Limit:     1,
+	})
+	if err != nil {
+		t.Fatalf("ListAuditRecords: %v", err)
+	}
+	if len(got) != 1 || got[0].AuditID != "audit-1" {
+		t.Fatalf("audits = %#v", got)
+	}
+	if _, err := store.ListAuditRecords(ctx, agentos.PlanAuditScope{PlanID: spec.PlanID, AccountID: "acct-other", ProjectID: spec.ProjectID}); !errors.Is(err, agentos.ErrPlanRouteNotFound) {
+		t.Fatalf("tenant mismatch error = %v, want ErrPlanRouteNotFound", err)
 	}
 }
 

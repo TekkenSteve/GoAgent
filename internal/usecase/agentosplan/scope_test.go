@@ -26,3 +26,10 @@ func TestValidatePlanTenantAccessHidesMismatches(t *testing.T) {
 		t.Fatalf("project mismatch error = %v, want ErrPlanRouteNotFound", err)
 	}
 }
+
+func TestValidatePlanAuditScopeRejectsNegativeLimit(t *testing.T) {
+	err := ValidatePlanAuditScope(agentos.PlanAuditScope{PlanID: "plan-1", AccountID: "acct-1", Limit: -1})
+	if !errors.Is(err, agentos.ErrInvalidPlanScope) {
+		t.Fatalf("error = %v, want ErrInvalidPlanScope", err)
+	}
+}

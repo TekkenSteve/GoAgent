@@ -715,6 +715,91 @@ func (r *AgentOSPlanRepo) GetAuditRecord(ctx context.Context, idempotencyKey str
 	return record, true, nil
 }
 
+func (r *AgentOSPlanRepo) ListAuditRecords(ctx context.Context, scope agentos.PlanAuditScope) ([]agentos.PlanAuditRecord, error) {
+	if err := agentosplan.ValidatePlanAuditScope(scope); err != nil {
+		return nil, err
+	}
+	spec, _, exists, err := r.GetPlan(ctx, scope.PlanID)
+	if err != nil {
+		return nil, err
+	}
+	if !exists {
+		return nil, fmt.Errorf("%w: %s", agentos.ErrPlanRouteNotFound, scope.PlanID)
+	}
+	if err := agentosplan.ValidatePlanTenantAccess(agentos.PlanRef{PlanID: scope.PlanID, AccountID: scope.AccountID, ProjectID: scope.ProjectID}, spec); err != nil {
+		return nil, err
+	}
+
+	builder := r.Builder.
+		Select("audit_id", "plan_id", "run_id", "node_id", "actor_id", "action", "idempotency_key", "payload_json", "created_at").
+		From("audit_logs").
+		Where(sq.Eq{"plan_id": scope.PlanID}).
+		OrderBy("created_at ASC", "audit_id ASC")
+	if scope.NodeID != "" {
+		builder = builder.Where(sq.Eq{"node_id": scope.NodeID})
+	}
+	if scope.RunID != "" {
+		builder = builder.Where(sq.Eq{"run_id": scope.RunID})
+	}
+	if scope.Action != "" {
+		builder = builder.Where(sq.Eq{"action": string(scope.Action)})
+	}
+	if scope.Limit > 0 {
+		builder = builder.Limit(uint64(scope.Limit))
+	}
+
+	sql, args, err := builder.ToSql()
+	if err != nil {
+		return nil, fmt.Errorf("AgentOSPlanRepo - ListAuditRecords - builder: %w", err)
+	}
+	rows, err := r.Pool.Query(ctx, sql, args...)
+	if err != nil {
+		return nil, fmt.Errorf("AgentOSPlanRepo - ListAuditRecords - query: %w", err)
+	}
+	defer rows.Close()
+
+	var records []agentos.PlanAuditRecord
+	for rows.Next() {
+		record, err := scanPlanAuditRecord(rows)
+		if err != nil {
+			return nil, err
+		}
+		records = append(records, record)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("AgentOSPlanRepo - ListAuditRecords - rows: %w", err)
+	}
+
+	return records, nil
+}
+
+func scanPlanAuditRecord(scanner interface{ Scan(dest ...any) error }) (agentos.PlanAuditRecord, error) {
+	var record agentos.PlanAuditRecord
+	var action string
+	var payloadJSON []byte
+	if err := scanner.Scan(
+		&record.AuditID,
+		&record.PlanID,
+		&record.RunID,
+		&record.NodeID,
+		&record.ActorID,
+		&action,
+		&record.IdempotencyKey,
+		&payloadJSON,
+		&record.CreatedAt,
+	); err != nil {
+		return agentos.PlanAuditRecord{}, fmt.Errorf("AgentOSPlanRepo - scanPlanAuditRecord: %w", err)
+	}
+	if len(payloadJSON) > 0 {
+		if err := json.Unmarshal(payloadJSON, &record.Payload); err != nil {
+			return agentos.PlanAuditRecord{}, fmt.Errorf("AgentOSPlanRepo - scanPlanAuditRecord - decode payload: %w", err)
+		}
+	}
+	record.Action = agentos.PlanAuditAction(action)
+
+	return record, nil
+}
+
 func auditIDFromIdempotencyKey(idempotencyKey string) string {
 	sum := sha256.Sum256([]byte(idempotencyKey))
 

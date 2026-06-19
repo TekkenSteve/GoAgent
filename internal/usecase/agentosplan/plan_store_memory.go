@@ -259,6 +259,56 @@ func (s *MemoryPlanStore) GetAuditRecord(_ context.Context, idempotencyKey strin
 	return record, ok, nil
 }
 
+func (s *MemoryPlanStore) ListAuditRecords(_ context.Context, scope agentos.PlanAuditScope) ([]agentos.PlanAuditRecord, error) {
+	if err := ValidatePlanAuditScope(scope); err != nil {
+		return nil, err
+	}
+
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	spec, ok := s.specs[scope.PlanID]
+	if !ok {
+		return nil, fmt.Errorf("%w: %s", agentos.ErrPlanRouteNotFound, scope.PlanID)
+	}
+	if err := ValidatePlanTenantAccess(agentos.PlanRef{PlanID: scope.PlanID, AccountID: scope.AccountID, ProjectID: scope.ProjectID}, spec); err != nil {
+		return nil, err
+	}
+
+	records := make([]AuditRecord, 0, len(s.auditKeys))
+	for _, record := range s.auditKeys {
+		if record.PlanID != scope.PlanID {
+			continue
+		}
+		if scope.NodeID != "" && record.NodeID != scope.NodeID {
+			continue
+		}
+		if scope.RunID != "" && record.RunID != scope.RunID {
+			continue
+		}
+		if scope.Action != "" && string(record.Action) != string(scope.Action) {
+			continue
+		}
+		records = append(records, record)
+	}
+	sort.SliceStable(records, func(i, j int) bool {
+		if records[i].CreatedAt.Equal(records[j].CreatedAt) {
+			return records[i].AuditID < records[j].AuditID
+		}
+
+		return records[i].CreatedAt.Before(records[j].CreatedAt)
+	})
+	if scope.Limit > 0 && len(records) > scope.Limit {
+		records = records[:scope.Limit]
+	}
+
+	audits := make([]agentos.PlanAuditRecord, 0, len(records))
+	for _, record := range records {
+		audits = append(audits, PlanAuditRecordFromAuditRecord(record))
+	}
+
+	return audits, nil
+}
+
 var (
 	_ PlanIndex      = (*MemoryPlanStore)(nil)
 	_ PlanStateStore = (*MemoryPlanStore)(nil)

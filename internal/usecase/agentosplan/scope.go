@@ -28,6 +28,22 @@ func ValidatePlanStreamScope(scope agentos.PlanStreamScope) error {
 	})
 }
 
+// ValidatePlanAuditScope validates durable audit query scope.
+func ValidatePlanAuditScope(scope agentos.PlanAuditScope) error {
+	if err := ValidatePlanRef(agentos.PlanRef{
+		PlanID:    scope.PlanID,
+		AccountID: scope.AccountID,
+		ProjectID: scope.ProjectID,
+	}); err != nil {
+		return err
+	}
+	if scope.Limit < 0 {
+		return fmt.Errorf("%w: audit limit must be non-negative", agentos.ErrInvalidPlanScope)
+	}
+
+	return nil
+}
+
 // ValidatePlanTenantAccess returns ErrPlanRouteNotFound for tenant mismatches so
 // callers cannot distinguish missing plans from plans outside their scope.
 func ValidatePlanTenantAccess(ref agentos.PlanRef, spec agentos.RunPlanSpec) error {

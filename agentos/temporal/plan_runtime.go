@@ -286,6 +286,20 @@ func (r *planRuntime) SubscribePlan(ctx context.Context, scope agentos.PlanStrea
 	return newPlanReplayThenLiveSubscription(events, live), nil
 }
 
+func (r *planRuntime) ListPlanAudits(ctx context.Context, scope agentos.PlanAuditScope) ([]agentos.PlanAuditRecord, error) {
+	if r.auditStore == nil {
+		return nil, errPlanRuntimeAuditStoreRequired
+	}
+	if err := agentosplan.ValidatePlanAuditScope(scope); err != nil {
+		return nil, err
+	}
+	if _, _, err := r.authorizePlan(ctx, agentos.PlanRef{PlanID: scope.PlanID, AccountID: scope.AccountID, ProjectID: scope.ProjectID}); err != nil {
+		return nil, err
+	}
+
+	return r.auditStore.ListAuditRecords(ctx, scope)
+}
+
 func (r *planRuntime) Close() error {
 	var errs []error
 	if r.closeTemporal && r.temporalClient != nil {
