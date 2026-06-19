@@ -122,7 +122,7 @@ func TestAgentOSPlanPostgresDurablePersistence(t *testing.T) {
 	if secondEvent.EventID != firstEvent.EventID || secondEvent.Sequence != firstEvent.Sequence {
 		t.Fatalf("AppendPlanEvent replay = %#v, want %#v", secondEvent, firstEvent)
 	}
-	events, err := planRepo.ListPlanEvents(ctx, agentos.PlanStreamScope{PlanID: spec.PlanID}, 0)
+	events, err := planRepo.ListPlanEvents(ctx, postgresIntegrationPlanStreamScope(spec), 0)
 	if err != nil {
 		t.Fatalf("ListPlanEvents: %v", err)
 	}
@@ -414,7 +414,7 @@ func TestAgentOSPlanPostgresPlanEventIdempotencyDoesNotAdvanceSequence(t *testin
 	if next.Sequence != 2 {
 		t.Fatalf("next sequence = %d, want 2 after failed replay", next.Sequence)
 	}
-	events, err := planRepo.ListPlanEvents(ctx, agentos.PlanStreamScope{PlanID: spec.PlanID}, 0)
+	events, err := planRepo.ListPlanEvents(ctx, postgresIntegrationPlanStreamScope(spec), 0)
 	if err != nil {
 		t.Fatalf("ListPlanEvents: %v", err)
 	}
@@ -646,6 +646,14 @@ func postgresIntegrationPlanSpec(planID, idempotencyKey string) agentos.RunPlanS
 				},
 			},
 		},
+	}
+}
+
+func postgresIntegrationPlanStreamScope(spec agentos.RunPlanSpec) agentos.PlanStreamScope {
+	return agentos.PlanStreamScope{
+		PlanID:    spec.PlanID,
+		AccountID: spec.AccountID,
+		ProjectID: spec.ProjectID,
 	}
 }
 

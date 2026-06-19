@@ -691,34 +691,28 @@ func (r *AgentOSPlanRepo) planEventByIdempotencyKeyWith(ctx context.Context, que
 }
 
 func (r *AgentOSPlanRepo) ListPlanEvents(ctx context.Context, scope agentos.PlanStreamScope, limit int) ([]agentos.PlanEvent, error) {
-	if scope.PlanID == "" {
-		return nil, fmt.Errorf("%w: plan id is required", agentos.ErrInvalidStreamScope)
+	if err := agentosplan.ValidatePlanStreamScope(scope); err != nil {
+		return nil, err
 	}
-	if scope.AccountID != "" {
-		spec, _, exists, err := r.GetPlan(ctx, scope.PlanID)
-		if err != nil {
-			return nil, err
-		}
-		if !exists {
-			return nil, fmt.Errorf("%w: %s", agentos.ErrPlanRouteNotFound, scope.PlanID)
-		}
-		if err := agentosplan.ValidatePlanTenantAccess(agentos.PlanRef{PlanID: scope.PlanID, AccountID: scope.AccountID, ProjectID: scope.ProjectID}, spec); err != nil {
-			return nil, err
-		}
+	spec, _, exists, err := r.GetPlan(ctx, scope.PlanID)
+	if err != nil {
+		return nil, err
+	}
+	if !exists {
+		return nil, fmt.Errorf("%w: %s", agentos.ErrPlanRouteNotFound, scope.PlanID)
+	}
+	if err := agentosplan.ValidatePlanTenantAccess(agentos.PlanRef{PlanID: scope.PlanID, AccountID: scope.AccountID, ProjectID: scope.ProjectID}, spec); err != nil {
+		return nil, err
 	}
 
 	builder := r.Builder.
 		Select("event_json").
 		From("plan_events").
 		Where(sq.Eq{"plan_id": scope.PlanID}).
+		Where(sq.Eq{"account_id": scope.AccountID}).
+		Where(sq.Eq{"project_id": scope.ProjectID}).
 		Where(sq.Gt{"sequence": scope.AfterSequence}).
 		OrderBy("sequence ASC")
-	if scope.AccountID != "" {
-		builder = builder.Where(sq.Eq{"account_id": scope.AccountID})
-	}
-	if scope.ProjectID != "" {
-		builder = builder.Where(sq.Eq{"project_id": scope.ProjectID})
-	}
 	if scope.NodeID != "" {
 		builder = builder.Where(sq.Eq{"node_id": scope.NodeID})
 	}

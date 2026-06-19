@@ -79,7 +79,9 @@ type PlanStateStore interface {
 	LoadPlanState(ctx context.Context, planID string) (PlanStateSnapshot, bool, error)
 }
 
-// PlanEventStore is the durable event source for RunPlan timelines.
+// PlanEventStore is the durable event source for RunPlan timelines. Reads must
+// carry the full account/project plan scope; PlanID alone is not a production
+// isolation boundary.
 type PlanEventStore interface {
 	AppendPlanEvent(ctx context.Context, event agentos.PlanEvent, idempotencyKey string) (agentos.PlanEvent, error)
 	ListPlanEvents(ctx context.Context, scope agentos.PlanStreamScope, limit int) ([]agentos.PlanEvent, error)

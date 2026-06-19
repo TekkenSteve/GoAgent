@@ -124,6 +124,8 @@ func TestPlanWorkflowPublishesDebugTraceEvents(t *testing.T) {
 	ref := agentos.BackendRef{Kind: agentos.BackendKindNative, Name: agentos.BackendNameGoAgentNative}
 	spec := agentos.RunPlanSpec{
 		PlanID:         "plan-debug-trace",
+		AccountID:      "acct-debug-trace",
+		ProjectID:      "proj-debug-trace",
 		IdempotencyKey: "plan-start-debug-trace",
 		Inputs: map[string]any{
 			"task": map[string]any{"topic": "durable trace"},
@@ -161,7 +163,7 @@ func TestPlanWorkflowPublishesDebugTraceEvents(t *testing.T) {
 	require.Len(t, mocks.startedInputs, 1)
 	require.Equal(t, "durable trace", mocks.startedInputs[0]["topic"])
 
-	events, err := store.ListPlanEvents(context.Background(), agentos.PlanStreamScope{PlanID: spec.PlanID}, 0)
+	events, err := store.ListPlanEvents(context.Background(), planWorkflowEventScope(spec), 0)
 	require.NoError(t, err)
 	capabilityEvent := findPlanEventByType(events, agentos.EventCapabilitySelected)
 	require.NotNil(t, capabilityEvent)
@@ -255,6 +257,8 @@ func TestPlanWorkflowAppliesPlanDeltaArtifact(t *testing.T) {
 	ref := agentos.BackendRef{Kind: agentos.BackendKindNative, Name: agentos.BackendNameGoAgentNative}
 	spec := agentos.RunPlanSpec{
 		PlanID:         "plan-expand",
+		AccountID:      "acct-expand",
+		ProjectID:      "proj-expand",
 		IdempotencyKey: "plan-start-expand",
 		Policy: agentos.PlanPolicy{
 			MaxNodes:      2,
@@ -308,7 +312,7 @@ func TestPlanWorkflowAppliesPlanDeltaArtifact(t *testing.T) {
 	require.Equal(t, "expanded", result.Nodes[0].NodeID)
 	require.Equal(t, "seed", result.Nodes[1].NodeID)
 
-	events, err := store.ListPlanEvents(context.Background(), agentos.PlanStreamScope{PlanID: spec.PlanID}, 0)
+	events, err := store.ListPlanEvents(context.Background(), planWorkflowEventScope(spec), 0)
 	require.NoError(t, err)
 	eventTypes := make([]agentos.EventType, 0, len(events))
 	for _, event := range events {
@@ -412,6 +416,8 @@ func TestPlanWorkflowOrchestratesMixedBackendsThroughRuntime(t *testing.T) {
 	}
 	spec := agentos.RunPlanSpec{
 		PlanID:         "plan-mixed-backends",
+		AccountID:      "acct-mixed-backends",
+		ProjectID:      "proj-mixed-backends",
 		IdempotencyKey: "plan-start-mixed-backends",
 		Policy: agentos.PlanPolicy{
 			MaxParallelNodes: 2,
@@ -461,7 +467,7 @@ func TestPlanWorkflowOrchestratesMixedBackendsThroughRuntime(t *testing.T) {
 	require.Equal(t, agentos.PlanLifecycleSucceeded, result.LifecycleState)
 	require.Equal(t, []agentos.BackendRef{refs[0], refs[1], refs[2], refs[3]}, runtime.startedBackends())
 
-	events, err := store.ListPlanEvents(context.Background(), agentos.PlanStreamScope{PlanID: spec.PlanID}, 0)
+	events, err := store.ListPlanEvents(context.Background(), planWorkflowEventScope(spec), 0)
 	require.NoError(t, err)
 	require.NotEmpty(t, events)
 	require.Equal(t, agentos.EventPlanStarted, events[0].EventType)
@@ -880,6 +886,14 @@ func findPlanEventByType(events []agentos.PlanEvent, eventType agentos.EventType
 	}
 
 	return nil
+}
+
+func planWorkflowEventScope(spec agentos.RunPlanSpec) agentos.PlanStreamScope {
+	return agentos.PlanStreamScope{
+		PlanID:    spec.PlanID,
+		AccountID: spec.AccountID,
+		ProjectID: spec.ProjectID,
+	}
 }
 
 func findPlanNodeStatus(nodes []agentos.PlanNodeStatus, nodeID string) *agentos.PlanNodeStatus {

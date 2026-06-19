@@ -43,7 +43,7 @@ func TestPlanEventFromStateEventMapsPublicEvent(t *testing.T) {
 func TestMemoryPlanStoreAppendPlanEventIsIdempotent(t *testing.T) {
 	ctx := context.Background()
 	store := NewMemoryPlanStore()
-	spec := agentos.RunPlanSpec{PlanID: "plan-1", IdempotencyKey: "plan-start-1"}
+	spec := agentos.RunPlanSpec{PlanID: "plan-1", AccountID: "acct-1", ProjectID: "proj-1", IdempotencyKey: "plan-start-1"}
 	status := agentos.RunPlanStatus{PlanID: "plan-1", LifecycleState: agentos.PlanLifecycleRunning}
 	if err := store.SavePlanState(ctx, PlanStateSnapshot{Spec: spec, Status: status}); err != nil {
 		t.Fatalf("SavePlanState: %v", err)
@@ -67,7 +67,7 @@ func TestMemoryPlanStoreAppendPlanEventIsIdempotent(t *testing.T) {
 	if _, err := agentos.MarshalPlanEvent(first); err != nil {
 		t.Fatalf("stored event is not valid public PlanEvent: %v", err)
 	}
-	events, err := store.ListPlanEvents(ctx, agentos.PlanStreamScope{PlanID: "plan-1"}, 0)
+	events, err := store.ListPlanEvents(ctx, agentos.PlanStreamScope{PlanID: spec.PlanID, AccountID: spec.AccountID, ProjectID: spec.ProjectID}, 0)
 	if err != nil {
 		t.Fatalf("ListPlanEvents: %v", err)
 	}
@@ -210,6 +210,15 @@ func TestMemoryPlanStoreListPlanEventsEnforcesTenantScope(t *testing.T) {
 		t.Fatalf("AppendPlanEvent: %v", err)
 	}
 
+	for _, scope := range []agentos.PlanStreamScope{
+		{PlanID: spec.PlanID},
+		{PlanID: spec.PlanID, AccountID: spec.AccountID},
+		{PlanID: spec.PlanID, ProjectID: spec.ProjectID},
+	} {
+		if _, err := store.ListPlanEvents(ctx, scope, 0); !errors.Is(err, agentos.ErrInvalidPlanScope) {
+			t.Fatalf("ListPlanEvents scope %#v error = %v, want ErrInvalidPlanScope", scope, err)
+		}
+	}
 	if _, err := store.ListPlanEvents(ctx, agentos.PlanStreamScope{PlanID: spec.PlanID, AccountID: "acct-other", ProjectID: spec.ProjectID}, 0); !errors.Is(err, agentos.ErrPlanRouteNotFound) {
 		t.Fatalf("ListPlanEvents mismatch error = %v, want ErrPlanRouteNotFound", err)
 	}
