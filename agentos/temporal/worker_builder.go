@@ -30,9 +30,15 @@ import (
 )
 
 var (
-	ErrWorkerPostgresURLRequired       = errors.New("agentos temporal worker: postgres url is required")
-	ErrWorkerRedisURLRequired          = errors.New("agentos temporal worker: redis url is required")
-	ErrWorkerArtifactStoreRootRequired = errors.New("agentos temporal worker: artifact store root is required")
+	ErrWorkerPostgresURLRequired              = errors.New("agentos temporal worker: postgres url is required")
+	ErrWorkerRedisURLRequired                 = errors.New("agentos temporal worker: redis url is required")
+	ErrWorkerArtifactStoreBackendRequired     = errors.New("agentos temporal worker: artifact store backend is required")
+	ErrWorkerArtifactStoreBackendUnknown      = errors.New("agentos temporal worker: artifact store backend is unknown")
+	ErrWorkerArtifactStoreLocalRootRequired   = errors.New("agentos temporal worker: artifact local root is required")
+	ErrWorkerArtifactStoreS3BucketRequired    = errors.New("agentos temporal worker: artifact s3 bucket is required")
+	ErrWorkerArtifactStoreS3RegionRequired    = errors.New("agentos temporal worker: artifact s3 region is required")
+	ErrWorkerArtifactStoreS3AccessKeyRequired = errors.New("agentos temporal worker: artifact s3 access key id is required")
+	ErrWorkerArtifactStoreS3SecretKeyRequired = errors.New("agentos temporal worker: artifact s3 secret access key is required")
 )
 
 func newWorkerKit(ctx context.Context, cfg WorkerConfig) (*WorkerKit, error) {
@@ -42,8 +48,8 @@ func newWorkerKit(ctx context.Context, cfg WorkerConfig) (*WorkerKit, error) {
 	if cfg.RedisURL == "" {
 		return nil, ErrWorkerRedisURLRequired
 	}
-	if cfg.ArtifactStoreRoot == "" {
-		return nil, ErrWorkerArtifactStoreRootRequired
+	if err := validateWorkerArtifactStore(cfg.ArtifactStore); err != nil {
+		return nil, err
 	}
 
 	l := logger.New(cfg.LogLevel)
@@ -93,7 +99,7 @@ func newWorkerKit(ctx context.Context, cfg WorkerConfig) (*WorkerKit, error) {
 
 	runBackendIndex := temporalrepo.NewRunBackendIndexRepo(pg)
 	planStore := temporalrepo.NewAgentOSPlanRepo(pg)
-	blobStore, err := artifactrepo.NewLocalBlobStore(cfg.ArtifactStoreRoot)
+	blobStore, err := artifactrepo.NewBlobStore(ctx, artifactBlobConfig(cfg.ArtifactStore))
 	if err != nil {
 		temporalClient.Close()
 		_ = rdb.Close()
@@ -151,6 +157,52 @@ func newWorkerKit(ctx context.Context, cfg WorkerConfig) (*WorkerKit, error) {
 	)
 
 	return kit, nil
+}
+
+func validateWorkerArtifactStore(cfg ArtifactStoreConfig) error {
+	switch cfg.Backend {
+	case ArtifactStoreBackendLocal:
+		if cfg.Local.Root == "" {
+			return ErrWorkerArtifactStoreLocalRootRequired
+		}
+	case ArtifactStoreBackendS3:
+		if cfg.S3.Bucket == "" {
+			return ErrWorkerArtifactStoreS3BucketRequired
+		}
+		if cfg.S3.Region == "" {
+			return ErrWorkerArtifactStoreS3RegionRequired
+		}
+		if cfg.S3.AccessKeyID == "" {
+			return ErrWorkerArtifactStoreS3AccessKeyRequired
+		}
+		if cfg.S3.SecretAccessKey == "" {
+			return ErrWorkerArtifactStoreS3SecretKeyRequired
+		}
+	case "":
+		return ErrWorkerArtifactStoreBackendRequired
+	default:
+		return fmt.Errorf("%w: %s", ErrWorkerArtifactStoreBackendUnknown, cfg.Backend)
+	}
+
+	return nil
+}
+
+func artifactBlobConfig(cfg ArtifactStoreConfig) artifactrepo.Config {
+	return artifactrepo.Config{
+		Backend: artifactrepo.Backend(cfg.Backend),
+		Local: artifactrepo.LocalConfig{
+			Root: cfg.Local.Root,
+		},
+		S3: artifactrepo.S3Config{
+			Bucket:          cfg.S3.Bucket,
+			Region:          cfg.S3.Region,
+			Endpoint:        cfg.S3.Endpoint,
+			AccessKeyID:     cfg.S3.AccessKeyID,
+			SecretAccessKey: cfg.S3.SecretAccessKey,
+			SessionToken:    cfg.S3.SessionToken,
+			ForcePathStyle:  cfg.S3.ForcePathStyle,
+		},
+	}
 }
 
 func newPostgres(cfg WorkerConfig) (*postgres.Postgres, error) {

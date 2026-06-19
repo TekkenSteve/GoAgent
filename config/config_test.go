@@ -6,6 +6,31 @@ import (
 	"github.com/TekkenSteve/GoAgent/agentos"
 )
 
+func TestAgentOSArtifactStoreConfig(t *testing.T) {
+	cfg := AgentOS{
+		ArtifactStoreBackend:          "s3",
+		ArtifactStoreS3Bucket:         "agentos-artifacts",
+		ArtifactStoreS3Region:         "us-east-1",
+		ArtifactStoreS3Endpoint:       "http://minio:9000",
+		ArtifactStoreS3AccessKeyID:    "access",
+		ArtifactStoreS3SecretKey:      "secret",
+		ArtifactStoreS3SessionToken:   "session",
+		ArtifactStoreS3ForcePathStyle: true,
+	}
+
+	got := cfg.ArtifactStoreConfig()
+	if got.Backend != "s3" ||
+		got.S3.Bucket != "agentos-artifacts" ||
+		got.S3.Region != "us-east-1" ||
+		got.S3.Endpoint != "http://minio:9000" ||
+		got.S3.AccessKeyID != "access" ||
+		got.S3.SecretAccessKey != "secret" ||
+		got.S3.SessionToken != "session" ||
+		!got.S3.ForcePathStyle {
+		t.Fatalf("unexpected artifact store config: %#v", got)
+	}
+}
+
 func TestTemporalExternalBackends(t *testing.T) {
 	backends, err := AgentFW{
 		TemporalExternalBackendsJSON: `[

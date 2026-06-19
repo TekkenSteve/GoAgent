@@ -52,8 +52,16 @@ type (
 
 	// AgentOS -.
 	AgentOS struct {
-		ArtifactStoreRoot string `env:"AGENTOS_ARTIFACT_STORE_ROOT,required"`
-		CapabilitiesJSON  string `env:"AGENTOS_CAPABILITIES_JSON" envDefault:"[]"`
+		ArtifactStoreBackend          string `env:"AGENTOS_ARTIFACT_STORE_BACKEND,required"`
+		ArtifactStoreLocalRoot        string `env:"AGENTOS_ARTIFACT_STORE_LOCAL_ROOT"`
+		ArtifactStoreS3Bucket         string `env:"AGENTOS_ARTIFACT_STORE_S3_BUCKET"`
+		ArtifactStoreS3Region         string `env:"AGENTOS_ARTIFACT_STORE_S3_REGION"`
+		ArtifactStoreS3Endpoint       string `env:"AGENTOS_ARTIFACT_STORE_S3_ENDPOINT"`
+		ArtifactStoreS3AccessKeyID    string `env:"AGENTOS_ARTIFACT_STORE_S3_ACCESS_KEY_ID"`
+		ArtifactStoreS3SecretKey      string `env:"AGENTOS_ARTIFACT_STORE_S3_SECRET_ACCESS_KEY"`
+		ArtifactStoreS3SessionToken   string `env:"AGENTOS_ARTIFACT_STORE_S3_SESSION_TOKEN"`
+		ArtifactStoreS3ForcePathStyle bool   `env:"AGENTOS_ARTIFACT_STORE_S3_FORCE_PATH_STYLE" envDefault:"false"`
+		CapabilitiesJSON              string `env:"AGENTOS_CAPABILITIES_JSON" envDefault:"[]"`
 	}
 
 	// AgentFW -.
@@ -147,6 +155,28 @@ type BackendSelectionRule struct {
 	Input    map[string]any     `json:"input,omitempty"`
 }
 
+// ArtifactStoreConfig is the app-level artifact blob configuration. The app
+// maps it to the selected AgentOS runtime implementation at wiring time.
+type ArtifactStoreConfig struct {
+	Backend string
+	Local   LocalArtifactStoreConfig
+	S3      S3ArtifactStoreConfig
+}
+
+type LocalArtifactStoreConfig struct {
+	Root string
+}
+
+type S3ArtifactStoreConfig struct {
+	Bucket          string
+	Region          string
+	Endpoint        string
+	AccessKeyID     string
+	SecretAccessKey string
+	SessionToken    string
+	ForcePathStyle  bool
+}
+
 // TemporalExternalBackends parses configured temporal_external backends.
 func (c AgentFW) TemporalExternalBackends() ([]TemporalExternalBackend, error) {
 	var backends []TemporalExternalBackend
@@ -195,6 +225,24 @@ func (c AgentOS) Capabilities() ([]agentos.Capability, error) {
 	}
 
 	return capabilities, nil
+}
+
+func (c AgentOS) ArtifactStoreConfig() ArtifactStoreConfig {
+	return ArtifactStoreConfig{
+		Backend: c.ArtifactStoreBackend,
+		Local: LocalArtifactStoreConfig{
+			Root: c.ArtifactStoreLocalRoot,
+		},
+		S3: S3ArtifactStoreConfig{
+			Bucket:          c.ArtifactStoreS3Bucket,
+			Region:          c.ArtifactStoreS3Region,
+			Endpoint:        c.ArtifactStoreS3Endpoint,
+			AccessKeyID:     c.ArtifactStoreS3AccessKeyID,
+			SecretAccessKey: c.ArtifactStoreS3SecretKey,
+			SessionToken:    c.ArtifactStoreS3SessionToken,
+			ForcePathStyle:  c.ArtifactStoreS3ForcePathStyle,
+		},
+	}
 }
 
 // NewConfig returns app config.

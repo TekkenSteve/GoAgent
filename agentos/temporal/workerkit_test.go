@@ -26,13 +26,39 @@ func TestNewWorkerKitRequiresRedisURL(t *testing.T) {
 	}
 }
 
-func TestNewWorkerKitRequiresArtifactStoreRoot(t *testing.T) {
+func TestNewWorkerKitRequiresArtifactStoreBackend(t *testing.T) {
 	_, err := NewWorkerKit(context.Background(), WorkerConfig{
 		PostgresURL: "postgres://user:pass@localhost:5432/db",
 		RedisURL:    "redis://localhost:6379",
 	})
-	if !errors.Is(err, ErrWorkerArtifactStoreRootRequired) {
-		t.Fatalf("NewWorkerKit error = %v, want %v", err, ErrWorkerArtifactStoreRootRequired)
+	if !errors.Is(err, ErrWorkerArtifactStoreBackendRequired) {
+		t.Fatalf("NewWorkerKit error = %v, want %v", err, ErrWorkerArtifactStoreBackendRequired)
+	}
+}
+
+func TestNewWorkerKitRequiresLocalArtifactStoreRoot(t *testing.T) {
+	_, err := NewWorkerKit(context.Background(), WorkerConfig{
+		PostgresURL: "postgres://user:pass@localhost:5432/db",
+		RedisURL:    "redis://localhost:6379",
+		ArtifactStore: ArtifactStoreConfig{
+			Backend: ArtifactStoreBackendLocal,
+		},
+	})
+	if !errors.Is(err, ErrWorkerArtifactStoreLocalRootRequired) {
+		t.Fatalf("NewWorkerKit error = %v, want %v", err, ErrWorkerArtifactStoreLocalRootRequired)
+	}
+}
+
+func TestNewWorkerKitRequiresS3ArtifactStoreBucket(t *testing.T) {
+	_, err := NewWorkerKit(context.Background(), WorkerConfig{
+		PostgresURL: "postgres://user:pass@localhost:5432/db",
+		RedisURL:    "redis://localhost:6379",
+		ArtifactStore: ArtifactStoreConfig{
+			Backend: ArtifactStoreBackendS3,
+		},
+	})
+	if !errors.Is(err, ErrWorkerArtifactStoreS3BucketRequired) {
+		t.Fatalf("NewWorkerKit error = %v, want %v", err, ErrWorkerArtifactStoreS3BucketRequired)
 	}
 }
 

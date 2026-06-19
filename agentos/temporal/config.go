@@ -62,6 +62,35 @@ type GRPCMethodNames struct {
 	Status  string
 }
 
+type ArtifactStoreBackend string
+
+const (
+	ArtifactStoreBackendLocal ArtifactStoreBackend = "local"
+	ArtifactStoreBackendS3    ArtifactStoreBackend = "s3"
+)
+
+// ArtifactStoreConfig selects the blob store used for large AgentOS plan
+// artifacts. Artifact metadata is still stored in the durable plan database.
+type ArtifactStoreConfig struct {
+	Backend ArtifactStoreBackend
+	Local   LocalArtifactStoreConfig
+	S3      S3ArtifactStoreConfig
+}
+
+type LocalArtifactStoreConfig struct {
+	Root string
+}
+
+type S3ArtifactStoreConfig struct {
+	Bucket          string
+	Region          string
+	Endpoint        string
+	AccessKeyID     string
+	SecretAccessKey string
+	SessionToken    string
+	ForcePathStyle  bool
+}
+
 // RunBackendIndex persists run ownership for Signal/Control/Status routing.
 type RunBackendIndex interface {
 	Bind(ctx context.Context, spec agentos.RunSpec) error
@@ -112,7 +141,7 @@ type WorkerConfig struct {
 	RedisURL          string
 	LLMConfigPath     string
 	LogLevel          string
-	ArtifactStoreRoot string
+	ArtifactStore     ArtifactStoreConfig
 
 	TemporalExternalBackends []ExternalBackendConfig
 	HTTPBackends             []HTTPBackendConfig

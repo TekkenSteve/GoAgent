@@ -253,7 +253,7 @@ func initTemporalComponents(
 
 	planStore := temporalrepo.NewAgentOSPlanRepo(pg)
 	planEventStream := repostream.NewRedisPlanEventStream(rdb)
-	blobStore, err := artifactrepo.NewLocalBlobStore(cfg.AgentOS.ArtifactStoreRoot)
+	blobStore, err := artifactrepo.NewBlobStore(context.Background(), appArtifactBlobConfig(cfg.AgentOS.ArtifactStoreConfig()))
 	if err != nil {
 		l.Fatal(fmt.Errorf("app - Run - artifact store: %w", err))
 	}
@@ -339,6 +339,24 @@ func closeAgentOSPlanRuntime(planRuntime agentos.PlanRuntime) func() error {
 	}
 
 	return closeable.Close
+}
+
+func appArtifactBlobConfig(cfg config.ArtifactStoreConfig) artifactrepo.Config {
+	return artifactrepo.Config{
+		Backend: artifactrepo.Backend(cfg.Backend),
+		Local: artifactrepo.LocalConfig{
+			Root: cfg.Local.Root,
+		},
+		S3: artifactrepo.S3Config{
+			Bucket:          cfg.S3.Bucket,
+			Region:          cfg.S3.Region,
+			Endpoint:        cfg.S3.Endpoint,
+			AccessKeyID:     cfg.S3.AccessKeyID,
+			SecretAccessKey: cfg.S3.SecretAccessKey,
+			SessionToken:    cfg.S3.SessionToken,
+			ForcePathStyle:  cfg.S3.ForcePathStyle,
+		},
+	}
 }
 
 func httpBackends(l logger.Interface, cfg *config.Config) []agentostemporal.HTTPBackendConfig {
