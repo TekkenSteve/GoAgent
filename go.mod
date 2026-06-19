@@ -55,6 +55,8 @@ require (
 	sigs.k8s.io/yaml v1.4.0
 )
 
+replace github.com/google/cel-go => github.com/cel-expr/cel-go v0.28.1
+
 require (
 	4d63.com/gocheckcompilerdirectives v1.3.0 // indirect
 	4d63.com/gochecknoglobals v0.2.2 // indirect
