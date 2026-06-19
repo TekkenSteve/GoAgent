@@ -804,6 +804,190 @@ func scanPlanAuditRecord(scanner interface{ Scan(dest ...any) error }) (agentos.
 	return record, nil
 }
 
+func (r *AgentOSPlanRepo) RecordPlanCommand(ctx context.Context, command agentosplan.PlanCommandRecord) (agentosplan.PlanCommandRecord, bool, error) {
+	if command.PlanID == "" {
+		return agentosplan.PlanCommandRecord{}, false, fmt.Errorf("%w: plan id is required", agentos.ErrInvalidRunPlan)
+	}
+	if command.Action == "" {
+		return agentosplan.PlanCommandRecord{}, false, fmt.Errorf("%w: command action is required", agentos.ErrInvalidRunPlan)
+	}
+	if command.IdempotencyKey == "" {
+		return agentosplan.PlanCommandRecord{}, false, fmt.Errorf("%w: command idempotency key is required", agentos.ErrInvalidRunPlan)
+	}
+	existing, exists, err := r.GetPlanCommand(ctx, command.IdempotencyKey)
+	if err != nil {
+		return agentosplan.PlanCommandRecord{}, false, err
+	}
+	if exists {
+		if err := agentosplan.ValidatePlanCommandIdempotency(existing, command); err != nil {
+			return agentosplan.PlanCommandRecord{}, false, err
+		}
+
+		return existing, false, nil
+	}
+	if command.CommandID == "" {
+		command.CommandID = commandIDFromIdempotencyKey(command.IdempotencyKey)
+	}
+	if command.Status == "" {
+		command.Status = agentosplan.PlanCommandPending
+	}
+	if command.CreatedAt.IsZero() {
+		command.CreatedAt = time.Now().UTC()
+	}
+	if command.UpdatedAt.IsZero() {
+		command.UpdatedAt = command.CreatedAt
+	}
+	if command.Payload == nil {
+		command.Payload = map[string]any{}
+	}
+	payloadJSON, err := json.Marshal(command.Payload)
+	if err != nil {
+		return agentosplan.PlanCommandRecord{}, false, fmt.Errorf("AgentOSPlanRepo - RecordPlanCommand - marshal payload: %w", err)
+	}
+
+	_, err = r.Pool.Exec(ctx, `
+INSERT INTO plan_commands (
+    command_id,
+    plan_id,
+    actor_id,
+    action,
+    idempotency_key,
+    payload_json,
+    status,
+    failure_reason,
+    created_at,
+    updated_at
+) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)`,
+		command.CommandID,
+		command.PlanID,
+		command.ActorID,
+		string(command.Action),
+		command.IdempotencyKey,
+		payloadJSON,
+		string(command.Status),
+		command.FailureReason,
+		command.CreatedAt,
+		command.UpdatedAt,
+	)
+	if err != nil {
+		if isPostgresUniqueViolation(err) {
+			existing, exists, lookupErr := r.GetPlanCommand(ctx, command.IdempotencyKey)
+			if lookupErr != nil {
+				return agentosplan.PlanCommandRecord{}, false, lookupErr
+			}
+			if exists {
+				if err := agentosplan.ValidatePlanCommandIdempotency(existing, command); err != nil {
+					return agentosplan.PlanCommandRecord{}, false, err
+				}
+
+				return existing, false, nil
+			}
+		}
+
+		return agentosplan.PlanCommandRecord{}, false, fmt.Errorf("AgentOSPlanRepo - RecordPlanCommand - insert: %w", err)
+	}
+
+	return command, true, nil
+}
+
+func (r *AgentOSPlanRepo) GetPlanCommand(ctx context.Context, idempotencyKey string) (agentosplan.PlanCommandRecord, bool, error) {
+	if idempotencyKey == "" {
+		return agentosplan.PlanCommandRecord{}, false, fmt.Errorf("%w: command idempotency key is required", agentos.ErrInvalidRunPlan)
+	}
+
+	sql, args, err := r.Builder.
+		Select("command_id", "plan_id", "actor_id", "action", "idempotency_key", "payload_json", "status", "failure_reason", "created_at", "updated_at").
+		From("plan_commands").
+		Where(sq.Eq{"idempotency_key": idempotencyKey}).
+		ToSql()
+	if err != nil {
+		return agentosplan.PlanCommandRecord{}, false, fmt.Errorf("AgentOSPlanRepo - GetPlanCommand - builder: %w", err)
+	}
+
+	command, err := r.scanPlanCommand(ctx, sql, args...)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return agentosplan.PlanCommandRecord{}, false, nil
+		}
+
+		return agentosplan.PlanCommandRecord{}, false, err
+	}
+
+	return command, true, nil
+}
+
+func (r *AgentOSPlanRepo) MarkPlanCommandDelivered(ctx context.Context, idempotencyKey string) (agentosplan.PlanCommandRecord, error) {
+	return r.updatePlanCommandStatus(ctx, idempotencyKey, agentosplan.PlanCommandDelivered, "")
+}
+
+func (r *AgentOSPlanRepo) MarkPlanCommandFailed(ctx context.Context, idempotencyKey string, reason string) (agentosplan.PlanCommandRecord, error) {
+	return r.updatePlanCommandStatus(ctx, idempotencyKey, agentosplan.PlanCommandFailed, reason)
+}
+
+func (r *AgentOSPlanRepo) updatePlanCommandStatus(ctx context.Context, idempotencyKey string, status agentosplan.PlanCommandStatus, reason string) (agentosplan.PlanCommandRecord, error) {
+	if idempotencyKey == "" {
+		return agentosplan.PlanCommandRecord{}, fmt.Errorf("%w: command idempotency key is required", agentos.ErrInvalidRunPlan)
+	}
+
+	command, exists, err := r.GetPlanCommand(ctx, idempotencyKey)
+	if err != nil {
+		return agentosplan.PlanCommandRecord{}, err
+	}
+	if !exists {
+		return agentosplan.PlanCommandRecord{}, fmt.Errorf("%w: command %q", agentos.ErrInvalidRunPlan, idempotencyKey)
+	}
+	command.Status = status
+	command.FailureReason = reason
+	command.UpdatedAt = time.Now().UTC()
+
+	sql := `
+UPDATE plan_commands
+SET status = $2,
+    failure_reason = $3,
+    updated_at = $4
+WHERE idempotency_key = $1
+RETURNING command_id, plan_id, actor_id, action, idempotency_key, payload_json, status, failure_reason, created_at, updated_at`
+
+	return r.scanPlanCommand(ctx, sql, idempotencyKey, string(command.Status), command.FailureReason, command.UpdatedAt)
+}
+
+func (r *AgentOSPlanRepo) scanPlanCommand(ctx context.Context, sql string, args ...any) (agentosplan.PlanCommandRecord, error) {
+	var command agentosplan.PlanCommandRecord
+	var action string
+	var status string
+	var payloadJSON []byte
+	err := r.Pool.QueryRow(ctx, sql, args...).Scan(
+		&command.CommandID,
+		&command.PlanID,
+		&command.ActorID,
+		&action,
+		&command.IdempotencyKey,
+		&payloadJSON,
+		&status,
+		&command.FailureReason,
+		&command.CreatedAt,
+		&command.UpdatedAt,
+	)
+	if err != nil {
+		return agentosplan.PlanCommandRecord{}, fmt.Errorf("AgentOSPlanRepo - scanPlanCommand: %w", err)
+	}
+	if len(payloadJSON) > 0 {
+		if err := json.Unmarshal(payloadJSON, &command.Payload); err != nil {
+			return agentosplan.PlanCommandRecord{}, fmt.Errorf("AgentOSPlanRepo - scanPlanCommand - decode payload: %w", err)
+		}
+	}
+	command.Action = agentosplan.AuditAction(action)
+	command.Status = agentosplan.PlanCommandStatus(status)
+
+	return command, nil
+}
+
+func commandIDFromIdempotencyKey(idempotencyKey string) string {
+	sum := sha256.Sum256([]byte(idempotencyKey))
+
+	return "command:" + hex.EncodeToString(sum[:])
+}
+
 func auditIDFromIdempotencyKey(idempotencyKey string) string {
 	sum := sha256.Sum256([]byte(idempotencyKey))
 
@@ -819,8 +1003,9 @@ func nullableTime(value time.Time) any {
 }
 
 var (
-	_ agentosplan.PlanIndex      = (*AgentOSPlanRepo)(nil)
-	_ agentosplan.PlanStateStore = (*AgentOSPlanRepo)(nil)
-	_ agentosplan.PlanEventStore = (*AgentOSPlanRepo)(nil)
-	_ agentosplan.AuditStore     = (*AgentOSPlanRepo)(nil)
+	_ agentosplan.PlanIndex        = (*AgentOSPlanRepo)(nil)
+	_ agentosplan.PlanStateStore   = (*AgentOSPlanRepo)(nil)
+	_ agentosplan.PlanEventStore   = (*AgentOSPlanRepo)(nil)
+	_ agentosplan.PlanCommandStore = (*AgentOSPlanRepo)(nil)
+	_ agentosplan.AuditStore       = (*AgentOSPlanRepo)(nil)
 )

@@ -26,6 +26,7 @@ type planRuntime struct {
 	planLiveEvents agentosplan.PlanEventSubscriber
 	planIndex      agentosplan.PlanIndex
 	artifactStore  agentosplan.ArtifactStore
+	commandStore   agentosplan.PlanCommandStore
 	auditStore     agentosplan.AuditStore
 	taskQueue      string
 }
@@ -34,6 +35,7 @@ var (
 	errPlanRuntimePlanIndexRequired      = errors.New("agentos temporal plan runtime: plan index is not configured")
 	errPlanRuntimePlanEventStoreRequired = errors.New("agentos temporal plan runtime: plan event store is not configured")
 	errPlanRuntimeArtifactStoreRequired  = errors.New("agentos temporal plan runtime: artifact store is not configured")
+	errPlanRuntimeCommandStoreRequired   = errors.New("agentos temporal plan runtime: plan command store is not configured")
 	errPlanRuntimeAuditStoreRequired     = errors.New("agentos temporal plan runtime: audit store is not configured")
 
 	ErrPlanRuntimePostgresURLRequired              = errors.New("agentos temporal plan runtime: postgres url is required")
@@ -115,6 +117,7 @@ func newPlanRuntimeWithClient(ctx context.Context, cfg RuntimeConfig, c planTemp
 	planStore := temporalrepo.NewAgentOSPlanRepo(pg)
 	rt.planEvents = planStore
 	rt.planIndex = planStore
+	rt.commandStore = planStore
 	rt.auditStore = planStore
 
 	blobStore, err := artifactrepo.NewBlobStore(ctx, artifactBlobConfig(cfg.ArtifactStore))
@@ -221,16 +224,23 @@ func (r *planRuntime) SignalPlan(ctx context.Context, ref agentos.PlanRef, signa
 		return err
 	}
 	record := planSignalAuditRecord(ref.PlanID, signal)
-	exists, err := r.planAuditRecorded(ctx, record)
+	command, err := r.recordPlanCommand(ctx, planCommandFromAuditRecord(record))
 	if err != nil {
 		return err
 	}
-	if exists {
-		return nil
+	if command.Status == agentosplan.PlanCommandDelivered {
+		_, err := r.recordPlanAudit(ctx, record)
+
+		return err
 	}
 
 	if err := r.temporalClient.SignalWorkflow(ctx, planWorkflowID(ref.PlanID), "", PlanSignalName, signal); err != nil {
-		return fmt.Errorf("agentos temporal plan runtime - signal plan workflow: %w", err)
+		markErr := r.markPlanCommandFailed(ctx, command.IdempotencyKey, err)
+
+		return errors.Join(fmt.Errorf("agentos temporal plan runtime - signal plan workflow: %w", err), markErr)
+	}
+	if err := r.markPlanCommandDelivered(ctx, command.IdempotencyKey); err != nil {
+		return err
 	}
 	if _, err := r.recordPlanAudit(ctx, record); err != nil {
 		return err
@@ -265,16 +275,23 @@ func (r *planRuntime) ControlPlan(ctx context.Context, ref agentos.PlanRef, cont
 			"metadata":  control.Metadata,
 		},
 	}
-	exists, err := r.planAuditRecorded(ctx, record)
+	command, err := r.recordPlanCommand(ctx, planCommandFromAuditRecord(record))
 	if err != nil {
 		return err
 	}
-	if exists {
-		return nil
+	if command.Status == agentosplan.PlanCommandDelivered {
+		_, err := r.recordPlanAudit(ctx, record)
+
+		return err
 	}
 
 	if err := r.temporalClient.SignalWorkflow(ctx, planWorkflowID(ref.PlanID), "", PlanControlSignalName, control); err != nil {
-		return fmt.Errorf("agentos temporal plan runtime - control plan workflow: %w", err)
+		markErr := r.markPlanCommandFailed(ctx, command.IdempotencyKey, err)
+
+		return errors.Join(fmt.Errorf("agentos temporal plan runtime - control plan workflow: %w", err), markErr)
+	}
+	if err := r.markPlanCommandDelivered(ctx, command.IdempotencyKey); err != nil {
+		return err
 	}
 	if _, err := r.recordPlanAudit(ctx, record); err != nil {
 		return err
@@ -408,19 +425,34 @@ func (r *planRuntime) recordPlanAudit(ctx context.Context, record agentosplan.Au
 	return created, err
 }
 
-func (r *planRuntime) planAuditRecorded(ctx context.Context, record agentosplan.AuditRecord) (bool, error) {
-	if r.auditStore == nil {
-		return false, errPlanRuntimeAuditStoreRequired
-	}
-	existing, exists, err := r.auditStore.GetAuditRecord(ctx, record.IdempotencyKey)
-	if err != nil || !exists {
-		return exists, err
-	}
-	if err := agentosplan.ValidateAuditIdempotency(existing, record); err != nil {
-		return false, err
+func (r *planRuntime) recordPlanCommand(ctx context.Context, command agentosplan.PlanCommandRecord) (agentosplan.PlanCommandRecord, error) {
+	if r.commandStore == nil {
+		return agentosplan.PlanCommandRecord{}, errPlanRuntimeCommandStoreRequired
 	}
 
-	return true, nil
+	stored, _, err := r.commandStore.RecordPlanCommand(ctx, command)
+
+	return stored, err
+}
+
+func (r *planRuntime) markPlanCommandDelivered(ctx context.Context, idempotencyKey string) error {
+	if r.commandStore == nil {
+		return errPlanRuntimeCommandStoreRequired
+	}
+
+	_, err := r.commandStore.MarkPlanCommandDelivered(ctx, idempotencyKey)
+
+	return err
+}
+
+func (r *planRuntime) markPlanCommandFailed(ctx context.Context, idempotencyKey string, cause error) error {
+	if r.commandStore == nil {
+		return errPlanRuntimeCommandStoreRequired
+	}
+
+	_, err := r.commandStore.MarkPlanCommandFailed(ctx, idempotencyKey, cause.Error())
+
+	return err
 }
 
 func planWorkflowID(planID string) string {
@@ -437,6 +469,17 @@ func planSignalAuditRecord(planID string, signal agentos.Signal) agentosplan.Aud
 			"type":    signal.Type,
 			"payload": signal.Payload,
 		},
+	}
+}
+
+func planCommandFromAuditRecord(record agentosplan.AuditRecord) agentosplan.PlanCommandRecord {
+	return agentosplan.PlanCommandRecord{
+		PlanID:         record.PlanID,
+		ActorID:        record.ActorID,
+		Action:         record.Action,
+		IdempotencyKey: record.IdempotencyKey,
+		Payload:        record.Payload,
+		Status:         agentosplan.PlanCommandPending,
 	}
 }
 

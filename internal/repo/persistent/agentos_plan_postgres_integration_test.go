@@ -136,6 +136,40 @@ func TestAgentOSPlanPostgresDurablePersistence(t *testing.T) {
 		t.Fatalf("ListAuditRecords mismatch error = %v, want ErrPlanRouteNotFound", err)
 	}
 
+	command, created, err := planRepo.RecordPlanCommand(ctx, agentosplan.PlanCommandRecord{
+		PlanID:         spec.PlanID,
+		ActorID:        "operator-1",
+		Action:         agentosplan.AuditActionPlanControl,
+		IdempotencyKey: "command-" + suffix,
+		Payload:        map[string]any{"operation": string(agentos.ControlCancel)},
+	})
+	if err != nil {
+		t.Fatalf("RecordPlanCommand first: %v", err)
+	}
+	if !created || command.Status != agentosplan.PlanCommandPending {
+		t.Fatalf("RecordPlanCommand first = %#v created=%v", command, created)
+	}
+	commandReplay, created, err := planRepo.RecordPlanCommand(ctx, agentosplan.PlanCommandRecord{
+		PlanID:         spec.PlanID,
+		ActorID:        "operator-1",
+		Action:         agentosplan.AuditActionPlanControl,
+		IdempotencyKey: "command-" + suffix,
+		Payload:        map[string]any{"operation": string(agentos.ControlCancel)},
+	})
+	if err != nil {
+		t.Fatalf("RecordPlanCommand replay: %v", err)
+	}
+	if created || commandReplay.CommandID != command.CommandID {
+		t.Fatalf("RecordPlanCommand replay = %#v created=%v, want %#v created=false", commandReplay, created, command)
+	}
+	deliveredCommand, err := planRepo.MarkPlanCommandDelivered(ctx, command.IdempotencyKey)
+	if err != nil {
+		t.Fatalf("MarkPlanCommandDelivered: %v", err)
+	}
+	if deliveredCommand.Status != agentosplan.PlanCommandDelivered || deliveredCommand.FailureReason != "" {
+		t.Fatalf("delivered command = %#v", deliveredCommand)
+	}
+
 	runSpec := spec.Nodes[0].Run
 	runSpec.IdempotencyKey, err = agentosplan.NodeStartIdempotencyKey(spec.PlanID, spec.Nodes[0].NodeID, 1)
 	if err != nil {
@@ -463,6 +497,7 @@ func applyAgentOSPlanMigrations(t *testing.T, pg *postgres.Postgres) {
 		"20260619000001_create_agentos_capabilities.up.sql",
 		"20260619000002_require_plan_event_idempotency.up.sql",
 		"20260619000003_require_control_plane_idempotency.up.sql",
+		"20260619000004_create_plan_commands.up.sql",
 	} {
 		path := filepath.Join("..", "..", "..", "migrations", migration)
 		data, err := os.ReadFile(path)

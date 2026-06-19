@@ -132,6 +132,20 @@ func TestPlanRuntimeNilDurableStoresFailMethods(t *testing.T) {
 	}
 }
 
+func TestPlanRuntimeSignalPlanRequiresCommandStore(t *testing.T) {
+	store, ref := newPlanRuntimeTestStore(t)
+	rt := &planRuntime{temporalClient: &fakePlanTemporalClient{}, auditStore: store, planIndex: store}
+
+	err := rt.SignalPlan(t.Context(), ref, agentos.Signal{
+		Type:           agentos.SignalPlanApprove,
+		IdempotencyKey: "approve-1",
+		ActorID:        "operator-1",
+	})
+	if !errors.Is(err, errPlanRuntimeCommandStoreRequired) {
+		t.Fatalf("SignalPlan error = %v, want missing command store", err)
+	}
+}
+
 func TestPlanRuntimeStatusPlanReportsMissingDurablePlan(t *testing.T) {
 	rt := &planRuntime{planIndex: agentosplan.NewMemoryPlanStore()}
 
@@ -365,7 +379,7 @@ func TestPlanRuntimeGetPlanArtifactEnforcesPlanOwnership(t *testing.T) {
 func TestPlanRuntimeSignalPlanDoesNotAuditFailedDelivery(t *testing.T) {
 	store, ref := newPlanRuntimeTestStore(t)
 	temporalClient := &fakePlanTemporalClient{signalErr: errors.New("temporal unavailable")}
-	rt := &planRuntime{temporalClient: temporalClient, auditStore: store, planIndex: store}
+	rt := &planRuntime{temporalClient: temporalClient, commandStore: store, auditStore: store, planIndex: store}
 
 	err := rt.SignalPlan(t.Context(), ref, agentos.Signal{
 		Type:           agentos.SignalPlanApprove,
@@ -381,20 +395,64 @@ func TestPlanRuntimeSignalPlanDoesNotAuditFailedDelivery(t *testing.T) {
 	if _, exists, lookupErr := store.GetAuditRecord(t.Context(), "approve-1"); lookupErr != nil || exists {
 		t.Fatalf("audit exists=%v err=%v, want no audit", exists, lookupErr)
 	}
+	command, exists, lookupErr := store.GetPlanCommand(t.Context(), "approve-1")
+	if lookupErr != nil || !exists {
+		t.Fatalf("command exists=%v err=%v", exists, lookupErr)
+	}
+	if command.Status != agentosplan.PlanCommandFailed || command.FailureReason == "" {
+		t.Fatalf("command = %#v, want failed with reason", command)
+	}
 }
 
-func TestPlanRuntimeSignalPlanSkipsDeliveryWhenAuditExists(t *testing.T) {
+func TestPlanRuntimeSignalPlanRetriesFailedCommand(t *testing.T) {
+	store, ref := newPlanRuntimeTestStore(t)
+	temporalClient := &fakePlanTemporalClient{signalErr: errors.New("temporal unavailable")}
+	rt := &planRuntime{temporalClient: temporalClient, commandStore: store, auditStore: store, planIndex: store}
+	signal := agentos.Signal{
+		Type:           agentos.SignalPlanApprove,
+		IdempotencyKey: "approve-1",
+		ActorID:        "operator-1",
+	}
+
+	if err := rt.SignalPlan(t.Context(), ref, signal); err == nil {
+		t.Fatal("SignalPlan succeeded, want delivery error")
+	}
+	temporalClient.signalErr = nil
+	if err := rt.SignalPlan(t.Context(), ref, signal); err != nil {
+		t.Fatalf("SignalPlan retry: %v", err)
+	}
+
+	if temporalClient.signalCount != 2 {
+		t.Fatalf("signal count = %d, want retry delivery", temporalClient.signalCount)
+	}
+	command, exists, err := store.GetPlanCommand(t.Context(), signal.IdempotencyKey)
+	if err != nil || !exists {
+		t.Fatalf("command exists=%v err=%v", exists, err)
+	}
+	if command.Status != agentosplan.PlanCommandDelivered {
+		t.Fatalf("command = %#v, want delivered", command)
+	}
+	if _, exists, err := store.GetAuditRecord(t.Context(), signal.IdempotencyKey); err != nil || !exists {
+		t.Fatalf("audit exists=%v err=%v", exists, err)
+	}
+}
+
+func TestPlanRuntimeSignalPlanSkipsDeliveryWhenCommandDelivered(t *testing.T) {
 	store, ref := newPlanRuntimeTestStore(t)
 	signal := agentos.Signal{
 		Type:           agentos.SignalPlanApprove,
 		IdempotencyKey: "approve-1",
 		ActorID:        "operator-1",
 	}
-	if _, _, err := store.RecordAudit(t.Context(), planSignalAuditRecord("plan-1", signal)); err != nil {
-		t.Fatalf("RecordAudit: %v", err)
+	command, _, err := store.RecordPlanCommand(t.Context(), planCommandFromAuditRecord(planSignalAuditRecord("plan-1", signal)))
+	if err != nil {
+		t.Fatalf("RecordPlanCommand: %v", err)
+	}
+	if _, err := store.MarkPlanCommandDelivered(t.Context(), command.IdempotencyKey); err != nil {
+		t.Fatalf("MarkPlanCommandDelivered: %v", err)
 	}
 	temporalClient := &fakePlanTemporalClient{signalErr: errors.New("should not signal")}
-	rt := &planRuntime{temporalClient: temporalClient, auditStore: store, planIndex: store}
+	rt := &planRuntime{temporalClient: temporalClient, commandStore: store, auditStore: store, planIndex: store}
 
 	if err := rt.SignalPlan(t.Context(), ref, signal); err != nil {
 		t.Fatalf("SignalPlan: %v", err)
@@ -402,19 +460,22 @@ func TestPlanRuntimeSignalPlanSkipsDeliveryWhenAuditExists(t *testing.T) {
 	if temporalClient.signalCount != 0 {
 		t.Fatalf("signal count = %d, want 0", temporalClient.signalCount)
 	}
+	if _, exists, err := store.GetAuditRecord(t.Context(), "approve-1"); err != nil || !exists {
+		t.Fatalf("audit exists=%v err=%v", exists, err)
+	}
 }
 
-func TestPlanRuntimeSignalPlanRejectsAuditKeyReuseWithDifferentSignal(t *testing.T) {
+func TestPlanRuntimeSignalPlanRejectsCommandKeyReuseWithDifferentSignal(t *testing.T) {
 	store, ref := newPlanRuntimeTestStore(t)
-	if _, _, err := store.RecordAudit(t.Context(), planSignalAuditRecord("plan-1", agentos.Signal{
+	if _, _, err := store.RecordPlanCommand(t.Context(), planCommandFromAuditRecord(planSignalAuditRecord("plan-1", agentos.Signal{
 		Type:           agentos.SignalPlanApprove,
 		IdempotencyKey: "signal-1",
 		ActorID:        "operator-1",
-	})); err != nil {
-		t.Fatalf("RecordAudit: %v", err)
+	}))); err != nil {
+		t.Fatalf("RecordPlanCommand: %v", err)
 	}
 	temporalClient := &fakePlanTemporalClient{signalErr: errors.New("should not signal")}
-	rt := &planRuntime{temporalClient: temporalClient, auditStore: store, planIndex: store}
+	rt := &planRuntime{temporalClient: temporalClient, commandStore: store, auditStore: store, planIndex: store}
 
 	err := rt.SignalPlan(t.Context(), ref, agentos.Signal{
 		Type:           agentos.SignalPlanReject,
@@ -432,7 +493,7 @@ func TestPlanRuntimeSignalPlanRejectsAuditKeyReuseWithDifferentSignal(t *testing
 func TestPlanRuntimeControlPlanAuditsAfterDelivery(t *testing.T) {
 	store, ref := newPlanRuntimeTestStore(t)
 	temporalClient := &fakePlanTemporalClient{}
-	rt := &planRuntime{temporalClient: temporalClient, auditStore: store, planIndex: store}
+	rt := &planRuntime{temporalClient: temporalClient, commandStore: store, auditStore: store, planIndex: store}
 
 	err := rt.ControlPlan(t.Context(), ref, agentos.ControlRequest{
 		Operation:      agentos.ControlCancel,
@@ -452,11 +513,18 @@ func TestPlanRuntimeControlPlanAuditsAfterDelivery(t *testing.T) {
 	if record.ActorID != "operator-1" || record.Action != agentosplan.AuditActionPlanControl {
 		t.Fatalf("audit = %#v", record)
 	}
+	command, exists, err := store.GetPlanCommand(t.Context(), "cancel-1")
+	if err != nil || !exists {
+		t.Fatalf("command exists=%v err=%v", exists, err)
+	}
+	if command.Status != agentosplan.PlanCommandDelivered {
+		t.Fatalf("command = %#v, want delivered", command)
+	}
 }
 
-func TestPlanRuntimeControlPlanRejectsAuditKeyReuseWithDifferentControl(t *testing.T) {
+func TestPlanRuntimeControlPlanRejectsCommandKeyReuseWithDifferentControl(t *testing.T) {
 	store, ref := newPlanRuntimeTestStore(t)
-	if _, _, err := store.RecordAudit(t.Context(), agentosplan.AuditRecord{
+	if _, _, err := store.RecordPlanCommand(t.Context(), planCommandFromAuditRecord(agentosplan.AuditRecord{
 		PlanID:         "plan-1",
 		ActorID:        "operator-1",
 		Action:         agentosplan.AuditActionPlanControl,
@@ -465,11 +533,11 @@ func TestPlanRuntimeControlPlanRejectsAuditKeyReuseWithDifferentControl(t *testi
 			"operation": agentos.ControlCancel,
 			"metadata":  map[string]string(nil),
 		},
-	}); err != nil {
-		t.Fatalf("RecordAudit: %v", err)
+	})); err != nil {
+		t.Fatalf("RecordPlanCommand: %v", err)
 	}
 	temporalClient := &fakePlanTemporalClient{signalErr: errors.New("should not signal")}
-	rt := &planRuntime{temporalClient: temporalClient, auditStore: store, planIndex: store}
+	rt := &planRuntime{temporalClient: temporalClient, commandStore: store, auditStore: store, planIndex: store}
 
 	err := rt.ControlPlan(t.Context(), ref, agentos.ControlRequest{
 		Operation:      agentos.ControlPause,

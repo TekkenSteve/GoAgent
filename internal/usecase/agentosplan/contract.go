@@ -110,6 +110,38 @@ type AuditStore interface {
 	ListAuditRecords(ctx context.Context, scope agentos.PlanAuditScope) ([]agentos.PlanAuditRecord, error)
 }
 
+// PlanCommandStatus is the durable outbox state for a control-plane command.
+type PlanCommandStatus string
+
+const (
+	PlanCommandPending   PlanCommandStatus = "pending"
+	PlanCommandDelivered PlanCommandStatus = "delivered"
+	PlanCommandFailed    PlanCommandStatus = "failed"
+)
+
+// PlanCommandRecord is the durable command/outbox entry written before
+// delivering a control-plane signal to PlanWorkflow.
+type PlanCommandRecord struct {
+	CommandID      string
+	PlanID         string
+	ActorID        string
+	Action         AuditAction
+	IdempotencyKey string
+	Payload        map[string]any
+	Status         PlanCommandStatus
+	FailureReason  string
+	CreatedAt      time.Time
+	UpdatedAt      time.Time
+}
+
+// PlanCommandStore persists recoverable signal/control commands.
+type PlanCommandStore interface {
+	RecordPlanCommand(ctx context.Context, command PlanCommandRecord) (PlanCommandRecord, bool, error)
+	GetPlanCommand(ctx context.Context, idempotencyKey string) (PlanCommandRecord, bool, error)
+	MarkPlanCommandDelivered(ctx context.Context, idempotencyKey string) (PlanCommandRecord, error)
+	MarkPlanCommandFailed(ctx context.Context, idempotencyKey string, reason string) (PlanCommandRecord, error)
+}
+
 // Runner starts and controls backend-owned child runs.
 type Runner interface {
 	Start(ctx context.Context, spec agentos.RunSpec) (agentos.RunStatus, error)

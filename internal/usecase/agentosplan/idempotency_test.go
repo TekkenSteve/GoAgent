@@ -89,6 +89,22 @@ func TestValidateAuditIdempotencyRejectsDifferentPayload(t *testing.T) {
 	}
 }
 
+func TestValidatePlanCommandIdempotencyRejectsDifferentPayload(t *testing.T) {
+	existing := PlanCommandRecord{
+		PlanID:         "plan-1",
+		Action:         AuditActionPlanControl,
+		IdempotencyKey: "control-key",
+		Payload:        map[string]any{"operation": string(agentos.ControlCancel)},
+	}
+	requested := existing
+	requested.Payload = map[string]any{"operation": string(agentos.ControlPause)}
+
+	err := ValidatePlanCommandIdempotency(existing, requested)
+	if !errors.Is(err, agentos.ErrInvalidRunPlan) {
+		t.Fatalf("error = %v, want ErrInvalidRunPlan", err)
+	}
+}
+
 func TestPlanAuditRecordFromAuditRecordUsesPublicAction(t *testing.T) {
 	record := PlanAuditRecordFromAuditRecord(AuditRecord{
 		AuditID:        "audit-1",

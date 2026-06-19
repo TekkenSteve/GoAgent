@@ -131,6 +131,60 @@ func TestMemoryPlanStoreRejectsAuditKeyReuseWithDifferentRequest(t *testing.T) {
 	}
 }
 
+func TestMemoryPlanStorePlanCommandLifecycleIsIdempotent(t *testing.T) {
+	store := NewMemoryPlanStore()
+	command := PlanCommandRecord{
+		PlanID:         "plan-1",
+		ActorID:        "operator-1",
+		Action:         AuditActionPlanControl,
+		IdempotencyKey: "control-1",
+		Payload:        map[string]any{"operation": string(agentos.ControlCancel)},
+	}
+	first, created, err := store.RecordPlanCommand(context.Background(), command)
+	if err != nil {
+		t.Fatalf("RecordPlanCommand first: %v", err)
+	}
+	if !created || first.Status != PlanCommandPending {
+		t.Fatalf("first command = %#v created=%v", first, created)
+	}
+	replay, created, err := store.RecordPlanCommand(context.Background(), command)
+	if err != nil {
+		t.Fatalf("RecordPlanCommand replay: %v", err)
+	}
+	if created || replay.CommandID != first.CommandID {
+		t.Fatalf("replay = %#v created=%v, want %#v created=false", replay, created, first)
+	}
+
+	delivered, err := store.MarkPlanCommandDelivered(context.Background(), command.IdempotencyKey)
+	if err != nil {
+		t.Fatalf("MarkPlanCommandDelivered: %v", err)
+	}
+	if delivered.Status != PlanCommandDelivered || delivered.FailureReason != "" {
+		t.Fatalf("delivered command = %#v", delivered)
+	}
+}
+
+func TestMemoryPlanStoreRejectsCommandKeyReuseWithDifferentRequest(t *testing.T) {
+	store := NewMemoryPlanStore()
+	command := PlanCommandRecord{
+		PlanID:         "plan-1",
+		ActorID:        "operator-1",
+		Action:         AuditActionPlanSignal,
+		IdempotencyKey: "signal-1",
+		Payload:        map[string]any{"type": string(agentos.SignalPlanApprove)},
+	}
+	if _, _, err := store.RecordPlanCommand(context.Background(), command); err != nil {
+		t.Fatalf("RecordPlanCommand first: %v", err)
+	}
+
+	changed := command
+	changed.Payload = map[string]any{"type": string(agentos.SignalPlanReject)}
+	_, _, err := store.RecordPlanCommand(context.Background(), changed)
+	if !errors.Is(err, agentos.ErrInvalidRunPlan) {
+		t.Fatalf("error = %v, want ErrInvalidRunPlan", err)
+	}
+}
+
 func TestMemoryPlanStoreListAuditRecordsFiltersAndLimits(t *testing.T) {
 	ctx := context.Background()
 	store := NewMemoryPlanStore()

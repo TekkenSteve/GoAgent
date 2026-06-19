@@ -19,6 +19,7 @@ type MemoryPlanStore struct {
 	planKeys  map[string]string
 	events    map[string][]agentos.PlanEvent
 	eventKeys map[string]agentos.PlanEvent
+	commands  map[string]PlanCommandRecord
 	auditKeys map[string]AuditRecord
 }
 
@@ -30,6 +31,7 @@ func NewMemoryPlanStore() *MemoryPlanStore {
 		planKeys:  make(map[string]string),
 		events:    make(map[string][]agentos.PlanEvent),
 		eventKeys: make(map[string]agentos.PlanEvent),
+		commands:  make(map[string]PlanCommandRecord),
 		auditKeys: make(map[string]AuditRecord),
 	}
 }
@@ -247,6 +249,85 @@ func (s *MemoryPlanStore) RecordAudit(_ context.Context, record AuditRecord) (Au
 	return record, true, nil
 }
 
+func (s *MemoryPlanStore) RecordPlanCommand(_ context.Context, command PlanCommandRecord) (PlanCommandRecord, bool, error) {
+	if command.PlanID == "" {
+		return PlanCommandRecord{}, false, fmt.Errorf("%w: plan id is required", agentos.ErrInvalidRunPlan)
+	}
+	if command.Action == "" {
+		return PlanCommandRecord{}, false, fmt.Errorf("%w: command action is required", agentos.ErrInvalidRunPlan)
+	}
+	if command.IdempotencyKey == "" {
+		return PlanCommandRecord{}, false, fmt.Errorf("%w: command idempotency key is required", agentos.ErrInvalidRunPlan)
+	}
+	if command.Status == "" {
+		command.Status = PlanCommandPending
+	}
+	if command.CreatedAt.IsZero() {
+		command.CreatedAt = time.Now().UTC()
+	}
+	if command.UpdatedAt.IsZero() {
+		command.UpdatedAt = command.CreatedAt
+	}
+	if command.CommandID == "" {
+		command.CommandID = command.PlanID + ":" + command.IdempotencyKey
+	}
+	if command.Payload == nil {
+		command.Payload = map[string]any{}
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if existing, ok := s.commands[command.IdempotencyKey]; ok {
+		if err := ValidatePlanCommandIdempotency(existing, command); err != nil {
+			return PlanCommandRecord{}, false, err
+		}
+
+		return existing, false, nil
+	}
+	s.commands[command.IdempotencyKey] = command
+
+	return command, true, nil
+}
+
+func (s *MemoryPlanStore) GetPlanCommand(_ context.Context, idempotencyKey string) (PlanCommandRecord, bool, error) {
+	if idempotencyKey == "" {
+		return PlanCommandRecord{}, false, fmt.Errorf("%w: command idempotency key is required", agentos.ErrInvalidRunPlan)
+	}
+
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	command, ok := s.commands[idempotencyKey]
+
+	return command, ok, nil
+}
+
+func (s *MemoryPlanStore) MarkPlanCommandDelivered(_ context.Context, idempotencyKey string) (PlanCommandRecord, error) {
+	return s.updatePlanCommandStatus(idempotencyKey, PlanCommandDelivered, "")
+}
+
+func (s *MemoryPlanStore) MarkPlanCommandFailed(_ context.Context, idempotencyKey string, reason string) (PlanCommandRecord, error) {
+	return s.updatePlanCommandStatus(idempotencyKey, PlanCommandFailed, reason)
+}
+
+func (s *MemoryPlanStore) updatePlanCommandStatus(idempotencyKey string, status PlanCommandStatus, reason string) (PlanCommandRecord, error) {
+	if idempotencyKey == "" {
+		return PlanCommandRecord{}, fmt.Errorf("%w: command idempotency key is required", agentos.ErrInvalidRunPlan)
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	command, ok := s.commands[idempotencyKey]
+	if !ok {
+		return PlanCommandRecord{}, fmt.Errorf("%w: command %q", agentos.ErrInvalidRunPlan, idempotencyKey)
+	}
+	command.Status = status
+	command.FailureReason = reason
+	command.UpdatedAt = time.Now().UTC()
+	s.commands[idempotencyKey] = command
+
+	return command, nil
+}
+
 func (s *MemoryPlanStore) GetAuditRecord(_ context.Context, idempotencyKey string) (AuditRecord, bool, error) {
 	if idempotencyKey == "" {
 		return AuditRecord{}, false, fmt.Errorf("%w: audit idempotency key is required", agentos.ErrInvalidRunPlan)
@@ -310,8 +391,9 @@ func (s *MemoryPlanStore) ListAuditRecords(_ context.Context, scope agentos.Plan
 }
 
 var (
-	_ PlanIndex      = (*MemoryPlanStore)(nil)
-	_ PlanStateStore = (*MemoryPlanStore)(nil)
-	_ PlanEventStore = (*MemoryPlanStore)(nil)
-	_ AuditStore     = (*MemoryPlanStore)(nil)
+	_ PlanIndex        = (*MemoryPlanStore)(nil)
+	_ PlanStateStore   = (*MemoryPlanStore)(nil)
+	_ PlanEventStore   = (*MemoryPlanStore)(nil)
+	_ PlanCommandStore = (*MemoryPlanStore)(nil)
+	_ AuditStore       = (*MemoryPlanStore)(nil)
 )

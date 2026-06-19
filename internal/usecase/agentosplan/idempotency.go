@@ -126,6 +126,37 @@ func ValidateAuditIdempotency(existing AuditRecord, requested AuditRecord) error
 	return nil
 }
 
+// ValidatePlanCommandIdempotency verifies that a command idempotency key is
+// replayed for the same durable control-plane command.
+func ValidatePlanCommandIdempotency(existing PlanCommandRecord, requested PlanCommandRecord) error {
+	if existing.PlanID != requested.PlanID {
+		return fmt.Errorf("%w: command idempotency key belongs to plan %q", agentos.ErrInvalidRunPlan, existing.PlanID)
+	}
+	if existing.ActorID != requested.ActorID {
+		return fmt.Errorf("%w: command idempotency key belongs to actor %q", agentos.ErrInvalidRunPlan, existing.ActorID)
+	}
+	if existing.Action != requested.Action {
+		return fmt.Errorf("%w: command idempotency key belongs to action %q", agentos.ErrInvalidRunPlan, existing.Action)
+	}
+	if existing.IdempotencyKey != requested.IdempotencyKey {
+		return fmt.Errorf("%w: command idempotency key mismatch", agentos.ErrInvalidRunPlan)
+	}
+
+	existingPayload, err := json.Marshal(normalizeAuditPayload(existing.Payload))
+	if err != nil {
+		return fmt.Errorf("%w: marshal existing command payload: %s", agentos.ErrInvalidRunPlan, err)
+	}
+	requestedPayload, err := json.Marshal(normalizeAuditPayload(requested.Payload))
+	if err != nil {
+		return fmt.Errorf("%w: marshal requested command payload: %s", agentos.ErrInvalidRunPlan, err)
+	}
+	if !bytes.Equal(existingPayload, requestedPayload) {
+		return fmt.Errorf("%w: command idempotency key was reused with a different payload", agentos.ErrInvalidRunPlan)
+	}
+
+	return nil
+}
+
 func normalizeAuditPayload(payload map[string]any) map[string]any {
 	if payload == nil {
 		return map[string]any{}
