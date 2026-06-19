@@ -72,6 +72,16 @@ type AgentOSPlanStreamScope struct {
 	AfterSequence int64  `query:"after_sequence"`
 }
 
+// AgentOSPlanEventScope selects durable plan events for REST history queries.
+type AgentOSPlanEventScope struct {
+	AccountID     string `query:"account_id" validate:"required"`
+	ProjectID     string `query:"project_id"`
+	NodeID        string `query:"node_id"`
+	RunID         string `query:"run_id"`
+	AfterSequence int64  `query:"after_sequence"`
+	Limit         int    `query:"limit"`
+}
+
 // AgentOSPlanAuditScope selects plan audit records for REST queries.
 type AgentOSPlanAuditScope struct {
 	AccountID string                  `query:"account_id" validate:"required"`

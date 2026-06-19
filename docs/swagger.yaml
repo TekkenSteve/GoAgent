@@ -267,6 +267,30 @@ definitions:
       to:
         type: string
     type: object
+  agentos.PlanEvent:
+    properties:
+      event_id:
+        type: string
+      event_type:
+        $ref: '#/definitions/agentos.EventType'
+      node_id:
+        type: string
+      payload:
+        additionalProperties: {}
+        type: object
+      plan_id:
+        type: string
+      run_id:
+        type: string
+      sequence:
+        type: integer
+      source:
+        type: string
+      thread_id:
+        type: string
+      timestamp:
+        type: string
+    type: object
   agentos.PlanJoinStrategy:
     enum:
     - all
@@ -919,10 +943,14 @@ definitions:
     - 1000000000
     - 60000000000
     - 3600000000000
+    - -9223372036854775808
+    - 9223372036854775807
     - 1
     - 1000
     - 1000000
     - 1000000000
+    - 60000000000
+    - 3600000000000
     format: int64
     type: integer
     x-enum-varnames:
@@ -934,10 +962,14 @@ definitions:
     - Second
     - Minute
     - Hour
+    - minDuration
+    - maxDuration
     - Nanosecond
     - Microsecond
     - Millisecond
     - Second
+    - Minute
+    - Hour
   v1.ingestAgentOSEventResponse:
     properties:
       duplicate:
@@ -1240,6 +1272,67 @@ paths:
           schema:
             $ref: '#/definitions/response.Error'
       summary: Stream AgentOS plan events
+      tags:
+      - agentos
+  /agentos/plans/{plan_id}/events/history:
+    get:
+      consumes:
+      - application/json
+      description: Query durable RunPlan events for timeline and debug views.
+      operationId: agentos-list-plan-events
+      parameters:
+      - description: Plan ID
+        in: path
+        name: plan_id
+        required: true
+        type: string
+      - description: Account ID
+        in: query
+        name: account_id
+        required: true
+        type: string
+      - description: Project ID
+        in: query
+        name: project_id
+        type: string
+      - description: Node ID
+        in: query
+        name: node_id
+        type: string
+      - description: Child run ID
+        in: query
+        name: run_id
+        type: string
+      - description: Only return events after this sequence
+        in: query
+        name: after_sequence
+        type: integer
+      - description: Maximum events
+        in: query
+        name: limit
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            items:
+              $ref: '#/definitions/agentos.PlanEvent'
+            type: array
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/response.Error'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/response.Error'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/response.Error'
+      summary: List AgentOS plan event history
       tags:
       - agentos
   /agentos/plans/{plan_id}/signals:

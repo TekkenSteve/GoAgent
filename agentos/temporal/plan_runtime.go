@@ -298,6 +298,20 @@ func (r *planRuntime) SubscribePlan(ctx context.Context, scope agentos.PlanStrea
 	return newPlanReplayThenLiveSubscription(events, live), nil
 }
 
+func (r *planRuntime) ListPlanEvents(ctx context.Context, scope agentos.PlanEventScope) ([]agentos.PlanEvent, error) {
+	if r.planEvents == nil {
+		return nil, errPlanRuntimePlanEventStoreRequired
+	}
+	if err := agentosplan.ValidatePlanEventScope(scope); err != nil {
+		return nil, err
+	}
+	if _, _, err := r.authorizePlan(ctx, agentos.PlanRef{PlanID: scope.PlanID, AccountID: scope.AccountID, ProjectID: scope.ProjectID}); err != nil {
+		return nil, err
+	}
+
+	return r.planEvents.ListPlanEvents(ctx, planEventStreamScope(scope), scope.Limit)
+}
+
 func (r *planRuntime) ListPlanAudits(ctx context.Context, scope agentos.PlanAuditScope) ([]agentos.PlanAuditRecord, error) {
 	if r.auditStore == nil {
 		return nil, errPlanRuntimeAuditStoreRequired
@@ -425,6 +439,17 @@ func filterPlanArtifactRefs(refs []agentos.ArtifactRef, scope agentos.PlanArtifa
 	}
 
 	return filtered
+}
+
+func planEventStreamScope(scope agentos.PlanEventScope) agentos.PlanStreamScope {
+	return agentos.PlanStreamScope{
+		PlanID:        scope.PlanID,
+		AccountID:     scope.AccountID,
+		ProjectID:     scope.ProjectID,
+		NodeID:        scope.NodeID,
+		RunID:         scope.RunID,
+		AfterSequence: scope.AfterSequence,
+	}
 }
 
 func planArtifactRefMatches(ref agentos.ArtifactRef, scope agentos.PlanArtifactScope) bool {

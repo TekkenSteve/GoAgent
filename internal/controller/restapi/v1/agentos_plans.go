@@ -302,6 +302,53 @@ func (r *V1) getAgentOSPlanArtifact(ctx *fiber.Ctx) error {
 	return ctx.Status(http.StatusOK).JSON(artifact)
 }
 
+// @Summary     List AgentOS plan event history
+// @Description Query durable RunPlan events for timeline and debug views.
+// @ID          agentos-list-plan-events
+// @Tags        agentos
+// @Accept      json
+// @Produce     json
+// @Param       plan_id path string true "Plan ID"
+// @Param       account_id query string true "Account ID"
+// @Param       project_id query string false "Project ID"
+// @Param       node_id query string false "Node ID"
+// @Param       run_id query string false "Child run ID"
+// @Param       after_sequence query int false "Only return events after this sequence"
+// @Param       limit query int false "Maximum events"
+// @Success     200 {array} agentos.PlanEvent
+// @Failure     400 {object} response.Error
+// @Failure     404 {object} response.Error
+// @Failure     500 {object} response.Error
+// @Router      /agentos/plans/{plan_id}/events/history [get]
+func (r *V1) listAgentOSPlanEvents(ctx *fiber.Ctx) error {
+	if r.planRuntime == nil {
+		return errorResponse(ctx, http.StatusNotFound, "agentos plan runtime is not configured")
+	}
+
+	var req request.AgentOSPlanEventScope
+	if err := ctx.QueryParser(&req); err != nil {
+		return errorResponse(ctx, http.StatusBadRequest, "invalid event scope")
+	}
+	if err := r.v.Struct(&req); err != nil {
+		return errorResponse(ctx, http.StatusBadRequest, err.Error())
+	}
+
+	events, err := r.planRuntime.ListPlanEvents(ctx.UserContext(), agentos.PlanEventScope{
+		PlanID:        ctx.Params("plan_id"),
+		AccountID:     req.AccountID,
+		ProjectID:     req.ProjectID,
+		NodeID:        req.NodeID,
+		RunID:         req.RunID,
+		AfterSequence: req.AfterSequence,
+		Limit:         req.Limit,
+	})
+	if err != nil {
+		return agentOSError(ctx, err)
+	}
+
+	return ctx.Status(http.StatusOK).JSON(events)
+}
+
 // @Summary     Stream AgentOS plan events
 // @Description Stream durable RunPlan events as Server-Sent Events.
 // @ID          agentos-stream-plan-events

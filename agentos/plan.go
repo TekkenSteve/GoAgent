@@ -241,6 +241,17 @@ type PlanStreamScope struct {
 	AfterSequence int64  `json:"after_sequence,omitempty"`
 }
 
+// PlanEventScope selects durable plan events for timeline/debug queries.
+type PlanEventScope struct {
+	PlanID        string `json:"plan_id"`
+	AccountID     string `json:"account_id"`
+	ProjectID     string `json:"project_id,omitempty"`
+	NodeID        string `json:"node_id,omitempty"`
+	RunID         string `json:"run_id,omitempty"`
+	AfterSequence int64  `json:"after_sequence,omitempty"`
+	Limit         int    `json:"limit,omitempty"`
+}
+
 // PlanEvent is the public event envelope for plan-level events.
 type PlanEvent struct {
 	Event

@@ -28,6 +28,22 @@ func ValidatePlanStreamScope(scope agentos.PlanStreamScope) error {
 	})
 }
 
+// ValidatePlanEventScope validates durable event history query scope.
+func ValidatePlanEventScope(scope agentos.PlanEventScope) error {
+	if err := ValidatePlanRef(agentos.PlanRef{
+		PlanID:    scope.PlanID,
+		AccountID: scope.AccountID,
+		ProjectID: scope.ProjectID,
+	}); err != nil {
+		return err
+	}
+	if scope.Limit < 0 {
+		return fmt.Errorf("%w: event limit must be non-negative", agentos.ErrInvalidPlanScope)
+	}
+
+	return nil
+}
+
 // ValidatePlanAuditScope validates durable audit query scope.
 func ValidatePlanAuditScope(scope agentos.PlanAuditScope) error {
 	if err := ValidatePlanRef(agentos.PlanRef{

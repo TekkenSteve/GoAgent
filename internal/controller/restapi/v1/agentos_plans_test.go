@@ -152,6 +152,27 @@ func TestAgentOSPlanRoutesUsePlanRuntime(t *testing.T) {
 	if artifact.Ref.ArtifactID != "artifact-1" || artifact.Payload.(map[string]any)["summary"] != "ok" {
 		t.Fatalf("unexpected artifact: %#v", artifact)
 	}
+
+	resp = doAgentOSRouteRequest(t, app, http.MethodGet, "/v1/agentos/plans/plan-1/events/history?account_id=acct-1&node_id=research&run_id=run-research&after_sequence=7&limit=3", "")
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("event history status = %d", resp.StatusCode)
+	}
+	if planRuntime.eventScope.PlanID != "plan-1" ||
+		planRuntime.eventScope.AccountID != "acct-1" ||
+		planRuntime.eventScope.NodeID != "research" ||
+		planRuntime.eventScope.RunID != "run-research" ||
+		planRuntime.eventScope.AfterSequence != 7 ||
+		planRuntime.eventScope.Limit != 3 {
+		t.Fatalf("unexpected event scope: %#v", planRuntime.eventScope)
+	}
+	var planEvents []agentos.PlanEvent
+	if err := json.NewDecoder(resp.Body).Decode(&planEvents); err != nil {
+		t.Fatalf("decode event history: %v", err)
+	}
+	if len(planEvents) != 1 || planEvents[0].PlanID != "plan-1" || planEvents[0].NodeID != "research" {
+		t.Fatalf("unexpected event history: %#v", planEvents)
+	}
 }
 
 func TestAgentOSPlanEventRouteStreamsSSE(t *testing.T) {
@@ -204,6 +225,7 @@ type fakePlanRuntime struct {
 	controlRef       agentos.PlanRef
 	control          agentos.ControlRequest
 	scope            agentos.PlanStreamScope
+	eventScope       agentos.PlanEventScope
 	auditScope       agentos.PlanAuditScope
 	artifactScope    agentos.PlanArtifactScope
 	artifactGetScope agentos.PlanArtifactScope
@@ -252,6 +274,24 @@ func (r *fakePlanRuntime) SubscribePlan(_ context.Context, scope agentos.PlanStr
 	close(events)
 
 	return fakeSubscription{events: events}, nil
+}
+
+func (r *fakePlanRuntime) ListPlanEvents(_ context.Context, scope agentos.PlanEventScope) ([]agentos.PlanEvent, error) {
+	r.eventScope = scope
+
+	return []agentos.PlanEvent{
+		{
+			Event: agentos.Event{
+				EventID:   "plan-event-1",
+				EventType: agentos.EventPlanNodeStarted,
+				RunID:     "run-research",
+				Sequence:  8,
+				Timestamp: time.Now(),
+			},
+			PlanID: scope.PlanID,
+			NodeID: "research",
+		},
+	}, nil
 }
 
 func (r *fakePlanRuntime) ListPlanAudits(_ context.Context, scope agentos.PlanAuditScope) ([]agentos.PlanAuditRecord, error) {

@@ -101,6 +101,10 @@ func TestPlanRuntimeWithoutPostgresDoesNotInstallMemoryPlanStores(t *testing.T) 
 	if !errors.Is(err, errPlanRuntimePlanEventStoreRequired) {
 		t.Fatalf("SubscribePlan error = %v, want missing durable plan event store", err)
 	}
+	_, err = rt.ListPlanEvents(t.Context(), agentos.PlanEventScope{PlanID: "plan-1", AccountID: "acct-1"})
+	if !errors.Is(err, errPlanRuntimePlanEventStoreRequired) {
+		t.Fatalf("ListPlanEvents error = %v, want missing durable plan event store", err)
+	}
 }
 
 func TestPlanRuntimeStatusPlanReportsMissingDurablePlan(t *testing.T) {
@@ -143,6 +147,59 @@ func TestPlanRuntimeSubscribePlanEnforcesTenantScope(t *testing.T) {
 	event := <-sub.Events()
 	if event.EventType != agentos.EventPlanStarted {
 		t.Fatalf("event = %#v", event)
+	}
+}
+
+func TestPlanRuntimeListPlanEventsEnforcesTenantScopeAndFilters(t *testing.T) {
+	store, ref := newPlanRuntimeTestStore(t)
+	events := []agentos.PlanEvent{
+		{
+			Event:  agentos.Event{EventType: agentos.EventPlanStarted},
+			PlanID: ref.PlanID,
+		},
+		{
+			Event:  agentos.Event{EventType: agentos.EventPlanNodeStarted, RunID: "run-research"},
+			PlanID: ref.PlanID,
+			NodeID: "research",
+		},
+		{
+			Event:  agentos.Event{EventType: agentos.EventPlanNodeSucceeded, RunID: "run-research"},
+			PlanID: ref.PlanID,
+			NodeID: "research",
+		},
+		{
+			Event:  agentos.Event{EventType: agentos.EventPlanNodeStarted, RunID: "run-verify"},
+			PlanID: ref.PlanID,
+			NodeID: "verify",
+		},
+	}
+	keys := []string{"event-1", "event-2", "event-3", "event-4"}
+	for i, event := range events {
+		if _, err := store.AppendPlanEvent(t.Context(), event, keys[i]); err != nil {
+			t.Fatalf("AppendPlanEvent %d: %v", i, err)
+		}
+	}
+	rt := &planRuntime{planIndex: store, planEvents: store}
+
+	_, err := rt.ListPlanEvents(t.Context(), agentos.PlanEventScope{PlanID: ref.PlanID, AccountID: "acct-other", ProjectID: ref.ProjectID})
+	if !errors.Is(err, agentos.ErrPlanRouteNotFound) {
+		t.Fatalf("ListPlanEvents mismatch error = %v, want ErrPlanRouteNotFound", err)
+	}
+
+	got, err := rt.ListPlanEvents(t.Context(), agentos.PlanEventScope{
+		PlanID:        ref.PlanID,
+		AccountID:     ref.AccountID,
+		ProjectID:     ref.ProjectID,
+		NodeID:        "research",
+		RunID:         "run-research",
+		AfterSequence: 1,
+		Limit:         1,
+	})
+	if err != nil {
+		t.Fatalf("ListPlanEvents scoped: %v", err)
+	}
+	if len(got) != 1 || got[0].EventType != agentos.EventPlanNodeStarted || got[0].NodeID != "research" || got[0].RunID != "run-research" {
+		t.Fatalf("events = %#v", got)
 	}
 }
 
