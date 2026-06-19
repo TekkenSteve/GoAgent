@@ -49,13 +49,12 @@ func TestPlanActivitiesStartStatusControl(t *testing.T) {
 	}
 }
 
-func TestPlanActivitiesStartResolvesMappedInput(t *testing.T) {
+func TestPlanActivitiesResolvePlanNodeInputMapsInput(t *testing.T) {
 	runtime := &fakePlanRuntime{}
 	activities := NewPlanActivities(runtime)
 	ref := agentos.BackendRef{Kind: agentos.BackendKindNative, Name: agentos.BackendNameGoAgentNative}
 
-	started, err := activities.StartPlanNodeActivity(context.Background(), startPlanNodeInput{
-		PlanID: "plan-1",
+	resolved, err := activities.ResolvePlanNodeInputActivity(context.Background(), resolvePlanNodeInputInput{
 		PlanInputs: map[string]any{
 			"task": map[string]any{"topic": "artifact routing"},
 		},
@@ -72,16 +71,16 @@ func TestPlanActivitiesStartResolvesMappedInput(t *testing.T) {
 		},
 	})
 	if err != nil {
-		t.Fatalf("StartPlanNodeActivity: %v", err)
+		t.Fatalf("ResolvePlanNodeInputActivity: %v", err)
 	}
-	if started.Status.RunID != "run-1" {
-		t.Fatalf("started = %#v", started)
+	if resolved.Input["existing"] != true {
+		t.Fatalf("existing input = %#v", resolved.Input)
 	}
-	if runtime.started.Input["existing"] != true {
-		t.Fatalf("existing input = %#v", runtime.started.Input)
+	if resolved.Input["topic"] != "artifact routing" {
+		t.Fatalf("topic input = %#v", resolved.Input)
 	}
-	if runtime.started.Input["topic"] != "artifact routing" {
-		t.Fatalf("topic input = %#v", runtime.started.Input)
+	if resolved.Trace.MappingCount != 1 || resolved.Trace.InputDigest == "" {
+		t.Fatalf("trace = %#v", resolved.Trace)
 	}
 }
 

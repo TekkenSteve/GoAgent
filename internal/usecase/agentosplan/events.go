@@ -60,6 +60,18 @@ func PlanEventFromStateEvent(spec agentos.RunPlanSpec, status agentos.RunPlanSta
 		payload["budget_delta"] = event.BudgetDelta
 		payload["budget_usage"] = status.BudgetUsage
 	}
+	if event.PreviousLifecycleState != "" || event.NextLifecycleState != "" {
+		payload["transition"] = map[string]any{
+			"previous_lifecycle_state": event.PreviousLifecycleState,
+			"next_lifecycle_state":     event.NextLifecycleState,
+		}
+	}
+	if event.InputTrace.InputDigest != "" || event.InputTrace.MappingCount > 0 {
+		payload["input_resolution"] = event.InputTrace
+	}
+	if event.Capability.Capability != "" {
+		payload["capability"] = event.Capability
+	}
 
 	planEvent := agentos.PlanEvent{
 		Event: agentos.Event{
@@ -282,6 +294,10 @@ func planEventType(kind EventKind) (agentos.EventType, error) {
 		return agentos.EventPlanNodeSkipped, nil
 	case EventNodeCanceled:
 		return agentos.EventPlanNodeCanceled, nil
+	case EventNodeInputResolved:
+		return agentos.EventNodeInputResolved, nil
+	case EventCapabilitySelected:
+		return agentos.EventCapabilitySelected, nil
 	case EventArtifactsPublished:
 		return agentos.EventNodeOutputPublished, nil
 	case EventBudgetReported:

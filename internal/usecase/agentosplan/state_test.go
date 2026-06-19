@@ -170,3 +170,29 @@ func TestStateBudgetReportedAccumulatesPlanAndNodeUsage(t *testing.T) {
 		t.Fatalf("transitions = %d, want 1", state.AppliedTransitions())
 	}
 }
+
+func TestStateDebugTraceEventsTouchNodeWithoutChangingLifecycle(t *testing.T) {
+	now := time.Date(2026, 6, 19, 12, 0, 0, 0, time.UTC)
+	ref := agentos.BackendRef{Kind: agentos.BackendKindNative, Name: agentos.BackendNameGoAgentNative}
+	state := NewState(agentos.RunPlanSpec{
+		PlanID: "plan-debug",
+		Nodes: []agentos.PlanNodeSpec{
+			{NodeID: "node-1", Run: agentos.RunSpec{RunID: "run-1", Backend: ref}},
+		},
+	}, now)
+
+	if err := state.Apply(StateEvent{Kind: EventCapabilitySelected, NodeID: "node-1", At: now.Add(time.Second)}); err != nil {
+		t.Fatalf("Apply capability: %v", err)
+	}
+	if err := state.Apply(StateEvent{Kind: EventNodeInputResolved, NodeID: "node-1", RunID: "run-1", At: now.Add(2 * time.Second)}); err != nil {
+		t.Fatalf("Apply input: %v", err)
+	}
+
+	node, _ := state.NodeStatus("node-1")
+	if node.LifecycleState != agentos.PlanNodePending {
+		t.Fatalf("lifecycle = %q, want pending", node.LifecycleState)
+	}
+	if state.AppliedTransitions() != 2 {
+		t.Fatalf("transitions = %d, want 2", state.AppliedTransitions())
+	}
+}

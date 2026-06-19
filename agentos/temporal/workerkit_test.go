@@ -79,6 +79,7 @@ func TestWorkerKitRegistersPlanWorkflowAndActivities(t *testing.T) {
 	}
 	for _, name := range []string{
 		ValidatePlanActivityName,
+		ResolvePlanNodeInputActivityName,
 		StartPlanNodeActivityName,
 		StatusPlanNodeActivityName,
 		ControlPlanNodeActivityName,

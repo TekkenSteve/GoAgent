@@ -66,6 +66,59 @@ func TestPlanWorkflowExecutesSuccessEdgeAndPublishesArtifacts(t *testing.T) {
 	require.Equal(t, "research", result.Artifacts[0].NodeID)
 }
 
+func TestPlanWorkflowPublishesDebugTraceEvents(t *testing.T) {
+	t.Parallel()
+
+	ref := agentos.BackendRef{Kind: agentos.BackendKindNative, Name: agentos.BackendNameGoAgentNative}
+	spec := agentos.RunPlanSpec{
+		PlanID: "plan-debug-trace",
+		Inputs: map[string]any{
+			"task": map[string]any{"topic": "durable trace"},
+		},
+		Nodes: []agentos.PlanNodeSpec{
+			{
+				NodeID:     "research",
+				Capability: "run",
+				Run: agentos.RunSpec{
+					RunID:   "run-research",
+					Backend: ref,
+					Input:   map[string]any{"existing": true},
+				},
+				Inputs: []agentos.InputMapping{
+					{Target: "topic", SourcePath: "task.topic", Required: true},
+				},
+			},
+		},
+	}
+	store := agentosplan.NewMemoryPlanStore()
+	mocks := &planWorkflowMocks{
+		statuses: map[string]agentos.RunStatus{
+			"run-research": {RunID: "run-research", LifecycleState: "completed"},
+		},
+	}
+	env := newPlanWorkflowTestEnvWithStores(mocks, []agentos.Capability{
+		{Backend: ref, Name: "run", Controls: []agentos.ControlOperation{agentos.ControlCancel}},
+	}, store, agentosplan.NewMemoryArtifactStore())
+
+	env.ExecuteWorkflow(PlanWorkflow, planWorkflowInput{Spec: spec})
+
+	require.True(t, env.IsWorkflowCompleted())
+	require.NoError(t, env.GetWorkflowError())
+	require.Len(t, mocks.startedInputs, 1)
+	require.Equal(t, "durable trace", mocks.startedInputs[0]["topic"])
+
+	events, err := store.ListPlanEvents(context.Background(), agentos.PlanStreamScope{PlanID: spec.PlanID}, 0)
+	require.NoError(t, err)
+	capabilityEvent := findPlanEventByType(events, agentos.EventCapabilitySelected)
+	require.NotNil(t, capabilityEvent)
+	require.NotNil(t, capabilityEvent.Payload["capability"])
+	require.NotNil(t, capabilityEvent.Payload["transition"])
+	inputEvent := findPlanEventByType(events, agentos.EventNodeInputResolved)
+	require.NotNil(t, inputEvent)
+	require.NotNil(t, inputEvent.Payload["input_resolution"])
+	require.NotNil(t, inputEvent.Payload["transition"])
+}
+
 func TestPlanWorkflowErrorEdgeRunsRecoveryButPlanRemainsFailed(t *testing.T) {
 	t.Parallel()
 
@@ -330,6 +383,7 @@ func TestPlanWorkflowOrchestratesMixedBackendsThroughRuntime(t *testing.T) {
 	env.RegisterWorkflowWithOptions(PlanWorkflow, workflow.RegisterOptions{Name: PlanWorkflowName})
 	env.RegisterActivityWithOptions(activities.ValidatePlanActivity, activity.RegisterOptions{Name: ValidatePlanActivityName})
 	env.RegisterActivityWithOptions(activities.PersistPlanStateActivity, activity.RegisterOptions{Name: PersistPlanStateActivityName})
+	env.RegisterActivityWithOptions(activities.ResolvePlanNodeInputActivity, activity.RegisterOptions{Name: ResolvePlanNodeInputActivityName})
 	env.RegisterActivityWithOptions(activities.StartPlanNodeActivity, activity.RegisterOptions{Name: StartPlanNodeActivityName})
 	env.RegisterActivityWithOptions(activities.StatusPlanNodeActivity, activity.RegisterOptions{Name: StatusPlanNodeActivityName})
 	env.RegisterActivityWithOptions(activities.ControlPlanNodeActivity, activity.RegisterOptions{Name: ControlPlanNodeActivityName})
@@ -527,6 +581,7 @@ func TestPlanWorkflowContinuedInputRestoresSnapshotStatus(t *testing.T) {
 
 type planWorkflowMocks struct {
 	started         []string
+	startedInputs   []map[string]any
 	statuses        map[string]agentos.RunStatus
 	statusSequences map[string][]agentos.RunStatus
 	controls        []controlPlanNodeInput
@@ -562,6 +617,7 @@ func newPlanWorkflowTestEnvWithStores(mocks *planWorkflowMocks, capabilities []a
 	}
 	env.RegisterActivityWithOptions(activities.ValidatePlanActivity, activity.RegisterOptions{Name: ValidatePlanActivityName})
 	env.RegisterActivityWithOptions(activities.PersistPlanStateActivity, activity.RegisterOptions{Name: PersistPlanStateActivityName})
+	env.RegisterActivityWithOptions(activities.ResolvePlanNodeInputActivity, activity.RegisterOptions{Name: ResolvePlanNodeInputActivityName})
 	env.RegisterActivityWithOptions(mocks.start, activity.RegisterOptions{Name: StartPlanNodeActivityName})
 	env.RegisterActivityWithOptions(mocks.status, activity.RegisterOptions{Name: StatusPlanNodeActivityName})
 	env.RegisterActivityWithOptions(mocks.control, activity.RegisterOptions{Name: ControlPlanNodeActivityName})
@@ -573,6 +629,7 @@ func newPlanWorkflowTestEnvWithStores(mocks *planWorkflowMocks, capabilities []a
 
 func (m *planWorkflowMocks) start(_ context.Context, input startPlanNodeInput) (startPlanNodeOutput, error) {
 	m.started = append(m.started, input.Node.Run.RunID)
+	m.startedInputs = append(m.startedInputs, input.Node.Run.Input)
 
 	return startPlanNodeOutput{Status: agentos.RunStatus{RunID: input.Node.Run.RunID, LifecycleState: "running"}}, nil
 }
@@ -715,4 +772,14 @@ func mixedBackendCapabilities(refs []agentos.BackendRef) []agentos.Capability {
 	}
 
 	return capabilities
+}
+
+func findPlanEventByType(events []agentos.PlanEvent, eventType agentos.EventType) *agentos.PlanEvent {
+	for i := range events {
+		if events[i].EventType == eventType {
+			return &events[i]
+		}
+	}
+
+	return nil
 }

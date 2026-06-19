@@ -153,6 +153,51 @@ func TestPlanEventFromBudgetReportedUsesPublicUsageEvent(t *testing.T) {
 	}
 }
 
+func TestPlanEventFromDebugTraceEvents(t *testing.T) {
+	at := time.Date(2026, 6, 19, 12, 0, 0, 0, time.UTC)
+	spec := agentos.RunPlanSpec{PlanID: "plan-1"}
+	status := agentos.RunPlanStatus{PlanID: "plan-1", LifecycleState: agentos.PlanLifecycleRunning, UpdatedAt: at}
+
+	capabilityEvent, _, err := PlanEventFromStateEvent(spec, status, StateEvent{
+		Kind:                   EventCapabilitySelected,
+		NodeID:                 "node-1",
+		Capability:             CapabilitySelectionTrace{Backend: agentos.BackendRef{Kind: agentos.BackendKindHTTP, Name: "research"}, Capability: "run", HasOutputSchema: true},
+		PreviousLifecycleState: agentos.PlanNodePending,
+		NextLifecycleState:     agentos.PlanNodePending,
+		At:                     at,
+	})
+	if err != nil {
+		t.Fatalf("PlanEventFromStateEvent capability: %v", err)
+	}
+	if capabilityEvent.EventType != agentos.EventCapabilitySelected || capabilityEvent.Payload["capability"] == nil {
+		t.Fatalf("capability event = %#v", capabilityEvent)
+	}
+	if capabilityEvent.Payload["transition"] == nil {
+		t.Fatalf("capability event missing transition = %#v", capabilityEvent.Payload)
+	}
+
+	inputEvent, _, err := PlanEventFromStateEvent(spec, status, StateEvent{
+		Kind:   EventNodeInputResolved,
+		NodeID: "node-1",
+		RunID:  "run-1",
+		InputTrace: InputResolutionTrace{
+			InputDigest:  "abc123",
+			InputKeys:    []string{"topic"},
+			MappingCount: 1,
+			Mappings: []InputMappingTrace{
+				{Target: "topic", SourcePath: "task.topic", Required: true},
+			},
+		},
+		At: at,
+	})
+	if err != nil {
+		t.Fatalf("PlanEventFromStateEvent input: %v", err)
+	}
+	if inputEvent.EventType != agentos.EventNodeInputResolved || inputEvent.Payload["input_resolution"] == nil {
+		t.Fatalf("input event = %#v", inputEvent)
+	}
+}
+
 func TestNodeStartIdempotencyKeyIncludesAttempt(t *testing.T) {
 	first, err := NodeStartIdempotencyKey("plan-1", "node-1", 1)
 	if err != nil {

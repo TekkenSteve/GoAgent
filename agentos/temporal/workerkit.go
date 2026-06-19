@@ -43,6 +43,9 @@ func RegisterPlanActivities(w worker.Worker, activities *PlanActivities) error {
 	w.RegisterActivityWithOptions(activities.ValidatePlanActivity, activity.RegisterOptions{
 		Name: ValidatePlanActivityName,
 	})
+	w.RegisterActivityWithOptions(activities.ResolvePlanNodeInputActivity, activity.RegisterOptions{
+		Name: ResolvePlanNodeInputActivityName,
+	})
 	w.RegisterActivityWithOptions(activities.StartPlanNodeActivity, activity.RegisterOptions{
 		Name: StartPlanNodeActivityName,
 	})

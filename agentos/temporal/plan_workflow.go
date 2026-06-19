@@ -18,6 +18,7 @@ const (
 	PlanSignalName                    = "agentos.plan.signal"
 	PlanControlSignalName             = "agentos.plan.control"
 	ValidatePlanActivityName          = "AgentOSValidatePlan"
+	ResolvePlanNodeInputActivityName  = "AgentOSResolvePlanNodeInput"
 	StartPlanNodeActivityName         = "AgentOSStartPlanNode"
 	StatusPlanNodeActivityName        = "AgentOSStatusPlanNode"
 	ControlPlanNodeActivityName       = "AgentOSControlPlanNode"
@@ -244,9 +245,11 @@ func applyPlanStateEvent(activityCtx workflow.Context, workflowCtx workflow.Cont
 	if event.At.IsZero() {
 		event.At = workflow.Now(workflowCtx)
 	}
+	event.PreviousLifecycleState = lifecycleForEvent(state.Status, event)
 	if err := state.Apply(event); err != nil {
 		return err
 	}
+	event.NextLifecycleState = lifecycleForEvent(state.Status, event)
 	planEvent, idempotencyKey, err := agentosplan.PlanEventFromStateEvent(spec, state.Status, event)
 	if err != nil {
 		return err
@@ -265,7 +268,25 @@ func applyPlanStateEvent(activityCtx workflow.Context, workflowCtx workflow.Cont
 	return nil
 }
 
+func lifecycleForEvent(status agentos.RunPlanStatus, event agentosplan.StateEvent) string {
+	if event.NodeID == "" {
+		return status.LifecycleState
+	}
+	for _, node := range status.Nodes {
+		if node.NodeID == event.NodeID {
+			return node.LifecycleState
+		}
+	}
+
+	return ""
+}
+
 func startPlanNode(activityCtx workflow.Context, workflowCtx workflow.Context, spec *agentos.RunPlanSpec, state *agentosplan.State, validation *validatePlanOutput, expansionCount *int32, node agentos.PlanNodeSpec, incomingEdges []agentos.PlanEdgeSpec) error {
+	if capability, ok := validation.CapabilitiesByNode[node.NodeID]; ok {
+		if err := applyPlanStateEvent(activityCtx, workflowCtx, *spec, state, agentosplan.StateEvent{Kind: agentosplan.EventCapabilitySelected, NodeID: node.NodeID, Capability: capability}); err != nil {
+			return err
+		}
+	}
 	if err := applyPlanStateEvent(activityCtx, workflowCtx, *spec, state, agentosplan.StateEvent{Kind: agentosplan.EventNodeReady, NodeID: node.NodeID}); err != nil {
 		return err
 	}
@@ -274,18 +295,28 @@ func startPlanNode(activityCtx workflow.Context, workflowCtx workflow.Context, s
 	if err != nil {
 		return err
 	}
+	var resolved resolvePlanNodeInputOutput
+	if err := workflow.ExecuteActivity(activityCtx, ResolvePlanNodeInputActivityName, resolvePlanNodeInputInput{
+		PlanInputs: spec.Inputs,
+		Status:     state.Status,
+		Node:       attemptNode,
+		Edges:      incomingEdges,
+	}).Get(activityCtx, &resolved); err != nil {
+		return applyNodeAttemptFailure(activityCtx, workflowCtx, *spec, state, node, attemptNode.Run.RunID, fmt.Sprintf("resolve input for attempt %d failed: %s", attempt, err))
+	}
+	attemptNode.Run.Input = resolved.Input
+	if err := applyPlanStateEvent(activityCtx, workflowCtx, *spec, state, agentosplan.StateEvent{Kind: agentosplan.EventNodeInputResolved, NodeID: node.NodeID, RunID: attemptNode.Run.RunID, InputTrace: resolved.Trace}); err != nil {
+		return err
+	}
 	if err := applyPlanStateEvent(activityCtx, workflowCtx, *spec, state, agentosplan.StateEvent{Kind: agentosplan.EventNodeStarted, NodeID: node.NodeID, RunID: attemptNode.Run.RunID, Attempt: attempt}); err != nil {
 		return err
 	}
 
 	var started startPlanNodeOutput
 	if err := workflow.ExecuteActivity(activityCtx, StartPlanNodeActivityName, startPlanNodeInput{
-		PlanID:     spec.PlanID,
-		PlanInputs: spec.Inputs,
-		Status:     state.Status,
-		Node:       attemptNode,
-		Edges:      incomingEdges,
-		Attempt:    attempt,
+		PlanID:  spec.PlanID,
+		Node:    attemptNode,
+		Attempt: attempt,
 	}).Get(activityCtx, &started); err != nil {
 		return applyNodeAttemptFailure(activityCtx, workflowCtx, *spec, state, node, attemptNode.Run.RunID, fmt.Sprintf("start attempt %d failed: %s", attempt, err))
 	}

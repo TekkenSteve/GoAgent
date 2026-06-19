@@ -106,21 +106,27 @@ const (
 	EventNodeRetryScheduled EventKind = "node.retry_scheduled"
 	EventNodeSkipped        EventKind = "node.skipped"
 	EventNodeCanceled       EventKind = "node.canceled"
+	EventNodeInputResolved  EventKind = "node.input_resolved"
+	EventCapabilitySelected EventKind = "capability.selected"
 	EventArtifactsPublished EventKind = "artifacts.published"
 	EventBudgetReported     EventKind = "budget.reported"
 )
 
 // StateEvent transitions plan state.
 type StateEvent struct {
-	Kind        EventKind               `json:"kind"`
-	NodeID      string                  `json:"node_id,omitempty"`
-	RunID       string                  `json:"run_id,omitempty"`
-	Reason      string                  `json:"reason,omitempty"`
-	Attempt     int32                   `json:"attempt,omitempty"`
-	Expansion   PlanDelta               `json:"expansion,omitempty"`
-	Artifacts   []agentos.ArtifactRef   `json:"artifacts,omitempty"`
-	BudgetDelta agentos.PlanBudgetUsage `json:"budget_delta,omitempty"`
-	At          time.Time               `json:"at,omitempty"`
+	Kind                   EventKind                `json:"kind"`
+	NodeID                 string                   `json:"node_id,omitempty"`
+	RunID                  string                   `json:"run_id,omitempty"`
+	Reason                 string                   `json:"reason,omitempty"`
+	Attempt                int32                    `json:"attempt,omitempty"`
+	Expansion              PlanDelta                `json:"expansion,omitempty"`
+	Artifacts              []agentos.ArtifactRef    `json:"artifacts,omitempty"`
+	BudgetDelta            agentos.PlanBudgetUsage  `json:"budget_delta,omitempty"`
+	InputTrace             InputResolutionTrace     `json:"input_trace,omitempty"`
+	Capability             CapabilitySelectionTrace `json:"capability,omitempty"`
+	PreviousLifecycleState string                   `json:"previous_lifecycle_state,omitempty"`
+	NextLifecycleState     string                   `json:"next_lifecycle_state,omitempty"`
+	At                     time.Time                `json:"at,omitempty"`
 }
 
 // Apply applies one deterministic state transition.
@@ -166,6 +172,8 @@ func (s *State) Apply(event StateEvent) error {
 		return s.transitionNode(event.NodeID, agentos.PlanNodeSkipped, event, at)
 	case EventNodeCanceled:
 		return s.transitionNode(event.NodeID, agentos.PlanNodeCanceled, event, at)
+	case EventNodeInputResolved, EventCapabilitySelected:
+		return s.touchNode(event.NodeID, at)
 	case EventArtifactsPublished:
 		if event.NodeID != "" {
 			node, ok := s.nodes[event.NodeID]
@@ -181,6 +189,21 @@ func (s *State) Apply(event StateEvent) error {
 		return s.reportBudget(event, at)
 	default:
 		return fmt.Errorf("%w: unknown plan event %q", agentos.ErrInvalidRunPlan, event.Kind)
+	}
+	s.refresh(at)
+	s.transitions++
+
+	return nil
+}
+
+func (s *State) touchNode(nodeID string, at time.Time) error {
+	if nodeID != "" {
+		node, ok := s.nodes[nodeID]
+		if !ok {
+			return fmt.Errorf("%w: unknown node %q", agentos.ErrInvalidRunPlan, nodeID)
+		}
+		node.UpdatedAt = at
+		s.nodes[nodeID] = node
 	}
 	s.refresh(at)
 	s.transitions++

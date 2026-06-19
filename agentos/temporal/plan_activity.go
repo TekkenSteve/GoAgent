@@ -101,8 +101,9 @@ type validatePlanInput struct {
 }
 
 type validatePlanOutput struct {
-	Plan           agentosplan.ExecutablePlan
-	ControlsByNode map[string][]agentos.ControlOperation
+	Plan               agentosplan.ExecutablePlan
+	ControlsByNode     map[string][]agentos.ControlOperation
+	CapabilitiesByNode map[string]agentosplan.CapabilitySelectionTrace
 }
 
 // ValidatePlanActivity validates a RunPlan before workflow execution.
@@ -116,8 +117,16 @@ func (a *PlanActivities) ValidatePlanActivity(ctx context.Context, input validat
 	if err != nil {
 		return validatePlanOutput{}, err
 	}
+	capabilitiesByNode, err := a.capabilitiesByNode(ctx, plan)
+	if err != nil {
+		return validatePlanOutput{}, err
+	}
 
-	return validatePlanOutput{Plan: plan, ControlsByNode: controlsByNode}, nil
+	return validatePlanOutput{
+		Plan:               plan,
+		ControlsByNode:     controlsByNode,
+		CapabilitiesByNode: capabilitiesByNode,
+	}, nil
 }
 
 func (a *PlanActivities) controlsByNode(ctx context.Context, plan agentosplan.ExecutablePlan) (map[string][]agentos.ControlOperation, error) {
@@ -140,13 +149,58 @@ func (a *PlanActivities) controlsByNode(ctx context.Context, plan agentosplan.Ex
 	return controlsByNode, nil
 }
 
-type startPlanNodeInput struct {
-	PlanID     string
+func (a *PlanActivities) capabilitiesByNode(ctx context.Context, plan agentosplan.ExecutablePlan) (map[string]agentosplan.CapabilitySelectionTrace, error) {
+	capabilitiesByNode := make(map[string]agentosplan.CapabilitySelectionTrace)
+	for _, node := range plan.Spec.Nodes {
+		if node.Capability == "" || a.Validator.Capabilities == nil {
+			continue
+		}
+		capability, ok, err := a.Validator.Capabilities.GetCapability(ctx, node.Run.Backend, node.Capability)
+		if err != nil {
+			return nil, err
+		}
+		if !ok {
+			return nil, fmt.Errorf("%w: node %q capability %s/%s/%s", agentos.ErrCapabilityNotFound, node.NodeID, node.Run.Backend.Kind, node.Run.Backend.Name, node.Capability)
+		}
+		capabilitiesByNode[node.NodeID] = agentosplan.NewCapabilitySelectionTrace(capability)
+	}
+
+	return capabilitiesByNode, nil
+}
+
+type resolvePlanNodeInputInput struct {
 	PlanInputs map[string]any
 	Status     agentos.RunPlanStatus
 	Node       agentos.PlanNodeSpec
 	Edges      []agentos.PlanEdgeSpec
-	Attempt    int32
+}
+
+type resolvePlanNodeInputOutput struct {
+	Input map[string]any
+	Trace agentosplan.InputResolutionTrace
+}
+
+// ResolvePlanNodeInputActivity resolves node input mapping before a child run starts.
+func (a *PlanActivities) ResolvePlanNodeInputActivity(ctx context.Context, input resolvePlanNodeInputInput) (resolvePlanNodeInputOutput, error) {
+	resolvedInput, err := agentosplan.ResolveRunInput(ctx, a.ArtifactStore, a.Expressions, input.PlanInputs, input.Status, input.Node, input.Edges)
+	if err != nil {
+		return resolvePlanNodeInputOutput{}, err
+	}
+
+	return resolvePlanNodeInputOutput{
+		Input: resolvedInput,
+		Trace: agentosplan.NewInputResolutionTrace(
+			resolvedInput,
+			input.Node.Inputs,
+			input.Edges,
+		),
+	}, nil
+}
+
+type startPlanNodeInput struct {
+	PlanID  string
+	Node    agentos.PlanNodeSpec
+	Attempt int32
 }
 
 type startPlanNodeOutput struct {
@@ -169,12 +223,6 @@ func (a *PlanActivities) StartPlanNodeActivity(ctx context.Context, input startP
 		}
 		input.Node.Run.IdempotencyKey = key
 	}
-	resolvedInput, err := agentosplan.ResolveRunInput(ctx, a.ArtifactStore, a.Expressions, input.PlanInputs, input.Status, input.Node, input.Edges)
-	if err != nil {
-		return startPlanNodeOutput{}, err
-	}
-	input.Node.Run.Input = resolvedInput
-
 	status, err := a.Runtime.Start(ctx, input.Node.Run)
 	if err != nil {
 		return startPlanNodeOutput{}, err
