@@ -27,14 +27,35 @@ func NewAgentOSPlanRepo(pg *postgres.Postgres) *AgentOSPlanRepo {
 }
 
 func (r *AgentOSPlanRepo) CreatePlan(ctx context.Context, spec agentos.RunPlanSpec, status agentos.RunPlanStatus) (agentos.RunPlanStatus, bool, error) {
+	if spec.PlanID == "" {
+		return agentos.RunPlanStatus{}, false, fmt.Errorf("%w: plan id is required", agentos.ErrInvalidRunPlan)
+	}
+	if spec.IdempotencyKey == "" {
+		return agentos.RunPlanStatus{}, false, fmt.Errorf("%w: plan idempotency key is required", agentos.ErrInvalidRunPlan)
+	}
 	if status.PlanID == "" {
 		status.PlanID = spec.PlanID
 	}
-	_, existing, exists, err := r.GetPlan(ctx, spec.PlanID)
+	existingSpec, existing, exists, err := r.planByIdempotencyKey(ctx, spec.IdempotencyKey)
 	if err != nil {
 		return agentos.RunPlanStatus{}, false, err
 	}
 	if exists {
+		if err := agentosplan.ValidatePlanStartIdempotency(existingSpec, spec); err != nil {
+			return agentos.RunPlanStatus{}, false, err
+		}
+
+		return existing, false, nil
+	}
+	existingSpec, existing, exists, err = r.GetPlan(ctx, spec.PlanID)
+	if err != nil {
+		return agentos.RunPlanStatus{}, false, err
+	}
+	if exists {
+		if err := agentosplan.ValidatePlanStartIdempotency(existingSpec, spec); err != nil {
+			return agentos.RunPlanStatus{}, false, err
+		}
+
 		return existing, false, nil
 	}
 	if err := r.SavePlanState(ctx, agentosplan.PlanStateSnapshot{
@@ -42,6 +63,20 @@ func (r *AgentOSPlanRepo) CreatePlan(ctx context.Context, spec agentos.RunPlanSp
 		Status:         status,
 		IdempotencyKey: spec.IdempotencyKey,
 	}); err != nil {
+		if isPostgresUniqueViolation(err) {
+			existingSpec, existing, exists, lookupErr := r.planByIdempotencyKey(ctx, spec.IdempotencyKey)
+			if lookupErr != nil {
+				return agentos.RunPlanStatus{}, false, lookupErr
+			}
+			if exists {
+				if validateErr := agentosplan.ValidatePlanStartIdempotency(existingSpec, spec); validateErr != nil {
+					return agentos.RunPlanStatus{}, false, validateErr
+				}
+
+				return existing, false, nil
+			}
+		}
+
 		return agentos.RunPlanStatus{}, false, err
 	}
 
@@ -262,6 +297,43 @@ func (r *AgentOSPlanRepo) LoadPlanState(ctx context.Context, planID string) (age
 		Status:         status,
 		IdempotencyKey: idempotencyKey,
 	}, true, nil
+}
+
+func (r *AgentOSPlanRepo) planByIdempotencyKey(ctx context.Context, idempotencyKey string) (agentos.RunPlanSpec, agentos.RunPlanStatus, bool, error) {
+	if idempotencyKey == "" {
+		return agentos.RunPlanSpec{}, agentos.RunPlanStatus{}, false, fmt.Errorf("%w: plan idempotency key is required", agentos.ErrInvalidRunPlan)
+	}
+
+	sql, args, err := r.Builder.
+		Select("spec_json", "status_json").
+		From("plans").
+		Where(sq.Eq{"idempotency_key": idempotencyKey}).
+		ToSql()
+	if err != nil {
+		return agentos.RunPlanSpec{}, agentos.RunPlanStatus{}, false, fmt.Errorf("AgentOSPlanRepo - planByIdempotencyKey - builder: %w", err)
+	}
+
+	var specJSON []byte
+	var statusJSON []byte
+	err = r.Pool.QueryRow(ctx, sql, args...).Scan(&specJSON, &statusJSON)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return agentos.RunPlanSpec{}, agentos.RunPlanStatus{}, false, nil
+		}
+
+		return agentos.RunPlanSpec{}, agentos.RunPlanStatus{}, false, fmt.Errorf("AgentOSPlanRepo - planByIdempotencyKey - query: %w", err)
+	}
+
+	var spec agentos.RunPlanSpec
+	if err := json.Unmarshal(specJSON, &spec); err != nil {
+		return agentos.RunPlanSpec{}, agentos.RunPlanStatus{}, false, fmt.Errorf("AgentOSPlanRepo - planByIdempotencyKey - decode spec: %w", err)
+	}
+	var status agentos.RunPlanStatus
+	if err := json.Unmarshal(statusJSON, &status); err != nil {
+		return agentos.RunPlanSpec{}, agentos.RunPlanStatus{}, false, fmt.Errorf("AgentOSPlanRepo - planByIdempotencyKey - decode status: %w", err)
+	}
+
+	return spec, status, true, nil
 }
 
 func (r *AgentOSPlanRepo) AppendPlanEvent(ctx context.Context, event agentos.PlanEvent, idempotencyKey string) (agentos.PlanEvent, error) {

@@ -16,6 +16,7 @@ type MemoryPlanStore struct {
 	mu        sync.RWMutex
 	specs     map[string]agentos.RunPlanSpec
 	statuses  map[string]agentos.RunPlanStatus
+	planKeys  map[string]string
 	events    map[string][]agentos.PlanEvent
 	eventKeys map[string]agentos.PlanEvent
 	auditKeys map[string]AuditRecord
@@ -26,6 +27,7 @@ func NewMemoryPlanStore() *MemoryPlanStore {
 	return &MemoryPlanStore{
 		specs:     make(map[string]agentos.RunPlanSpec),
 		statuses:  make(map[string]agentos.RunPlanStatus),
+		planKeys:  make(map[string]string),
 		events:    make(map[string][]agentos.PlanEvent),
 		eventKeys: make(map[string]agentos.PlanEvent),
 		auditKeys: make(map[string]AuditRecord),
@@ -36,11 +38,29 @@ func (s *MemoryPlanStore) CreatePlan(ctx context.Context, spec agentos.RunPlanSp
 	if spec.PlanID == "" {
 		return agentos.RunPlanStatus{}, false, fmt.Errorf("%w: plan id is required", agentos.ErrInvalidRunPlan)
 	}
+	if spec.IdempotencyKey == "" {
+		return agentos.RunPlanStatus{}, false, fmt.Errorf("%w: plan idempotency key is required", agentos.ErrInvalidRunPlan)
+	}
 	s.mu.RLock()
-	existing, exists := s.statuses[spec.PlanID]
+	if existingPlanID, exists := s.planKeys[spec.IdempotencyKey]; exists {
+		existingSpec := s.specs[existingPlanID]
+		existingStatus := s.statuses[existingPlanID]
+		s.mu.RUnlock()
+		if err := ValidatePlanStartIdempotency(existingSpec, spec); err != nil {
+			return agentos.RunPlanStatus{}, false, err
+		}
+
+		return existingStatus, false, nil
+	}
+	existingSpec, exists := s.specs[spec.PlanID]
+	existingStatus := s.statuses[spec.PlanID]
 	s.mu.RUnlock()
 	if exists {
-		return existing, false, nil
+		if err := ValidatePlanStartIdempotency(existingSpec, spec); err != nil {
+			return agentos.RunPlanStatus{}, false, err
+		}
+
+		return existingStatus, false, nil
 	}
 
 	snapshot := PlanStateSnapshot{
@@ -92,8 +112,19 @@ func (s *MemoryPlanStore) SavePlanState(_ context.Context, snapshot PlanStateSna
 
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if existingSpec, ok := s.specs[snapshot.Spec.PlanID]; ok && existingSpec.IdempotencyKey != "" && snapshot.Spec.IdempotencyKey != "" {
+		if err := ValidatePlanStartIdempotency(existingSpec, snapshot.Spec); err != nil {
+			return err
+		}
+	}
+	if existingPlanID, ok := s.planKeys[snapshot.Spec.IdempotencyKey]; snapshot.Spec.IdempotencyKey != "" && ok && existingPlanID != snapshot.Spec.PlanID {
+		return fmt.Errorf("%w: plan idempotency key belongs to plan %q", agentos.ErrInvalidRunPlan, existingPlanID)
+	}
 	s.specs[snapshot.Spec.PlanID] = snapshot.Spec
 	s.statuses[snapshot.Spec.PlanID] = snapshot.Status
+	if snapshot.Spec.IdempotencyKey != "" {
+		s.planKeys[snapshot.Spec.IdempotencyKey] = snapshot.Spec.PlanID
+	}
 
 	return nil
 }
@@ -108,8 +139,9 @@ func (s *MemoryPlanStore) LoadPlanState(_ context.Context, planID string) (PlanS
 	}
 
 	return PlanStateSnapshot{
-		Spec:   spec,
-		Status: s.statuses[planID],
+		Spec:           spec,
+		Status:         s.statuses[planID],
+		IdempotencyKey: spec.IdempotencyKey,
 	}, true, nil
 }
 
