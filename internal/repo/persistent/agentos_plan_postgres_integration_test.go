@@ -169,6 +169,32 @@ func TestAgentOSPlanPostgresDurablePersistence(t *testing.T) {
 	if deliveredCommand.Status != agentosplan.PlanCommandDelivered || deliveredCommand.FailureReason != "" {
 		t.Fatalf("delivered command = %#v", deliveredCommand)
 	}
+	failedCommand, created, err := planRepo.RecordPlanCommand(ctx, agentosplan.PlanCommandRecord{
+		PlanID:         spec.PlanID,
+		ActorID:        "operator-1",
+		Action:         agentosplan.AuditActionPlanSignal,
+		IdempotencyKey: "failed-command-" + suffix,
+		Payload:        map[string]any{"type": string(agentos.SignalPlanReject)},
+	})
+	if err != nil {
+		t.Fatalf("RecordPlanCommand failed command: %v", err)
+	}
+	if !created {
+		t.Fatal("failed command was not created")
+	}
+	if _, err := planRepo.MarkPlanCommandFailed(ctx, failedCommand.IdempotencyKey, "temporal unavailable"); err != nil {
+		t.Fatalf("MarkPlanCommandFailed: %v", err)
+	}
+	recoverableCommands, err := planRepo.ListRecoverablePlanCommands(ctx, agentosplan.PlanCommandScope{
+		PlanID:   spec.PlanID,
+		Statuses: []agentosplan.PlanCommandStatus{agentosplan.PlanCommandFailed},
+	})
+	if err != nil {
+		t.Fatalf("ListRecoverablePlanCommands: %v", err)
+	}
+	if len(recoverableCommands) != 1 || recoverableCommands[0].CommandID != failedCommand.CommandID {
+		t.Fatalf("recoverable commands = %#v", recoverableCommands)
+	}
 
 	runSpec := spec.Nodes[0].Run
 	runSpec.IdempotencyKey, err = agentosplan.NodeStartIdempotencyKey(spec.PlanID, spec.Nodes[0].NodeID, 1)

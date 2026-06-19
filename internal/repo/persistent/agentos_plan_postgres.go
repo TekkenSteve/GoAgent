@@ -904,7 +904,7 @@ func (r *AgentOSPlanRepo) GetPlanCommand(ctx context.Context, idempotencyKey str
 		return agentosplan.PlanCommandRecord{}, false, fmt.Errorf("AgentOSPlanRepo - GetPlanCommand - builder: %w", err)
 	}
 
-	command, err := r.scanPlanCommand(ctx, sql, args...)
+	command, err := r.scanPlanCommandRow(ctx, r.Pool.QueryRow(ctx, sql, args...))
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return agentosplan.PlanCommandRecord{}, false, nil
@@ -914,6 +914,56 @@ func (r *AgentOSPlanRepo) GetPlanCommand(ctx context.Context, idempotencyKey str
 	}
 
 	return command, true, nil
+}
+
+func (r *AgentOSPlanRepo) ListRecoverablePlanCommands(ctx context.Context, scope agentosplan.PlanCommandScope) ([]agentosplan.PlanCommandRecord, error) {
+	statuses, err := agentosplan.RecoverablePlanCommandStatuses(scope)
+	if err != nil {
+		return nil, err
+	}
+	statusValues := make([]string, 0, len(statuses))
+	for _, status := range statuses {
+		statusValues = append(statusValues, string(status))
+	}
+
+	builder := r.Builder.
+		Select("command_id", "plan_id", "actor_id", "action", "idempotency_key", "payload_json", "status", "failure_reason", "created_at", "updated_at").
+		From("plan_commands").
+		Where(sq.Eq{"status": statusValues}).
+		OrderBy("updated_at ASC", "command_id ASC")
+	if scope.PlanID != "" {
+		builder = builder.Where(sq.Eq{"plan_id": scope.PlanID})
+	}
+	if scope.Action != "" {
+		builder = builder.Where(sq.Eq{"action": string(scope.Action)})
+	}
+	if scope.Limit > 0 {
+		builder = builder.Limit(uint64(scope.Limit))
+	}
+
+	sql, args, err := builder.ToSql()
+	if err != nil {
+		return nil, fmt.Errorf("AgentOSPlanRepo - ListRecoverablePlanCommands - builder: %w", err)
+	}
+	rows, err := r.Pool.Query(ctx, sql, args...)
+	if err != nil {
+		return nil, fmt.Errorf("AgentOSPlanRepo - ListRecoverablePlanCommands - query: %w", err)
+	}
+	defer rows.Close()
+
+	var commands []agentosplan.PlanCommandRecord
+	for rows.Next() {
+		command, err := r.scanPlanCommandRow(ctx, rows)
+		if err != nil {
+			return nil, err
+		}
+		commands = append(commands, command)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("AgentOSPlanRepo - ListRecoverablePlanCommands - rows: %w", err)
+	}
+
+	return commands, nil
 }
 
 func (r *AgentOSPlanRepo) MarkPlanCommandDelivered(ctx context.Context, idempotencyKey string) (agentosplan.PlanCommandRecord, error) {
@@ -948,15 +998,15 @@ SET status = $2,
 WHERE idempotency_key = $1
 RETURNING command_id, plan_id, actor_id, action, idempotency_key, payload_json, status, failure_reason, created_at, updated_at`
 
-	return r.scanPlanCommand(ctx, sql, idempotencyKey, string(command.Status), command.FailureReason, command.UpdatedAt)
+	return r.scanPlanCommandRow(ctx, r.Pool.QueryRow(ctx, sql, idempotencyKey, string(command.Status), command.FailureReason, command.UpdatedAt))
 }
 
-func (r *AgentOSPlanRepo) scanPlanCommand(ctx context.Context, sql string, args ...any) (agentosplan.PlanCommandRecord, error) {
+func (r *AgentOSPlanRepo) scanPlanCommandRow(_ context.Context, scanner interface{ Scan(dest ...any) error }) (agentosplan.PlanCommandRecord, error) {
 	var command agentosplan.PlanCommandRecord
 	var action string
 	var status string
 	var payloadJSON []byte
-	err := r.Pool.QueryRow(ctx, sql, args...).Scan(
+	err := scanner.Scan(
 		&command.CommandID,
 		&command.PlanID,
 		&command.ActorID,

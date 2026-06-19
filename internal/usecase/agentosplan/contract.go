@@ -134,10 +134,19 @@ type PlanCommandRecord struct {
 	UpdatedAt      time.Time
 }
 
+// PlanCommandScope selects recoverable command outbox entries.
+type PlanCommandScope struct {
+	PlanID   string
+	Action   AuditAction
+	Statuses []PlanCommandStatus
+	Limit    int
+}
+
 // PlanCommandStore persists recoverable signal/control commands.
 type PlanCommandStore interface {
 	RecordPlanCommand(ctx context.Context, command PlanCommandRecord) (PlanCommandRecord, bool, error)
 	GetPlanCommand(ctx context.Context, idempotencyKey string) (PlanCommandRecord, bool, error)
+	ListRecoverablePlanCommands(ctx context.Context, scope PlanCommandScope) ([]PlanCommandRecord, error)
 	MarkPlanCommandDelivered(ctx context.Context, idempotencyKey string) (PlanCommandRecord, error)
 	MarkPlanCommandFailed(ctx context.Context, idempotencyKey string, reason string) (PlanCommandRecord, error)
 }

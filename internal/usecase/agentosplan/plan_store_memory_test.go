@@ -164,6 +164,84 @@ func TestMemoryPlanStorePlanCommandLifecycleIsIdempotent(t *testing.T) {
 	}
 }
 
+func TestMemoryPlanStoreListRecoverablePlanCommands(t *testing.T) {
+	ctx := context.Background()
+	store := NewMemoryPlanStore()
+	commands := []PlanCommandRecord{
+		{
+			CommandID:      "command-delivered",
+			PlanID:         "plan-1",
+			Action:         AuditActionPlanControl,
+			IdempotencyKey: "command-delivered",
+			Payload:        map[string]any{"operation": string(agentos.ControlCancel)},
+			CreatedAt:      time.Date(2026, 6, 19, 12, 0, 0, 0, time.UTC),
+			UpdatedAt:      time.Date(2026, 6, 19, 12, 0, 0, 0, time.UTC),
+		},
+		{
+			CommandID:      "command-pending",
+			PlanID:         "plan-1",
+			Action:         AuditActionPlanSignal,
+			IdempotencyKey: "command-pending",
+			Payload:        map[string]any{"type": string(agentos.SignalPlanApprove)},
+			CreatedAt:      time.Date(2026, 6, 19, 12, 1, 0, 0, time.UTC),
+			UpdatedAt:      time.Date(2026, 6, 19, 12, 1, 0, 0, time.UTC),
+		},
+		{
+			CommandID:      "command-failed",
+			PlanID:         "plan-1",
+			Action:         AuditActionPlanSignal,
+			IdempotencyKey: "command-failed",
+			Payload:        map[string]any{"type": string(agentos.SignalPlanReject)},
+			CreatedAt:      time.Date(2026, 6, 19, 12, 2, 0, 0, time.UTC),
+			UpdatedAt:      time.Date(2026, 6, 19, 12, 2, 0, 0, time.UTC),
+		},
+	}
+	for _, command := range commands {
+		if _, _, err := store.RecordPlanCommand(ctx, command); err != nil {
+			t.Fatalf("RecordPlanCommand %s: %v", command.CommandID, err)
+		}
+	}
+	if _, err := store.MarkPlanCommandDelivered(ctx, "command-delivered"); err != nil {
+		t.Fatalf("MarkPlanCommandDelivered: %v", err)
+	}
+	if _, err := store.MarkPlanCommandFailed(ctx, "command-failed", "temporal unavailable"); err != nil {
+		t.Fatalf("MarkPlanCommandFailed: %v", err)
+	}
+
+	got, err := store.ListRecoverablePlanCommands(ctx, PlanCommandScope{
+		PlanID:   "plan-1",
+		Action:   AuditActionPlanSignal,
+		Statuses: []PlanCommandStatus{PlanCommandPending},
+		Limit:    1,
+	})
+	if err != nil {
+		t.Fatalf("ListRecoverablePlanCommands: %v", err)
+	}
+	if len(got) != 1 || got[0].CommandID != "command-pending" {
+		t.Fatalf("commands = %#v", got)
+	}
+
+	got, err = store.ListRecoverablePlanCommands(ctx, PlanCommandScope{
+		PlanID:   "plan-1",
+		Statuses: []PlanCommandStatus{PlanCommandFailed},
+	})
+	if err != nil {
+		t.Fatalf("ListRecoverablePlanCommands failed: %v", err)
+	}
+	if len(got) != 1 || got[0].CommandID != "command-failed" {
+		t.Fatalf("failed commands = %#v", got)
+	}
+}
+
+func TestRecoverablePlanCommandStatusesRejectsDelivered(t *testing.T) {
+	_, err := RecoverablePlanCommandStatuses(PlanCommandScope{
+		Statuses: []PlanCommandStatus{PlanCommandDelivered},
+	})
+	if !errors.Is(err, agentos.ErrInvalidRunPlan) {
+		t.Fatalf("error = %v, want ErrInvalidRunPlan", err)
+	}
+}
+
 func TestMemoryPlanStoreRejectsCommandKeyReuseWithDifferentRequest(t *testing.T) {
 	store := NewMemoryPlanStore()
 	command := PlanCommandRecord{

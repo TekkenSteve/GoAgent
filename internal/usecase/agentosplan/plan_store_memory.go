@@ -301,6 +301,45 @@ func (s *MemoryPlanStore) GetPlanCommand(_ context.Context, idempotencyKey strin
 	return command, ok, nil
 }
 
+func (s *MemoryPlanStore) ListRecoverablePlanCommands(_ context.Context, scope PlanCommandScope) ([]PlanCommandRecord, error) {
+	statuses, err := RecoverablePlanCommandStatuses(scope)
+	if err != nil {
+		return nil, err
+	}
+	statusSet := make(map[PlanCommandStatus]struct{}, len(statuses))
+	for _, status := range statuses {
+		statusSet[status] = struct{}{}
+	}
+
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	commands := make([]PlanCommandRecord, 0, len(s.commands))
+	for _, command := range s.commands {
+		if scope.PlanID != "" && command.PlanID != scope.PlanID {
+			continue
+		}
+		if scope.Action != "" && command.Action != scope.Action {
+			continue
+		}
+		if _, ok := statusSet[command.Status]; !ok {
+			continue
+		}
+		commands = append(commands, command)
+	}
+	sort.SliceStable(commands, func(i, j int) bool {
+		if !commands[i].UpdatedAt.Equal(commands[j].UpdatedAt) {
+			return commands[i].UpdatedAt.Before(commands[j].UpdatedAt)
+		}
+
+		return commands[i].CommandID < commands[j].CommandID
+	})
+	if scope.Limit > 0 && len(commands) > scope.Limit {
+		commands = commands[:scope.Limit]
+	}
+
+	return commands, nil
+}
+
 func (s *MemoryPlanStore) MarkPlanCommandDelivered(_ context.Context, idempotencyKey string) (PlanCommandRecord, error) {
 	return s.updatePlanCommandStatus(idempotencyKey, PlanCommandDelivered, "")
 }
