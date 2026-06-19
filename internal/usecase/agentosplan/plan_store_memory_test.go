@@ -394,6 +394,15 @@ func TestMemoryPlanStoreListAuditRecordsFiltersAndLimits(t *testing.T) {
 	if len(got) != 1 || got[0].AuditID != "audit-1" {
 		t.Fatalf("audits = %#v", got)
 	}
+	for _, scope := range []agentos.PlanAuditScope{
+		{PlanID: spec.PlanID},
+		{PlanID: spec.PlanID, AccountID: spec.AccountID},
+		{PlanID: spec.PlanID, ProjectID: spec.ProjectID},
+	} {
+		if _, err := store.ListAuditRecords(ctx, scope); !errors.Is(err, agentos.ErrInvalidPlanScope) {
+			t.Fatalf("ListAuditRecords scope %#v error = %v, want ErrInvalidPlanScope", scope, err)
+		}
+	}
 	if _, err := store.ListAuditRecords(ctx, agentos.PlanAuditScope{PlanID: spec.PlanID, AccountID: "acct-other", ProjectID: spec.ProjectID}); !errors.Is(err, agentos.ErrPlanRouteNotFound) {
 		t.Fatalf("tenant mismatch error = %v, want ErrPlanRouteNotFound", err)
 	}

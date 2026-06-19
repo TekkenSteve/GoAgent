@@ -1093,13 +1093,9 @@ func (r *AgentOSPlanRepo) ListAuditRecords(ctx context.Context, scope agentos.Pl
 		Select("audit_id", "plan_id", "account_id", "project_id", "run_id", "node_id", "actor_id", "action", "idempotency_key", "payload_json", "created_at").
 		From("audit_logs").
 		Where(sq.Eq{"plan_id": scope.PlanID}).
+		Where(sq.Eq{"account_id": scope.AccountID}).
+		Where(sq.Eq{"project_id": scope.ProjectID}).
 		OrderBy("created_at ASC", "audit_id ASC")
-	if scope.AccountID != "" {
-		builder = builder.Where(sq.Eq{"account_id": scope.AccountID})
-	}
-	if scope.ProjectID != "" {
-		builder = builder.Where(sq.Eq{"project_id": scope.ProjectID})
-	}
 	if scope.NodeID != "" {
 		builder = builder.Where(sq.Eq{"node_id": scope.NodeID})
 	}

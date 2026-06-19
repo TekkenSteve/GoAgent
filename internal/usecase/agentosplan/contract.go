@@ -149,7 +149,8 @@ type AuditRecord struct {
 	CreatedAt      time.Time
 }
 
-// AuditStore persists idempotent control-plane audit records.
+// AuditStore persists idempotent control-plane audit records. List operations
+// must carry the full account/project plan scope.
 type AuditStore interface {
 	RecordAudit(ctx context.Context, record AuditRecord) (AuditRecord, bool, error)
 	GetAuditRecord(ctx context.Context, idempotencyKey string) (AuditRecord, bool, error)
