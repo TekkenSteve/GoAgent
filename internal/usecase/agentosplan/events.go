@@ -50,6 +50,9 @@ func PlanEventFromStateEvent(spec agentos.RunPlanSpec, status agentos.RunPlanSta
 	if event.Attempt > 0 {
 		payload["attempt"] = event.Attempt
 	}
+	if len(event.Expansion.Nodes) > 0 || len(event.Expansion.Edges) > 0 {
+		payload["expansion"] = planExpansionPayload(event.Expansion)
+	}
 	if len(event.Artifacts) > 0 {
 		payload["artifacts"] = event.Artifacts
 	}
@@ -253,6 +256,8 @@ func planEventType(kind EventKind) (agentos.EventType, error) {
 		return agentos.EventPlanStarted, nil
 	case EventPlanBlocked:
 		return agentos.EventPlanBlocked, nil
+	case EventPlanExpanded:
+		return agentos.EventPlanExpanded, nil
 	case EventPlanApproved:
 		return agentos.EventPlanApproved, nil
 	case EventPlanRejected:
@@ -283,5 +288,31 @@ func planEventType(kind EventKind) (agentos.EventType, error) {
 		return agentos.EventUsageReported, nil
 	default:
 		return "", fmt.Errorf("%w: unknown plan event kind %q", agentos.ErrInvalidPlanEvent, kind)
+	}
+}
+
+func planExpansionPayload(delta PlanDelta) map[string]any {
+	nodeIDs := make([]string, 0, len(delta.Nodes))
+	for _, node := range delta.Nodes {
+		nodeIDs = append(nodeIDs, node.NodeID)
+	}
+	edges := make([]map[string]any, 0, len(delta.Edges))
+	for _, edge := range delta.Edges {
+		item := map[string]any{
+			"from": edge.From,
+			"to":   edge.To,
+		}
+		if edge.EdgeID != "" {
+			item["edge_id"] = edge.EdgeID
+		}
+		if edge.On != "" {
+			item["on"] = edge.On
+		}
+		edges = append(edges, item)
+	}
+
+	return map[string]any{
+		"node_ids": nodeIDs,
+		"edges":    edges,
 	}
 }

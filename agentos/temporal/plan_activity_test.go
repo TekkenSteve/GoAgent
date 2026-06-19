@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/TekkenSteve/GoAgent/agentos"
+	"github.com/TekkenSteve/GoAgent/internal/usecase/agentosplan"
 )
 
 func TestPlanActivitiesStartStatusControl(t *testing.T) {
@@ -148,6 +149,72 @@ func TestPlanActivitiesPersistPlanStatePublishesStoredEvent(t *testing.T) {
 	}
 	if publisher.event.Sequence != output.Event.Sequence || publisher.event.EventID != output.Event.EventID {
 		t.Fatalf("published event = %#v, want %#v", publisher.event, output.Event)
+	}
+}
+
+func TestPlanActivitiesEvaluatePlanExpansionValidatesDelta(t *testing.T) {
+	ref := agentos.BackendRef{Kind: agentos.BackendKindNative, Name: agentos.BackendNameGoAgentNative}
+	artifactStore := agentosplan.NewMemoryArtifactStore()
+	deltaRef, err := artifactStore.Put(context.Background(), agentos.ArtifactRef{
+		ArtifactID: "delta-1",
+		PlanID:     "plan-expand",
+		NodeID:     "seed",
+		RunID:      "run-seed",
+		Name:       "expand",
+		Kind:       agentos.ArtifactKindPlanDelta,
+	}, agentosplan.PlanDelta{
+		Nodes: []agentos.PlanNodeSpec{
+			{NodeID: "expanded", Run: agentos.RunSpec{RunID: "run-expanded", Backend: ref}},
+		},
+		Edges: []agentos.PlanEdgeSpec{
+			{EdgeID: "seed-expanded", From: "seed", To: "expanded", On: agentos.EdgeOnSuccess},
+		},
+	}, "delta-key")
+	if err != nil {
+		t.Fatalf("Put delta artifact: %v", err)
+	}
+	activities, err := NewPlanActivitiesWithStores(
+		&fakePlanRuntime{},
+		nil,
+		agentosplan.NewMemoryPlanStore(),
+		agentosplan.NewMemoryPlanStore(),
+		nil,
+		nil,
+		artifactStore,
+	)
+	if err != nil {
+		t.Fatalf("NewPlanActivitiesWithStores: %v", err)
+	}
+
+	output, err := activities.EvaluatePlanExpansionActivity(context.Background(), evaluatePlanExpansionInput{
+		Spec: agentos.RunPlanSpec{
+			PlanID: "plan-expand",
+			Policy: agentos.PlanPolicy{
+				MaxNodes: 2,
+			},
+			Nodes: []agentos.PlanNodeSpec{
+				{NodeID: "seed", Run: agentos.RunSpec{RunID: "run-seed", Backend: ref}},
+			},
+		},
+		Status: agentos.RunPlanStatus{PlanID: "plan-expand"},
+		Node:   agentos.PlanNodeSpec{NodeID: "seed", Run: agentos.RunSpec{RunID: "run-seed", Backend: ref}},
+		RunStatus: agentos.RunStatus{
+			RunID:          "run-seed",
+			LifecycleState: "completed",
+		},
+		Artifacts: []agentos.ArtifactRef{deltaRef},
+	})
+	if err != nil {
+		t.Fatalf("EvaluatePlanExpansionActivity: %v", err)
+	}
+	if !output.Expanded {
+		t.Fatal("expansion was not applied")
+	}
+	if len(output.Spec.Nodes) != 2 || output.Spec.Nodes[1].NodeID != "expanded" {
+		t.Fatalf("expanded spec nodes = %#v", output.Spec.Nodes)
+	}
+	if output.Plan.NodeByID["expanded"].Run.RunID != "run-expanded" {
+		t.Fatalf("expanded executable plan = %#v", output.Plan.NodeByID)
 	}
 }
 

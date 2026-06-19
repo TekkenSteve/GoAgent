@@ -13,16 +13,17 @@ import (
 )
 
 const (
-	PlanWorkflowName                 = "AgentOSPlanWorkflow"
-	PlanStatusQueryName              = "agentos.plan.status"
-	PlanSignalName                   = "agentos.plan.signal"
-	PlanControlSignalName            = "agentos.plan.control"
-	ValidatePlanActivityName         = "AgentOSValidatePlan"
-	StartPlanNodeActivityName        = "AgentOSStartPlanNode"
-	StatusPlanNodeActivityName       = "AgentOSStatusPlanNode"
-	ControlPlanNodeActivityName      = "AgentOSControlPlanNode"
-	PublishPlanArtifactsActivityName = "AgentOSPublishPlanArtifacts"
-	PersistPlanStateActivityName     = "AgentOSPersistPlanState"
+	PlanWorkflowName                  = "AgentOSPlanWorkflow"
+	PlanStatusQueryName               = "agentos.plan.status"
+	PlanSignalName                    = "agentos.plan.signal"
+	PlanControlSignalName             = "agentos.plan.control"
+	ValidatePlanActivityName          = "AgentOSValidatePlan"
+	StartPlanNodeActivityName         = "AgentOSStartPlanNode"
+	StatusPlanNodeActivityName        = "AgentOSStatusPlanNode"
+	ControlPlanNodeActivityName       = "AgentOSControlPlanNode"
+	PublishPlanArtifactsActivityName  = "AgentOSPublishPlanArtifacts"
+	EvaluatePlanExpansionActivityName = "AgentOSEvaluatePlanExpansion"
+	PersistPlanStateActivityName      = "AgentOSPersistPlanState"
 )
 
 const planNodePollInterval = 5 * time.Second
@@ -32,6 +33,7 @@ type planWorkflowInput struct {
 	Status            agentos.RunPlanStatus `json:"status,omitempty"`
 	Continued         bool                  `json:"continued,omitempty"`
 	ContinuationCount int32                 `json:"continuation_count,omitempty"`
+	ExpansionCount    int32                 `json:"expansion_count,omitempty"`
 }
 
 // PlanWorkflow executes a cross-backend RunPlan using deterministic plan state
@@ -78,6 +80,7 @@ func PlanWorkflow(ctx workflow.Context, input planWorkflowInput) (agentos.RunPla
 	}
 	scheduler := agentosplan.Scheduler{Expressions: compiler}
 	maxParallel := normalizePlanParallelism(spec.Policy.MaxParallelNodes)
+	expansionCount := input.ExpansionCount
 	paused := state.Status.LifecycleState == agentos.PlanLifecycleBlocked
 	processedControls := make(map[string]bool)
 	processedSignals := make(map[string]bool)
@@ -112,7 +115,7 @@ func PlanWorkflow(ctx workflow.Context, input planWorkflowInput) (agentos.RunPla
 			return state.Status, nil
 		}
 		if paused {
-			if err := continuePlanWorkflowIfNeeded(ctx, input, state); err != nil {
+			if err := continuePlanWorkflowIfNeeded(ctx, input, spec, state, expansionCount); err != nil {
 				return state.Status, err
 			}
 			if err := workflow.Sleep(ctx, planNodePollInterval); err != nil {
@@ -150,7 +153,7 @@ func PlanWorkflow(ctx workflow.Context, input planWorkflowInput) (agentos.RunPla
 			if !nodeSchedulable(state, node.NodeID) {
 				continue
 			}
-			if err := startPlanNode(activityCtx, ctx, spec, &state, node, validation.Plan.EdgesByTo[node.NodeID]); err != nil {
+			if err := startPlanNode(activityCtx, ctx, &spec, &state, &validation, &expansionCount, node, validation.Plan.EdgesByTo[node.NodeID]); err != nil {
 				if persistErr := applyPlanStateEvent(activityCtx, ctx, spec, &state, agentosplan.StateEvent{Kind: agentosplan.EventNodeFailed, NodeID: node.NodeID, Reason: err.Error()}); persistErr != nil {
 					return state.Status, errors.Join(err, persistErr)
 				}
@@ -166,7 +169,7 @@ func PlanWorkflow(ctx workflow.Context, input planWorkflowInput) (agentos.RunPla
 			}
 		}
 
-		pollProgressed, err := pollRunningPlanNodes(activityCtx, ctx, spec, &state, validation.Plan.NodeByID)
+		pollProgressed, err := pollRunningPlanNodes(activityCtx, ctx, &spec, &state, &validation, &expansionCount)
 		if err != nil {
 			persistErr := applyPlanStateEvent(activityCtx, ctx, spec, &state, agentosplan.StateEvent{Kind: agentosplan.EventPlanFailed, Reason: err.Error()})
 
@@ -197,7 +200,7 @@ func PlanWorkflow(ctx workflow.Context, input planWorkflowInput) (agentos.RunPla
 
 			return state.Status, fmt.Errorf("%w: %s", agentos.ErrInvalidRunPlan, reason)
 		}
-		if err := continuePlanWorkflowIfNeeded(ctx, input, state); err != nil {
+		if err := continuePlanWorkflowIfNeeded(ctx, input, spec, state, expansionCount); err != nil {
 			return state.Status, err
 		}
 		if !progressed {
@@ -216,11 +219,11 @@ func initialPlanWorkflowState(input planWorkflowInput, now time.Time) (agentospl
 	return agentosplan.NewState(input.Spec, now), nil
 }
 
-func continuePlanWorkflowIfNeeded(ctx workflow.Context, input planWorkflowInput, state agentosplan.State) error {
+func continuePlanWorkflowIfNeeded(ctx workflow.Context, input planWorkflowInput, spec agentos.RunPlanSpec, state agentosplan.State, expansionCount int32) error {
 	if planTerminal(state.Status.LifecycleState) {
 		return nil
 	}
-	decision := agentosplan.EvaluateContinuationPolicy(input.Spec.Policy, agentosplan.ContinuationSnapshot{
+	decision := agentosplan.EvaluateContinuationPolicy(spec.Policy, agentosplan.ContinuationSnapshot{
 		AppliedTransitions: state.AppliedTransitions(),
 	})
 	if !decision.ShouldContinue {
@@ -228,9 +231,11 @@ func continuePlanWorkflowIfNeeded(ctx workflow.Context, input planWorkflowInput,
 	}
 
 	nextInput := input
+	nextInput.Spec = spec
 	nextInput.Status = state.Status
 	nextInput.Continued = true
 	nextInput.ContinuationCount++
+	nextInput.ExpansionCount = expansionCount
 
 	return workflow.NewContinueAsNewError(ctx, PlanWorkflowName, nextInput)
 }
@@ -260,8 +265,8 @@ func applyPlanStateEvent(activityCtx workflow.Context, workflowCtx workflow.Cont
 	return nil
 }
 
-func startPlanNode(activityCtx workflow.Context, workflowCtx workflow.Context, spec agentos.RunPlanSpec, state *agentosplan.State, node agentos.PlanNodeSpec, incomingEdges []agentos.PlanEdgeSpec) error {
-	if err := applyPlanStateEvent(activityCtx, workflowCtx, spec, state, agentosplan.StateEvent{Kind: agentosplan.EventNodeReady, NodeID: node.NodeID}); err != nil {
+func startPlanNode(activityCtx workflow.Context, workflowCtx workflow.Context, spec *agentos.RunPlanSpec, state *agentosplan.State, validation *validatePlanOutput, expansionCount *int32, node agentos.PlanNodeSpec, incomingEdges []agentos.PlanEdgeSpec) error {
+	if err := applyPlanStateEvent(activityCtx, workflowCtx, *spec, state, agentosplan.StateEvent{Kind: agentosplan.EventNodeReady, NodeID: node.NodeID}); err != nil {
 		return err
 	}
 	attempt := nextNodeAttempt(*state, node.NodeID)
@@ -269,7 +274,7 @@ func startPlanNode(activityCtx workflow.Context, workflowCtx workflow.Context, s
 	if err != nil {
 		return err
 	}
-	if err := applyPlanStateEvent(activityCtx, workflowCtx, spec, state, agentosplan.StateEvent{Kind: agentosplan.EventNodeStarted, NodeID: node.NodeID, RunID: attemptNode.Run.RunID, Attempt: attempt}); err != nil {
+	if err := applyPlanStateEvent(activityCtx, workflowCtx, *spec, state, agentosplan.StateEvent{Kind: agentosplan.EventNodeStarted, NodeID: node.NodeID, RunID: attemptNode.Run.RunID, Attempt: attempt}); err != nil {
 		return err
 	}
 
@@ -282,28 +287,28 @@ func startPlanNode(activityCtx workflow.Context, workflowCtx workflow.Context, s
 		Edges:      incomingEdges,
 		Attempt:    attempt,
 	}).Get(activityCtx, &started); err != nil {
-		return applyNodeAttemptFailure(activityCtx, workflowCtx, spec, state, node, attemptNode.Run.RunID, fmt.Sprintf("start attempt %d failed: %s", attempt, err))
+		return applyNodeAttemptFailure(activityCtx, workflowCtx, *spec, state, node, attemptNode.Run.RunID, fmt.Sprintf("start attempt %d failed: %s", attempt, err))
 	}
 	if started.Status.RunID != "" && started.Status.RunID != attemptNode.Run.RunID {
-		if err := applyPlanStateEvent(activityCtx, workflowCtx, spec, state, agentosplan.StateEvent{Kind: agentosplan.EventNodeStarted, NodeID: node.NodeID, RunID: started.Status.RunID, Attempt: attempt}); err != nil {
+		if err := applyPlanStateEvent(activityCtx, workflowCtx, *spec, state, agentosplan.StateEvent{Kind: agentosplan.EventNodeStarted, NodeID: node.NodeID, RunID: started.Status.RunID, Attempt: attempt}); err != nil {
 			return err
 		}
 	}
 	if runTerminal(started.Status.LifecycleState) {
-		return applyNodeRunTerminal(activityCtx, workflowCtx, spec, state, node, started.Status)
+		return applyNodeRunTerminal(activityCtx, workflowCtx, spec, state, validation, expansionCount, node, started.Status)
 	}
 
 	return nil
 }
 
-func pollRunningPlanNodes(activityCtx workflow.Context, workflowCtx workflow.Context, spec agentos.RunPlanSpec, state *agentosplan.State, nodes map[string]agentos.PlanNodeSpec) (bool, error) {
+func pollRunningPlanNodes(activityCtx workflow.Context, workflowCtx workflow.Context, spec *agentos.RunPlanSpec, state *agentosplan.State, validation *validatePlanOutput, expansionCount *int32) (bool, error) {
 	progressed := false
 	now := workflow.Now(workflowCtx)
 	for _, node := range state.Status.Nodes {
 		if node.LifecycleState != agentos.PlanNodeRunning {
 			continue
 		}
-		nodeSpec, ok := nodes[node.NodeID]
+		nodeSpec, ok := validation.Plan.NodeByID[node.NodeID]
 		if !ok {
 			return progressed, fmt.Errorf("%w: unknown node %q", agentos.ErrInvalidRunPlan, node.NodeID)
 		}
@@ -312,7 +317,7 @@ func pollRunningPlanNodes(activityCtx workflow.Context, workflowCtx workflow.Con
 				return progressed, err
 			}
 			reason := fmt.Sprintf("node timed out after %d seconds", nodeSpec.Policy.TimeoutSeconds)
-			if err := applyNodeAttemptFailure(activityCtx, workflowCtx, spec, state, nodeSpec, node.RunID, reason); err != nil {
+			if err := applyNodeAttemptFailure(activityCtx, workflowCtx, *spec, state, nodeSpec, node.RunID, reason); err != nil {
 				return true, err
 			}
 
@@ -320,7 +325,7 @@ func pollRunningPlanNodes(activityCtx workflow.Context, workflowCtx workflow.Con
 			continue
 		}
 		if node.RunID == "" {
-			if err := applyPlanStateEvent(activityCtx, workflowCtx, spec, state, agentosplan.StateEvent{Kind: agentosplan.EventNodeSucceeded, NodeID: node.NodeID}); err != nil {
+			if err := applyPlanStateEvent(activityCtx, workflowCtx, *spec, state, agentosplan.StateEvent{Kind: agentosplan.EventNodeSucceeded, NodeID: node.NodeID}); err != nil {
 				return progressed, err
 			}
 			progressed = true
@@ -329,14 +334,14 @@ func pollRunningPlanNodes(activityCtx workflow.Context, workflowCtx workflow.Con
 
 		var current statusPlanNodeOutput
 		if err := workflow.ExecuteActivity(activityCtx, StatusPlanNodeActivityName, statusPlanNodeInput{RunID: node.RunID}).Get(activityCtx, &current); err != nil {
-			if persistErr := applyPlanStateEvent(activityCtx, workflowCtx, spec, state, agentosplan.StateEvent{Kind: agentosplan.EventNodeFailed, NodeID: node.NodeID, Reason: err.Error()}); persistErr != nil {
+			if persistErr := applyPlanStateEvent(activityCtx, workflowCtx, *spec, state, agentosplan.StateEvent{Kind: agentosplan.EventNodeFailed, NodeID: node.NodeID, Reason: err.Error()}); persistErr != nil {
 				return true, persistErr
 			}
 
 			return true, nil
 		}
 		if runTerminal(current.Status.LifecycleState) {
-			if err := applyNodeRunTerminal(activityCtx, workflowCtx, spec, state, nodeSpec, current.Status); err != nil {
+			if err := applyNodeRunTerminal(activityCtx, workflowCtx, spec, state, validation, expansionCount, nodeSpec, current.Status); err != nil {
 				return progressed, err
 			}
 			progressed = true
@@ -346,8 +351,8 @@ func pollRunningPlanNodes(activityCtx workflow.Context, workflowCtx workflow.Con
 	return progressed, nil
 }
 
-func applyNodeRunTerminal(activityCtx workflow.Context, workflowCtx workflow.Context, spec agentos.RunPlanSpec, state *agentosplan.State, node agentos.PlanNodeSpec, status agentos.RunStatus) error {
-	if err := applyRunBudgetUsage(activityCtx, workflowCtx, spec, state, node, status); err != nil {
+func applyNodeRunTerminal(activityCtx workflow.Context, workflowCtx workflow.Context, spec *agentos.RunPlanSpec, state *agentosplan.State, validation *validatePlanOutput, expansionCount *int32, node agentos.PlanNodeSpec, status agentos.RunStatus) error {
+	if err := applyRunBudgetUsage(activityCtx, workflowCtx, *spec, state, node, status); err != nil {
 		return err
 	}
 
@@ -357,29 +362,75 @@ func applyNodeRunTerminal(activityCtx workflow.Context, workflowCtx workflow.Con
 		Node:   node,
 		Status: status,
 	}).Get(activityCtx, &published); err != nil {
-		return applyPlanStateEvent(activityCtx, workflowCtx, spec, state, agentosplan.StateEvent{Kind: agentosplan.EventNodeFailed, NodeID: node.NodeID, RunID: status.RunID, Reason: err.Error()})
+		return applyPlanStateEvent(activityCtx, workflowCtx, *spec, state, agentosplan.StateEvent{Kind: agentosplan.EventNodeFailed, NodeID: node.NodeID, RunID: status.RunID, Reason: err.Error()})
 
 	}
 	artifacts := published.Artifacts
 	if len(artifacts) > 0 {
-		if err := applyPlanStateEvent(activityCtx, workflowCtx, spec, state, agentosplan.StateEvent{Kind: agentosplan.EventArtifactsPublished, NodeID: node.NodeID, RunID: status.RunID, Artifacts: artifacts}); err != nil {
+		if err := applyPlanStateEvent(activityCtx, workflowCtx, *spec, state, agentosplan.StateEvent{Kind: agentosplan.EventArtifactsPublished, NodeID: node.NodeID, RunID: status.RunID, Artifacts: artifacts}); err != nil {
 			return err
 		}
 	}
 	switch status.LifecycleState {
 	case "completed", "succeeded":
 		if err := validateRequiredArtifacts(node.Outputs, artifacts); err != nil {
-			return applyNodeAttemptFailure(activityCtx, workflowCtx, spec, state, node, status.RunID, err.Error())
+			return applyNodeAttemptFailure(activityCtx, workflowCtx, *spec, state, node, status.RunID, err.Error())
 
 		}
-		return applyPlanStateEvent(activityCtx, workflowCtx, spec, state, agentosplan.StateEvent{Kind: agentosplan.EventNodeSucceeded, NodeID: node.NodeID, RunID: status.RunID})
+		if err := applyPlanExpansion(activityCtx, workflowCtx, spec, state, validation, expansionCount, node, status, artifacts); err != nil {
+			return err
+		}
+
+		return applyPlanStateEvent(activityCtx, workflowCtx, *spec, state, agentosplan.StateEvent{Kind: agentosplan.EventNodeSucceeded, NodeID: node.NodeID, RunID: status.RunID})
 	case "failed":
-		return applyNodeAttemptFailure(activityCtx, workflowCtx, spec, state, node, status.RunID, status.Reason)
+		return applyNodeAttemptFailure(activityCtx, workflowCtx, *spec, state, node, status.RunID, status.Reason)
 	case "canceled", "cancelled":
-		return applyPlanStateEvent(activityCtx, workflowCtx, spec, state, agentosplan.StateEvent{Kind: agentosplan.EventNodeCanceled, NodeID: node.NodeID, RunID: status.RunID, Reason: status.Reason})
+		return applyPlanStateEvent(activityCtx, workflowCtx, *spec, state, agentosplan.StateEvent{Kind: agentosplan.EventNodeCanceled, NodeID: node.NodeID, RunID: status.RunID, Reason: status.Reason})
 	}
 
 	return nil
+}
+
+func applyPlanExpansion(activityCtx workflow.Context, workflowCtx workflow.Context, spec *agentos.RunPlanSpec, state *agentosplan.State, validation *validatePlanOutput, expansionCount *int32, node agentos.PlanNodeSpec, status agentos.RunStatus, artifacts []agentos.ArtifactRef) error {
+	if !hasPlanDeltaArtifact(artifacts) {
+		return nil
+	}
+
+	var expanded evaluatePlanExpansionOutput
+	if err := workflow.ExecuteActivity(activityCtx, EvaluatePlanExpansionActivityName, evaluatePlanExpansionInput{
+		Spec:           *spec,
+		Status:         state.Status,
+		Node:           node,
+		RunStatus:      status,
+		Artifacts:      artifacts,
+		ExpansionCount: *expansionCount,
+	}).Get(activityCtx, &expanded); err != nil {
+		return err
+	}
+	if !expanded.Expanded {
+		return nil
+	}
+
+	nextSpec := expanded.Spec
+	if err := applyPlanStateEvent(activityCtx, workflowCtx, nextSpec, state, agentosplan.StateEvent{Kind: agentosplan.EventPlanExpanded, Expansion: expanded.Delta}); err != nil {
+		return err
+	}
+	*spec = nextSpec
+	validation.Plan = expanded.Plan
+	validation.ControlsByNode = expanded.ControlsByNode
+	(*expansionCount)++
+
+	return nil
+}
+
+func hasPlanDeltaArtifact(artifacts []agentos.ArtifactRef) bool {
+	for _, artifact := range artifacts {
+		if artifact.Kind == agentos.ArtifactKindPlanDelta {
+			return true
+		}
+	}
+
+	return false
 }
 
 func applyRunBudgetUsage(activityCtx workflow.Context, workflowCtx workflow.Context, spec agentos.RunPlanSpec, state *agentosplan.State, node agentos.PlanNodeSpec, status agentos.RunStatus) error {

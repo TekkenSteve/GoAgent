@@ -83,6 +83,7 @@ func TestWorkerKitRegistersPlanWorkflowAndActivities(t *testing.T) {
 		StatusPlanNodeActivityName,
 		ControlPlanNodeActivityName,
 		PublishPlanArtifactsActivityName,
+		EvaluatePlanExpansionActivityName,
 		PersistPlanStateActivityName,
 	} {
 		if !worker.activityRegistered(name) {

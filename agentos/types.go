@@ -104,6 +104,7 @@ const (
 	EventCapabilitySelected     EventType = "capability.selected"
 	EventPlanStarted            EventType = "plan.started"
 	EventPlanBlocked            EventType = "plan.blocked"
+	EventPlanExpanded           EventType = "plan.expanded"
 	EventPlanApproved           EventType = "plan.approved"
 	EventPlanRejected           EventType = "plan.rejected"
 	EventPlanSucceeded          EventType = "plan.succeeded"

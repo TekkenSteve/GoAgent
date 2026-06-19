@@ -93,6 +93,7 @@ type EventKind string
 const (
 	EventPlanStarted        EventKind = "plan.started"
 	EventPlanBlocked        EventKind = "plan.blocked"
+	EventPlanExpanded       EventKind = "plan.expanded"
 	EventPlanApproved       EventKind = "plan.approved"
 	EventPlanRejected       EventKind = "plan.rejected"
 	EventPlanSucceeded      EventKind = "plan.succeeded"
@@ -116,6 +117,7 @@ type StateEvent struct {
 	RunID       string                  `json:"run_id,omitempty"`
 	Reason      string                  `json:"reason,omitempty"`
 	Attempt     int32                   `json:"attempt,omitempty"`
+	Expansion   PlanDelta               `json:"expansion,omitempty"`
 	Artifacts   []agentos.ArtifactRef   `json:"artifacts,omitempty"`
 	BudgetDelta agentos.PlanBudgetUsage `json:"budget_delta,omitempty"`
 	At          time.Time               `json:"at,omitempty"`
@@ -134,6 +136,8 @@ func (s *State) Apply(event StateEvent) error {
 	case EventPlanBlocked:
 		s.Status.LifecycleState = agentos.PlanLifecycleBlocked
 		s.Status.Reason = event.Reason
+	case EventPlanExpanded:
+		return s.expand(event.Expansion, at)
 	case EventPlanApproved:
 		s.Status.LifecycleState = agentos.PlanLifecycleRunning
 		s.Status.Reason = event.Reason
@@ -250,6 +254,31 @@ func (s *State) reportBudget(event StateEvent, at time.Time) error {
 		s.nodes[event.NodeID] = node
 	}
 	s.Status.BudgetUsage.SpentCents += event.BudgetDelta.SpentCents
+	s.refresh(at)
+	s.transitions++
+
+	return nil
+}
+
+func (s *State) expand(delta PlanDelta, at time.Time) error {
+	if len(delta.Nodes) == 0 && len(delta.Edges) == 0 {
+		return fmt.Errorf("%w: expansion delta is empty", agentos.ErrInvalidRunPlan)
+	}
+	for _, node := range delta.Nodes {
+		if node.NodeID == "" {
+			return fmt.Errorf("%w: expansion node id is required", agentos.ErrInvalidRunPlan)
+		}
+		if _, exists := s.nodes[node.NodeID]; exists {
+			return fmt.Errorf("%w: expansion node %q already exists", agentos.ErrInvalidRunPlan, node.NodeID)
+		}
+		s.nodes[node.NodeID] = agentos.PlanNodeStatus{
+			NodeID:         node.NodeID,
+			RunID:          node.Run.RunID,
+			Backend:        node.Run.Backend,
+			LifecycleState: agentos.PlanNodePending,
+			UpdatedAt:      at,
+		}
+	}
 	s.refresh(at)
 	s.transitions++
 

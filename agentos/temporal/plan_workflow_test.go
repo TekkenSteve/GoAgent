@@ -137,6 +137,73 @@ func TestPlanWorkflowRetriesFailedNodeAttempt(t *testing.T) {
 	require.Equal(t, "run-flaky-attempt-2", result.Nodes[0].RunID)
 }
 
+func TestPlanWorkflowAppliesPlanDeltaArtifact(t *testing.T) {
+	t.Parallel()
+
+	ref := agentos.BackendRef{Kind: agentos.BackendKindNative, Name: agentos.BackendNameGoAgentNative}
+	spec := agentos.RunPlanSpec{
+		PlanID: "plan-expand",
+		Policy: agentos.PlanPolicy{
+			MaxNodes:      2,
+			MaxExpansions: 1,
+		},
+		Nodes: []agentos.PlanNodeSpec{
+			{NodeID: "seed", Run: agentos.RunSpec{RunID: "run-seed", Backend: ref}},
+		},
+	}
+	store := agentosplan.NewMemoryPlanStore()
+	artifactStore := agentosplan.NewMemoryArtifactStore()
+	deltaRef, err := artifactStore.Put(context.Background(), agentos.ArtifactRef{
+		ArtifactID: "delta-1",
+		PlanID:     spec.PlanID,
+		NodeID:     "seed",
+		RunID:      "run-seed",
+		Name:       "expand",
+		Kind:       agentos.ArtifactKindPlanDelta,
+	}, agentosplan.PlanDelta{
+		Nodes: []agentos.PlanNodeSpec{
+			{NodeID: "expanded", Run: agentos.RunSpec{RunID: "run-expanded", Backend: ref}},
+		},
+		Edges: []agentos.PlanEdgeSpec{
+			{EdgeID: "seed-expanded", From: "seed", To: "expanded", On: agentos.EdgeOnSuccess},
+		},
+	}, "delta-key")
+	require.NoError(t, err)
+
+	mocks := &planWorkflowMocks{
+		statuses: map[string]agentos.RunStatus{
+			"run-seed": {
+				RunID:          "run-seed",
+				LifecycleState: "completed",
+				Artifacts:      []agentos.ArtifactRef{deltaRef},
+			},
+			"run-expanded": {RunID: "run-expanded", LifecycleState: "completed"},
+		},
+	}
+	env := newPlanWorkflowTestEnvWithStores(mocks, nil, store, artifactStore)
+
+	env.ExecuteWorkflow(PlanWorkflow, planWorkflowInput{Spec: spec})
+
+	require.True(t, env.IsWorkflowCompleted())
+	require.NoError(t, env.GetWorkflowError())
+
+	var result agentos.RunPlanStatus
+	require.NoError(t, env.GetWorkflowResult(&result))
+	require.Equal(t, agentos.PlanLifecycleSucceeded, result.LifecycleState)
+	require.Equal(t, []string{"run-seed", "run-expanded"}, mocks.started)
+	require.Len(t, result.Nodes, 2)
+	require.Equal(t, "expanded", result.Nodes[0].NodeID)
+	require.Equal(t, "seed", result.Nodes[1].NodeID)
+
+	events, err := store.ListPlanEvents(context.Background(), agentos.PlanStreamScope{PlanID: spec.PlanID}, 0)
+	require.NoError(t, err)
+	eventTypes := make([]agentos.EventType, 0, len(events))
+	for _, event := range events {
+		eventTypes = append(eventTypes, event.EventType)
+	}
+	require.Contains(t, eventTypes, agentos.EventPlanExpanded)
+}
+
 func TestPlanWorkflowCancelsTimedOutNode(t *testing.T) {
 	t.Parallel()
 
@@ -267,6 +334,7 @@ func TestPlanWorkflowOrchestratesMixedBackendsThroughRuntime(t *testing.T) {
 	env.RegisterActivityWithOptions(activities.StatusPlanNodeActivity, activity.RegisterOptions{Name: StatusPlanNodeActivityName})
 	env.RegisterActivityWithOptions(activities.ControlPlanNodeActivity, activity.RegisterOptions{Name: ControlPlanNodeActivityName})
 	env.RegisterActivityWithOptions(activities.PublishPlanArtifactsActivity, activity.RegisterOptions{Name: PublishPlanArtifactsActivityName})
+	env.RegisterActivityWithOptions(activities.EvaluatePlanExpansionActivity, activity.RegisterOptions{Name: EvaluatePlanExpansionActivityName})
 
 	env.ExecuteWorkflow(PlanWorkflow, planWorkflowInput{Spec: spec})
 
@@ -466,10 +534,26 @@ func newPlanWorkflowTestEnv(mocks *planWorkflowMocks) *testsuite.TestWorkflowEnv
 }
 
 func newPlanWorkflowTestEnvWithCapabilities(mocks *planWorkflowMocks, capabilities []agentos.Capability) *testsuite.TestWorkflowEnvironment {
+	return newPlanWorkflowTestEnvWithStores(mocks, capabilities, agentosplan.NewMemoryPlanStore(), agentosplan.NewMemoryArtifactStore())
+}
+
+func newPlanWorkflowTestEnvWithStores(mocks *planWorkflowMocks, capabilities []agentos.Capability, store agentosplan.PlanStateStore, artifactStore agentosplan.ArtifactStore) *testsuite.TestWorkflowEnvironment {
 	env := (&testsuite.WorkflowTestSuite{}).NewTestWorkflowEnvironment()
 	env.RegisterWorkflowWithOptions(PlanWorkflow, workflow.RegisterOptions{Name: PlanWorkflowName})
 
-	activities, err := NewPlanActivitiesWithCapabilities(&fakePlanRuntime{}, capabilities)
+	eventStore, ok := store.(agentosplan.PlanEventStore)
+	if !ok {
+		panic("plan workflow test store must implement PlanEventStore")
+	}
+	activities, err := NewPlanActivitiesWithStores(
+		&fakePlanRuntime{},
+		capabilities,
+		store,
+		eventStore,
+		nil,
+		nil,
+		artifactStore,
+	)
 	if err != nil {
 		panic(err)
 	}
@@ -479,6 +563,7 @@ func newPlanWorkflowTestEnvWithCapabilities(mocks *planWorkflowMocks, capabiliti
 	env.RegisterActivityWithOptions(mocks.status, activity.RegisterOptions{Name: StatusPlanNodeActivityName})
 	env.RegisterActivityWithOptions(mocks.control, activity.RegisterOptions{Name: ControlPlanNodeActivityName})
 	env.RegisterActivityWithOptions(mocks.publishArtifacts, activity.RegisterOptions{Name: PublishPlanArtifactsActivityName})
+	env.RegisterActivityWithOptions(activities.EvaluatePlanExpansionActivity, activity.RegisterOptions{Name: EvaluatePlanExpansionActivityName})
 
 	return env
 }

@@ -17,6 +17,7 @@ type PlanActivities struct {
 	PlanEventPublisher agentosplan.PlanEventPublisher
 	RunBackendBinder   PlanRunBackendBinder
 	ArtifactStore      agentosplan.ArtifactStore
+	PlanDeltaProvider  agentosplan.PlanDeltaProvider
 	Expressions        agentosplan.ValueExpressionCompiler
 }
 
@@ -75,6 +76,7 @@ func NewPlanActivitiesWithStores(
 		PlanEventPublisher: eventPublisher,
 		RunBackendBinder:   runBackendBinder,
 		ArtifactStore:      artifactStore,
+		PlanDeltaProvider:  agentosplan.NewArtifactPlanDeltaProvider(artifactStore),
 		Expressions:        compiler,
 	}, nil
 }
@@ -244,6 +246,60 @@ func (a *PlanActivities) PublishPlanArtifactsActivity(ctx context.Context, input
 	}
 
 	return publishPlanArtifactsOutput{Artifacts: stored}, nil
+}
+
+type evaluatePlanExpansionInput struct {
+	Spec           agentos.RunPlanSpec
+	Status         agentos.RunPlanStatus
+	Node           agentos.PlanNodeSpec
+	RunStatus      agentos.RunStatus
+	Artifacts      []agentos.ArtifactRef
+	ExpansionCount int32
+}
+
+type evaluatePlanExpansionOutput struct {
+	Expanded       bool
+	Delta          agentosplan.PlanDelta
+	Spec           agentos.RunPlanSpec
+	Plan           agentosplan.ExecutablePlan
+	ControlsByNode map[string][]agentos.ControlOperation
+}
+
+// EvaluatePlanExpansionActivity materializes and validates workflow-owned
+// dynamic topology expansion after a child run publishes explicit plan_delta
+// artifacts.
+func (a *PlanActivities) EvaluatePlanExpansionActivity(ctx context.Context, input evaluatePlanExpansionInput) (evaluatePlanExpansionOutput, error) {
+	if a.PlanDeltaProvider == nil {
+		return evaluatePlanExpansionOutput{}, fmt.Errorf("%w: plan delta provider is required", agentos.ErrInvalidRunPlan)
+	}
+	delta, ok, err := a.PlanDeltaProvider.NextPlanDelta(ctx, agentosplan.PlanDeltaInput{
+		Spec:           input.Spec,
+		Status:         input.Status,
+		Node:           input.Node,
+		RunStatus:      input.RunStatus,
+		Artifacts:      input.Artifacts,
+		ExpansionCount: input.ExpansionCount,
+	})
+	if err != nil || !ok {
+		return evaluatePlanExpansionOutput{Expanded: false}, err
+	}
+
+	nextSpec, plan, err := agentosplan.ApplyDelta(ctx, a.Validator, input.Spec, delta, input.ExpansionCount)
+	if err != nil {
+		return evaluatePlanExpansionOutput{}, err
+	}
+	controlsByNode, err := a.controlsByNode(ctx, plan)
+	if err != nil {
+		return evaluatePlanExpansionOutput{}, err
+	}
+
+	return evaluatePlanExpansionOutput{
+		Expanded:       true,
+		Delta:          delta,
+		Spec:           nextSpec,
+		Plan:           plan,
+		ControlsByNode: controlsByNode,
+	}, nil
 }
 
 type statusPlanNodeInput struct {

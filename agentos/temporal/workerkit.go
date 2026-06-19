@@ -55,6 +55,9 @@ func RegisterPlanActivities(w worker.Worker, activities *PlanActivities) error {
 	w.RegisterActivityWithOptions(activities.PublishPlanArtifactsActivity, activity.RegisterOptions{
 		Name: PublishPlanArtifactsActivityName,
 	})
+	w.RegisterActivityWithOptions(activities.EvaluatePlanExpansionActivity, activity.RegisterOptions{
+		Name: EvaluatePlanExpansionActivityName,
+	})
 	w.RegisterActivityWithOptions(activities.PersistPlanStateActivity, activity.RegisterOptions{
 		Name: PersistPlanStateActivityName,
 	})

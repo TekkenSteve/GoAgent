@@ -84,6 +84,7 @@ const (
 	ArtifactKindPatch     ArtifactKind = "patch"
 	ArtifactKindReport    ArtifactKind = "report"
 	ArtifactKindReference ArtifactKind = "reference"
+	ArtifactKindPlanDelta ArtifactKind = "plan_delta"
 )
 
 // ArtifactRef points to an artifact outside Temporal workflow history.
