@@ -1,0 +1,241 @@
+package temporal
+
+import (
+	"context"
+	"errors"
+	"fmt"
+
+	"github.com/TekkenSteve/GoAgent/agentos"
+	"github.com/TekkenSteve/GoAgent/internal/usecase/agentosplan"
+)
+
+type planCommandReconciler struct {
+	temporalClient planTemporalClient
+	commandStore   agentosplan.PlanCommandStore
+	auditStore     agentosplan.AuditStore
+}
+
+func newPlanCommandReconciler(temporalClient planTemporalClient, commandStore agentosplan.PlanCommandStore, auditStore agentosplan.AuditStore) *planCommandReconciler {
+	return &planCommandReconciler{
+		temporalClient: temporalClient,
+		commandStore:   commandStore,
+		auditStore:     auditStore,
+	}
+}
+
+func (r *planCommandReconciler) Recover(ctx context.Context, limit int) (PlanCommandRecoveryResult, error) {
+	if r.temporalClient == nil {
+		return PlanCommandRecoveryResult{}, errors.New("agentos temporal plan command reconciler: temporal client is not configured")
+	}
+	if r.commandStore == nil {
+		return PlanCommandRecoveryResult{}, errPlanRuntimeCommandStoreRequired
+	}
+	if r.auditStore == nil {
+		return PlanCommandRecoveryResult{}, errPlanRuntimeAuditStoreRequired
+	}
+
+	commands, err := r.commandStore.ListRecoverablePlanCommands(ctx, agentosplan.PlanCommandScope{Limit: limit})
+	if err != nil {
+		return PlanCommandRecoveryResult{}, err
+	}
+
+	result := PlanCommandRecoveryResult{Scanned: len(commands)}
+	var errs []error
+	for _, command := range commands {
+		if err := r.deliver(ctx, command); err != nil {
+			result.Failed++
+			errs = append(errs, err)
+
+			continue
+		}
+		result.Delivered++
+	}
+
+	return result, errors.Join(errs...)
+}
+
+func (r *planCommandReconciler) deliver(ctx context.Context, command agentosplan.PlanCommandRecord) error {
+	if command.Status == agentosplan.PlanCommandDelivered {
+		return nil
+	}
+
+	signalName, payload, auditRecord, err := commandDeliveryPayload(command)
+	if err != nil {
+		if _, markErr := r.commandStore.MarkPlanCommandFailed(ctx, command.IdempotencyKey, err.Error()); markErr != nil {
+			return errors.Join(err, markErr)
+		}
+
+		return err
+	}
+
+	if err := r.temporalClient.SignalWorkflow(ctx, planWorkflowID(command.PlanID), "", signalName, payload); err != nil {
+		_, markErr := r.commandStore.MarkPlanCommandFailed(ctx, command.IdempotencyKey, err.Error())
+
+		return errors.Join(fmt.Errorf("agentos temporal plan command reconciler - signal workflow: %w", err), markErr)
+	}
+	if _, err := r.commandStore.MarkPlanCommandDelivered(ctx, command.IdempotencyKey); err != nil {
+		return err
+	}
+	if _, _, err := r.auditStore.RecordAudit(ctx, auditRecord); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func commandDeliveryPayload(command agentosplan.PlanCommandRecord) (string, any, agentosplan.AuditRecord, error) {
+	switch command.Action {
+	case agentosplan.AuditActionPlanSignal:
+		signal, err := signalFromPlanCommand(command)
+		if err != nil {
+			return "", nil, agentosplan.AuditRecord{}, err
+		}
+
+		return PlanSignalName, signal, planSignalAuditRecord(command.PlanID, signal), nil
+	case agentosplan.AuditActionPlanControl:
+		control, err := controlFromPlanCommand(command)
+		if err != nil {
+			return "", nil, agentosplan.AuditRecord{}, err
+		}
+
+		return PlanControlSignalName, control, planControlAuditRecord(command.PlanID, control), nil
+	default:
+		return "", nil, agentosplan.AuditRecord{}, fmt.Errorf("%w: unsupported plan command action %q", agentos.ErrInvalidRunPlan, command.Action)
+	}
+}
+
+func signalFromPlanCommand(command agentosplan.PlanCommandRecord) (agentos.Signal, error) {
+	signalType, err := signalTypePayload(command.Payload, planCommandPayloadSignalType)
+	if err != nil {
+		return agentos.Signal{}, err
+	}
+	payload, err := mapPayload(command.Payload, planCommandPayloadPayload)
+	if err != nil {
+		return agentos.Signal{}, err
+	}
+
+	signal := agentos.Signal{
+		Type:           signalType,
+		IdempotencyKey: command.IdempotencyKey,
+		ActorID:        command.ActorID,
+		Payload:        payload,
+	}
+	if err := agentosplan.ValidatePlanSignal(signal); err != nil {
+		return agentos.Signal{}, err
+	}
+
+	return signal, nil
+}
+
+func controlFromPlanCommand(command agentosplan.PlanCommandRecord) (agentos.ControlRequest, error) {
+	operation, err := controlOperationPayload(command.Payload, planCommandPayloadOperation)
+	if err != nil {
+		return agentos.ControlRequest{}, err
+	}
+	metadata, err := stringMapPayload(command.Payload, planCommandPayloadMetadata)
+	if err != nil {
+		return agentos.ControlRequest{}, err
+	}
+
+	control := agentos.ControlRequest{
+		Operation:      operation,
+		IdempotencyKey: command.IdempotencyKey,
+		ActorID:        command.ActorID,
+		Metadata:       metadata,
+	}
+	if err := agentos.ValidateControlRequest(control); err != nil {
+		return agentos.ControlRequest{}, err
+	}
+	if control.ActorID == "" {
+		return agentos.ControlRequest{}, fmt.Errorf("%w: control actor id is required", agentos.ErrInvalidControlOperation)
+	}
+
+	return control, nil
+}
+
+func signalTypePayload(payload map[string]any, key string) (agentos.SignalType, error) {
+	value, exists := payload[key]
+	if !exists {
+		return "", fmt.Errorf("%w: command payload.%s is required", agentos.ErrInvalidRunPlan, key)
+	}
+	switch typed := value.(type) {
+	case agentos.SignalType:
+		return typed, nil
+	case string:
+		return agentos.SignalType(typed), nil
+	default:
+		return "", fmt.Errorf("%w: command payload.%s must be a string", agentos.ErrInvalidRunPlan, key)
+	}
+}
+
+func controlOperationPayload(payload map[string]any, key string) (agentos.ControlOperation, error) {
+	value, exists := payload[key]
+	if !exists {
+		return "", fmt.Errorf("%w: command payload.%s is required", agentos.ErrInvalidRunPlan, key)
+	}
+	switch typed := value.(type) {
+	case agentos.ControlOperation:
+		return typed, nil
+	case string:
+		return agentos.ControlOperation(typed), nil
+	default:
+		return "", fmt.Errorf("%w: command payload.%s must be a string", agentos.ErrInvalidRunPlan, key)
+	}
+}
+
+func mapPayload(payload map[string]any, key string) (map[string]any, error) {
+	value, exists := payload[key]
+	if !exists || value == nil {
+		return map[string]any{}, nil
+	}
+	switch typed := value.(type) {
+	case map[string]any:
+		return typed, nil
+	case map[string]string:
+		converted := make(map[string]any, len(typed))
+		for key, value := range typed {
+			converted[key] = value
+		}
+
+		return converted, nil
+	default:
+		return nil, fmt.Errorf("%w: command payload.%s must be an object", agentos.ErrInvalidRunPlan, key)
+	}
+}
+
+func stringMapPayload(payload map[string]any, key string) (map[string]string, error) {
+	value, exists := payload[key]
+	if !exists || value == nil {
+		return nil, nil
+	}
+	switch typed := value.(type) {
+	case map[string]string:
+		return typed, nil
+	case map[string]any:
+		converted := make(map[string]string, len(typed))
+		for key, value := range typed {
+			stringValue, ok := value.(string)
+			if !ok {
+				return nil, fmt.Errorf("%w: command payload.%s.%s must be a string", agentos.ErrInvalidRunPlan, planCommandPayloadMetadata, key)
+			}
+			converted[key] = stringValue
+		}
+
+		return converted, nil
+	default:
+		return nil, fmt.Errorf("%w: command payload.%s must be an object", agentos.ErrInvalidRunPlan, key)
+	}
+}
+
+func planControlAuditRecord(planID string, control agentos.ControlRequest) agentosplan.AuditRecord {
+	return agentosplan.AuditRecord{
+		PlanID:         planID,
+		ActorID:        control.ActorID,
+		Action:         agentosplan.AuditActionPlanControl,
+		IdempotencyKey: control.IdempotencyKey,
+		Payload: map[string]any{
+			planCommandPayloadOperation: control.Operation,
+			planCommandPayloadMetadata:  control.Metadata,
+		},
+	}
+}

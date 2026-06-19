@@ -48,6 +48,13 @@ var (
 	ErrPlanRuntimeArtifactStoreS3SecretKeyRequired = errors.New("agentos temporal plan runtime: artifact s3 secret access key is required")
 )
 
+const (
+	planCommandPayloadSignalType = "type"
+	planCommandPayloadPayload    = "payload"
+	planCommandPayloadOperation  = "operation"
+	planCommandPayloadMetadata   = "metadata"
+)
+
 type planTemporalClient interface {
 	ExecuteWorkflow(ctx context.Context, options client.StartWorkflowOptions, workflow interface{}, args ...interface{}) (client.WorkflowRun, error)
 	SignalWorkflow(ctx context.Context, workflowID string, runID string, signalName string, arg interface{}) error
@@ -265,16 +272,7 @@ func (r *planRuntime) ControlPlan(ctx context.Context, ref agentos.PlanRef, cont
 	if _, _, err := r.authorizePlan(ctx, ref); err != nil {
 		return err
 	}
-	record := agentosplan.AuditRecord{
-		PlanID:         ref.PlanID,
-		ActorID:        control.ActorID,
-		Action:         agentosplan.AuditActionPlanControl,
-		IdempotencyKey: control.IdempotencyKey,
-		Payload: map[string]any{
-			"operation": control.Operation,
-			"metadata":  control.Metadata,
-		},
-	}
+	record := planControlAuditRecord(ref.PlanID, control)
 	command, err := r.recordPlanCommand(ctx, planCommandFromAuditRecord(record))
 	if err != nil {
 		return err
@@ -466,8 +464,8 @@ func planSignalAuditRecord(planID string, signal agentos.Signal) agentosplan.Aud
 		Action:         agentosplan.AuditActionPlanSignal,
 		IdempotencyKey: signal.IdempotencyKey,
 		Payload: map[string]any{
-			"type":    signal.Type,
-			"payload": signal.Payload,
+			planCommandPayloadSignalType: signal.Type,
+			planCommandPayloadPayload:    signal.Payload,
 		},
 	}
 }

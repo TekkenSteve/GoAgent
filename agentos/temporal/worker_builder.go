@@ -143,6 +143,7 @@ func newWorkerKit(ctx context.Context, cfg WorkerConfig) (*WorkerKit, error) {
 		return nil, fmt.Errorf("agentos temporal worker - plan activities: %w", err)
 	}
 	kit.planActivities = planActivities
+	kit.planCommandReconciler = newPlanCommandReconciler(temporalClient, planStore, planStore)
 
 	kit.closeFns = append(kit.closeFns,
 		func() error {

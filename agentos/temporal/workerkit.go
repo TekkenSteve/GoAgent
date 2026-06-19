@@ -13,9 +13,10 @@ import (
 
 // WorkerKit registers GoAgent workflows and activities into an existing worker.
 type WorkerKit struct {
-	activities     *orchestration.AgentActivities
-	planActivities *PlanActivities
-	closeFns       []func() error
+	activities            *orchestration.AgentActivities
+	planActivities        *PlanActivities
+	planCommandReconciler *planCommandReconciler
+	closeFns              []func() error
 }
 
 // RegisterPlanWorkflow installs the AgentOS RunPlan workflow into an existing worker.
@@ -138,6 +139,23 @@ func (k *WorkerKit) Register(w worker.Worker) error {
 
 func (k *WorkerKit) registerPlanActivities(w worker.Worker) error {
 	return RegisterPlanActivities(w, k.planActivities)
+}
+
+// PlanCommandRecoveryResult summarizes one durable command outbox recovery pass.
+type PlanCommandRecoveryResult struct {
+	Scanned   int
+	Delivered int
+	Failed    int
+}
+
+// RecoverPlanCommands redelivers pending/failed RunPlan control-plane commands
+// from the durable outbox.
+func (k *WorkerKit) RecoverPlanCommands(ctx context.Context, limit int) (PlanCommandRecoveryResult, error) {
+	if k.planCommandReconciler == nil {
+		return PlanCommandRecoveryResult{}, errors.New("agentos temporal workerkit: plan command reconciler is not configured")
+	}
+
+	return k.planCommandReconciler.Recover(ctx, limit)
 }
 
 // Close releases resources owned by the kit.

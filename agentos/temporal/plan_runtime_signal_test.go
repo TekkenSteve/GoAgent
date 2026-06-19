@@ -575,17 +575,21 @@ func newPlanRuntimeTestStore(t *testing.T) (*agentosplan.MemoryPlanStore, agento
 }
 
 type fakePlanTemporalClient struct {
-	signalName  string
-	signalCount int
-	signalErr   error
+	signalWorkflowID string
+	signalName       string
+	signalPayload    any
+	signalCount      int
+	signalErr        error
 }
 
 func (c *fakePlanTemporalClient) ExecuteWorkflow(context.Context, client.StartWorkflowOptions, interface{}, ...interface{}) (client.WorkflowRun, error) {
 	return nil, nil
 }
 
-func (c *fakePlanTemporalClient) SignalWorkflow(_ context.Context, _ string, _ string, signalName string, _ interface{}) error {
+func (c *fakePlanTemporalClient) SignalWorkflow(_ context.Context, workflowID string, _ string, signalName string, arg interface{}) error {
+	c.signalWorkflowID = workflowID
 	c.signalName = signalName
+	c.signalPayload = arg
 	c.signalCount++
 
 	return c.signalErr
