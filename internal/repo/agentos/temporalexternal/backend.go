@@ -8,8 +8,6 @@ import (
 
 	"github.com/TekkenSteve/GoAgent/agentos"
 	agentosruntime "github.com/TekkenSteve/GoAgent/internal/usecase/agentosruntime"
-	enumspb "go.temporal.io/api/enums/v1"
-	workflowservicepb "go.temporal.io/api/workflowservice/v1"
 	"go.temporal.io/sdk/client"
 	"go.temporal.io/sdk/converter"
 )
@@ -18,9 +16,7 @@ import (
 type TemporalClient interface {
 	ExecuteWorkflow(ctx context.Context, options client.StartWorkflowOptions, workflow interface{}, args ...interface{}) (client.WorkflowRun, error)
 	SignalWorkflow(ctx context.Context, workflowID string, runID string, signalName string, arg interface{}) error
-	CancelWorkflow(ctx context.Context, workflowID string, runID string) error
 	QueryWorkflow(ctx context.Context, workflowID string, runID string, queryType string, args ...interface{}) (converter.EncodedValue, error)
-	DescribeWorkflowExecution(ctx context.Context, workflowID string, runID string) (*workflowservicepb.DescribeWorkflowExecutionResponse, error)
 }
 
 // Backend starts and controls external Temporal workflows that implement AgentOS protocol.
@@ -108,34 +104,15 @@ func (b *Backend) Control(ctx context.Context, runID string, control agentos.Con
 	case agentos.ControlResume:
 		return b.controlBySignal(ctx, runID, agentos.SignalControlResume, control)
 	case agentos.ControlCancel:
-		if b.config.Signals.Cancel != "" {
-			return b.controlBySignal(ctx, runID, agentos.SignalControlCancel, control)
-		}
-		if err := b.client.CancelWorkflow(ctx, workflowID(runID), ""); err != nil {
-			return fmt.Errorf("temporal external backend - cancel workflow: %w", err)
-		}
-
-		return nil
+		return b.controlBySignal(ctx, runID, agentos.SignalControlCancel, control)
 	default:
 		return fmt.Errorf("%w: %s", agentos.ErrInvalidControlOperation, control.Operation)
 	}
 }
 
-// Status returns external workflow status from optional query or Temporal describe.
+// Status returns external workflow status from the backend-owned AgentOS query.
 func (b *Backend) Status(ctx context.Context, runID string) (agentos.RunStatus, error) {
-	if b.config.QueryType != "" {
-		status, err := b.queryStatus(ctx, runID)
-		if err == nil {
-			return status, nil
-		}
-	}
-
-	desc, err := b.client.DescribeWorkflowExecution(ctx, workflowID(runID), "")
-	if err != nil {
-		return agentos.RunStatus{}, fmt.Errorf("temporal external backend - describe workflow: %w", err)
-	}
-
-	return runStatusFromDescription(runID, desc, b.now()), nil
+	return b.queryStatus(ctx, runID)
 }
 
 // Subscribe returns the shared AgentOS event stream for the run.
@@ -154,7 +131,7 @@ func (b *Backend) Capabilities() agentosruntime.BackendCapabilities {
 		SupportsSignalUserMessage: b.config.Signals.Defaults[agentos.SignalUserMessage] != "",
 		SupportsPause:             b.config.Signals.Pause != "",
 		SupportsResume:            b.config.Signals.Resume != "",
-		SupportsCancel:            true,
+		SupportsCancel:            b.config.Signals.Cancel != "",
 		SupportsStreaming:         b.subscriber != nil,
 	}
 }
@@ -218,36 +195,4 @@ func (b *Backend) queryStatus(ctx context.Context, runID string) (agentos.RunSta
 
 func workflowID(runID string) string {
 	return "agentos-external-" + runID
-}
-
-func runStatusFromDescription(runID string, desc *workflowservicepb.DescribeWorkflowExecutionResponse, now time.Time) agentos.RunStatus {
-	state := "unknown"
-	if info := desc.GetWorkflowExecutionInfo(); info != nil {
-		state = lifecycleFromTemporalStatus(info.GetStatus())
-	}
-
-	return agentos.RunStatus{
-		RunID:          runID,
-		LifecycleState: state,
-		UpdatedAt:      now,
-	}
-}
-
-func lifecycleFromTemporalStatus(status enumspb.WorkflowExecutionStatus) string {
-	switch status {
-	case enumspb.WORKFLOW_EXECUTION_STATUS_RUNNING:
-		return "running"
-	case enumspb.WORKFLOW_EXECUTION_STATUS_COMPLETED:
-		return "completed"
-	case enumspb.WORKFLOW_EXECUTION_STATUS_FAILED:
-		return "failed"
-	case enumspb.WORKFLOW_EXECUTION_STATUS_CANCELED:
-		return "canceled"
-	case enumspb.WORKFLOW_EXECUTION_STATUS_TERMINATED:
-		return "canceled"
-	case enumspb.WORKFLOW_EXECUTION_STATUS_TIMED_OUT:
-		return "failed"
-	default:
-		return "unknown"
-	}
 }

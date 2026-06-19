@@ -19,7 +19,6 @@ import (
 	"github.com/TekkenSteve/GoAgent/internal/usecase/agentosplan"
 	agentosruntime "github.com/TekkenSteve/GoAgent/internal/usecase/agentosruntime"
 	"github.com/stretchr/testify/require"
-	workflowservicepb "go.temporal.io/api/workflowservice/v1"
 	"go.temporal.io/sdk/activity"
 	"go.temporal.io/sdk/client"
 	"go.temporal.io/sdk/converter"
@@ -437,16 +436,8 @@ func (c *mixedAdapterTemporalClient) SignalWorkflow(context.Context, string, str
 	return nil
 }
 
-func (c *mixedAdapterTemporalClient) CancelWorkflow(context.Context, string, string) error {
-	return nil
-}
-
 func (c *mixedAdapterTemporalClient) QueryWorkflow(context.Context, string, string, string, ...interface{}) (converter.EncodedValue, error) {
 	return c.queryValue, nil
-}
-
-func (c *mixedAdapterTemporalClient) DescribeWorkflowExecution(context.Context, string, string) (*workflowservicepb.DescribeWorkflowExecutionResponse, error) {
-	return &workflowservicepb.DescribeWorkflowExecutionResponse{}, nil
 }
 
 type mixedAdapterWorkflowRun struct {

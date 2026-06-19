@@ -2,14 +2,12 @@ package temporalexternal
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
 
 	"github.com/TekkenSteve/GoAgent/agentos"
 	"github.com/TekkenSteve/GoAgent/internal/usecase/agentosruntime/agentosruntimetest"
-	enumspb "go.temporal.io/api/enums/v1"
-	workflowpb "go.temporal.io/api/workflow/v1"
-	workflowservicepb "go.temporal.io/api/workflowservice/v1"
 	"go.temporal.io/sdk/client"
 	"go.temporal.io/sdk/converter"
 )
@@ -56,6 +54,7 @@ func TestBackendStartExecutesConfiguredWorkflow(t *testing.T) {
 		Name:         "langgraph-main",
 		TaskQueue:    "langgraph-queue",
 		WorkflowType: "langgraph.agent.v1",
+		QueryType:    "agentos_status",
 	})
 	backend.now = func() time.Time { return time.Date(2026, 6, 16, 9, 0, 0, 0, time.UTC) }
 
@@ -99,6 +98,7 @@ func TestBackendSignalUsesConfiguredSignalName(t *testing.T) {
 		Name:         "langgraph-main",
 		TaskQueue:    "langgraph-queue",
 		WorkflowType: "langgraph.agent.v1",
+		QueryType:    "agentos_status",
 		Signals: SignalNames{
 			Defaults: map[agentos.SignalType]string{
 				agentos.SignalUserMessage: "user_input",
@@ -129,20 +129,39 @@ func TestBackendSignalUsesConfiguredSignalName(t *testing.T) {
 	}
 }
 
-func TestBackendControlCancelFallsBackToTemporalCancel(t *testing.T) {
+func TestBackendControlCancelRequiresConfiguredSignal(t *testing.T) {
 	temporalClient := &fakeTemporalClient{}
 	backend := newTestBackend(t, temporalClient, Config{
 		Name:         "python-agent",
 		TaskQueue:    "python-queue",
 		WorkflowType: "python.agent.v1",
+		QueryType:    "agentos_status",
 	})
 
-	if err := backend.Control(context.Background(), "run-1", agentos.ControlRequest{Operation: agentos.ControlCancel}); err != nil {
+	err := backend.Control(context.Background(), "run-1", agentos.ControlRequest{Operation: agentos.ControlCancel})
+	if !errors.Is(err, agentos.ErrInvalidControlOperation) {
+		t.Fatalf("Control cancel error = %v, want ErrInvalidControlOperation", err)
+	}
+}
+
+func TestBackendControlCancelUsesConfiguredSignal(t *testing.T) {
+	temporalClient := &fakeTemporalClient{}
+	backend := newTestBackend(t, temporalClient, Config{
+		Name:         "python-agent",
+		TaskQueue:    "python-queue",
+		WorkflowType: "python.agent.v1",
+		QueryType:    "agentos_status",
+		Signals: SignalNames{
+			Cancel: "agentos_cancel",
+		},
+	})
+
+	err := backend.Control(context.Background(), "run-1", agentos.ControlRequest{Operation: agentos.ControlCancel})
+	if err != nil {
 		t.Fatalf("Control cancel: %v", err)
 	}
-
-	if temporalClient.cancelWorkflowID != "agentos-external-run-1" {
-		t.Fatalf("cancel workflow id = %q", temporalClient.cancelWorkflowID)
+	if temporalClient.signalWorkflowID != "agentos-external-run-1" || temporalClient.signalName != "agentos_cancel" {
+		t.Fatalf("unexpected cancel signal route: workflow=%q signal=%q", temporalClient.signalWorkflowID, temporalClient.signalName)
 	}
 }
 
@@ -171,27 +190,14 @@ func TestBackendStatusUsesQueryWhenConfigured(t *testing.T) {
 	}
 }
 
-func TestBackendStatusFallsBackToDescribe(t *testing.T) {
-	temporalClient := &fakeTemporalClient{
-		describeResponse: &workflowservicepb.DescribeWorkflowExecutionResponse{
-			WorkflowExecutionInfo: &workflowpb.WorkflowExecutionInfo{
-				Status: enumspb.WORKFLOW_EXECUTION_STATUS_COMPLETED,
-			},
-		},
-	}
-	backend := newTestBackend(t, temporalClient, Config{
+func TestBackendRequiresStatusQuery(t *testing.T) {
+	_, err := NewBackend(&fakeTemporalClient{}, nil, Config{
 		Name:         "python-agent",
 		TaskQueue:    "python-queue",
 		WorkflowType: "python.agent.v1",
 	})
-
-	status, err := backend.Status(context.Background(), "run-1")
-	if err != nil {
-		t.Fatalf("Status: %v", err)
-	}
-
-	if status.LifecycleState != "completed" {
-		t.Fatalf("lifecycle = %q", status.LifecycleState)
+	if !errors.Is(err, agentos.ErrInvalidBackendRef) {
+		t.Fatalf("NewBackend error = %v, want ErrInvalidBackendRef", err)
 	}
 }
 
@@ -215,10 +221,8 @@ type fakeTemporalClient struct {
 	signalWorkflowID string
 	signalName       string
 	signalArg        interface{}
-	cancelWorkflowID string
 	queryType        string
 	queryValue       converter.EncodedValue
-	describeResponse *workflowservicepb.DescribeWorkflowExecutionResponse
 }
 
 func (c *fakeTemporalClient) ExecuteWorkflow(_ context.Context, options client.StartWorkflowOptions, workflow interface{}, args ...interface{}) (client.WorkflowRun, error) {
@@ -237,24 +241,10 @@ func (c *fakeTemporalClient) SignalWorkflow(_ context.Context, workflowID string
 	return nil
 }
 
-func (c *fakeTemporalClient) CancelWorkflow(_ context.Context, workflowID string, _ string) error {
-	c.cancelWorkflowID = workflowID
-
-	return nil
-}
-
 func (c *fakeTemporalClient) QueryWorkflow(_ context.Context, _ string, _ string, queryType string, _ ...interface{}) (converter.EncodedValue, error) {
 	c.queryType = queryType
 
 	return c.queryValue, nil
-}
-
-func (c *fakeTemporalClient) DescribeWorkflowExecution(context.Context, string, string) (*workflowservicepb.DescribeWorkflowExecutionResponse, error) {
-	if c.describeResponse == nil {
-		return &workflowservicepb.DescribeWorkflowExecutionResponse{}, nil
-	}
-
-	return c.describeResponse, nil
 }
 
 type fakeWorkflowRun struct {

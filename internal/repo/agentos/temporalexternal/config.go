@@ -41,6 +41,9 @@ func (c Config) validate() error {
 	if c.WorkflowType == "" {
 		return fmt.Errorf("%w: temporal external workflow type is required", agentos.ErrInvalidBackendRef)
 	}
+	if c.QueryType == "" {
+		return fmt.Errorf("%w: temporal external status query type is required", agentos.ErrInvalidBackendRef)
+	}
 
 	return nil
 }
