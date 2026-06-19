@@ -2,8 +2,6 @@ package persistent
 
 import (
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -51,14 +49,14 @@ func (r *AgentOSArtifactRepo) Put(ctx context.Context, ref agentos.ArtifactRef, 
 	}
 	var encodedPayload []byte
 	if payload != nil {
-		encoded, mediaType, err := encodeArtifactPayload(payload, ref.MediaType)
+		encoded, mediaType, err := agentosplan.EncodeArtifactPayload(payload, ref.MediaType)
 		if err != nil {
 			return agentos.ArtifactRef{}, err
 		}
 		encodedPayload = encoded
 		ref.MediaType = mediaType
 		ref.SizeBytes = int64(len(encodedPayload))
-		ref.Digest = digestArtifactPayload(encodedPayload)
+		ref.Digest = agentosplan.DigestArtifactPayload(encodedPayload)
 	}
 
 	existing, exists, err := r.artifactByIdempotencyKey(ctx, idempotencyKey)
@@ -168,7 +166,7 @@ func (r *AgentOSArtifactRepo) Get(ctx context.Context, artifactID string) (agent
 	if err != nil {
 		return agentos.ArtifactRef{}, nil, err
 	}
-	payload, err := decodeArtifactPayload(data, ref.MediaType)
+	payload, err := agentosplan.DecodeArtifactPayload(data, ref.MediaType)
 	if err != nil {
 		return agentos.ArtifactRef{}, nil, err
 	}
@@ -237,12 +235,6 @@ func artifactColumns() []string {
 	return []string{"artifact_id", "plan_id", "node_id", "run_id", "name", "kind", "media_type", "uri", "size_bytes", "digest", "metadata_json", "created_at"}
 }
 
-func digestArtifactPayload(payload []byte) string {
-	sum := sha256.Sum256(payload)
-
-	return "sha256:" + hex.EncodeToString(sum[:])
-}
-
 func artifactBlobKey(artifactID, digest string) string {
 	if digest == "" {
 		return artifactID
@@ -289,47 +281,4 @@ func scanArtifactRef(scanner artifactScanner) (agentos.ArtifactRef, error) {
 	}
 
 	return ref, nil
-}
-
-func encodeArtifactPayload(payload any, mediaType string) ([]byte, string, error) {
-	if mediaType == "" {
-		mediaType = "application/json"
-	}
-	switch value := payload.(type) {
-	case []byte:
-		if mediaType == "application/json" {
-			mediaType = "application/octet-stream"
-		}
-
-		return value, mediaType, nil
-	case string:
-		if mediaType == "application/json" {
-			mediaType = "text/plain"
-		}
-
-		return []byte(value), mediaType, nil
-	default:
-		data, err := json.Marshal(value)
-		if err != nil {
-			return nil, "", fmt.Errorf("%w: encode artifact payload: %s", agentos.ErrInvalidArtifact, err)
-		}
-
-		return data, mediaType, nil
-	}
-}
-
-func decodeArtifactPayload(data []byte, mediaType string) (any, error) {
-	switch mediaType {
-	case "application/json", "":
-		var value any
-		if err := json.Unmarshal(data, &value); err != nil {
-			return nil, fmt.Errorf("%w: decode artifact payload: %s", agentos.ErrInvalidArtifact, err)
-		}
-
-		return value, nil
-	case "text/plain":
-		return string(data), nil
-	default:
-		return data, nil
-	}
 }

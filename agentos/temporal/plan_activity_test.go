@@ -84,6 +84,50 @@ func TestPlanActivitiesResolvePlanNodeInputMapsInput(t *testing.T) {
 	}
 }
 
+func TestPlanActivitiesResolvePlanNodeInputDereferencesArtifactPayload(t *testing.T) {
+	ctx := context.Background()
+	activities := NewPlanActivities(&fakePlanRuntime{})
+	ref, err := activities.ArtifactStore.Put(ctx, agentos.ArtifactRef{
+		ArtifactID: "artifact-summary",
+		PlanID:     "plan-1",
+		NodeID:     "research",
+		RunID:      "run-research",
+		Name:       "summary",
+		Kind:       agentos.ArtifactKindObject,
+	}, map[string]any{
+		"body": map[string]any{"title": "artifact mapping"},
+	}, "plan-1:artifact-summary")
+	if err != nil {
+		t.Fatalf("Put artifact: %v", err)
+	}
+
+	resolved, err := activities.ResolvePlanNodeInputActivity(ctx, resolvePlanNodeInputInput{
+		Status: agentos.RunPlanStatus{
+			PlanID:    "plan-1",
+			Artifacts: []agentos.ArtifactRef{ref},
+		},
+		Node: agentos.PlanNodeSpec{
+			NodeID: "verify",
+			Run:    agentos.RunSpec{RunID: "run-verify"},
+			Inputs: []agentos.InputMapping{
+				{
+					Target:         "summary_title",
+					SourceNodeID:   "research",
+					SourceArtifact: "summary",
+					SourcePath:     "body.title",
+					Required:       true,
+				},
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("ResolvePlanNodeInputActivity: %v", err)
+	}
+	if resolved.Input["summary_title"] != "artifact mapping" {
+		t.Fatalf("summary_title = %#v", resolved.Input["summary_title"])
+	}
+}
+
 func TestPlanActivitiesPublishArtifactsIsIdempotent(t *testing.T) {
 	activities := NewPlanActivities(&fakePlanRuntime{})
 	input := publishPlanArtifactsInput{
@@ -116,6 +160,49 @@ func TestPlanActivitiesPublishArtifactsIsIdempotent(t *testing.T) {
 	}
 	if first.Artifacts[0].PlanID != "plan-1" || first.Artifacts[0].NodeID != "node-1" || first.Artifacts[0].RunID != "run-1" {
 		t.Fatalf("artifact scope = %#v", first.Artifacts[0])
+	}
+}
+
+func TestPlanActivitiesPublishArtifactsRetainsStoredPayload(t *testing.T) {
+	ctx := context.Background()
+	activities := NewPlanActivities(&fakePlanRuntime{})
+	node := agentos.PlanNodeSpec{NodeID: "research"}
+	status := agentos.RunStatus{RunID: "run-research"}
+	key, err := agentosplan.ArtifactPublishIdempotencyKey("plan-1", node.NodeID, status.RunID, "summary")
+	if err != nil {
+		t.Fatalf("ArtifactPublishIdempotencyKey: %v", err)
+	}
+	ref, err := activities.ArtifactStore.Put(ctx, agentos.ArtifactRef{
+		ArtifactID: "artifact-summary",
+		PlanID:     "plan-1",
+		NodeID:     node.NodeID,
+		RunID:      status.RunID,
+		Name:       "summary",
+		Kind:       agentos.ArtifactKindObject,
+	}, map[string]any{"value": "from backend"}, key)
+	if err != nil {
+		t.Fatalf("Put artifact payload: %v", err)
+	}
+	status.Artifacts = []agentos.ArtifactRef{ref}
+
+	output, err := activities.PublishPlanArtifactsActivity(ctx, publishPlanArtifactsInput{
+		PlanID: "plan-1",
+		Node:   node,
+		Status: status,
+	})
+	if err != nil {
+		t.Fatalf("PublishPlanArtifactsActivity: %v", err)
+	}
+	if len(output.Artifacts) != 1 || output.Artifacts[0].Digest != ref.Digest {
+		t.Fatalf("published artifacts = %#v, want %#v", output.Artifacts, ref)
+	}
+	_, payload, err := activities.ArtifactStore.Get(ctx, ref.ArtifactID)
+	if err != nil {
+		t.Fatalf("Get artifact: %v", err)
+	}
+	value, ok := payload.(map[string]any)["value"]
+	if !ok || value != "from backend" {
+		t.Fatalf("payload = %#v, want original payload", payload)
 	}
 }
 

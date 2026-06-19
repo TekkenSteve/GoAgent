@@ -2,9 +2,7 @@ package agentosplan
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
-	"reflect"
 	"sync"
 	"time"
 
@@ -47,6 +45,15 @@ func (s *MemoryArtifactStore) Put(_ context.Context, artifact agentos.ArtifactRe
 	if artifact.Kind == "" {
 		return agentos.ArtifactRef{}, fmt.Errorf("%w: artifact kind is required", agentos.ErrInvalidArtifact)
 	}
+	if payload != nil {
+		encodedPayload, mediaType, err := EncodeArtifactPayload(payload, artifact.MediaType)
+		if err != nil {
+			return agentos.ArtifactRef{}, err
+		}
+		artifact.MediaType = mediaType
+		artifact.SizeBytes = int64(len(encodedPayload))
+		artifact.Digest = DigestArtifactPayload(encodedPayload)
+	}
 	if artifact.ArtifactID == "" {
 		artifact.ArtifactID = ArtifactIDFromIdempotencyKey(idempotencyKey)
 	}
@@ -62,12 +69,12 @@ func (s *MemoryArtifactStore) Put(_ context.Context, artifact agentos.ArtifactRe
 			if err := ValidateArtifactPublishIdempotency(existing.ref, artifact); err != nil {
 				return agentos.ArtifactRef{}, err
 			}
-			if err := validateArtifactPayloadIdempotency(existing.payload, payload); err != nil {
-				return agentos.ArtifactRef{}, err
-			}
 
 			return existing.ref, nil
 		}
+	}
+	if _, exists := s.artifacts[artifact.ArtifactID]; exists {
+		return agentos.ArtifactRef{}, fmt.Errorf("%w: artifact id %q already exists with a different idempotency key", agentos.ErrInvalidArtifact, artifact.ArtifactID)
 	}
 	s.artifacts[artifact.ArtifactID] = storedArtifact{ref: artifact, payload: payload}
 	if idempotencyKey != "" {
@@ -105,17 +112,4 @@ func (s *MemoryArtifactStore) List(_ context.Context, planID string) ([]agentos.
 	}
 
 	return refs, nil
-}
-
-func validateArtifactPayloadIdempotency(existing any, requested any) error {
-	if reflect.DeepEqual(existing, requested) {
-		return nil
-	}
-	existingJSON, existingErr := json.Marshal(existing)
-	requestedJSON, requestedErr := json.Marshal(requested)
-	if existingErr == nil && requestedErr == nil && string(existingJSON) == string(requestedJSON) {
-		return nil
-	}
-
-	return fmt.Errorf("%w: artifact idempotency key was reused with a different payload", agentos.ErrInvalidArtifact)
 }
