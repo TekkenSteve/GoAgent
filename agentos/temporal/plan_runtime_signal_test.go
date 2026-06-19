@@ -80,6 +80,29 @@ func TestPlanRuntimeStartPlanRequiresAccountScope(t *testing.T) {
 	}
 }
 
+func TestPlanRuntimeWithoutPostgresDoesNotInstallMemoryPlanStores(t *testing.T) {
+	rt, err := newPlanRuntimeWithClient(t.Context(), RuntimeConfig{TemporalTaskQueue: "agentos-test"}, &fakePlanTemporalClient{}, false)
+	if err != nil {
+		t.Fatalf("newPlanRuntimeWithClient: %v", err)
+	}
+	if rt.planIndex != nil || rt.planEvents != nil || rt.auditStore != nil {
+		t.Fatalf("durable stores = index:%T events:%T audit:%T, want nil without postgres", rt.planIndex, rt.planEvents, rt.auditStore)
+	}
+
+	_, err = rt.StartPlan(t.Context(), agentos.RunPlanSpec{
+		PlanID:         "plan-1",
+		AccountID:      "acct-1",
+		IdempotencyKey: "plan-start-1",
+	})
+	if !errors.Is(err, errPlanRuntimePlanIndexRequired) {
+		t.Fatalf("StartPlan error = %v, want missing durable plan index", err)
+	}
+	_, err = rt.SubscribePlan(t.Context(), agentos.PlanStreamScope{PlanID: "plan-1", AccountID: "acct-1"})
+	if !errors.Is(err, errPlanRuntimePlanEventStoreRequired) {
+		t.Fatalf("SubscribePlan error = %v, want missing durable plan event store", err)
+	}
+}
+
 func TestPlanRuntimeStatusPlanReportsMissingDurablePlan(t *testing.T) {
 	rt := &planRuntime{planIndex: agentosplan.NewMemoryPlanStore()}
 

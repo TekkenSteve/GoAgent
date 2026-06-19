@@ -28,6 +28,12 @@ type planRuntime struct {
 	taskQueue      string
 }
 
+var (
+	errPlanRuntimePlanIndexRequired      = errors.New("agentos temporal plan runtime: plan index is not configured")
+	errPlanRuntimePlanEventStoreRequired = errors.New("agentos temporal plan runtime: plan event store is not configured")
+	errPlanRuntimeAuditStoreRequired     = errors.New("agentos temporal plan runtime: audit store is not configured")
+)
+
 type planTemporalClient interface {
 	ExecuteWorkflow(ctx context.Context, options client.StartWorkflowOptions, workflow interface{}, args ...interface{}) (client.WorkflowRun, error)
 	SignalWorkflow(ctx context.Context, workflowID string, runID string, signalName string, arg interface{}) error
@@ -64,7 +70,7 @@ func NewPlanRuntimeWithClient(ctx context.Context, cfg RuntimeConfig, c client.C
 	return newPlanRuntimeWithClient(ctx, cfg, c, false)
 }
 
-func newPlanRuntimeWithClient(ctx context.Context, cfg RuntimeConfig, c client.Client, closeTemporal bool) (*planRuntime, error) {
+func newPlanRuntimeWithClient(ctx context.Context, cfg RuntimeConfig, c planTemporalClient, closeTemporal bool) (*planRuntime, error) {
 	fwTemporal := temporalConfig(cfg)
 	rt := &planRuntime{
 		temporalClient: c,
@@ -107,7 +113,7 @@ func (r *planRuntime) StartPlan(ctx context.Context, spec agentos.RunPlanSpec) (
 		return agentos.RunPlanStatus{}, fmt.Errorf("%w: plan idempotency key is required", agentos.ErrInvalidRunPlan)
 	}
 	if r.planIndex == nil {
-		return agentos.RunPlanStatus{}, errors.New("agentos temporal plan runtime: plan index is not configured")
+		return agentos.RunPlanStatus{}, errPlanRuntimePlanIndexRequired
 	}
 
 	status := agentosplan.NewState(spec, time.Now().UTC()).Status
@@ -161,7 +167,7 @@ func (r *planRuntime) authorizePlan(ctx context.Context, ref agentos.PlanRef) (a
 		return agentos.RunPlanSpec{}, agentos.RunPlanStatus{}, err
 	}
 	if r.planIndex == nil {
-		return agentos.RunPlanSpec{}, agentos.RunPlanStatus{}, errors.New("agentos temporal plan runtime: plan index is not configured")
+		return agentos.RunPlanSpec{}, agentos.RunPlanStatus{}, errPlanRuntimePlanIndexRequired
 	}
 
 	spec, status, exists, err := r.planIndex.GetPlan(ctx, ref.PlanID)
@@ -253,7 +259,7 @@ func (r *planRuntime) ControlPlan(ctx context.Context, ref agentos.PlanRef, cont
 
 func (r *planRuntime) SubscribePlan(ctx context.Context, scope agentos.PlanStreamScope) (agentos.Subscription, error) {
 	if r.planEvents == nil {
-		return nil, errors.New("agentos temporal plan runtime: plan event store is not configured")
+		return nil, errPlanRuntimePlanEventStoreRequired
 	}
 	if err := agentosplan.ValidatePlanStreamScope(scope); err != nil {
 		return nil, err
@@ -297,7 +303,7 @@ func (r *planRuntime) Close() error {
 
 func (r *planRuntime) recordPlanAudit(ctx context.Context, record agentosplan.AuditRecord) (bool, error) {
 	if r.auditStore == nil {
-		return false, errors.New("agentos temporal plan runtime: audit store is not configured")
+		return false, errPlanRuntimeAuditStoreRequired
 	}
 	_, created, err := r.auditStore.RecordAudit(ctx, record)
 
@@ -306,7 +312,7 @@ func (r *planRuntime) recordPlanAudit(ctx context.Context, record agentosplan.Au
 
 func (r *planRuntime) planAuditRecorded(ctx context.Context, record agentosplan.AuditRecord) (bool, error) {
 	if r.auditStore == nil {
-		return false, errors.New("agentos temporal plan runtime: audit store is not configured")
+		return false, errPlanRuntimeAuditStoreRequired
 	}
 	existing, exists, err := r.auditStore.GetAuditRecord(ctx, record.IdempotencyKey)
 	if err != nil || !exists {
