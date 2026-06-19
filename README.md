@@ -70,6 +70,11 @@ make compose-up-all
   - `POST /v1/agentos/runs/{run_id}/signals` — Send business input such as `user.message`
   - `POST /v1/agentos/runs/{run_id}/control` — Send pause, resume, or cancel
   - `POST /v1/agentos/runs/{run_id}/events` — Ingest backend events
+  - `POST /v1/agentos/plans` — Start a durable cross-backend RunPlan
+  - `GET /v1/agentos/plans/{plan_id}/status` — Poll aggregate plan status
+  - `POST /v1/agentos/plans/{plan_id}/signals` — Send plan signals such as retry, approve, or reject
+  - `POST /v1/agentos/plans/{plan_id}/control` — Send pause, resume, or cancel to a RunPlan
+  - `GET /v1/agentos/plans/{plan_id}/events` — Stream RunPlan events as SSE
 - **Orchestration API**:
   - `POST /v1/orchestration/execute` — Start multi-step orchestration workflow
   - `GET /v1/orchestration/status/{run_id}` — Poll orchestration status

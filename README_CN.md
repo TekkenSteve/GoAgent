@@ -70,6 +70,11 @@ make compose-up-all
   - `POST /v1/agentos/runs/{run_id}/signals` — 发送 `user.message` 等业务输入
   - `POST /v1/agentos/runs/{run_id}/control` — 发送 pause、resume、cancel
   - `POST /v1/agentos/runs/{run_id}/events` — 接收 backend 事件回写
+  - `POST /v1/agentos/plans` — 启动跨 backend 的持久 RunPlan
+  - `GET /v1/agentos/plans/{plan_id}/status` — 轮询 plan 聚合状态
+  - `POST /v1/agentos/plans/{plan_id}/signals` — 发送 retry、approve、reject 等 plan 信号
+  - `POST /v1/agentos/plans/{plan_id}/control` — 向 RunPlan 发送 pause、resume、cancel
+  - `GET /v1/agentos/plans/{plan_id}/events` — 通过 SSE 订阅 RunPlan 事件
 - **编排 API**:
   - `POST /v1/orchestration/execute` — 启动多步骤编排工作流
   - `GET /v1/orchestration/status/{run_id}` — 轮询编排状态

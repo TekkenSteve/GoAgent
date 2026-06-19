@@ -7,9 +7,9 @@ Example:
 ```sh
 export AGENTFW_BACKEND_SELECTION_RULES_JSON='[
   {
-    "name": "card-template",
-    "backend": {"kind": "temporal_external", "name": "kardcraft-agent-workflow"},
-    "input": {"task_type": "card_template"}
+    "name": "research-report",
+    "backend": {"kind": "temporal_external", "name": "research-agent-workflow"},
+    "input": {"task_type": "research_report"}
   },
   {
     "name": "opencode",
@@ -25,8 +25,8 @@ Then a caller can omit `RunSpec.Backend` only when the run matches one configure
 status, err := rt.Start(ctx, agentos.RunSpec{
     RunID: "run-1",
     Input: map[string]any{
-        "task_type": "card_template",
-        "query": "generate cards from this document",
+        "task_type": "research_report",
+        "query": "summarize this document",
     },
 })
 ```
