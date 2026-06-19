@@ -181,6 +181,105 @@ func TestPlanRuntimeListPlanAuditsEnforcesTenantScope(t *testing.T) {
 	}
 }
 
+func TestPlanRuntimeListPlanArtifactsEnforcesTenantScopeAndFilters(t *testing.T) {
+	store, ref := newPlanRuntimeTestStore(t)
+	artifactStore := agentosplan.NewMemoryArtifactStore()
+	_, err := artifactStore.Put(t.Context(), agentos.ArtifactRef{
+		ArtifactID: "artifact-research",
+		PlanID:     ref.PlanID,
+		NodeID:     "research",
+		RunID:      "run-research",
+		Name:       "summary",
+		Kind:       agentos.ArtifactKindObject,
+	}, map[string]any{"summary": "ok"}, "artifact-research")
+	if err != nil {
+		t.Fatalf("Put artifact: %v", err)
+	}
+	_, err = artifactStore.Put(t.Context(), agentos.ArtifactRef{
+		ArtifactID: "artifact-other",
+		PlanID:     ref.PlanID,
+		NodeID:     "verify",
+		RunID:      "run-verify",
+		Name:       "report",
+		Kind:       agentos.ArtifactKindReport,
+	}, map[string]any{"report": "ok"}, "artifact-other")
+	if err != nil {
+		t.Fatalf("Put other artifact: %v", err)
+	}
+
+	rt := &planRuntime{planIndex: store, artifactStore: artifactStore}
+	_, err = rt.ListPlanArtifacts(t.Context(), agentos.PlanArtifactScope{PlanID: ref.PlanID, AccountID: "acct-other", ProjectID: ref.ProjectID})
+	if !errors.Is(err, agentos.ErrPlanRouteNotFound) {
+		t.Fatalf("ListPlanArtifacts mismatch error = %v, want ErrPlanRouteNotFound", err)
+	}
+
+	refs, err := rt.ListPlanArtifacts(t.Context(), agentos.PlanArtifactScope{
+		PlanID:    ref.PlanID,
+		AccountID: ref.AccountID,
+		ProjectID: ref.ProjectID,
+		NodeID:    "research",
+		Limit:     1,
+	})
+	if err != nil {
+		t.Fatalf("ListPlanArtifacts scoped: %v", err)
+	}
+	if len(refs) != 1 || refs[0].ArtifactID != "artifact-research" {
+		t.Fatalf("refs = %#v", refs)
+	}
+}
+
+func TestPlanRuntimeGetPlanArtifactEnforcesPlanOwnership(t *testing.T) {
+	store, ref := newPlanRuntimeTestStore(t)
+	artifactStore := agentosplan.NewMemoryArtifactStore()
+	_, err := artifactStore.Put(t.Context(), agentos.ArtifactRef{
+		ArtifactID: "artifact-1",
+		PlanID:     ref.PlanID,
+		NodeID:     "research",
+		RunID:      "run-research",
+		Name:       "summary",
+		Kind:       agentos.ArtifactKindObject,
+	}, map[string]any{"summary": "ok"}, "artifact-1")
+	if err != nil {
+		t.Fatalf("Put artifact: %v", err)
+	}
+	_, err = artifactStore.Put(t.Context(), agentos.ArtifactRef{
+		ArtifactID: "artifact-other-plan",
+		PlanID:     "plan-other",
+		NodeID:     "research",
+		RunID:      "run-other",
+		Name:       "summary",
+		Kind:       agentos.ArtifactKindObject,
+	}, map[string]any{"summary": "other"}, "artifact-other-plan")
+	if err != nil {
+		t.Fatalf("Put other artifact: %v", err)
+	}
+
+	rt := &planRuntime{planIndex: store, artifactStore: artifactStore}
+	artifact, err := rt.GetPlanArtifact(t.Context(), agentos.PlanArtifactScope{
+		PlanID:     ref.PlanID,
+		AccountID:  ref.AccountID,
+		ProjectID:  ref.ProjectID,
+		ArtifactID: "artifact-1",
+	})
+	if err != nil {
+		t.Fatalf("GetPlanArtifact: %v", err)
+	}
+	payload, ok := artifact.Payload.(map[string]any)
+	if !ok || payload["summary"] != "ok" {
+		t.Fatalf("artifact = %#v", artifact)
+	}
+
+	_, err = rt.GetPlanArtifact(t.Context(), agentos.PlanArtifactScope{
+		PlanID:     ref.PlanID,
+		AccountID:  ref.AccountID,
+		ProjectID:  ref.ProjectID,
+		ArtifactID: "artifact-other-plan",
+	})
+	if !errors.Is(err, agentos.ErrArtifactNotFound) {
+		t.Fatalf("GetPlanArtifact other plan error = %v, want ErrArtifactNotFound", err)
+	}
+}
+
 func TestPlanRuntimeSignalPlanDoesNotAuditFailedDelivery(t *testing.T) {
 	store, ref := newPlanRuntimeTestStore(t)
 	temporalClient := &fakePlanTemporalClient{signalErr: errors.New("temporal unavailable")}

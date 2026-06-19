@@ -1,5 +1,11 @@
 basePath: /v1
 definitions:
+  agentos.Artifact:
+    properties:
+      payload: {}
+      ref:
+        $ref: '#/definitions/agentos.ArtifactRef'
+    type: object
   agentos.ArtifactKind:
     enum:
     - object
@@ -913,6 +919,10 @@ definitions:
     - 1000000000
     - 60000000000
     - 3600000000000
+    - 1
+    - 1000
+    - 1000000
+    - 1000000000
     format: int64
     type: integer
     x-enum-varnames:
@@ -924,6 +934,10 @@ definitions:
     - Second
     - Minute
     - Hour
+    - Nanosecond
+    - Microsecond
+    - Millisecond
+    - Second
   v1.ingestAgentOSEventResponse:
     properties:
       duplicate:
@@ -975,6 +989,111 @@ paths:
           schema:
             $ref: '#/definitions/response.Error'
       summary: Start AgentOS plan
+      tags:
+      - agentos
+  /agentos/plans/{plan_id}/artifacts:
+    get:
+      consumes:
+      - application/json
+      description: Query durable artifact refs for a RunPlan.
+      operationId: agentos-list-plan-artifacts
+      parameters:
+      - description: Plan ID
+        in: path
+        name: plan_id
+        required: true
+        type: string
+      - description: Account ID
+        in: query
+        name: account_id
+        required: true
+        type: string
+      - description: Project ID
+        in: query
+        name: project_id
+        type: string
+      - description: Node ID
+        in: query
+        name: node_id
+        type: string
+      - description: Child run ID
+        in: query
+        name: run_id
+        type: string
+      - description: Maximum refs
+        in: query
+        name: limit
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            items:
+              $ref: '#/definitions/agentos.ArtifactRef'
+            type: array
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/response.Error'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/response.Error'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/response.Error'
+      summary: List AgentOS plan artifacts
+      tags:
+      - agentos
+  /agentos/plans/{plan_id}/artifacts/{artifact_id}:
+    get:
+      consumes:
+      - application/json
+      description: Read one durable artifact document for a RunPlan.
+      operationId: agentos-get-plan-artifact
+      parameters:
+      - description: Plan ID
+        in: path
+        name: plan_id
+        required: true
+        type: string
+      - description: Artifact ID
+        in: path
+        name: artifact_id
+        required: true
+        type: string
+      - description: Account ID
+        in: query
+        name: account_id
+        required: true
+        type: string
+      - description: Project ID
+        in: query
+        name: project_id
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/agentos.Artifact'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/response.Error'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/response.Error'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/response.Error'
+      summary: Get AgentOS plan artifact
       tags:
       - agentos
   /agentos/plans/{plan_id}/audits:

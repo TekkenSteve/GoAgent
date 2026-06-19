@@ -115,6 +115,43 @@ func TestAgentOSPlanRoutesUsePlanRuntime(t *testing.T) {
 	if len(audits) != 1 || audits[0].Action != agentos.PlanAuditActionControl {
 		t.Fatalf("unexpected audits: %#v", audits)
 	}
+
+	resp = doAgentOSRouteRequest(t, app, http.MethodGet, "/v1/agentos/plans/plan-1/artifacts?account_id=acct-1&node_id=research&limit=10", "")
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("artifacts status = %d", resp.StatusCode)
+	}
+	if planRuntime.artifactScope.PlanID != "plan-1" ||
+		planRuntime.artifactScope.AccountID != "acct-1" ||
+		planRuntime.artifactScope.NodeID != "research" ||
+		planRuntime.artifactScope.Limit != 10 {
+		t.Fatalf("unexpected artifact scope: %#v", planRuntime.artifactScope)
+	}
+	var refs []agentos.ArtifactRef
+	if err := json.NewDecoder(resp.Body).Decode(&refs); err != nil {
+		t.Fatalf("decode artifacts: %v", err)
+	}
+	if len(refs) != 1 || refs[0].ArtifactID != "artifact-1" {
+		t.Fatalf("unexpected artifacts: %#v", refs)
+	}
+
+	resp = doAgentOSRouteRequest(t, app, http.MethodGet, "/v1/agentos/plans/plan-1/artifacts/artifact-1?account_id=acct-1", "")
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("artifact status = %d", resp.StatusCode)
+	}
+	if planRuntime.artifactGetScope.PlanID != "plan-1" ||
+		planRuntime.artifactGetScope.AccountID != "acct-1" ||
+		planRuntime.artifactGetScope.ArtifactID != "artifact-1" {
+		t.Fatalf("unexpected artifact get scope: %#v", planRuntime.artifactGetScope)
+	}
+	var artifact agentos.Artifact
+	if err := json.NewDecoder(resp.Body).Decode(&artifact); err != nil {
+		t.Fatalf("decode artifact: %v", err)
+	}
+	if artifact.Ref.ArtifactID != "artifact-1" || artifact.Payload.(map[string]any)["summary"] != "ok" {
+		t.Fatalf("unexpected artifact: %#v", artifact)
+	}
 }
 
 func TestAgentOSPlanEventRouteStreamsSSE(t *testing.T) {
@@ -161,13 +198,15 @@ func TestAgentOSPlanEventRouteStreamsSSE(t *testing.T) {
 }
 
 type fakePlanRuntime struct {
-	started    agentos.RunPlanSpec
-	signalRef  agentos.PlanRef
-	signal     agentos.Signal
-	controlRef agentos.PlanRef
-	control    agentos.ControlRequest
-	scope      agentos.PlanStreamScope
-	auditScope agentos.PlanAuditScope
+	started          agentos.RunPlanSpec
+	signalRef        agentos.PlanRef
+	signal           agentos.Signal
+	controlRef       agentos.PlanRef
+	control          agentos.ControlRequest
+	scope            agentos.PlanStreamScope
+	auditScope       agentos.PlanAuditScope
+	artifactScope    agentos.PlanArtifactScope
+	artifactGetScope agentos.PlanArtifactScope
 }
 
 func newFakePlanRuntime() *fakePlanRuntime {
@@ -227,6 +266,35 @@ func (r *fakePlanRuntime) ListPlanAudits(_ context.Context, scope agentos.PlanAu
 			Payload:        map[string]any{"operation": string(agentos.ControlPause)},
 			CreatedAt:      time.Now(),
 		},
+	}, nil
+}
+
+func (r *fakePlanRuntime) ListPlanArtifacts(_ context.Context, scope agentos.PlanArtifactScope) ([]agentos.ArtifactRef, error) {
+	r.artifactScope = scope
+
+	return []agentos.ArtifactRef{
+		{
+			ArtifactID: "artifact-1",
+			PlanID:     scope.PlanID,
+			NodeID:     "research",
+			RunID:      "run-research",
+			Name:       "summary",
+			Kind:       agentos.ArtifactKindObject,
+		},
+	}, nil
+}
+
+func (r *fakePlanRuntime) GetPlanArtifact(_ context.Context, scope agentos.PlanArtifactScope) (agentos.Artifact, error) {
+	r.artifactGetScope = scope
+
+	return agentos.Artifact{
+		Ref: agentos.ArtifactRef{
+			ArtifactID: scope.ArtifactID,
+			PlanID:     scope.PlanID,
+			Name:       "summary",
+			Kind:       agentos.ArtifactKindObject,
+		},
+		Payload: map[string]any{"summary": "ok"},
 	}, nil
 }
 

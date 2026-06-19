@@ -82,6 +82,15 @@ type AgentOSPlanAuditScope struct {
 	Limit     int                     `query:"limit"`
 }
 
+// AgentOSPlanArtifactScope selects plan artifacts for REST queries.
+type AgentOSPlanArtifactScope struct {
+	AccountID string `query:"account_id" validate:"required"`
+	ProjectID string `query:"project_id"`
+	NodeID    string `query:"node_id"`
+	RunID     string `query:"run_id"`
+	Limit     int    `query:"limit"`
+}
+
 // AgentOSPlanScope selects one plan inside a tenant boundary.
 type AgentOSPlanScope struct {
 	AccountID string `query:"account_id" validate:"required"`

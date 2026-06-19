@@ -15,6 +15,7 @@ type RuntimeConfig struct {
 	PostgresURL              string
 	PostgresPoolMax          int
 	RedisURL                 string
+	ArtifactStore            ArtifactStoreConfig
 	TemporalExternalBackends []ExternalBackendConfig
 	HTTPBackends             []HTTPBackendConfig
 	GRPCBackends             []GRPCBackendConfig

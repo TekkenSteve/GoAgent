@@ -9,6 +9,7 @@ import (
 	"github.com/TekkenSteve/GoAgent/agentos"
 	"github.com/TekkenSteve/GoAgent/internal/pkg/postgres"
 	goredis "github.com/TekkenSteve/GoAgent/internal/pkg/redis"
+	artifactrepo "github.com/TekkenSteve/GoAgent/internal/repo/artifact"
 	temporalrepo "github.com/TekkenSteve/GoAgent/internal/repo/persistent"
 	repostream "github.com/TekkenSteve/GoAgent/internal/repo/stream"
 	"github.com/TekkenSteve/GoAgent/internal/usecase/agentosplan"
@@ -24,6 +25,7 @@ type planRuntime struct {
 	planEvents     agentosplan.PlanEventStore
 	planLiveEvents agentosplan.PlanEventSubscriber
 	planIndex      agentosplan.PlanIndex
+	artifactStore  agentosplan.ArtifactStore
 	auditStore     agentosplan.AuditStore
 	taskQueue      string
 }
@@ -31,6 +33,7 @@ type planRuntime struct {
 var (
 	errPlanRuntimePlanIndexRequired      = errors.New("agentos temporal plan runtime: plan index is not configured")
 	errPlanRuntimePlanEventStoreRequired = errors.New("agentos temporal plan runtime: plan event store is not configured")
+	errPlanRuntimeArtifactStoreRequired  = errors.New("agentos temporal plan runtime: artifact store is not configured")
 	errPlanRuntimeAuditStoreRequired     = errors.New("agentos temporal plan runtime: audit store is not configured")
 )
 
@@ -97,6 +100,15 @@ func newPlanRuntimeWithClient(ctx context.Context, cfg RuntimeConfig, c planTemp
 		rt.planEvents = planStore
 		rt.planIndex = planStore
 		rt.auditStore = planStore
+		if cfg.ArtifactStore.Backend != "" {
+			blobStore, err := artifactrepo.NewBlobStore(ctx, artifactBlobConfig(cfg.ArtifactStore))
+			if err != nil {
+				_ = rt.Close()
+
+				return nil, fmt.Errorf("agentos temporal plan runtime artifact store: %w", err)
+			}
+			rt.artifactStore = temporalrepo.NewAgentOSArtifactRepo(pg, blobStore)
+		}
 	}
 
 	return rt, nil
@@ -300,6 +312,50 @@ func (r *planRuntime) ListPlanAudits(ctx context.Context, scope agentos.PlanAudi
 	return r.auditStore.ListAuditRecords(ctx, scope)
 }
 
+func (r *planRuntime) ListPlanArtifacts(ctx context.Context, scope agentos.PlanArtifactScope) ([]agentos.ArtifactRef, error) {
+	if r.artifactStore == nil {
+		return nil, errPlanRuntimeArtifactStoreRequired
+	}
+	if err := agentosplan.ValidatePlanArtifactScope(scope); err != nil {
+		return nil, err
+	}
+	if _, _, err := r.authorizePlan(ctx, agentos.PlanRef{PlanID: scope.PlanID, AccountID: scope.AccountID, ProjectID: scope.ProjectID}); err != nil {
+		return nil, err
+	}
+
+	refs, err := r.artifactStore.List(ctx, scope.PlanID)
+	if err != nil {
+		return nil, err
+	}
+
+	return filterPlanArtifactRefs(refs, scope), nil
+}
+
+func (r *planRuntime) GetPlanArtifact(ctx context.Context, scope agentos.PlanArtifactScope) (agentos.Artifact, error) {
+	if r.artifactStore == nil {
+		return agentos.Artifact{}, errPlanRuntimeArtifactStoreRequired
+	}
+	if err := agentosplan.ValidatePlanArtifactScope(scope); err != nil {
+		return agentos.Artifact{}, err
+	}
+	if scope.ArtifactID == "" {
+		return agentos.Artifact{}, fmt.Errorf("%w: artifact id is required", agentos.ErrInvalidArtifact)
+	}
+	if _, _, err := r.authorizePlan(ctx, agentos.PlanRef{PlanID: scope.PlanID, AccountID: scope.AccountID, ProjectID: scope.ProjectID}); err != nil {
+		return agentos.Artifact{}, err
+	}
+
+	ref, payload, err := r.artifactStore.Get(ctx, scope.ArtifactID)
+	if err != nil {
+		return agentos.Artifact{}, err
+	}
+	if !planArtifactRefMatches(ref, scope) {
+		return agentos.Artifact{}, fmt.Errorf("%w: %s", agentos.ErrArtifactNotFound, scope.ArtifactID)
+	}
+
+	return agentos.Artifact{Ref: ref, Payload: payload}, nil
+}
+
 func (r *planRuntime) Close() error {
 	var errs []error
 	if r.closeTemporal && r.temporalClient != nil {
@@ -354,6 +410,38 @@ func planSignalAuditRecord(planID string, signal agentos.Signal) agentosplan.Aud
 			"payload": signal.Payload,
 		},
 	}
+}
+
+func filterPlanArtifactRefs(refs []agentos.ArtifactRef, scope agentos.PlanArtifactScope) []agentos.ArtifactRef {
+	filtered := make([]agentos.ArtifactRef, 0, len(refs))
+	for _, ref := range refs {
+		if !planArtifactRefMatches(ref, scope) {
+			continue
+		}
+		filtered = append(filtered, ref)
+		if scope.Limit > 0 && len(filtered) >= scope.Limit {
+			break
+		}
+	}
+
+	return filtered
+}
+
+func planArtifactRefMatches(ref agentos.ArtifactRef, scope agentos.PlanArtifactScope) bool {
+	if ref.PlanID != scope.PlanID {
+		return false
+	}
+	if scope.ArtifactID != "" && ref.ArtifactID != scope.ArtifactID {
+		return false
+	}
+	if scope.NodeID != "" && ref.NodeID != scope.NodeID {
+		return false
+	}
+	if scope.RunID != "" && ref.RunID != scope.RunID {
+		return false
+	}
+
+	return true
 }
 
 func newRuntimePostgres(cfg RuntimeConfig) (*postgres.Postgres, error) {

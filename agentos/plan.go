@@ -118,6 +118,24 @@ type ArtifactRef struct {
 	CreatedAt  time.Time         `json:"created_at,omitempty"`
 }
 
+// Artifact is the public artifact document returned by ArtifactStore-backed
+// control-plane APIs. Payloads are never embedded in Temporal workflow history.
+type Artifact struct {
+	Ref     ArtifactRef `json:"ref"`
+	Payload any         `json:"payload,omitempty"`
+}
+
+// PlanArtifactScope selects artifacts inside a tenant-scoped RunPlan.
+type PlanArtifactScope struct {
+	PlanID     string `json:"plan_id"`
+	AccountID  string `json:"account_id"`
+	ProjectID  string `json:"project_id,omitempty"`
+	NodeID     string `json:"node_id,omitempty"`
+	RunID      string `json:"run_id,omitempty"`
+	ArtifactID string `json:"artifact_id,omitempty"`
+	Limit      int    `json:"limit,omitempty"`
+}
+
 // Capability describes a backend-owned execution capability.
 type Capability struct {
 	Backend      BackendRef         `json:"backend"`

@@ -287,6 +287,7 @@ func initTemporalComponents(
 		PostgresURL:       cfg.PG.URL,
 		PostgresPoolMax:   cfg.PG.PoolMax,
 		RedisURL:          cfg.Redis.URL,
+		ArtifactStore:     appAgentOSArtifactStoreConfig(cfg.AgentOS.ArtifactStoreConfig()),
 	}, runtime.Client)
 	if err != nil {
 		l.Fatal(fmt.Errorf("app - Run - agentos temporal plan runtime: %w", err))
@@ -353,6 +354,24 @@ func appArtifactBlobConfig(cfg config.ArtifactStoreConfig) artifactrepo.Config {
 			Root: cfg.Local.Root,
 		},
 		S3: artifactrepo.S3Config{
+			Bucket:          cfg.S3.Bucket,
+			Region:          cfg.S3.Region,
+			Endpoint:        cfg.S3.Endpoint,
+			AccessKeyID:     cfg.S3.AccessKeyID,
+			SecretAccessKey: cfg.S3.SecretAccessKey,
+			SessionToken:    cfg.S3.SessionToken,
+			ForcePathStyle:  cfg.S3.ForcePathStyle,
+		},
+	}
+}
+
+func appAgentOSArtifactStoreConfig(cfg config.ArtifactStoreConfig) agentostemporal.ArtifactStoreConfig {
+	return agentostemporal.ArtifactStoreConfig{
+		Backend: agentostemporal.ArtifactStoreBackend(cfg.Backend),
+		Local: agentostemporal.LocalArtifactStoreConfig{
+			Root: cfg.Local.Root,
+		},
+		S3: agentostemporal.S3ArtifactStoreConfig{
 			Bucket:          cfg.S3.Bucket,
 			Region:          cfg.S3.Region,
 			Endpoint:        cfg.S3.Endpoint,

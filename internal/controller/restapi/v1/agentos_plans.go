@@ -216,6 +216,92 @@ func (r *V1) listAgentOSPlanAudits(ctx *fiber.Ctx) error {
 	return ctx.Status(http.StatusOK).JSON(records)
 }
 
+// @Summary     List AgentOS plan artifacts
+// @Description Query durable artifact refs for a RunPlan.
+// @ID          agentos-list-plan-artifacts
+// @Tags        agentos
+// @Accept      json
+// @Produce     json
+// @Param       plan_id path string true "Plan ID"
+// @Param       account_id query string true "Account ID"
+// @Param       project_id query string false "Project ID"
+// @Param       node_id query string false "Node ID"
+// @Param       run_id query string false "Child run ID"
+// @Param       limit query int false "Maximum refs"
+// @Success     200 {array} agentos.ArtifactRef
+// @Failure     400 {object} response.Error
+// @Failure     404 {object} response.Error
+// @Failure     500 {object} response.Error
+// @Router      /agentos/plans/{plan_id}/artifacts [get]
+func (r *V1) listAgentOSPlanArtifacts(ctx *fiber.Ctx) error {
+	if r.planRuntime == nil {
+		return errorResponse(ctx, http.StatusNotFound, "agentos plan runtime is not configured")
+	}
+
+	var req request.AgentOSPlanArtifactScope
+	if err := ctx.QueryParser(&req); err != nil {
+		return errorResponse(ctx, http.StatusBadRequest, "invalid artifact scope")
+	}
+	if err := r.v.Struct(&req); err != nil {
+		return errorResponse(ctx, http.StatusBadRequest, err.Error())
+	}
+
+	refs, err := r.planRuntime.ListPlanArtifacts(ctx.UserContext(), agentos.PlanArtifactScope{
+		PlanID:    ctx.Params("plan_id"),
+		AccountID: req.AccountID,
+		ProjectID: req.ProjectID,
+		NodeID:    req.NodeID,
+		RunID:     req.RunID,
+		Limit:     req.Limit,
+	})
+	if err != nil {
+		return agentOSError(ctx, err)
+	}
+
+	return ctx.Status(http.StatusOK).JSON(refs)
+}
+
+// @Summary     Get AgentOS plan artifact
+// @Description Read one durable artifact document for a RunPlan.
+// @ID          agentos-get-plan-artifact
+// @Tags        agentos
+// @Accept      json
+// @Produce     json
+// @Param       plan_id path string true "Plan ID"
+// @Param       artifact_id path string true "Artifact ID"
+// @Param       account_id query string true "Account ID"
+// @Param       project_id query string false "Project ID"
+// @Success     200 {object} agentos.Artifact
+// @Failure     400 {object} response.Error
+// @Failure     404 {object} response.Error
+// @Failure     500 {object} response.Error
+// @Router      /agentos/plans/{plan_id}/artifacts/{artifact_id} [get]
+func (r *V1) getAgentOSPlanArtifact(ctx *fiber.Ctx) error {
+	if r.planRuntime == nil {
+		return errorResponse(ctx, http.StatusNotFound, "agentos plan runtime is not configured")
+	}
+
+	var req request.AgentOSPlanScope
+	if err := ctx.QueryParser(&req); err != nil {
+		return errorResponse(ctx, http.StatusBadRequest, "invalid artifact scope")
+	}
+	if err := r.v.Struct(&req); err != nil {
+		return errorResponse(ctx, http.StatusBadRequest, err.Error())
+	}
+
+	artifact, err := r.planRuntime.GetPlanArtifact(ctx.UserContext(), agentos.PlanArtifactScope{
+		PlanID:     ctx.Params("plan_id"),
+		AccountID:  req.AccountID,
+		ProjectID:  req.ProjectID,
+		ArtifactID: ctx.Params("artifact_id"),
+	})
+	if err != nil {
+		return agentOSError(ctx, err)
+	}
+
+	return ctx.Status(http.StatusOK).JSON(artifact)
+}
+
 // @Summary     Stream AgentOS plan events
 // @Description Stream durable RunPlan events as Server-Sent Events.
 // @ID          agentos-stream-plan-events

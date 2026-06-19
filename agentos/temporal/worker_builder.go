@@ -125,6 +125,7 @@ func newWorkerKit(ctx context.Context, cfg WorkerConfig) (*WorkerKit, error) {
 		TemporalExternalBackends: cfg.TemporalExternalBackends,
 		HTTPBackends:             cfg.HTTPBackends,
 		GRPCBackends:             cfg.GRPCBackends,
+		ArtifactStore:            cfg.ArtifactStore,
 	}, temporalClient, WithRunBackendIndex(runBackendIndex))
 	if err != nil {
 		temporalClient.Close()
