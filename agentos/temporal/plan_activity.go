@@ -286,7 +286,10 @@ type publishPlanArtifactsOutput struct {
 	Artifacts []agentos.ArtifactRef
 }
 
-// PublishPlanArtifactsActivity persists child-run artifact refs outside workflow history.
+// PublishPlanArtifactsActivity persists child-run artifact refs outside
+// workflow history. Backends that produce payloads must write those payloads to
+// the configured AgentOS ArtifactStore before returning refs; this activity
+// only claims the ref idempotently and returns metadata to the workflow.
 func (a *PlanActivities) PublishPlanArtifactsActivity(ctx context.Context, input publishPlanArtifactsInput) (publishPlanArtifactsOutput, error) {
 	if a.ArtifactStore == nil {
 		return publishPlanArtifactsOutput{}, fmt.Errorf("%w: artifact store is required", agentos.ErrInvalidArtifact)

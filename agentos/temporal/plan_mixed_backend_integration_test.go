@@ -32,6 +32,11 @@ func TestPlanWorkflowRunsThroughMixedBackendAdapters(t *testing.T) {
 	t.Parallel()
 
 	ctx := context.Background()
+	const (
+		planID          = "plan-real-mixed-adapters"
+		httpNodeID      = "http"
+		summaryArtifact = "summary"
+	)
 	nativeRef := agentos.BackendRef{Kind: agentos.BackendKindNative, Name: agentos.BackendNameGoAgentNative}
 	temporalRef := agentos.BackendRef{Kind: agentos.BackendKindTemporalExternal, Name: "langgraph"}
 	httpRef := agentos.BackendRef{Kind: agentos.BackendKindHTTP, Name: "http-agent"}
@@ -60,7 +65,16 @@ func TestPlanWorkflowRunsThroughMixedBackendAdapters(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	httpServer := newMixedAdapterHTTPServer(t)
+	artifactStore := agentosplan.NewMemoryArtifactStore()
+	httpServer := newMixedAdapterHTTPServer(t, artifactStore, mixedAdapterArtifactOutput{
+		PlanID:       planID,
+		NodeID:       httpNodeID,
+		ArtifactName: summaryArtifact,
+		ArtifactID:   "artifact-http-summary",
+		Payload: map[string]any{
+			"body": map[string]any{"title": "mixed backend artifact"},
+		},
+	})
 	httpBackend, err := httpbackend.NewBackend(httpServer.Client(), nil, httpbackend.Config{
 		Name:     httpRef.Name,
 		Endpoint: httpServer.URL,
@@ -99,22 +113,43 @@ func TestPlanWorkflowRunsThroughMixedBackendAdapters(t *testing.T) {
 		planStore,
 		nil,
 		runIndex,
-		agentosplan.NewMemoryArtifactStore(),
+		artifactStore,
 	)
 	require.NoError(t, err)
 
 	spec := agentos.RunPlanSpec{
-		PlanID: "plan-real-mixed-adapters",
+		PlanID: planID,
 		Nodes: []agentos.PlanNodeSpec{
 			{NodeID: "native", Capability: "run", Run: agentos.RunSpec{RunID: "run-native", Backend: nativeRef}},
 			{NodeID: "temporal", Capability: "run", Run: agentos.RunSpec{RunID: "run-temporal", Backend: temporalRef}},
-			{NodeID: "http", Capability: "run", Run: agentos.RunSpec{RunID: "run-http", Backend: httpRef}},
+			{
+				NodeID:     httpNodeID,
+				Capability: "run",
+				Run:        agentos.RunSpec{RunID: "run-http", Backend: httpRef},
+				Outputs: []agentos.ArtifactSpec{
+					{Name: summaryArtifact, Kind: agentos.ArtifactKindObject, Required: true},
+				},
+			},
 			{NodeID: "grpc", Capability: "run", Run: agentos.RunSpec{RunID: "run-grpc", Backend: grpcRef}},
 		},
 		Edges: []agentos.PlanEdgeSpec{
 			{EdgeID: "native-temporal", From: "native", To: "temporal", On: agentos.EdgeOnSuccess},
 			{EdgeID: "temporal-http", From: "temporal", To: "http", On: agentos.EdgeOnSuccess},
-			{EdgeID: "http-grpc", From: "http", To: "grpc", On: agentos.EdgeOnSuccess},
+			{
+				EdgeID: "http-grpc",
+				From:   httpNodeID,
+				To:     "grpc",
+				On:     agentos.EdgeOnSuccess,
+				InputMapping: []agentos.InputMapping{
+					{
+						Target:         "summary_title",
+						SourceNodeID:   httpNodeID,
+						SourceArtifact: summaryArtifact,
+						SourcePath:     "body.title",
+						Required:       true,
+					},
+				},
+			},
 		},
 	}
 
@@ -141,6 +176,9 @@ func TestPlanWorkflowRunsThroughMixedBackendAdapters(t *testing.T) {
 	require.Equal(t, "langgraph.agent.v1", temporalClient.workflow)
 	require.Equal(t, []string{"run-http"}, httpServer.startedRunIDs())
 	require.Equal(t, []string{"run-grpc"}, grpcServer.service.startedRunIDs())
+	require.Equal(t, []string{"mixed backend artifact"}, grpcServer.service.summaryTitles())
+	require.Len(t, status.Artifacts, 1)
+	require.Equal(t, summaryArtifact, status.Artifacts[0].Name)
 
 	expectedRoutes := map[string]agentos.BackendRef{
 		"run-native":   nativeRef,
@@ -225,7 +263,15 @@ type mixedAdapterHTTPServer struct {
 	started []string
 }
 
-func newMixedAdapterHTTPServer(t *testing.T) *mixedAdapterHTTPServer {
+type mixedAdapterArtifactOutput struct {
+	PlanID       string
+	NodeID       string
+	ArtifactName string
+	ArtifactID   string
+	Payload      any
+}
+
+func newMixedAdapterHTTPServer(t *testing.T, artifactStore agentosplan.ArtifactStore, output mixedAdapterArtifactOutput) *mixedAdapterHTTPServer {
 	t.Helper()
 	server := &mixedAdapterHTTPServer{}
 	server.Server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -238,7 +284,22 @@ func newMixedAdapterHTTPServer(t *testing.T) *mixedAdapterHTTPServer {
 			server.mu.Lock()
 			server.started = append(server.started, request.RunID)
 			server.mu.Unlock()
-			_ = json.NewEncoder(w).Encode(agentos.RunStatus{RunID: request.RunID, LifecycleState: "completed"})
+			key, err := agentosplan.ArtifactPublishIdempotencyKey(output.PlanID, output.NodeID, request.RunID, output.ArtifactName)
+			require.NoError(t, err)
+			ref, err := artifactStore.Put(r.Context(), agentos.ArtifactRef{
+				ArtifactID: output.ArtifactID,
+				PlanID:     output.PlanID,
+				NodeID:     output.NodeID,
+				RunID:      request.RunID,
+				Name:       output.ArtifactName,
+				Kind:       agentos.ArtifactKindObject,
+			}, output.Payload, key)
+			require.NoError(t, err)
+			_ = json.NewEncoder(w).Encode(agentos.RunStatus{
+				RunID:          request.RunID,
+				LifecycleState: "completed",
+				Artifacts:      []agentos.ArtifactRef{ref},
+			})
 		case r.Method == http.MethodGet && strings.HasSuffix(r.URL.Path, "/status"):
 			runID := strings.TrimSuffix(strings.TrimPrefix(r.URL.Path, "/runs/"), "/status")
 			_ = json.NewEncoder(w).Encode(agentos.RunStatus{RunID: runID, LifecycleState: "completed"})
@@ -267,8 +328,9 @@ type mixedAdapterGRPCServer struct {
 }
 
 type mixedAdapterGRPCService struct {
-	mu      sync.Mutex
-	started []string
+	mu                 sync.Mutex
+	started            []string
+	summaryTitleInputs []string
 }
 
 type mixedAdapterGRPCServiceContract interface {
@@ -290,8 +352,11 @@ func newMixedAdapterGRPCServer(t *testing.T) *mixedAdapterGRPCServer {
 		Methods: []grpc.MethodDesc{
 			{MethodName: "StartRun", Handler: mixedAdapterUnaryHandler(func(ctx context.Context, svc *mixedAdapterGRPCService, req map[string]any) (agentos.RunStatus, error) {
 				runID, _ := req["run_id"].(string)
+				input, _ := req["input"].(map[string]any)
+				summaryTitle, _ := input["summary_title"].(string)
 				svc.mu.Lock()
 				svc.started = append(svc.started, runID)
+				svc.summaryTitleInputs = append(svc.summaryTitleInputs, summaryTitle)
 				svc.mu.Unlock()
 
 				return agentos.RunStatus{RunID: runID, LifecycleState: "completed"}, nil
@@ -341,6 +406,13 @@ func (s *mixedAdapterGRPCService) startedRunIDs() []string {
 	defer s.mu.Unlock()
 
 	return append([]string(nil), s.started...)
+}
+
+func (s *mixedAdapterGRPCService) summaryTitles() []string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	return append([]string(nil), s.summaryTitleInputs...)
 }
 
 type mixedAdapterTemporalClient struct {
