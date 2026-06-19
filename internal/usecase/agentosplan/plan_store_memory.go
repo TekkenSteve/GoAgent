@@ -167,6 +167,9 @@ func (s *MemoryPlanStore) UpdatePlanStatus(_ context.Context, status agentos.Run
 
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if _, ok := s.specs[status.PlanID]; !ok {
+		return fmt.Errorf("%w: %s", agentos.ErrPlanRouteNotFound, status.PlanID)
+	}
 	s.statuses[status.PlanID] = status
 
 	return nil
@@ -229,6 +232,9 @@ func (s *MemoryPlanStore) AppendPlanEvent(_ context.Context, event agentos.PlanE
 
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if _, ok := s.specs[event.PlanID]; !ok {
+		return agentos.PlanEvent{}, fmt.Errorf("%w: %s", agentos.ErrPlanRouteNotFound, event.PlanID)
+	}
 	if existing, ok := s.eventKeys[idempotencyKey]; ok {
 		if err := ValidatePlanEventIdempotency(existing, event); err != nil {
 			return agentos.PlanEvent{}, err

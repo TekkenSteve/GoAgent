@@ -95,6 +95,18 @@ func TestMemoryPlanStoreAppendPlanEventRequiresIdempotencyKey(t *testing.T) {
 	}
 }
 
+func TestMemoryPlanStoreAppendPlanEventRejectsMissingPlan(t *testing.T) {
+	store := NewMemoryPlanStore()
+
+	_, err := store.AppendPlanEvent(context.Background(), agentos.PlanEvent{
+		Event:  agentos.Event{EventType: agentos.EventPlanStarted},
+		PlanID: "missing-plan",
+	}, "event-1")
+	if !errors.Is(err, agentos.ErrPlanRouteNotFound) {
+		t.Fatalf("AppendPlanEvent missing plan error = %v, want ErrPlanRouteNotFound", err)
+	}
+}
+
 func TestMemoryPlanStoreAppendPlanEventRejectsDifferentReplay(t *testing.T) {
 	ctx := context.Background()
 	store := NewMemoryPlanStore()

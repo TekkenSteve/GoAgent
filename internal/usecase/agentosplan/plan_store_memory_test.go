@@ -28,6 +28,15 @@ func TestMemoryPlanStoreSavePlanStateRequiresIdempotencyKey(t *testing.T) {
 	}
 }
 
+func TestMemoryPlanStoreUpdatePlanStatusRejectsMissingPlan(t *testing.T) {
+	store := NewMemoryPlanStore()
+
+	err := store.UpdatePlanStatus(context.Background(), agentos.RunPlanStatus{PlanID: "missing-plan"}, "status-key")
+	if !errors.Is(err, agentos.ErrPlanRouteNotFound) {
+		t.Fatalf("UpdatePlanStatus missing plan error = %v, want ErrPlanRouteNotFound", err)
+	}
+}
+
 func TestMemoryPlanStoreCreatePlanIsIdempotentForSameRequest(t *testing.T) {
 	store := NewMemoryPlanStore()
 	spec := testRunPlanSpec("plan-1", "start-key")
