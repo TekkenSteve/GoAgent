@@ -55,6 +55,7 @@ func Run(cfg *config.Config) { //nolint: gocyclo,cyclop,funlen,gocritic,nolintli
 		planRuntime      agentos.PlanRuntime
 		closePlanRuntime func() error
 		planRecovery     *agentostemporal.PlanCommandRecoveryLoop
+		planMetrics      *agentosplan.PlanMetricsExporterLoop
 		batchWriter      *pipelinepkg.BatchWriter
 		agentUC          *agent.UseCase
 		cancelWorkflow   restapiv1.CancelWorkflowFn
@@ -105,6 +106,7 @@ func Run(cfg *config.Config) { //nolint: gocyclo,cyclop,funlen,gocritic,nolintli
 		planRuntime = tc.planRuntime
 		closePlanRuntime = tc.closePlanRuntime
 		planRecovery = tc.planRecovery
+		planMetrics = tc.planMetrics
 		batchWriter = tc.batchWriter
 		agentUC = tc.agentUC
 		triggerUC = tc.triggerUC
@@ -126,6 +128,10 @@ func Run(cfg *config.Config) { //nolint: gocyclo,cyclop,funlen,gocritic,nolintli
 
 	if planRecovery != nil {
 		defer planRecovery.Stop()
+	}
+
+	if planMetrics != nil {
+		defer planMetrics.Stop()
 	}
 
 	if batchWriter != nil {
@@ -195,6 +201,7 @@ type temporalComponents struct {
 	planRuntime      agentos.PlanRuntime
 	closePlanRuntime func() error
 	planRecovery     *agentostemporal.PlanCommandRecoveryLoop
+	planMetrics      *agentosplan.PlanMetricsExporterLoop
 	batchWriter      *pipelinepkg.BatchWriter
 	agentUC          *agent.UseCase
 	triggerUC        *triggerpkg.UseCase
@@ -310,6 +317,7 @@ func initTemporalComponents(
 	l.Info("app - Run - agent framework worker started on task queue: %s", fwCfg.Temporal.TaskQueue)
 
 	planRecovery := startAgentOSPlanCommandRecovery(l, cfg.AgentOS, planRuntime)
+	planMetrics := startAgentOSPlanMetricsExporter(l, cfg, planStore)
 
 	return &temporalComponents{
 		runtime:          runtime,
@@ -317,6 +325,7 @@ func initTemporalComponents(
 		planRuntime:      planRuntime,
 		closePlanRuntime: closeAgentOSPlanRuntime(planRuntime),
 		planRecovery:     planRecovery,
+		planMetrics:      planMetrics,
 		batchWriter:      comp.batchWriter,
 		agentUC:          comp.agentUC,
 		triggerUC:        comp.triggerUC,
@@ -325,6 +334,65 @@ func initTemporalComponents(
 		signalWorkflow:   signalWorkflow,
 		llmProvider:      comp.llmProvider,
 	}
+}
+
+func startAgentOSPlanMetricsExporter(l logger.Interface, cfg *config.Config, planStore *temporalrepo.AgentOSPlanRepo) *agentosplan.PlanMetricsExporterLoop {
+	if !cfg.Metrics.Enabled || !cfg.AgentOS.PlanMetricsExporterEnabled {
+		return nil
+	}
+	exporter, err := agentosplan.NewPlanMetricsExporter(agentosplan.PlanMetricsExporterConfig{
+		ExporterID:  cfg.AgentOS.PlanMetricsExporterID,
+		PlanRefs:    planStore,
+		Plans:       planStore,
+		PlanEvents:  planStore,
+		Checkpoints: planStore,
+		Sink:        planStore,
+		BatchSize:   cfg.AgentOS.PlanMetricsExporterBatchSize,
+	})
+	if err != nil {
+		l.Fatal(fmt.Errorf("app - Run - agentos plan metrics exporter: %w", err))
+	}
+
+	loop, err := agentosplan.StartPlanMetricsExporterLoop(
+		context.Background(),
+		exporter,
+		agentosplan.PlanMetricsExporterLoopConfig{
+			Interval: time.Duration(cfg.AgentOS.PlanMetricsExporterIntervalSeconds) * time.Second,
+			Scope: agentosplan.PlanRefScope{
+				Limit: cfg.AgentOS.PlanMetricsExporterPlanLimit,
+			},
+			ExportImmediately: cfg.AgentOS.PlanMetricsExporterImmediateOnWorkerRun,
+		},
+		planMetricsExporterLogger{logger: l},
+	)
+	if err != nil {
+		l.Fatal(fmt.Errorf("app - Run - agentos plan metrics exporter: %w", err))
+	}
+
+	return loop
+}
+
+type planMetricsExporterLogger struct {
+	logger logger.Interface
+}
+
+func (l planMetricsExporterLogger) PlanMetricsExportSucceeded(result agentosplan.PlanMetricsExportResult) {
+	if result.PlansScanned == 0 && result.EventsScanned == 0 {
+		l.logger.Debug("app - Run - agentos plan metrics exporter: no plan events to export")
+
+		return
+	}
+	l.logger.Info(
+		"app - Run - agentos plan metrics exporter: plans=%d events=%d samples=%d checkpoints=%d",
+		result.PlansScanned,
+		result.EventsScanned,
+		result.SamplesRecorded,
+		result.CheckpointsSaved,
+	)
+}
+
+func (l planMetricsExporterLogger) PlanMetricsExportFailed(err error) {
+	l.logger.Error(fmt.Errorf("app - Run - agentos plan metrics exporter: %w", err))
 }
 
 func startAgentOSPlanCommandRecovery(l logger.Interface, cfg config.AgentOS, planRuntime agentos.PlanRuntime) *agentostemporal.PlanCommandRecoveryLoop {

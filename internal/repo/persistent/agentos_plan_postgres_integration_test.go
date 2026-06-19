@@ -512,6 +512,44 @@ func TestAgentOSPlanPostgresPlanRefsAndMetricCheckpoints(t *testing.T) {
 	if err := planRepo.SavePlanMetricCheckpoint(ctx, tenantMismatch); !errors.Is(err, agentos.ErrPlanRouteNotFound) {
 		t.Fatalf("SavePlanMetricCheckpoint tenant mismatch error = %v, want ErrPlanRouteNotFound", err)
 	}
+
+	sample := agentosplan.PlanMetricSample{
+		Name:      agentosplan.PlanMetricPlanStartedTotal,
+		Value:     1,
+		Unit:      "count",
+		PlanID:    spec.PlanID,
+		AccountID: spec.AccountID,
+		ProjectID: spec.ProjectID,
+		EventID:   spec.PlanID + ":1",
+		Sequence:  1,
+		Timestamp: time.Date(2026, 6, 19, 12, 0, 1, 123456000, time.UTC),
+		Labels:    map[string]string{"lifecycle_state": agentos.PlanLifecycleRunning},
+	}
+	if err := planRepo.RecordPlanMetric(ctx, sample); err != nil {
+		t.Fatalf("RecordPlanMetric first: %v", err)
+	}
+	if err := planRepo.RecordPlanMetric(ctx, sample); err != nil {
+		t.Fatalf("RecordPlanMetric replay: %v", err)
+	}
+	var sampleCount int
+	if err := pg.Pool.QueryRow(ctx, `SELECT COUNT(*) FROM plan_metric_samples WHERE plan_id = $1`, spec.PlanID).Scan(&sampleCount); err != nil {
+		t.Fatalf("count plan_metric_samples: %v", err)
+	}
+	if sampleCount != 1 {
+		t.Fatalf("metric sample count = %d, want 1", sampleCount)
+	}
+	changedSample := sample
+	changedSample.Value = 2
+	if err := planRepo.RecordPlanMetric(ctx, changedSample); !errors.Is(err, agentos.ErrInvalidRunPlan) {
+		t.Fatalf("RecordPlanMetric changed replay error = %v, want ErrInvalidRunPlan", err)
+	}
+	mismatchedSample := sample
+	mismatchedSample.Sequence = 2
+	mismatchedSample.EventID = spec.PlanID + ":2"
+	mismatchedSample.AccountID = "acct-other"
+	if err := planRepo.RecordPlanMetric(ctx, mismatchedSample); !errors.Is(err, agentos.ErrPlanRouteNotFound) {
+		t.Fatalf("RecordPlanMetric tenant mismatch error = %v, want ErrPlanRouteNotFound", err)
+	}
 }
 
 func TestAgentOSArtifactPostgresRejectsDifferentIdempotencyReplay(t *testing.T) {
@@ -655,6 +693,7 @@ func applyAgentOSPlanMigrations(t *testing.T, pg *postgres.Postgres) {
 		"20260619000004_create_plan_commands.up.sql",
 		"20260619000005_scope_plan_control_plane_records.up.sql",
 		"20260619000006_create_plan_metric_checkpoints.up.sql",
+		"20260619000007_create_plan_metric_samples.up.sql",
 	} {
 		path := filepath.Join("..", "..", "..", "migrations", migration)
 		data, err := os.ReadFile(path)

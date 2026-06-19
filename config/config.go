@@ -66,6 +66,12 @@ type (
 		PlanCommandRecoveryIntervalSeconds      int    `env:"AGENTOS_PLAN_COMMAND_RECOVERY_INTERVAL_SECONDS" envDefault:"30"`
 		PlanCommandRecoveryLimit                int    `env:"AGENTOS_PLAN_COMMAND_RECOVERY_LIMIT" envDefault:"100"`
 		PlanCommandRecoveryImmediateOnWorkerRun bool   `env:"AGENTOS_PLAN_COMMAND_RECOVERY_IMMEDIATE_ON_WORKER_RUN" envDefault:"true"`
+		PlanMetricsExporterEnabled              bool   `env:"AGENTOS_PLAN_METRICS_EXPORTER_ENABLED" envDefault:"true"`
+		PlanMetricsExporterID                   string `env:"AGENTOS_PLAN_METRICS_EXPORTER_ID" envDefault:"agentos-plan-metrics"`
+		PlanMetricsExporterIntervalSeconds      int    `env:"AGENTOS_PLAN_METRICS_EXPORTER_INTERVAL_SECONDS" envDefault:"30"`
+		PlanMetricsExporterPlanLimit            int    `env:"AGENTOS_PLAN_METRICS_EXPORTER_PLAN_LIMIT" envDefault:"100"`
+		PlanMetricsExporterBatchSize            int    `env:"AGENTOS_PLAN_METRICS_EXPORTER_BATCH_SIZE" envDefault:"1000"`
+		PlanMetricsExporterImmediateOnWorkerRun bool   `env:"AGENTOS_PLAN_METRICS_EXPORTER_IMMEDIATE_ON_WORKER_RUN" envDefault:"true"`
 	}
 
 	// AgentFW -.

@@ -868,6 +868,80 @@ WHERE plan_metric_checkpoints.sequence <= EXCLUDED.sequence`,
 	return nil
 }
 
+func (r *AgentOSPlanRepo) RecordPlanMetric(ctx context.Context, sample agentosplan.PlanMetricSample) error {
+	if err := agentosplan.ValidatePlanMetricSample(sample); err != nil {
+		return err
+	}
+	scope, exists, err := planTenantScopeByPlanID(ctx, r.Pool, sample.PlanID)
+	if err != nil {
+		return err
+	}
+	if !exists {
+		return fmt.Errorf("%w: %s", agentos.ErrPlanRouteNotFound, sample.PlanID)
+	}
+	if scope.AccountID != sample.AccountID || scope.ProjectID != sample.ProjectID {
+		return fmt.Errorf("%w: %s", agentos.ErrPlanRouteNotFound, sample.PlanID)
+	}
+
+	labelsJSON, err := json.Marshal(planMetricLabelsForStorage(sample.Labels))
+	if err != nil {
+		return fmt.Errorf("AgentOSPlanRepo - RecordPlanMetric - marshal labels: %w", err)
+	}
+	sample.Timestamp = sample.Timestamp.UTC().Truncate(time.Microsecond)
+	result, err := r.Pool.Exec(ctx, `
+INSERT INTO plan_metric_samples (
+    metric_name,
+    plan_id,
+    account_id,
+    project_id,
+    node_id,
+    run_id,
+    event_id,
+    sequence,
+    value,
+    unit,
+    labels_json,
+    sample_timestamp
+) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)
+ON CONFLICT (metric_name, plan_id, node_id, run_id, event_id, sequence) DO UPDATE SET
+    created_at = plan_metric_samples.created_at
+WHERE plan_metric_samples.account_id = EXCLUDED.account_id
+  AND plan_metric_samples.project_id = EXCLUDED.project_id
+  AND plan_metric_samples.value = EXCLUDED.value
+  AND plan_metric_samples.unit = EXCLUDED.unit
+  AND plan_metric_samples.labels_json = EXCLUDED.labels_json
+  AND plan_metric_samples.sample_timestamp = EXCLUDED.sample_timestamp`,
+		string(sample.Name),
+		sample.PlanID,
+		sample.AccountID,
+		sample.ProjectID,
+		sample.NodeID,
+		sample.RunID,
+		sample.EventID,
+		sample.Sequence,
+		sample.Value,
+		sample.Unit,
+		labelsJSON,
+		sample.Timestamp,
+	)
+	if err != nil {
+		return fmt.Errorf("AgentOSPlanRepo - RecordPlanMetric - upsert: %w", err)
+	}
+	if result.RowsAffected() == 0 {
+		return fmt.Errorf("%w: metric sample identity conflict for plan %q event %q", agentos.ErrInvalidRunPlan, sample.PlanID, sample.EventID)
+	}
+
+	return nil
+}
+
+func planMetricLabelsForStorage(labels map[string]string) map[string]string {
+	if len(labels) == 0 {
+		return map[string]string{}
+	}
+
+	return labels
+}
+
 func (r *AgentOSPlanRepo) RecordAudit(ctx context.Context, record agentosplan.AuditRecord) (agentosplan.AuditRecord, bool, error) {
 	if record.PlanID == "" {
 		return agentosplan.AuditRecord{}, false, fmt.Errorf("%w: plan id is required", agentos.ErrInvalidRunPlan)
@@ -1356,6 +1430,7 @@ var (
 	_ agentosplan.PlanStateStore            = (*AgentOSPlanRepo)(nil)
 	_ agentosplan.PlanEventStore            = (*AgentOSPlanRepo)(nil)
 	_ agentosplan.PlanMetricCheckpointStore = (*AgentOSPlanRepo)(nil)
+	_ agentosplan.PlanMetricsSink           = (*AgentOSPlanRepo)(nil)
 	_ agentosplan.PlanCommandStore          = (*AgentOSPlanRepo)(nil)
 	_ agentosplan.AuditStore                = (*AgentOSPlanRepo)(nil)
 )
