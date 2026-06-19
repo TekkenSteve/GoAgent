@@ -17,7 +17,7 @@ import (
 )
 
 type planRuntime struct {
-	temporalClient client.Client
+	temporalClient planTemporalClient
 	closeTemporal  bool
 	redis          *goredis.Redis
 	postgres       *postgres.Postgres
@@ -26,6 +26,12 @@ type planRuntime struct {
 	planIndex      agentosplan.PlanIndex
 	auditStore     agentosplan.AuditStore
 	taskQueue      string
+}
+
+type planTemporalClient interface {
+	ExecuteWorkflow(ctx context.Context, options client.StartWorkflowOptions, workflow interface{}, args ...interface{}) (client.WorkflowRun, error)
+	SignalWorkflow(ctx context.Context, workflowID string, runID string, signalName string, arg interface{}) error
+	Close()
 }
 
 // NewPlanRuntime creates the default Temporal implementation of agentos.PlanRuntime.
@@ -167,23 +173,25 @@ func (r *planRuntime) SignalPlan(ctx context.Context, planID string, signal agen
 	if err := agentosplan.ValidatePlanSignal(signal); err != nil {
 		return err
 	}
-	created, err := r.recordPlanAudit(ctx, agentosplan.AuditRecord{
+	record := agentosplan.AuditRecord{
 		PlanID:         planID,
 		Action:         agentosplan.AuditActionPlanSignal,
 		IdempotencyKey: signal.IdempotencyKey,
-		Payload: map[string]any{
-			"type": signal.Type,
-		},
-	})
+		Payload:        map[string]any{"type": signal.Type},
+	}
+	exists, err := r.planAuditRecorded(ctx, signal.IdempotencyKey)
 	if err != nil {
 		return err
 	}
-	if !created {
+	if exists {
 		return nil
 	}
 
 	if err := r.temporalClient.SignalWorkflow(ctx, planWorkflowID(planID), "", PlanSignalName, signal); err != nil {
 		return fmt.Errorf("agentos temporal plan runtime - signal plan workflow: %w", err)
+	}
+	if _, err := r.recordPlanAudit(ctx, record); err != nil {
+		return err
 	}
 
 	return nil
@@ -199,7 +207,7 @@ func (r *planRuntime) ControlPlan(ctx context.Context, planID string, control ag
 	if control.IdempotencyKey == "" {
 		return fmt.Errorf("%w: control idempotency key is required", agentos.ErrInvalidControlOperation)
 	}
-	created, err := r.recordPlanAudit(ctx, agentosplan.AuditRecord{
+	record := agentosplan.AuditRecord{
 		PlanID:         planID,
 		ActorID:        control.ActorID,
 		Action:         agentosplan.AuditActionPlanControl,
@@ -208,16 +216,20 @@ func (r *planRuntime) ControlPlan(ctx context.Context, planID string, control ag
 			"operation": control.Operation,
 			"metadata":  control.Metadata,
 		},
-	})
+	}
+	exists, err := r.planAuditRecorded(ctx, control.IdempotencyKey)
 	if err != nil {
 		return err
 	}
-	if !created {
+	if exists {
 		return nil
 	}
 
 	if err := r.temporalClient.SignalWorkflow(ctx, planWorkflowID(planID), "", PlanControlSignalName, control); err != nil {
 		return fmt.Errorf("agentos temporal plan runtime - control plan workflow: %w", err)
+	}
+	if _, err := r.recordPlanAudit(ctx, record); err != nil {
+		return err
 	}
 
 	return nil
@@ -271,6 +283,15 @@ func (r *planRuntime) recordPlanAudit(ctx context.Context, record agentosplan.Au
 	_, created, err := r.auditStore.RecordAudit(ctx, record)
 
 	return created, err
+}
+
+func (r *planRuntime) planAuditRecorded(ctx context.Context, idempotencyKey string) (bool, error) {
+	if r.auditStore == nil {
+		return false, errors.New("agentos temporal plan runtime: audit store is not configured")
+	}
+	_, exists, err := r.auditStore.GetAuditRecord(ctx, idempotencyKey)
+
+	return exists, err
 }
 
 func planWorkflowID(planID string) string {

@@ -573,7 +573,7 @@ func (r *AgentOSPlanRepo) RecordAudit(ctx context.Context, record agentosplan.Au
 	if record.IdempotencyKey == "" {
 		return agentosplan.AuditRecord{}, false, fmt.Errorf("%w: audit idempotency key is required", agentos.ErrInvalidRunPlan)
 	}
-	existing, exists, err := r.auditRecordByIdempotencyKey(ctx, record.IdempotencyKey)
+	existing, exists, err := r.GetAuditRecord(ctx, record.IdempotencyKey)
 	if err != nil || exists {
 		return existing, false, err
 	}
@@ -620,14 +620,18 @@ INSERT INTO audit_logs (
 	return record, true, nil
 }
 
-func (r *AgentOSPlanRepo) auditRecordByIdempotencyKey(ctx context.Context, idempotencyKey string) (agentosplan.AuditRecord, bool, error) {
+func (r *AgentOSPlanRepo) GetAuditRecord(ctx context.Context, idempotencyKey string) (agentosplan.AuditRecord, bool, error) {
+	if idempotencyKey == "" {
+		return agentosplan.AuditRecord{}, false, fmt.Errorf("%w: audit idempotency key is required", agentos.ErrInvalidRunPlan)
+	}
+
 	sql, args, err := r.Builder.
 		Select("audit_id", "plan_id", "run_id", "node_id", "actor_id", "action", "idempotency_key", "payload_json", "created_at").
 		From("audit_logs").
 		Where(sq.Eq{"idempotency_key": idempotencyKey}).
 		ToSql()
 	if err != nil {
-		return agentosplan.AuditRecord{}, false, fmt.Errorf("AgentOSPlanRepo - auditRecordByIdempotencyKey - builder: %w", err)
+		return agentosplan.AuditRecord{}, false, fmt.Errorf("AgentOSPlanRepo - GetAuditRecord - builder: %w", err)
 	}
 
 	var record agentosplan.AuditRecord
@@ -649,11 +653,11 @@ func (r *AgentOSPlanRepo) auditRecordByIdempotencyKey(ctx context.Context, idemp
 			return agentosplan.AuditRecord{}, false, nil
 		}
 
-		return agentosplan.AuditRecord{}, false, fmt.Errorf("AgentOSPlanRepo - auditRecordByIdempotencyKey - query: %w", err)
+		return agentosplan.AuditRecord{}, false, fmt.Errorf("AgentOSPlanRepo - GetAuditRecord - query: %w", err)
 	}
 	if len(payloadJSON) > 0 {
 		if err := json.Unmarshal(payloadJSON, &record.Payload); err != nil {
-			return agentosplan.AuditRecord{}, false, fmt.Errorf("AgentOSPlanRepo - auditRecordByIdempotencyKey - decode payload: %w", err)
+			return agentosplan.AuditRecord{}, false, fmt.Errorf("AgentOSPlanRepo - GetAuditRecord - decode payload: %w", err)
 		}
 	}
 	record.Action = agentosplan.AuditAction(action)

@@ -227,6 +227,18 @@ func (s *MemoryPlanStore) RecordAudit(_ context.Context, record AuditRecord) (Au
 	return record, true, nil
 }
 
+func (s *MemoryPlanStore) GetAuditRecord(_ context.Context, idempotencyKey string) (AuditRecord, bool, error) {
+	if idempotencyKey == "" {
+		return AuditRecord{}, false, fmt.Errorf("%w: audit idempotency key is required", agentos.ErrInvalidRunPlan)
+	}
+
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	record, ok := s.auditKeys[idempotencyKey]
+
+	return record, ok, nil
+}
+
 var (
 	_ PlanIndex      = (*MemoryPlanStore)(nil)
 	_ PlanStateStore = (*MemoryPlanStore)(nil)

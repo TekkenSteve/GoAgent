@@ -101,6 +101,7 @@ type AuditRecord struct {
 // AuditStore persists idempotent control-plane audit records.
 type AuditStore interface {
 	RecordAudit(ctx context.Context, record AuditRecord) (AuditRecord, bool, error)
+	GetAuditRecord(ctx context.Context, idempotencyKey string) (AuditRecord, bool, error)
 }
 
 // Runner starts and controls backend-owned child runs.
