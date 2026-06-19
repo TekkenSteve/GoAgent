@@ -1,6 +1,7 @@
 package stream
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"strconv"
@@ -220,10 +221,9 @@ func planEventMatchesScope(event agentos.PlanEvent, scope agentos.PlanStreamScop
 }
 
 func ensureSamePlanEvent(existing agentos.PlanEvent, expected agentos.PlanEvent) error {
-	if existing.PlanID == expected.PlanID &&
-		existing.EventID == expected.EventID &&
-		existing.Sequence == expected.Sequence &&
-		existing.EventType == expected.EventType {
+	existingData, existingErr := agentos.MarshalPlanEvent(existing)
+	expectedData, expectedErr := agentos.MarshalPlanEvent(expected)
+	if existingErr == nil && expectedErr == nil && bytes.Equal(existingData, expectedData) {
 		return nil
 	}
 

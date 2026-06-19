@@ -49,12 +49,41 @@ func TestRedisPlanEventStreamPublishIsIdempotent(t *testing.T) {
 	}
 }
 
+func TestRedisPlanEventStreamPublishComparesCanonicalPlanEvent(t *testing.T) {
+	fake := newFakePlanEventRedis()
+	stream := newRedisPlanEventStream(fake, nil)
+	event := testPlanEvent("evt-1", 7)
+	event.Payload = map[string]any{"attempt": 1}
+	fake.store(planEventStreamKey("plan-1"), "7-0", event)
+
+	if err := stream.PublishPlanEvent(context.Background(), event); err != nil {
+		t.Fatalf("PublishPlanEvent duplicate with numeric payload: %v", err)
+	}
+	if fake.addCalls != 0 {
+		t.Fatalf("duplicate publish called XADD %d times", fake.addCalls)
+	}
+}
+
 func TestRedisPlanEventStreamRejectsSequenceCollision(t *testing.T) {
 	fake := newFakePlanEventRedis()
 	stream := newRedisPlanEventStream(fake, nil)
 	fake.store(planEventStreamKey("plan-1"), "7-0", testPlanEvent("evt-existing", 7))
 
 	err := stream.PublishPlanEvent(context.Background(), testPlanEvent("evt-new", 7))
+	if !errors.Is(err, agentos.ErrInvalidPlanEvent) {
+		t.Fatalf("PublishPlanEvent error = %v, want ErrInvalidPlanEvent", err)
+	}
+}
+
+func TestRedisPlanEventStreamRejectsSameSequenceWithDifferentPayload(t *testing.T) {
+	fake := newFakePlanEventRedis()
+	stream := newRedisPlanEventStream(fake, nil)
+	existing := testPlanEvent("evt-1", 7)
+	fake.store(planEventStreamKey("plan-1"), "7-0", existing)
+	changed := existing
+	changed.Payload = map[string]any{"ok": false}
+
+	err := stream.PublishPlanEvent(context.Background(), changed)
 	if !errors.Is(err, agentos.ErrInvalidPlanEvent) {
 		t.Fatalf("PublishPlanEvent error = %v, want ErrInvalidPlanEvent", err)
 	}
