@@ -422,6 +422,11 @@ func TestAgentOSPlanConsoleRendersRuntimeData(t *testing.T) {
 		"plan.control",
 		`data-control-endpoint="control"`,
 		`data-signal-endpoint="signals"`,
+		`data-control="pause"`,
+		`data-control="resume"`,
+		`data-control="cancel"`,
+		`data-signal="plan.approve"`,
+		`data-signal="plan.reject"`,
 		`data-signal="plan.node.retry"`,
 	} {
 		if !strings.Contains(html, want) {
