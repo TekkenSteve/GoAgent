@@ -188,12 +188,6 @@ func (r *planRuntime) StartPlan(ctx context.Context, spec agentos.RunPlanSpec) (
 		return agentos.RunPlanStatus{}, fmt.Errorf("agentos temporal plan runtime - start plan workflow: %w", err)
 	}
 
-	status.LifecycleState = agentos.PlanLifecycleRunning
-	status.UpdatedAt = time.Now().UTC()
-	if err := r.planIndex.UpdatePlanStatus(ctx, status, spec.IdempotencyKey); err != nil {
-		return agentos.RunPlanStatus{}, err
-	}
-
 	return status, nil
 }
 

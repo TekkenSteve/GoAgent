@@ -170,6 +170,64 @@ func TestPlanRuntimeNilDurableStoresFailMethods(t *testing.T) {
 	}
 }
 
+func TestPlanRuntimeStartPlanDoesNotOverwriteWorkflowOwnedState(t *testing.T) {
+	store := agentosplan.NewMemoryPlanStore()
+	spec := agentos.RunPlanSpec{
+		PlanID:         "plan-1",
+		AccountID:      "acct-1",
+		ProjectID:      "proj-1",
+		IdempotencyKey: "plan-start-1",
+		Nodes: []agentos.PlanNodeSpec{
+			{
+				NodeID: "research",
+				Run: agentos.RunSpec{
+					RunID:   "run-research",
+					Backend: agentos.BackendRef{Kind: agentos.BackendKindHTTP, Name: "research-agent"},
+				},
+			},
+		},
+	}
+	workflowStatus := agentos.RunPlanStatus{
+		PlanID:         spec.PlanID,
+		LifecycleState: agentos.PlanLifecycleRunning,
+		Nodes: []agentos.PlanNodeStatus{
+			{
+				NodeID:         "research",
+				RunID:          "run-research",
+				Backend:        agentos.BackendRef{Kind: agentos.BackendKindHTTP, Name: "research-agent"},
+				LifecycleState: agentos.PlanNodeRunning,
+				Attempts:       1,
+			},
+		},
+		UpdatedAt: time.Now().UTC(),
+	}
+	temporalClient := &fakePlanTemporalClient{
+		executeFunc: func(ctx context.Context, _ client.StartWorkflowOptions, _ interface{}, _ ...interface{}) error {
+			return store.SavePlanState(ctx, agentosplan.PlanStateSnapshot{
+				Spec:           spec,
+				Status:         workflowStatus,
+				IdempotencyKey: "workflow-started-1",
+			})
+		},
+	}
+	rt := &planRuntime{temporalClient: temporalClient, planIndex: store, auditStore: store}
+
+	if _, err := rt.StartPlan(t.Context(), spec); err != nil {
+		t.Fatalf("StartPlan: %v", err)
+	}
+
+	_, got, exists, err := store.GetPlan(t.Context(), spec.PlanID)
+	if err != nil || !exists {
+		t.Fatalf("GetPlan exists=%v err=%v", exists, err)
+	}
+	if len(got.Nodes) != 1 ||
+		got.Nodes[0].NodeID != "research" ||
+		got.Nodes[0].LifecycleState != agentos.PlanNodeRunning ||
+		got.Nodes[0].RunID != "run-research" {
+		t.Fatalf("plan status was overwritten by runtime start path: %#v", got)
+	}
+}
+
 func TestPlanRuntimeSignalPlanRequiresCommandStore(t *testing.T) {
 	store, ref := newPlanRuntimeTestStore(t)
 	rt := &planRuntime{temporalClient: &fakePlanTemporalClient{}, auditStore: store, planIndex: store}
@@ -749,11 +807,9 @@ func (i *scopedOnlyPlanIndex) GetPlanByRef(_ context.Context, ref agentos.PlanRe
 	return i.spec, i.status, true, nil
 }
 
-func (i *scopedOnlyPlanIndex) UpdatePlanStatus(context.Context, agentos.RunPlanStatus, string) error {
-	return errors.New("unexpected UpdatePlanStatus")
-}
-
 type fakePlanTemporalClient struct {
+	executeFunc      func(context.Context, client.StartWorkflowOptions, interface{}, ...interface{}) error
+	executeErr       error
 	signalWorkflowID string
 	signalName       string
 	signalPayload    any
@@ -761,8 +817,14 @@ type fakePlanTemporalClient struct {
 	signalErr        error
 }
 
-func (c *fakePlanTemporalClient) ExecuteWorkflow(context.Context, client.StartWorkflowOptions, interface{}, ...interface{}) (client.WorkflowRun, error) {
-	return nil, nil
+func (c *fakePlanTemporalClient) ExecuteWorkflow(ctx context.Context, options client.StartWorkflowOptions, workflow interface{}, args ...interface{}) (client.WorkflowRun, error) {
+	if c.executeFunc != nil {
+		if err := c.executeFunc(ctx, options, workflow, args...); err != nil {
+			return nil, err
+		}
+	}
+
+	return nil, c.executeErr
 }
 
 func (c *fakePlanTemporalClient) SignalWorkflow(_ context.Context, workflowID string, _ string, signalName string, arg interface{}) error {

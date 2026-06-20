@@ -164,23 +164,6 @@ func (r *AgentOSPlanRepo) ListPlanRefs(ctx context.Context, scope agentosplan.Pl
 	return refs, nil
 }
 
-func (r *AgentOSPlanRepo) UpdatePlanStatus(ctx context.Context, status agentos.RunPlanStatus, idempotencyKey string) error {
-	if status.PlanID == "" {
-		return fmt.Errorf("%w: plan id is required", agentos.ErrInvalidRunPlan)
-	}
-	snapshot, exists, err := r.LoadPlanState(ctx, status.PlanID)
-	if err != nil {
-		return err
-	}
-	if !exists {
-		return fmt.Errorf("%w: %s", agentos.ErrPlanRouteNotFound, status.PlanID)
-	}
-	snapshot.Status = status
-	snapshot.IdempotencyKey = idempotencyKey
-
-	return r.SavePlanState(ctx, snapshot)
-}
-
 func (r *AgentOSPlanRepo) SavePlanState(ctx context.Context, snapshot agentosplan.PlanStateSnapshot) error {
 	if snapshot.Spec.PlanID == "" {
 		return fmt.Errorf("%w: plan id is required", agentos.ErrInvalidRunPlan)

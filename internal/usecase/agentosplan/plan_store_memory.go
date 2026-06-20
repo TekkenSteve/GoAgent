@@ -183,21 +183,6 @@ func (s *MemoryPlanStore) ListPlanRefs(_ context.Context, scope PlanRefScope) ([
 	return refs, nil
 }
 
-func (s *MemoryPlanStore) UpdatePlanStatus(_ context.Context, status agentos.RunPlanStatus, _ string) error {
-	if status.PlanID == "" {
-		return fmt.Errorf("%w: plan id is required", agentos.ErrInvalidRunPlan)
-	}
-
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if _, ok := s.specs[status.PlanID]; !ok {
-		return fmt.Errorf("%w: %s", agentos.ErrPlanRouteNotFound, status.PlanID)
-	}
-	s.statuses[status.PlanID] = status
-
-	return nil
-}
-
 func (s *MemoryPlanStore) SavePlanState(_ context.Context, snapshot PlanStateSnapshot) error {
 	if snapshot.Spec.PlanID == "" {
 		return fmt.Errorf("%w: plan id is required", agentos.ErrInvalidRunPlan)
