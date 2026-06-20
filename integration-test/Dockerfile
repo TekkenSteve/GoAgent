@@ -19,4 +19,7 @@ RUN go env -w CGO_ENABLED=0 \
     && go env -w GOOS=linux  \
     && go env -w GOARCH=amd64
 
-CMD ["go", "test", "-v", "./integration-test/..."]
+ENV GO_TEST_FLAGS="-v"
+ENV GO_TEST_PACKAGES="./integration-test/..."
+
+CMD ["sh", "-c", "go test ${GO_TEST_FLAGS} ${GO_TEST_PACKAGES}"]

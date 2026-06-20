@@ -30,11 +30,20 @@ compose-up-all: ### Run docker compose (with backend and reverse proxy)
 .PHONY: compose-up-all
 
 compose-up-integration-test: ### Run docker compose with integration test
-	$(INTEGRATION_TEST_STACK) up --build integration-test; \
-	exit_code=$$?; \
-	$(ALL_STACK) down --remove-orphans; \
+	exit_code=0; \
+	trap '$(ALL_STACK) down --remove-orphans' EXIT; \
+	$(INTEGRATION_TEST_STACK) up --build integration-test || exit_code=$$?; \
 	exit $$exit_code
 .PHONY: compose-up-integration-test
+
+compose-up-mixed-backend-integration-test: ### Run docker compose mixed AgentOS RunPlan backend test
+	exit_code=0; \
+	trap '$(ALL_STACK) down --remove-orphans' EXIT; \
+	GO_TEST_FLAGS="-v -run TestHTTPAgentOSRunPlanMixedBackendsV1 -count=1" \
+	GO_TEST_PACKAGES="./integration-test" \
+	$(INTEGRATION_TEST_STACK) up --build integration-test || exit_code=$$?; \
+	exit $$exit_code
+.PHONY: compose-up-mixed-backend-integration-test
 
 compose-down: ### Down docker compose
 	$(ALL_STACK) down --remove-orphans

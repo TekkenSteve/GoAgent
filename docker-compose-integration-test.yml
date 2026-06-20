@@ -87,6 +87,8 @@ services:
       dockerfile: integration-test/Dockerfile
     environment:
       PG_URL: "postgres://user:myAwEsOm3pa55@w0rd@db:5432/db"
+      GO_TEST_FLAGS: "${GO_TEST_FLAGS:--v}"
+      GO_TEST_PACKAGES: "${GO_TEST_PACKAGES:-./integration-test/...}"
     depends_on:
       app:
         condition: service_started
