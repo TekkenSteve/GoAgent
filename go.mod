@@ -46,7 +46,6 @@ require (
 	github.com/swaggo/swag v1.16.6
 	github.com/tidwall/gjson v1.18.0
 	github.com/tidwall/sjson v1.2.5
-	go.temporal.io/api v1.43.0
 	go.temporal.io/sdk v1.31.0
 	go.uber.org/mock v0.6.0
 	golang.org/x/sync v0.20.0
@@ -55,6 +54,8 @@ require (
 	sigs.k8s.io/yaml v1.4.0
 )
 
+// cel-go is hosted under github.com/cel-expr/cel-go, but v0.28.1 still declares
+// github.com/google/cel-go as its module path.
 replace github.com/google/cel-go => github.com/cel-expr/cel-go v0.28.1
 
 require (
@@ -430,6 +431,7 @@ require (
 	go.opentelemetry.io/otel/sdk/metric v1.40.0 // indirect
 	go.opentelemetry.io/otel/trace v1.43.0 // indirect
 	go.starlark.net v0.0.0-20260102030733-3fee463870c9 // indirect
+	go.temporal.io/api v1.43.0 // indirect
 	go.uber.org/multierr v1.10.0 // indirect
 	go.uber.org/zap v1.27.0 // indirect
 	go.yaml.in/yaml/v2 v2.4.4 // indirect
