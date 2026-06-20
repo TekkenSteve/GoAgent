@@ -208,6 +208,69 @@ func TestRouterStartRejectsBackendRunIDDrift(t *testing.T) {
 	}
 }
 
+func TestRouterStatusNormalizesBackendRunID(t *testing.T) {
+	ctx := context.Background()
+	ref := agentos.BackendRef{Kind: agentos.BackendKindNative, Name: agentos.BackendNameGoAgentNative}
+	stub := &stubBackend{statusStatus: agentos.RunStatus{LifecycleState: "running"}}
+	registry := NewRegistry()
+	if err := registry.Register(ref, stub); err != nil {
+		t.Fatalf("register backend: %v", err)
+	}
+	index := newStubRunIndex()
+	spec := agentos.RunSpec{
+		RunID:          "run-1",
+		AccountID:      "acct-1",
+		ProjectID:      "proj-1",
+		Backend:        ref,
+		IdempotencyKey: "run-start-1",
+	}
+	if err := index.Bind(ctx, spec, agentos.RunStatus{RunID: spec.RunID, LifecycleState: "running"}); err != nil {
+		t.Fatalf("Bind: %v", err)
+	}
+	router, err := NewRouter(registry, index)
+	if err != nil {
+		t.Fatalf("new router: %v", err)
+	}
+
+	status, err := router.Status(ctx, spec.RunID)
+	if err != nil {
+		t.Fatalf("Status: %v", err)
+	}
+	if status.RunID != spec.RunID {
+		t.Fatalf("status run id = %q, want %q", status.RunID, spec.RunID)
+	}
+}
+
+func TestRouterStatusRejectsBackendRunIDDrift(t *testing.T) {
+	ctx := context.Background()
+	ref := agentos.BackendRef{Kind: agentos.BackendKindNative, Name: agentos.BackendNameGoAgentNative}
+	stub := &stubBackend{statusStatus: agentos.RunStatus{RunID: "backend-run", LifecycleState: "running"}}
+	registry := NewRegistry()
+	if err := registry.Register(ref, stub); err != nil {
+		t.Fatalf("register backend: %v", err)
+	}
+	index := newStubRunIndex()
+	spec := agentos.RunSpec{
+		RunID:          "run-1",
+		AccountID:      "acct-1",
+		ProjectID:      "proj-1",
+		Backend:        ref,
+		IdempotencyKey: "run-start-1",
+	}
+	if err := index.Bind(ctx, spec, agentos.RunStatus{RunID: spec.RunID, LifecycleState: "running"}); err != nil {
+		t.Fatalf("Bind: %v", err)
+	}
+	router, err := NewRouter(registry, index)
+	if err != nil {
+		t.Fatalf("new router: %v", err)
+	}
+
+	_, err = router.Status(ctx, spec.RunID)
+	if err == nil {
+		t.Fatal("Status succeeded, want run id drift error")
+	}
+}
+
 func TestRouterSelectsBackendWhenSpecOmitsBackend(t *testing.T) {
 	ctx := context.Background()
 	ref := agentos.BackendRef{Kind: agentos.BackendKindHTTP, Name: "research-http"}
@@ -494,6 +557,7 @@ type stubBackend struct {
 	startBackend agentos.BackendRef
 	startCount   int
 	startStatus  agentos.RunStatus
+	statusStatus agentos.RunStatus
 }
 
 type stubRunIndex struct {
@@ -631,6 +695,9 @@ func (b *stubBackend) Control(_ context.Context, runID string, _ agentos.Control
 
 func (b *stubBackend) Status(_ context.Context, runID string) (agentos.RunStatus, error) {
 	b.statusRunID = runID
+	if b.statusStatus.RunID != "" || b.statusStatus.LifecycleState != "" {
+		return b.statusStatus, nil
+	}
 
 	return agentos.RunStatus{RunID: runID}, nil
 }

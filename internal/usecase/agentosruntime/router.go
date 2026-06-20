@@ -244,7 +244,12 @@ func (r *Router) Status(ctx context.Context, runID string) (agentos.RunStatus, e
 		return agentos.RunStatus{}, err
 	}
 
-	return backend.Status(ctx, runID)
+	status, err := backend.Status(ctx, runID)
+	if err != nil {
+		return agentos.RunStatus{}, err
+	}
+
+	return normalizeOwnedRunStatus(runID, status)
 }
 
 // Subscribe opens a stream subscription through the backend selected by the scope.
