@@ -998,6 +998,14 @@ func TestAgentOSArtifactPostgresRejectsDifferentIdempotencyReplay(t *testing.T) 
 	if err := routeIndex.BindPlanNode(ctx, spec.PlanID, spec.Nodes[0].NodeID, runSpec, agentos.RunStatus{RunID: runSpec.RunID, LifecycleState: "running"}); err != nil {
 		t.Fatalf("BindPlanNode for artifact: %v", err)
 	}
+	refOnlyBlob := ref
+	refOnlyBlob.ArtifactID = "artifact-ref-only-" + suffix
+	refOnlyBlob.URI = "local://artifact/unowned"
+	refOnlyBlob.SizeBytes = 2
+	refOnlyBlob.Digest = agentosplan.DigestArtifactPayload([]byte("ok"))
+	if _, err := artifactStore.Put(ctx, refOnlyBlob, nil, "artifact-ref-only-"+suffix); !errors.Is(err, agentos.ErrInvalidArtifact) {
+		t.Fatalf("Artifact Put ref-only blob metadata error = %v, want ErrInvalidArtifact", err)
+	}
 	first, err := artifactStore.Put(ctx, ref, map[string]any{
 		"summary":        "ok",
 		"payload_marker": "payload-" + suffix,

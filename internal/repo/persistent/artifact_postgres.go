@@ -84,6 +84,11 @@ func (r *AgentOSArtifactRepo) Put(ctx context.Context, ref agentos.ArtifactRef, 
 
 		return existing, nil
 	}
+	if payload == nil {
+		if err := agentosplan.ValidateNewRefOnlyArtifactPublish(ref); err != nil {
+			return agentos.ArtifactRef{}, err
+		}
+	}
 
 	if payload != nil {
 		if r.blob == nil {

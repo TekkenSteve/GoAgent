@@ -82,6 +82,11 @@ func (s *MemoryArtifactStore) Put(_ context.Context, artifact agentos.ArtifactRe
 			return existing.ref, nil
 		}
 	}
+	if payload == nil {
+		if err := ValidateNewRefOnlyArtifactPublish(artifact); err != nil {
+			return agentos.ArtifactRef{}, err
+		}
+	}
 	if _, exists := s.artifacts[artifact.ArtifactID]; exists {
 		return agentos.ArtifactRef{}, fmt.Errorf("%w: artifact id %q already exists with a different idempotency key", agentos.ErrInvalidArtifact, artifact.ArtifactID)
 	}
@@ -148,4 +153,16 @@ func artifactRefMatchesScope(ref agentos.ArtifactRef, scope agentos.PlanArtifact
 	}
 
 	return true
+}
+
+// ValidateNewRefOnlyArtifactPublish rejects first-time ref-only artifact
+// publishes that attempt to claim blob metadata without writing payload through
+// the ArtifactStore. Idempotent replays of an existing artifact are validated
+// against the stored ref before this check is needed.
+func ValidateNewRefOnlyArtifactPublish(ref agentos.ArtifactRef) error {
+	if ref.URI != "" || ref.SizeBytes != 0 || ref.Digest != "" {
+		return fmt.Errorf("%w: artifact payload metadata requires a stored payload", agentos.ErrInvalidArtifact)
+	}
+
+	return nil
 }

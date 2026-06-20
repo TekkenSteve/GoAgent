@@ -185,6 +185,47 @@ func TestMemoryArtifactStoreRejectsArtifactIDReuseWithDifferentKey(t *testing.T)
 	}
 }
 
+func TestMemoryArtifactStoreRejectsNewRefOnlyPayloadMetadata(t *testing.T) {
+	ctx := context.Background()
+	store := NewMemoryArtifactStore()
+	base := agentos.ArtifactRef{
+		ArtifactID: "artifact-1",
+		PlanID:     "plan-1",
+		Name:       "summary",
+		Kind:       agentos.ArtifactKindObject,
+	}
+
+	tests := map[string]agentos.ArtifactRef{
+		"uri": func() agentos.ArtifactRef {
+			ref := base
+			ref.URI = "local://artifact/plan-1/artifact-1"
+
+			return ref
+		}(),
+		"size": func() agentos.ArtifactRef {
+			ref := base
+			ref.SizeBytes = 12
+
+			return ref
+		}(),
+		"digest": func() agentos.ArtifactRef {
+			ref := base
+			ref.Digest = "sha256:abc"
+
+			return ref
+		}(),
+	}
+
+	for name, ref := range tests {
+		t.Run(name, func(t *testing.T) {
+			_, err := store.Put(ctx, ref, nil, "plan-1:"+name)
+			if !errors.Is(err, agentos.ErrInvalidArtifact) {
+				t.Fatalf("Put error = %v, want ErrInvalidArtifact", err)
+			}
+		})
+	}
+}
+
 func TestMemoryArtifactStoreRequiresScopedReads(t *testing.T) {
 	ctx := context.Background()
 	store := NewMemoryArtifactStore()
