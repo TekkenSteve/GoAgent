@@ -9,6 +9,7 @@ import (
 
 	"github.com/TekkenSteve/GoAgent/agentos"
 	"github.com/TekkenSteve/GoAgent/internal/pkg/redis"
+	"github.com/TekkenSteve/GoAgent/internal/usecase/agentosplan"
 	goredis "github.com/redis/go-redis/v9"
 )
 
@@ -91,11 +92,11 @@ func (s *RedisPlanEventStream) PublishPlanEvent(ctx context.Context, event agent
 
 // SubscribePlanEvents subscribes to live PlanEvents after scope.AfterSequence.
 func (s *RedisPlanEventStream) SubscribePlanEvents(_ context.Context, scope agentos.PlanStreamScope) (agentos.Subscription, error) {
+	if err := agentosplan.ValidatePlanStreamScope(scope); err != nil {
+		return nil, err
+	}
 	if s == nil || s.hub == nil {
 		return nil, fmt.Errorf("%w: redis plan event subscriber is not configured", agentos.ErrInvalidStreamScope)
-	}
-	if scope.PlanID == "" {
-		return nil, fmt.Errorf("%w: plan id is required", agentos.ErrInvalidStreamScope)
 	}
 
 	hubSub := s.hub.Subscribe(planEventStreamKey(scope.PlanID), planEventEntryID(scope.AfterSequence))

@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/TekkenSteve/GoAgent/agentos"
+	"github.com/TekkenSteve/GoAgent/internal/pkg/redis"
 	goredis "github.com/redis/go-redis/v9"
 )
 
@@ -86,6 +87,23 @@ func TestRedisPlanEventStreamRejectsSameSequenceWithDifferentPayload(t *testing.
 	err := stream.PublishPlanEvent(context.Background(), changed)
 	if !errors.Is(err, agentos.ErrInvalidPlanEvent) {
 		t.Fatalf("PublishPlanEvent error = %v, want ErrInvalidPlanEvent", err)
+	}
+}
+
+func TestRedisPlanEventStreamSubscribeRequiresTenantScope(t *testing.T) {
+	stream := newRedisPlanEventStream(newFakePlanEventRedis(), redis.NewStreamHub(nil))
+	for _, scope := range []agentos.PlanStreamScope{
+		{PlanID: "plan-1"},
+		{PlanID: "plan-1", AccountID: "acct-1"},
+		{PlanID: "plan-1", ProjectID: "proj-1"},
+	} {
+		sub, err := stream.SubscribePlanEvents(context.Background(), scope)
+		if sub != nil {
+			t.Fatalf("SubscribePlanEvents scope %#v returned subscription", scope)
+		}
+		if !errors.Is(err, agentos.ErrInvalidPlanScope) {
+			t.Fatalf("SubscribePlanEvents scope %#v error = %v, want ErrInvalidPlanScope", scope, err)
+		}
 	}
 }
 
