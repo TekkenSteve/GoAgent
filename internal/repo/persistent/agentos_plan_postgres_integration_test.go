@@ -8,6 +8,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"slices"
 	"testing"
 	"time"
 
@@ -520,6 +521,19 @@ func TestAgentOSPlanPostgresAppendPlanEventRequiresIdempotencyKey(t *testing.T) 
 	}
 }
 
+func TestAgentOSPlanPostgresPlanEventIdempotencyIndexIsTenantScoped(t *testing.T) {
+	_, pg, _ := newAgentOSPlanPostgresIntegrationDB(t)
+
+	columns := postgresIndexColumns(t, pg, "idx_plan_events_idempotency_key")
+	want := []string{"account_id", "project_id", "plan_id", "idempotency_key"}
+	if !slices.Equal(columns, want) {
+		t.Fatalf("idx_plan_events_idempotency_key columns = %#v, want %#v", columns, want)
+	}
+	if !postgresIndexIsUnique(t, pg, "idx_plan_events_idempotency_key") {
+		t.Fatal("idx_plan_events_idempotency_key is not unique")
+	}
+}
+
 func TestAgentOSPlanPostgresPlanRefsAndMetricCheckpoints(t *testing.T) {
 	ctx, pg, suffix := newAgentOSPlanPostgresIntegrationDB(t)
 	planRepo := NewAgentOSPlanRepo(pg)
@@ -912,6 +926,7 @@ func applyAgentOSPlanMigrations(t *testing.T, pg *postgres.Postgres) {
 		"20260619000007_create_plan_metric_samples.up.sql",
 		"20260619000008_create_agentos_artifact_schemas.up.sql",
 		"20260620000001_scope_agentos_idempotency_keys.up.sql",
+		"20260620000002_scope_plan_event_idempotency_keys.up.sql",
 	} {
 		path := filepath.Join("..", "..", "..", "migrations", migration)
 		data, err := os.ReadFile(path)
@@ -922,4 +937,56 @@ func applyAgentOSPlanMigrations(t *testing.T, pg *postgres.Postgres) {
 			t.Fatalf("apply migration %s: %v", migration, err)
 		}
 	}
+}
+
+func postgresIndexColumns(t *testing.T, pg *postgres.Postgres, indexName string) []string {
+	t.Helper()
+
+	rows, err := pg.Pool.Query(t.Context(), `
+SELECT attribute.attname
+FROM pg_class AS index_class
+JOIN pg_index AS index_info
+    ON index_info.indexrelid = index_class.oid
+JOIN LATERAL unnest(index_info.indkey) WITH ORDINALITY AS key(attnum, ord)
+    ON TRUE
+JOIN pg_attribute AS attribute
+    ON attribute.attrelid = index_info.indrelid
+   AND attribute.attnum = key.attnum
+WHERE index_class.relname = $1
+ORDER BY key.ord`, indexName)
+	if err != nil {
+		t.Fatalf("query index columns: %v", err)
+	}
+	defer rows.Close()
+
+	var columns []string
+	for rows.Next() {
+		var column string
+		if err := rows.Scan(&column); err != nil {
+			t.Fatalf("scan index column: %v", err)
+		}
+		columns = append(columns, column)
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatalf("index column rows: %v", err)
+	}
+
+	return columns
+}
+
+func postgresIndexIsUnique(t *testing.T, pg *postgres.Postgres, indexName string) bool {
+	t.Helper()
+
+	var unique bool
+	err := pg.Pool.QueryRow(t.Context(), `
+SELECT index_info.indisunique
+FROM pg_class AS index_class
+JOIN pg_index AS index_info
+    ON index_info.indexrelid = index_class.oid
+WHERE index_class.relname = $1`, indexName).Scan(&unique)
+	if err != nil {
+		t.Fatalf("query index uniqueness: %v", err)
+	}
+
+	return unique
 }

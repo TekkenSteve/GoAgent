@@ -563,7 +563,7 @@ FOR UPDATE`, event.PlanID).Scan(&currentSequence, &scope.AccountID, &scope.Proje
 		return agentos.PlanEvent{}, fmt.Errorf("AgentOSPlanRepo - AppendPlanEvent - lock plan: %w", err)
 	}
 
-	existing, exists, err := r.planEventByIdempotencyKeyWith(ctx, tx, event.PlanID, idempotencyKey)
+	existing, exists, err := r.planEventByIdempotencyKeyWith(ctx, tx, scope, event.PlanID, idempotencyKey)
 	if err != nil {
 		return agentos.PlanEvent{}, err
 	}
@@ -633,7 +633,7 @@ RETURNING event_json`
 	).Scan(&storedJSON)
 	if err != nil {
 		if isPostgresUniqueViolation(err) {
-			existing, exists, lookupErr := r.planEventByIdempotencyKeyWith(ctx, tx, event.PlanID, idempotencyKey)
+			existing, exists, lookupErr := r.planEventByIdempotencyKeyWith(ctx, tx, scope, event.PlanID, idempotencyKey)
 			if lookupErr != nil {
 				return agentos.PlanEvent{}, lookupErr
 			}
@@ -660,19 +660,20 @@ RETURNING event_json`
 	return stored, nil
 }
 
-func (r *AgentOSPlanRepo) planEventByIdempotencyKey(ctx context.Context, planID, idempotencyKey string) (agentos.PlanEvent, bool, error) {
-	return r.planEventByIdempotencyKeyWith(ctx, r.Pool, planID, idempotencyKey)
-}
-
 type planEventRowQuerier interface {
 	QueryRow(ctx context.Context, sql string, args ...any) pgx.Row
 }
 
-func (r *AgentOSPlanRepo) planEventByIdempotencyKeyWith(ctx context.Context, querier planEventRowQuerier, planID, idempotencyKey string) (agentos.PlanEvent, bool, error) {
+func (r *AgentOSPlanRepo) planEventByIdempotencyKeyWith(ctx context.Context, querier planEventRowQuerier, scope planTenantScope, planID, idempotencyKey string) (agentos.PlanEvent, bool, error) {
 	sql, args, err := r.Builder.
 		Select("event_json").
 		From("plan_events").
-		Where(sq.Eq{"plan_id": planID, "idempotency_key": idempotencyKey}).
+		Where(sq.Eq{
+			"account_id":      scope.AccountID,
+			"project_id":      scope.ProjectID,
+			"plan_id":         planID,
+			"idempotency_key": idempotencyKey,
+		}).
 		ToSql()
 	if err != nil {
 		return agentos.PlanEvent{}, false, fmt.Errorf("AgentOSPlanRepo - planEventByIdempotencyKey - builder: %w", err)
