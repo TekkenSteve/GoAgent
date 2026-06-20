@@ -631,6 +631,64 @@ func TestAgentOSArtifactPostgresRejectsDifferentIdempotencyReplay(t *testing.T) 
 	if !ok || value != "ok" {
 		t.Fatalf("payload = %#v, want original payload", payload)
 	}
+	assertPostgresArtifactScope(t, pg, first.ArtifactID, spec.AccountID, spec.ProjectID)
+	refs, err := artifactStore.List(ctx, agentos.PlanArtifactScope{
+		PlanID:    spec.PlanID,
+		AccountID: spec.AccountID,
+		ProjectID: spec.ProjectID,
+		NodeID:    ref.NodeID,
+		RunID:     ref.RunID,
+		Limit:     10,
+	})
+	if err != nil {
+		t.Fatalf("Artifact List: %v", err)
+	}
+	if len(refs) != 1 || refs[0].ArtifactID != first.ArtifactID {
+		t.Fatalf("Artifact List = %#v, want stored artifact", refs)
+	}
+	if _, _, err := artifactStore.Get(ctx, agentos.PlanArtifactScope{
+		PlanID:     spec.PlanID,
+		AccountID:  "acct-other",
+		ProjectID:  spec.ProjectID,
+		ArtifactID: first.ArtifactID,
+	}); !errors.Is(err, agentos.ErrArtifactNotFound) {
+		t.Fatalf("Artifact Get tenant mismatch error = %v, want ErrArtifactNotFound", err)
+	}
+	wrongTenantRefs, err := artifactStore.List(ctx, agentos.PlanArtifactScope{
+		PlanID:    spec.PlanID,
+		AccountID: "acct-other",
+		ProjectID: spec.ProjectID,
+	})
+	if err != nil {
+		t.Fatalf("Artifact List tenant mismatch: %v", err)
+	}
+	if len(wrongTenantRefs) != 0 {
+		t.Fatalf("Artifact List tenant mismatch = %#v, want empty", wrongTenantRefs)
+	}
+
+	node := spec.Nodes[0]
+	node.Inputs = []agentos.InputMapping{
+		{
+			Target:         "from_artifact.summary",
+			SourceArtifact: "summary",
+			SourcePath:     "summary",
+			Required:       true,
+		},
+	}
+	mapped, err := agentosplan.ResolveRunInput(ctx, artifactStore, nil, spec, agentos.RunPlanStatus{
+		PlanID:    spec.PlanID,
+		Artifacts: []agentos.ArtifactRef{first},
+	}, node, nil)
+	if err != nil {
+		t.Fatalf("ResolveRunInput from postgres artifact: %v", err)
+	}
+	mappedArtifact, ok := mapped["from_artifact"].(map[string]any)
+	if !ok || mappedArtifact["summary"] != "ok" {
+		t.Fatalf("mapped artifact input = %#v, want summary payload", mapped)
+	}
+	if _, err := agentosplan.ResolveRunInput(ctx, artifactStore, nil, spec, agentos.RunPlanStatus{PlanID: spec.PlanID}, node, nil); !errors.Is(err, agentos.ErrArtifactNotFound) {
+		t.Fatalf("ResolveRunInput missing required artifact error = %v, want ErrArtifactNotFound", err)
+	}
 }
 
 func postgresIntegrationPlanSpec(planID, idempotencyKey string) agentos.RunPlanSpec {
@@ -679,6 +737,23 @@ WHERE event_id = $1`, eventID).Scan(&storedAccountID, &storedProjectID)
 	}
 	if storedAccountID != accountID || storedProjectID != projectID {
 		t.Fatalf("plan event tenant scope = %s/%s, want %s/%s", storedAccountID, storedProjectID, accountID, projectID)
+	}
+}
+
+func assertPostgresArtifactScope(t *testing.T, pg *postgres.Postgres, artifactID, accountID, projectID string) {
+	t.Helper()
+
+	var storedAccountID string
+	var storedProjectID string
+	err := pg.Pool.QueryRow(t.Context(), `
+SELECT account_id, project_id
+FROM artifacts
+WHERE artifact_id = $1`, artifactID).Scan(&storedAccountID, &storedProjectID)
+	if err != nil {
+		t.Fatalf("read artifact tenant scope: %v", err)
+	}
+	if storedAccountID != accountID || storedProjectID != projectID {
+		t.Fatalf("artifact tenant scope = %s/%s, want %s/%s", storedAccountID, storedProjectID, accountID, projectID)
 	}
 }
 
