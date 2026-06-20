@@ -42,6 +42,7 @@ func RunBackendConformance(t *testing.T, tc BackendConformanceCase) {
 			RunID:       tc.RunID,
 			ThreadID:    "agentos-conformance-thread",
 			AccountID:   "agentos-conformance-account",
+			ProjectID:   "agentos-conformance-project",
 			UserMessage: "hello",
 			Backend:     tc.Ref,
 			Input: map[string]any{

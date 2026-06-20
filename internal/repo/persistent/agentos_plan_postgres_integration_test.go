@@ -32,6 +32,20 @@ func TestAgentOSPlanPostgresDurablePersistence(t *testing.T) {
 	defer pg.Close()
 	waitForPostgres(t, pg)
 	applyAgentOSPlanMigrations(t, pg)
+	assertPostgresCheckConstraints(t, pg,
+		"plans_account_id_required",
+		"plans_project_id_required",
+		"plan_events_account_id_required",
+		"plan_events_project_id_required",
+		"run_backend_index_account_id_required",
+		"run_backend_index_project_id_required",
+		"artifacts_account_id_required",
+		"artifacts_project_id_required",
+		"plan_commands_account_id_required",
+		"plan_commands_project_id_required",
+		"plan_metric_checkpoints_account_id_required",
+		"plan_metric_checkpoints_project_id_required",
+	)
 
 	ctx := t.Context()
 	planRepo := NewAgentOSPlanRepo(pg)
@@ -316,6 +330,8 @@ func TestAgentOSPlanPostgresDurablePersistence(t *testing.T) {
 	}
 	standaloneRun := agentos.RunSpec{
 		RunID:          "standalone-" + suffix,
+		AccountID:      spec.AccountID,
+		ProjectID:      spec.ProjectID,
 		Backend:        runSpec.Backend,
 		IdempotencyKey: "standalone-run-start-" + suffix,
 	}
@@ -333,6 +349,8 @@ func TestAgentOSPlanPostgresDurablePersistence(t *testing.T) {
 		t.Fatalf("Bind standalone replay claim: %v", err)
 	}
 	assertPostgresRunBackendIndexRecord(t, pg, standaloneRun.RunID, postgresRunBackendIndexExpectation{
+		AccountID:      standaloneRun.AccountID,
+		ProjectID:      standaloneRun.ProjectID,
 		BackendKind:    string(standaloneRun.Backend.Kind),
 		BackendName:    standaloneRun.Backend.Name,
 		IdempotencyKey: standaloneRun.IdempotencyKey,
@@ -1100,6 +1118,7 @@ func applyAgentOSPlanMigrations(t *testing.T, pg *postgres.Postgres) {
 		"20260619000008_create_agentos_artifact_schemas.up.sql",
 		"20260620000001_scope_agentos_idempotency_keys.up.sql",
 		"20260620000002_scope_plan_event_idempotency_keys.up.sql",
+		"20260620000003_require_agentos_control_plane_scope.up.sql",
 	} {
 		path := filepath.Join("..", "..", "..", "migrations", migration)
 		data, err := os.ReadFile(path)
@@ -1108,6 +1127,25 @@ func applyAgentOSPlanMigrations(t *testing.T, pg *postgres.Postgres) {
 		}
 		if _, err := pg.Pool.Exec(t.Context(), string(data)); err != nil {
 			t.Fatalf("apply migration %s: %v", migration, err)
+		}
+	}
+}
+
+func assertPostgresCheckConstraints(t *testing.T, pg *postgres.Postgres, names ...string) {
+	t.Helper()
+	for _, name := range names {
+		var exists bool
+		if err := pg.Pool.QueryRow(t.Context(), `
+SELECT EXISTS (
+    SELECT 1
+    FROM pg_constraint
+    WHERE conname = $1
+      AND contype = 'c'
+)`, name).Scan(&exists); err != nil {
+			t.Fatalf("query check constraint %s: %v", name, err)
+		}
+		if !exists {
+			t.Fatalf("missing check constraint %s", name)
 		}
 	}
 }

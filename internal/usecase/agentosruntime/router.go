@@ -54,6 +54,9 @@ func (r *Router) Start(ctx context.Context, spec agentos.RunSpec) (agentos.RunSt
 	if spec.IdempotencyKey == "" {
 		return agentos.RunStatus{}, fmt.Errorf("%w: run idempotency key is required", agentos.ErrInvalidRunSpec)
 	}
+	if err := validateRunSpecScope(spec); err != nil {
+		return agentos.RunStatus{}, err
+	}
 	selectedBackend, err := r.selectBackend(ctx, spec)
 	if err != nil {
 		return agentos.RunStatus{}, err
@@ -116,6 +119,9 @@ func (r *Router) StartPlanNode(ctx context.Context, planID, nodeID string, spec 
 	if spec.IdempotencyKey == "" {
 		return agentos.RunStatus{}, fmt.Errorf("%w: run idempotency key is required", agentos.ErrInvalidRunSpec)
 	}
+	if err := validateRunSpecScope(spec); err != nil {
+		return agentos.RunStatus{}, err
+	}
 	selectedBackend, err := r.selectBackend(ctx, spec)
 	if err != nil {
 		return agentos.RunStatus{}, err
@@ -161,6 +167,17 @@ func (r *Router) StartPlanNode(ctx context.Context, planID, nodeID string, spec 
 	}
 
 	return status, nil
+}
+
+func validateRunSpecScope(spec agentos.RunSpec) error {
+	if spec.AccountID == "" {
+		return fmt.Errorf("%w: account id is required", agentos.ErrInvalidRunSpec)
+	}
+	if spec.ProjectID == "" {
+		return fmt.Errorf("%w: project id is required", agentos.ErrInvalidRunSpec)
+	}
+
+	return nil
 }
 
 func normalizeOwnedRunStatus(runID string, status agentos.RunStatus) (agentos.RunStatus, error) {

@@ -350,9 +350,11 @@ func startPlanNode(activityCtx workflow.Context, workflowCtx workflow.Context, s
 
 	var started startPlanNodeOutput
 	if err := workflow.ExecuteActivity(activityCtx, StartPlanNodeActivityName, startPlanNodeInput{
-		PlanID:  spec.PlanID,
-		Node:    attemptNode,
-		Attempt: attempt,
+		PlanID:    spec.PlanID,
+		AccountID: spec.AccountID,
+		ProjectID: spec.ProjectID,
+		Node:      attemptNode,
+		Attempt:   attempt,
 	}).Get(activityCtx, &started); err != nil {
 		return applyNodeAttemptFailure(activityCtx, workflowCtx, *spec, state, node, attemptNode.Run.RunID, fmt.Sprintf("start attempt %d failed: %s", attempt, err))
 	}

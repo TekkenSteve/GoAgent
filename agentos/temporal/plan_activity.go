@@ -203,9 +203,11 @@ func (a *PlanActivities) ResolvePlanNodeInputActivity(ctx context.Context, input
 }
 
 type startPlanNodeInput struct {
-	PlanID  string
-	Node    agentos.PlanNodeSpec
-	Attempt int32
+	PlanID    string
+	AccountID string
+	ProjectID string
+	Node      agentos.PlanNodeSpec
+	Attempt   int32
 }
 
 type startPlanNodeOutput struct {
@@ -228,6 +230,14 @@ func (a *PlanActivities) StartPlanNodeActivity(ctx context.Context, input startP
 		}
 		input.Node.Run.IdempotencyKey = key
 	}
+	if input.AccountID == "" {
+		return startPlanNodeOutput{}, fmt.Errorf("%w: account id is required", agentos.ErrInvalidRunSpec)
+	}
+	if input.ProjectID == "" {
+		return startPlanNodeOutput{}, fmt.Errorf("%w: project id is required", agentos.ErrInvalidRunSpec)
+	}
+	input.Node.Run.AccountID = input.AccountID
+	input.Node.Run.ProjectID = input.ProjectID
 	status, err := a.PlanNodeStarter.StartPlanNode(ctx, input.PlanID, input.Node.NodeID, input.Node.Run)
 	if err != nil {
 		return startPlanNodeOutput{}, err

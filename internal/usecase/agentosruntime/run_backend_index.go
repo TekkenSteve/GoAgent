@@ -114,6 +114,12 @@ func ValidateRunBackendIndexRecord(record entity.RunBackendIndexRecord, requireI
 	if record.RunID == "" {
 		return fmt.Errorf("%w: run id is required", agentos.ErrInvalidRunSpec)
 	}
+	if record.AccountID == "" {
+		return fmt.Errorf("%w: account id is required", agentos.ErrInvalidRunSpec)
+	}
+	if record.ProjectID == "" {
+		return fmt.Errorf("%w: project id is required", agentos.ErrInvalidRunSpec)
+	}
 	if record.BackendKind == "" || record.BackendName == "" {
 		return fmt.Errorf("%w: kind and name are required", agentos.ErrInvalidBackendRef)
 	}

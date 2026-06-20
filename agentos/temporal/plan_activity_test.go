@@ -17,7 +17,9 @@ func TestPlanActivitiesStartStatusControl(t *testing.T) {
 	ref := agentos.BackendRef{Kind: agentos.BackendKindNative, Name: agentos.BackendNameGoAgentNative}
 
 	started, err := activities.StartPlanNodeActivity(context.Background(), startPlanNodeInput{
-		PlanID: "plan-1",
+		PlanID:    "plan-1",
+		AccountID: "acct-1",
+		ProjectID: "proj-1",
 		Node: agentos.PlanNodeSpec{
 			NodeID: "node-1",
 			Run: agentos.RunSpec{
@@ -55,7 +57,9 @@ func TestPlanActivitiesStartPlanNodeRejectsBackendRunIDDrift(t *testing.T) {
 	ref := agentos.BackendRef{Kind: agentos.BackendKindNative, Name: agentos.BackendNameGoAgentNative}
 
 	_, err := activities.StartPlanNodeActivity(context.Background(), startPlanNodeInput{
-		PlanID: "plan-1",
+		PlanID:    "plan-1",
+		AccountID: "acct-1",
+		ProjectID: "proj-1",
 		Node: agentos.PlanNodeSpec{
 			NodeID: "node-1",
 			Run: agentos.RunSpec{
