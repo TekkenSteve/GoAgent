@@ -2,6 +2,7 @@ package persistent
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -50,6 +51,9 @@ func (r *AgentOSArtifactRepo) Put(ctx context.Context, ref agentos.ArtifactRef, 
 	}
 	if !exists {
 		return agentos.ArtifactRef{}, fmt.Errorf("%w: %s", agentos.ErrPlanRouteNotFound, ref.PlanID)
+	}
+	if err := r.validateArtifactOwnership(ctx, ref, scope); err != nil {
+		return agentos.ArtifactRef{}, err
 	}
 	if ref.ArtifactID == "" {
 		ref.ArtifactID = agentosplan.ArtifactIDFromRef(ref.PlanID, idempotencyKey)
@@ -124,8 +128,8 @@ RETURNING `+strings.Join(artifactColumns(), ", "),
 		ref.PlanID,
 		scope.AccountID,
 		scope.ProjectID,
-		ref.NodeID,
-		ref.RunID,
+		nullableString(ref.NodeID),
+		nullableString(ref.RunID),
 		ref.Name,
 		string(ref.Kind),
 		ref.MediaType,
@@ -234,6 +238,44 @@ func (r *AgentOSArtifactRepo) List(ctx context.Context, scope agentos.PlanArtifa
 	return refs, nil
 }
 
+func (r *AgentOSArtifactRepo) validateArtifactOwnership(ctx context.Context, ref agentos.ArtifactRef, scope planTenantScope) error {
+	if ref.NodeID == "" && ref.RunID == "" {
+		return nil
+	}
+	if ref.NodeID == "" || ref.RunID == "" {
+		return fmt.Errorf("%w: artifact node id and run id must be provided together", agentos.ErrInvalidArtifact)
+	}
+
+	var nodeRunID string
+	var ownedRunID sql.NullString
+	err := r.Pool.QueryRow(ctx, `
+SELECT n.run_id, r.run_id
+FROM plan_nodes n
+LEFT JOIN run_backend_index r
+    ON r.plan_id = n.plan_id
+   AND r.node_id = n.node_id
+   AND r.run_id = $3
+   AND r.account_id = $4
+   AND r.project_id = $5
+WHERE n.plan_id = $1
+  AND n.node_id = $2`, ref.PlanID, ref.NodeID, ref.RunID, scope.AccountID, scope.ProjectID).Scan(&nodeRunID, &ownedRunID)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return fmt.Errorf("%w: artifact node %q is not durable", agentos.ErrInvalidArtifact, ref.NodeID)
+		}
+
+		return fmt.Errorf("AgentOSArtifactRepo - validateArtifactOwnership - query: %w", err)
+	}
+	if nodeRunID != ref.RunID {
+		return fmt.Errorf("%w: artifact node %q has durable run id %q, got %q", agentos.ErrInvalidArtifact, ref.NodeID, nodeRunID, ref.RunID)
+	}
+	if !ownedRunID.Valid || ownedRunID.String == "" {
+		return fmt.Errorf("%w: %s", agentos.ErrRunRouteNotFound, ref.RunID)
+	}
+
+	return nil
+}
+
 func (r *AgentOSArtifactRepo) artifactByIdempotencyKey(ctx context.Context, planID string, scope planTenantScope, key string) (agentos.ArtifactRef, bool, error) {
 	return r.getRef(ctx, sq.Eq{
 		"plan_id":         planID,
@@ -285,7 +327,7 @@ func (r *AgentOSArtifactRepo) getRef(ctx context.Context, where sq.Eq) (agentos.
 }
 
 func artifactColumns() []string {
-	return []string{"artifact_id", "plan_id", "node_id", "run_id", "name", "kind", "media_type", "uri", "size_bytes", "digest", "metadata_json", "created_at"}
+	return []string{"artifact_id", "plan_id", "COALESCE(node_id, '') AS node_id", "COALESCE(run_id, '') AS run_id", "name", "kind", "media_type", "uri", "size_bytes", "digest", "metadata_json", "created_at"}
 }
 
 func artifactBlobKey(artifactID, digest string) string {

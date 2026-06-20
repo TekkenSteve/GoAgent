@@ -46,8 +46,12 @@ func TestAgentOSPlanPostgresDurablePersistence(t *testing.T) {
 		"plan_metric_checkpoints_account_id_required",
 		"plan_metric_checkpoints_project_id_required",
 		"run_backend_index_plan_node_pair",
+		"artifacts_node_run_pair",
 	)
 	assertPostgresForeignKeyConstraint(t, pg, "run_backend_index_plan_node_fk")
+	assertPostgresForeignKeyConstraint(t, pg, "artifacts_plan_fk")
+	assertPostgresForeignKeyConstraint(t, pg, "artifacts_plan_node_fk")
+	assertPostgresForeignKeyConstraint(t, pg, "artifacts_plan_node_run_fk")
 
 	ctx := t.Context()
 	planRepo := NewAgentOSPlanRepo(pg)
@@ -806,21 +810,43 @@ func TestAgentOSArtifactPostgresRejectsDifferentIdempotencyReplay(t *testing.T) 
 	}
 	artifactStore := NewAgentOSArtifactRepo(pg, blobStore)
 	planRepo := NewAgentOSPlanRepo(pg)
+	routeIndex := NewRunBackendIndexRepo(pg)
 
 	spec := postgresIntegrationPlanSpec("plan-artifact-"+suffix, "plan-artifact-start-"+suffix)
 	status := agentosplan.NewState(spec, time.Now().UTC()).Status
 	if _, _, err := planRepo.CreatePlan(ctx, spec, status); err != nil {
 		t.Fatalf("CreatePlan: %v", err)
 	}
+	runSpec := spec.Nodes[0].Run
+	runSpec.IdempotencyKey, err = agentosplan.NodeStartIdempotencyKey(spec.PlanID, spec.Nodes[0].NodeID, 1)
+	if err != nil {
+		t.Fatalf("NodeStartIdempotencyKey: %v", err)
+	}
 
 	ref := agentos.ArtifactRef{
 		PlanID:    spec.PlanID,
-		NodeID:    "node-1",
-		RunID:     "run-1",
+		NodeID:    spec.Nodes[0].NodeID,
+		RunID:     runSpec.RunID,
 		Name:      "summary",
 		Kind:      agentos.ArtifactKindObject,
 		MediaType: "application/json",
 		Metadata:  map[string]string{"class": "summary"},
+	}
+	if _, err := artifactStore.Put(ctx, ref, map[string]any{"summary": "ok"}, "artifact-missing-route-"+suffix); !errors.Is(err, agentos.ErrRunRouteNotFound) {
+		t.Fatalf("Artifact Put missing run route error = %v, want ErrRunRouteNotFound", err)
+	}
+	missingNodeRef := ref
+	missingNodeRef.NodeID = "missing-node"
+	if _, err := artifactStore.Put(ctx, missingNodeRef, map[string]any{"summary": "ok"}, "artifact-missing-node-"+suffix); !errors.Is(err, agentos.ErrInvalidArtifact) {
+		t.Fatalf("Artifact Put missing node error = %v, want ErrInvalidArtifact", err)
+	}
+	unpairedRef := ref
+	unpairedRef.RunID = ""
+	if _, err := artifactStore.Put(ctx, unpairedRef, map[string]any{"summary": "ok"}, "artifact-unpaired-node-"+suffix); !errors.Is(err, agentos.ErrInvalidArtifact) {
+		t.Fatalf("Artifact Put unpaired node/run error = %v, want ErrInvalidArtifact", err)
+	}
+	if err := routeIndex.BindPlanNode(ctx, spec.PlanID, spec.Nodes[0].NodeID, runSpec, agentos.RunStatus{RunID: runSpec.RunID, LifecycleState: "running"}); err != nil {
+		t.Fatalf("BindPlanNode for artifact: %v", err)
 	}
 	first, err := artifactStore.Put(ctx, ref, map[string]any{
 		"summary":        "ok",
@@ -1151,6 +1177,7 @@ func applyAgentOSPlanMigrations(t *testing.T, pg *postgres.Postgres) {
 		"20260620000002_scope_plan_event_idempotency_keys.up.sql",
 		"20260620000003_require_agentos_control_plane_scope.up.sql",
 		"20260620000004_constrain_run_backend_plan_nodes.up.sql",
+		"20260620000005_constrain_artifact_plan_scope.up.sql",
 	} {
 		path := filepath.Join("..", "..", "..", "migrations", migration)
 		data, err := os.ReadFile(path)
