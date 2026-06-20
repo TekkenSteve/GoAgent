@@ -14,6 +14,7 @@ const (
 	idempotencyOperationNodeStart       = "node_start"
 	idempotencyOperationNodeControl     = "node_control"
 	idempotencyOperationNodeTimeout     = "node_timeout"
+	idempotencyOperationPlanTimeout     = "plan_timeout"
 	idempotencyOperationArtifactPublish = "artifact_publish"
 	idempotencyOperationBudgetExceeded  = "budget_exceeded"
 )
@@ -185,6 +186,37 @@ func NodeTimeoutControlIdempotencyKey(planID, nodeID, runID string) (string, err
 	})
 	if err != nil {
 		return "", fmt.Errorf("%w: marshal node timeout key: %s", agentos.ErrInvalidPlanEvent, err)
+	}
+	sum := sha256.Sum256(data)
+
+	return planID + ":" + hex.EncodeToString(sum[:]), nil
+}
+
+// PlanTimeoutControlIdempotencyKey creates the parent idempotency key for
+// propagating cancellation after a plan-level timeout guard trips.
+func PlanTimeoutControlIdempotencyKey(planID string, startedAt time.Time, timeoutSeconds int64) (string, error) {
+	if planID == "" {
+		return "", fmt.Errorf("%w: plan id is required", agentos.ErrInvalidRunPlan)
+	}
+	if startedAt.IsZero() {
+		return "", fmt.Errorf("%w: plan started_at is required", agentos.ErrInvalidRunPlan)
+	}
+	if timeoutSeconds <= 0 {
+		return "", fmt.Errorf("%w: plan timeout seconds must be positive", agentos.ErrInvalidRunPlan)
+	}
+	data, err := json.Marshal(struct {
+		Operation      string    `json:"operation"`
+		PlanID         string    `json:"plan_id"`
+		StartedAt      time.Time `json:"started_at"`
+		TimeoutSeconds int64     `json:"timeout_seconds"`
+	}{
+		Operation:      idempotencyOperationPlanTimeout,
+		PlanID:         planID,
+		StartedAt:      startedAt,
+		TimeoutSeconds: timeoutSeconds,
+	})
+	if err != nil {
+		return "", fmt.Errorf("%w: marshal plan timeout key: %s", agentos.ErrInvalidPlanEvent, err)
 	}
 	sum := sha256.Sum256(data)
 

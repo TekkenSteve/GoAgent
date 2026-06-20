@@ -115,6 +115,25 @@ func TestStatePlanApprovalAndRejection(t *testing.T) {
 	}
 }
 
+func TestStatePlanStartedRecordsInitialStartTime(t *testing.T) {
+	startedAt := time.Date(2026, 6, 20, 12, 0, 0, 0, time.UTC)
+	resumedAt := startedAt.Add(time.Minute)
+	state := NewState(agentos.RunPlanSpec{PlanID: "plan-started-at"}, startedAt)
+
+	if err := state.Apply(StateEvent{Kind: EventPlanStarted, At: startedAt}); err != nil {
+		t.Fatalf("Apply started: %v", err)
+	}
+	if !state.Status.StartedAt.Equal(startedAt) {
+		t.Fatalf("started_at = %s, want %s", state.Status.StartedAt, startedAt)
+	}
+	if err := state.Apply(StateEvent{Kind: EventPlanStarted, At: resumedAt}); err != nil {
+		t.Fatalf("Apply resumed: %v", err)
+	}
+	if !state.Status.StartedAt.Equal(startedAt) {
+		t.Fatalf("resume reset started_at = %s, want %s", state.Status.StartedAt, startedAt)
+	}
+}
+
 func TestStateRestoresFromSnapshotStatus(t *testing.T) {
 	now := time.Date(2026, 6, 19, 12, 0, 0, 0, time.UTC)
 	ref := agentos.BackendRef{Kind: agentos.BackendKindNative, Name: agentos.BackendNameGoAgentNative}

@@ -115,6 +115,14 @@ func PlanWorkflow(ctx workflow.Context, input planWorkflowInput) (agentos.RunPla
 			return state.Status, nil
 		}
 
+		timedOut, err := applyPlanTimeoutGuard(activityCtx, ctx, spec, &state, validation.ControlsByNode)
+		if err != nil {
+			return state.Status, err
+		}
+		if timedOut {
+			return state.Status, nil
+		}
+
 		if planNodesTerminal(state.Status) {
 			if err := applyTerminalPlanState(activityCtx, ctx, spec, &state); err != nil {
 				return state.Status, err
@@ -599,6 +607,38 @@ func applyPlanBudgetGuard(activityCtx workflow.Context, workflowCtx workflow.Con
 		return false, err
 	}
 	reason := agentosplan.BudgetExceededReason(spec.Policy, state.Status.BudgetUsage)
+	for _, node := range state.Status.Nodes {
+		if node.LifecycleState != agentos.PlanNodeRunning {
+			continue
+		}
+		if err := applyPlanStateEvent(activityCtx, workflowCtx, spec, state, agentosplan.StateEvent{Kind: agentosplan.EventNodeCanceled, NodeID: node.NodeID, RunID: node.RunID, Reason: reason}); err != nil {
+			return false, err
+		}
+	}
+	if err := applyPlanStateEvent(activityCtx, workflowCtx, spec, state, agentosplan.StateEvent{Kind: agentosplan.EventPlanFailed, Reason: reason}); err != nil {
+		return false, err
+	}
+
+	return true, nil
+}
+
+func applyPlanTimeoutGuard(activityCtx workflow.Context, workflowCtx workflow.Context, spec agentos.RunPlanSpec, state *agentosplan.State, controlsByNode map[string][]agentos.ControlOperation) (bool, error) {
+	if !agentosplan.PlanTimedOut(spec.Policy, state.Status.StartedAt, workflow.Now(workflowCtx)) {
+		return false, nil
+	}
+
+	key, err := agentosplan.PlanTimeoutControlIdempotencyKey(spec.PlanID, state.Status.StartedAt, spec.Policy.TimeoutSeconds)
+	if err != nil {
+		return false, err
+	}
+	control := agentos.ControlRequest{
+		Operation:      agentos.ControlCancel,
+		IdempotencyKey: key,
+	}
+	if err := controlActivePlanNodes(activityCtx, spec.PlanID, state.Status, control, controlsByNode); err != nil {
+		return false, err
+	}
+	reason := agentosplan.PlanTimeoutReason(spec.Policy)
 	for _, node := range state.Status.Nodes {
 		if node.LifecycleState != agentos.PlanNodeRunning {
 			continue

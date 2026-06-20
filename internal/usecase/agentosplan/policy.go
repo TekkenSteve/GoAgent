@@ -2,6 +2,7 @@ package agentosplan
 
 import (
 	"fmt"
+	"time"
 
 	"github.com/TekkenSteve/GoAgent/agentos"
 )
@@ -62,4 +63,19 @@ func BudgetExceeded(policy agentos.PlanPolicy, usage agentos.PlanBudgetUsage) bo
 // failures.
 func BudgetExceededReason(policy agentos.PlanPolicy, usage agentos.PlanBudgetUsage) string {
 	return fmt.Sprintf("plan budget exceeded: spent %d cents exceeds budget %d cents", usage.SpentCents, policy.BudgetCents)
+}
+
+// PlanTimedOut reports whether the plan-level wall-clock timeout has elapsed.
+func PlanTimedOut(policy agentos.PlanPolicy, startedAt time.Time, now time.Time) bool {
+	if policy.TimeoutSeconds <= 0 || startedAt.IsZero() {
+		return false
+	}
+
+	return !now.Before(startedAt.Add(time.Duration(policy.TimeoutSeconds) * time.Second))
+}
+
+// PlanTimeoutReason returns a stable public failure reason for plan-level
+// timeout failures.
+func PlanTimeoutReason(policy agentos.PlanPolicy) string {
+	return fmt.Sprintf("plan timed out after %d seconds", policy.TimeoutSeconds)
 }

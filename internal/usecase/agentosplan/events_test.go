@@ -400,3 +400,27 @@ func TestNodeTimeoutControlIdempotencyKeyRequiresRunID(t *testing.T) {
 		t.Fatal("NodeTimeoutControlIdempotencyKey accepted empty run id")
 	}
 }
+
+func TestPlanTimeoutControlIdempotencyKeyRequiresStartedAt(t *testing.T) {
+	startedAt := time.Date(2026, 6, 20, 12, 0, 0, 0, time.UTC)
+	first, err := PlanTimeoutControlIdempotencyKey("plan-1", startedAt, 60)
+	if err != nil {
+		t.Fatalf("PlanTimeoutControlIdempotencyKey: %v", err)
+	}
+	second, err := PlanTimeoutControlIdempotencyKey("plan-1", startedAt, 60)
+	if err != nil {
+		t.Fatalf("PlanTimeoutControlIdempotencyKey replay: %v", err)
+	}
+	if first == "" || second != first {
+		t.Fatalf("timeout control keys = %q/%q, want stable non-empty key", first, second)
+	}
+	if changed, err := PlanTimeoutControlIdempotencyKey("plan-1", startedAt.Add(time.Second), 60); err != nil || changed == first {
+		t.Fatalf("changed started_at key = %q err=%v, want distinct key", changed, err)
+	}
+	if _, err := PlanTimeoutControlIdempotencyKey("plan-1", time.Time{}, 60); err == nil {
+		t.Fatal("PlanTimeoutControlIdempotencyKey accepted empty start time")
+	}
+	if _, err := PlanTimeoutControlIdempotencyKey("plan-1", startedAt, 0); err == nil {
+		t.Fatal("PlanTimeoutControlIdempotencyKey accepted empty timeout")
+	}
+}

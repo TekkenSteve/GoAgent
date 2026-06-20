@@ -141,6 +141,9 @@ func (s *State) Apply(event StateEvent) error {
 	case EventPlanStarted:
 		s.Status.LifecycleState = agentos.PlanLifecycleRunning
 		s.Status.Reason = event.Reason
+		if s.Status.StartedAt.IsZero() {
+			s.Status.StartedAt = at
+		}
 	case EventPlanBlocked:
 		s.Status.LifecycleState = agentos.PlanLifecycleBlocked
 		s.Status.Reason = event.Reason

@@ -361,6 +361,44 @@ func TestPlanWorkflowCancelsTimedOutNode(t *testing.T) {
 	require.NotEmpty(t, mocks.controls[0].Control.IdempotencyKey)
 }
 
+func TestPlanWorkflowCancelsActiveNodesWhenPlanTimesOut(t *testing.T) {
+	t.Parallel()
+
+	ref := agentos.BackendRef{Kind: agentos.BackendKindNative, Name: agentos.BackendNameGoAgentNative}
+	spec := agentos.RunPlanSpec{
+		PlanID:         "plan-timeout-global",
+		IdempotencyKey: "plan-start-timeout-global",
+		Policy: agentos.PlanPolicy{
+			TimeoutSeconds: 1,
+		},
+		Nodes: []agentos.PlanNodeSpec{
+			{NodeID: "slow", Run: agentos.RunSpec{RunID: "run-slow", Backend: ref}},
+		},
+	}
+	mocks := &planWorkflowMocks{
+		statuses: map[string]agentos.RunStatus{
+			"run-slow": {RunID: "run-slow", LifecycleState: "running"},
+		},
+	}
+	env := newPlanWorkflowTestEnv(mocks)
+
+	env.ExecuteWorkflow(PlanWorkflow, planWorkflowInput{Spec: spec})
+
+	require.True(t, env.IsWorkflowCompleted())
+	require.NoError(t, env.GetWorkflowError())
+
+	var result agentos.RunPlanStatus
+	require.NoError(t, env.GetWorkflowResult(&result))
+	require.Equal(t, agentos.PlanLifecycleFailed, result.LifecycleState)
+	require.Contains(t, result.Reason, "plan timed out")
+	require.False(t, result.StartedAt.IsZero())
+	require.Equal(t, []string{"run-slow"}, mocks.started)
+	require.Len(t, mocks.controls, 1)
+	require.Equal(t, "run-slow", mocks.controls[0].RunID)
+	require.Equal(t, agentos.ControlCancel, mocks.controls[0].Control.Operation)
+	require.NotEmpty(t, mocks.controls[0].Control.IdempotencyKey)
+}
+
 func TestPlanWorkflowCancelsActiveNodesWhenBudgetExceeded(t *testing.T) {
 	t.Parallel()
 

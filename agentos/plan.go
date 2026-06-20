@@ -186,6 +186,7 @@ type RunPlanStatus struct {
 	Reason         string            `json:"reason,omitempty"`
 	BudgetUsage    PlanBudgetUsage   `json:"budget_usage,omitempty"`
 	Metadata       map[string]string `json:"metadata,omitempty"`
+	StartedAt      time.Time         `json:"started_at,omitempty"`
 	UpdatedAt      time.Time         `json:"updated_at,omitempty"`
 }
 
