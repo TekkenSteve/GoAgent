@@ -133,6 +133,18 @@ func TestRedisPlanEventStreamSubscribeRequiresTenantScope(t *testing.T) {
 	}
 }
 
+func TestPlanEventSubscriptionStartIDIsLiveOnly(t *testing.T) {
+	startID := planEventSubscriptionStartID(agentos.PlanStreamScope{
+		PlanID:        "plan-1",
+		AccountID:     "acct-1",
+		ProjectID:     "proj-1",
+		AfterSequence: 42,
+	})
+	if startID != "$" {
+		t.Fatalf("subscription start id = %q, want live-only $", startID)
+	}
+}
+
 func TestPlanEventMatchesScopeRejectsTenantMismatch(t *testing.T) {
 	event := testPlanEvent("evt-1", 7)
 	for _, scope := range []agentos.PlanStreamScope{

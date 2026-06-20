@@ -18,6 +18,7 @@ const (
 	planEventStreamMaxLen = 2000
 	planEventStreamTTL    = 2 * time.Hour
 	subscriberBufferSize  = 256
+	livePlanEventStartID  = "$"
 )
 
 type planEventRedisClient interface {
@@ -95,7 +96,8 @@ func (s *RedisPlanEventStream) PublishPlanEvent(ctx context.Context, event agent
 	return nil
 }
 
-// SubscribePlanEvents subscribes to live PlanEvents after scope.AfterSequence.
+// SubscribePlanEvents subscribes to live PlanEvents. Durable replay and
+// catch-up are owned by the Postgres PlanEventStore.
 func (s *RedisPlanEventStream) SubscribePlanEvents(_ context.Context, scope agentos.PlanStreamScope) (agentos.Subscription, error) {
 	if err := agentosplan.ValidatePlanStreamScope(scope); err != nil {
 		return nil, err
@@ -104,7 +106,7 @@ func (s *RedisPlanEventStream) SubscribePlanEvents(_ context.Context, scope agen
 		return nil, fmt.Errorf("%w: redis plan event subscriber is not configured", agentos.ErrInvalidStreamScope)
 	}
 
-	hubSub := s.hub.Subscribe(planEventStreamKey(planStreamRef(scope)), planEventEntryID(scope.AfterSequence))
+	hubSub := s.hub.Subscribe(planEventStreamKey(planStreamRef(scope)), planEventSubscriptionStartID(scope))
 	out := make(chan agentos.Event, subscriberBufferSize)
 	go func() {
 		defer close(out)
@@ -126,6 +128,10 @@ func (s *RedisPlanEventStream) SubscribePlanEvents(_ context.Context, scope agen
 			return nil
 		},
 	}, nil
+}
+
+func planEventSubscriptionStartID(agentos.PlanStreamScope) string {
+	return livePlanEventStartID
 }
 
 func (s *RedisPlanEventStream) planEventAt(ctx context.Context, streamKey string, entryID string) (agentos.PlanEvent, bool, error) {
