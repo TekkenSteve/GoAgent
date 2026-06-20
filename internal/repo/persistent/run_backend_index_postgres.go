@@ -23,8 +23,8 @@ func NewRunBackendIndexRepo(pg *postgres.Postgres) *RunBackendIndexRepo {
 	return &RunBackendIndexRepo{pg}
 }
 
-func (r *RunBackendIndexRepo) Bind(ctx context.Context, spec agentos.RunSpec) error {
-	return r.upsert(ctx, agentosruntime.RunBackendIndexRecordFromRunSpec(spec), true)
+func (r *RunBackendIndexRepo) Bind(ctx context.Context, spec agentos.RunSpec, status agentos.RunStatus) error {
+	return r.upsert(ctx, agentosruntime.RunBackendIndexRecordFromRunSpec(spec, status), true)
 }
 
 func (r *RunBackendIndexRepo) BindPlanNode(ctx context.Context, planID, nodeID string, spec agentos.RunSpec, status agentos.RunStatus) error {

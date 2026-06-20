@@ -82,6 +82,98 @@ func TestRouterStartRequiresIdempotencyKey(t *testing.T) {
 	}
 }
 
+func TestRouterStartClaimsOwnershipBeforeBackendStart(t *testing.T) {
+	ctx := context.Background()
+	ref := agentos.BackendRef{Kind: agentos.BackendKindNative, Name: agentos.BackendNameGoAgentNative}
+	stub := &stubBackend{}
+	registry := NewRegistry()
+	if err := registry.Register(ref, stub); err != nil {
+		t.Fatalf("register backend: %v", err)
+	}
+	index := newStubRunIndex()
+	router, err := NewRouter(registry, index)
+	if err != nil {
+		t.Fatalf("new router: %v", err)
+	}
+
+	if _, err := router.Start(ctx, agentos.RunSpec{
+		RunID:          "run-1",
+		Backend:        ref,
+		IdempotencyKey: "run-start-1",
+	}); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+
+	if len(index.routeLifecycle) != 2 ||
+		index.routeLifecycle[0] != RunBackendLifecycleClaiming ||
+		index.routeLifecycle[1] != "created" {
+		t.Fatalf("route lifecycle = %#v, want claim before completion", index.routeLifecycle)
+	}
+	if stub.startCount != 1 {
+		t.Fatalf("start count = %d, want 1", stub.startCount)
+	}
+}
+
+func TestRouterStartReusesCompletedOwnership(t *testing.T) {
+	ctx := context.Background()
+	ref := agentos.BackendRef{Kind: agentos.BackendKindNative, Name: agentos.BackendNameGoAgentNative}
+	stub := &stubBackend{}
+	registry := NewRegistry()
+	if err := registry.Register(ref, stub); err != nil {
+		t.Fatalf("register backend: %v", err)
+	}
+	index := newStubRunIndex()
+	spec := agentos.RunSpec{
+		RunID:          "run-1",
+		Backend:        ref,
+		IdempotencyKey: "run-start-1",
+	}
+	if err := index.Bind(ctx, spec, agentos.RunStatus{RunID: spec.RunID, LifecycleState: "running"}); err != nil {
+		t.Fatalf("Bind: %v", err)
+	}
+	router, err := NewRouter(registry, index)
+	if err != nil {
+		t.Fatalf("new router: %v", err)
+	}
+
+	status, err := router.Start(ctx, spec)
+	if err != nil {
+		t.Fatalf("Start replay: %v", err)
+	}
+	if status.RunID != spec.RunID {
+		t.Fatalf("status run id = %q, want %q", status.RunID, spec.RunID)
+	}
+	if stub.startCount != 0 {
+		t.Fatalf("backend start count = %d, want 0 for completed ownership replay", stub.startCount)
+	}
+	if stub.statusRunID != spec.RunID {
+		t.Fatalf("status run id = %q, want %q", stub.statusRunID, spec.RunID)
+	}
+}
+
+func TestRouterStartRejectsBackendRunIDDrift(t *testing.T) {
+	ctx := context.Background()
+	ref := agentos.BackendRef{Kind: agentos.BackendKindNative, Name: agentos.BackendNameGoAgentNative}
+	stub := &stubBackend{startStatus: agentos.RunStatus{RunID: "backend-run", LifecycleState: "running"}}
+	registry := NewRegistry()
+	if err := registry.Register(ref, stub); err != nil {
+		t.Fatalf("register backend: %v", err)
+	}
+	router, err := NewRouter(registry, newStubRunIndex())
+	if err != nil {
+		t.Fatalf("new router: %v", err)
+	}
+
+	_, err = router.Start(ctx, agentos.RunSpec{
+		RunID:          "run-1",
+		Backend:        ref,
+		IdempotencyKey: "run-start-1",
+	})
+	if err == nil {
+		t.Fatal("Start succeeded, want run id drift error")
+	}
+}
+
 func TestRouterSelectsBackendWhenSpecOmitsBackend(t *testing.T) {
 	ctx := context.Background()
 	ref := agentos.BackendRef{Kind: agentos.BackendKindHTTP, Name: "research-http"}
@@ -330,10 +422,13 @@ type stubBackend struct {
 	signalRunID  string
 	startBackend agentos.BackendRef
 	startCount   int
+	startStatus  agentos.RunStatus
 }
 
 type stubRunIndex struct {
 	routes             map[string]agentos.BackendRef
+	routeKeys          map[string]string
+	routeLifecycle     []string
 	planRoutes         map[string]stubPlanRoute
 	planRouteLifecycle []string
 }
@@ -349,12 +444,15 @@ type stubPlanRoute struct {
 func newStubRunIndex() *stubRunIndex {
 	return &stubRunIndex{
 		routes:     make(map[string]agentos.BackendRef),
+		routeKeys:  make(map[string]string),
 		planRoutes: make(map[string]stubPlanRoute),
 	}
 }
 
-func (i *stubRunIndex) Bind(_ context.Context, spec agentos.RunSpec) error {
+func (i *stubRunIndex) Bind(_ context.Context, spec agentos.RunSpec, status agentos.RunStatus) error {
 	i.routes[spec.RunID] = spec.Backend
+	i.routeKeys[spec.RunID] = spec.IdempotencyKey
+	i.routeLifecycle = append(i.routeLifecycle, status.LifecycleState)
 
 	return nil
 }
@@ -377,6 +475,19 @@ func (i *stubRunIndex) BindPlanNode(_ context.Context, planID, nodeID string, sp
 }
 
 func (i *stubRunIndex) GetRunBackend(_ context.Context, runID string) (agentos.RunBackendOwnership, bool, error) {
+	if route, ok := i.routes[runID]; ok {
+		lifecycle := ""
+		if len(i.routeLifecycle) > 0 {
+			lifecycle = i.routeLifecycle[len(i.routeLifecycle)-1]
+		}
+
+		return agentos.RunBackendOwnership{
+			RunID:          runID,
+			Backend:        route,
+			IdempotencyKey: i.routeKeys[runID],
+			LifecycleState: lifecycle,
+		}, true, nil
+	}
 	route, ok := i.planRoutes[runID]
 	if !ok {
 		return agentos.RunBackendOwnership{}, false, nil
@@ -403,6 +514,9 @@ func (i *stubRunIndex) Resolve(_ context.Context, runID string) (agentos.Backend
 func (b *stubBackend) Start(_ context.Context, spec agentos.RunSpec) (agentos.RunStatus, error) {
 	b.startBackend = spec.Backend
 	b.startCount++
+	if b.startStatus.RunID != "" || b.startStatus.LifecycleState != "" {
+		return b.startStatus, nil
+	}
 
 	return agentos.RunStatus{RunID: spec.RunID, LifecycleState: "created", UpdatedAt: time.Now()}, nil
 }

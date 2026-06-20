@@ -26,8 +26,8 @@ func NewAgentOSRunIndex() *AgentOSRunIndex {
 }
 
 // Bind stores the backend reference for a run.
-func (i *AgentOSRunIndex) Bind(_ context.Context, spec agentos.RunSpec) error {
-	return i.bind(agentosruntime.RunBackendIndexRecordFromRunSpec(spec), true)
+func (i *AgentOSRunIndex) Bind(_ context.Context, spec agentos.RunSpec, status agentos.RunStatus) error {
+	return i.bind(agentosruntime.RunBackendIndexRecordFromRunSpec(spec, status), true)
 }
 
 // BindPlanNode stores the backend reference for a plan-owned child run.

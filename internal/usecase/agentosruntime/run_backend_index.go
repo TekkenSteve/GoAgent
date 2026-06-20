@@ -9,18 +9,27 @@ import (
 
 const RunBackendLifecycleClaiming = "claiming"
 
-// RunBackendIndexRecordFromRunSpec builds the ownership record for a standalone
-// AgentOS run.
-func RunBackendIndexRecordFromRunSpec(spec agentos.RunSpec) entity.RunBackendIndexRecord {
+// RunBackendIndexRecordFromRunSpec builds the ownership record for a
+// standalone AgentOS run.
+func RunBackendIndexRecordFromRunSpec(spec agentos.RunSpec, status agentos.RunStatus) entity.RunBackendIndexRecord {
+	runID := status.RunID
+	if runID == "" {
+		runID = spec.RunID
+	}
+	lifecycle := status.LifecycleState
+	if lifecycle == "" {
+		lifecycle = "created"
+	}
+
 	return NormalizeRunBackendIndexRecord(entity.RunBackendIndexRecord{
-		RunID:          spec.RunID,
+		RunID:          runID,
 		ThreadID:       spec.ThreadID,
 		AccountID:      spec.AccountID,
 		ProjectID:      spec.ProjectID,
 		BackendKind:    string(spec.Backend.Kind),
 		BackendName:    spec.Backend.Name,
 		IdempotencyKey: spec.IdempotencyKey,
-		LifecycleState: "created",
+		LifecycleState: lifecycle,
 	})
 }
 

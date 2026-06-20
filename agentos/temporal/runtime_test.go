@@ -111,7 +111,7 @@ func TestRuntimeOptionsWithDefaultRunBackendIndexRequiresPostgresURL(t *testing.
 
 type fakeRunBackendIndex struct{}
 
-func (fakeRunBackendIndex) Bind(context.Context, agentos.RunSpec) error {
+func (fakeRunBackendIndex) Bind(context.Context, agentos.RunSpec, agentos.RunStatus) error {
 	return nil
 }
 

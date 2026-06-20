@@ -15,15 +15,15 @@ func TestAgentOSRunIndexRejectsRunOwnershipOverwrite(t *testing.T) {
 		IdempotencyKey: "run-start-1",
 		Backend:        agentos.BackendRef{Kind: agentos.BackendKindNative, Name: agentos.BackendNameGoAgentNative},
 	}
-	if err := index.Bind(t.Context(), spec); err != nil {
+	if err := index.Bind(t.Context(), spec, agentos.RunStatus{RunID: spec.RunID, LifecycleState: "created"}); err != nil {
 		t.Fatalf("Bind first: %v", err)
 	}
-	if err := index.Bind(t.Context(), spec); err != nil {
+	if err := index.Bind(t.Context(), spec, agentos.RunStatus{RunID: spec.RunID, LifecycleState: "created"}); err != nil {
 		t.Fatalf("Bind replay: %v", err)
 	}
 
 	spec.Backend = agentos.BackendRef{Kind: agentos.BackendKindHTTP, Name: "http-agent"}
-	if err := index.Bind(t.Context(), spec); !errors.Is(err, agentos.ErrInvalidBackendRef) {
+	if err := index.Bind(t.Context(), spec, agentos.RunStatus{RunID: spec.RunID, LifecycleState: "created"}); !errors.Is(err, agentos.ErrInvalidBackendRef) {
 		t.Fatalf("Bind changed backend error = %v, want ErrInvalidBackendRef", err)
 	}
 }
@@ -33,7 +33,7 @@ func TestAgentOSRunIndexRequiresIdempotencyKey(t *testing.T) {
 	err := index.Bind(t.Context(), agentos.RunSpec{
 		RunID:   "run-1",
 		Backend: agentos.BackendRef{Kind: agentos.BackendKindNative, Name: agentos.BackendNameGoAgentNative},
-	})
+	}, agentos.RunStatus{RunID: "run-1", LifecycleState: "created"})
 	if !errors.Is(err, agentos.ErrInvalidRunSpec) {
 		t.Fatalf("Bind error = %v, want ErrInvalidRunSpec", err)
 	}
@@ -46,12 +46,12 @@ func TestAgentOSRunIndexRejectsRunIDWithDifferentIdempotencyKey(t *testing.T) {
 		IdempotencyKey: "run-start-1",
 		Backend:        agentos.BackendRef{Kind: agentos.BackendKindNative, Name: agentos.BackendNameGoAgentNative},
 	}
-	if err := index.Bind(t.Context(), spec); err != nil {
+	if err := index.Bind(t.Context(), spec, agentos.RunStatus{RunID: spec.RunID, LifecycleState: "created"}); err != nil {
 		t.Fatalf("Bind first: %v", err)
 	}
 
 	spec.IdempotencyKey = "run-start-2"
-	if err := index.Bind(t.Context(), spec); !errors.Is(err, agentos.ErrInvalidRunSpec) {
+	if err := index.Bind(t.Context(), spec, agentos.RunStatus{RunID: spec.RunID, LifecycleState: "created"}); !errors.Is(err, agentos.ErrInvalidRunSpec) {
 		t.Fatalf("Bind changed key error = %v, want ErrInvalidRunSpec", err)
 	}
 }
@@ -63,13 +63,55 @@ func TestAgentOSRunIndexRejectsIdempotencyKeyWithDifferentRunID(t *testing.T) {
 		IdempotencyKey: "run-start-1",
 		Backend:        agentos.BackendRef{Kind: agentos.BackendKindNative, Name: agentos.BackendNameGoAgentNative},
 	}
-	if err := index.Bind(t.Context(), spec); err != nil {
+	if err := index.Bind(t.Context(), spec, agentos.RunStatus{RunID: spec.RunID, LifecycleState: "created"}); err != nil {
 		t.Fatalf("Bind first: %v", err)
 	}
 
 	spec.RunID = "run-2"
-	if err := index.Bind(t.Context(), spec); !errors.Is(err, agentos.ErrInvalidRunSpec) {
+	if err := index.Bind(t.Context(), spec, agentos.RunStatus{RunID: spec.RunID, LifecycleState: "created"}); !errors.Is(err, agentos.ErrInvalidRunSpec) {
 		t.Fatalf("Bind reused key error = %v, want ErrInvalidRunSpec", err)
+	}
+}
+
+func TestAgentOSRunIndexUpdatesStandaloneLifecycleWithoutDowngrade(t *testing.T) {
+	index := NewAgentOSRunIndex()
+	spec := agentos.RunSpec{
+		RunID:          "run-1",
+		IdempotencyKey: "run-start-1",
+		Backend:        agentos.BackendRef{Kind: agentos.BackendKindNative, Name: agentos.BackendNameGoAgentNative},
+	}
+	if err := index.Bind(t.Context(), spec, agentos.RunStatus{
+		RunID:          spec.RunID,
+		LifecycleState: agentosruntime.RunBackendLifecycleClaiming,
+	}); err != nil {
+		t.Fatalf("Bind claim: %v", err)
+	}
+	if err := index.Bind(t.Context(), spec, agentos.RunStatus{
+		RunID:          spec.RunID,
+		LifecycleState: "running",
+	}); err != nil {
+		t.Fatalf("Bind running: %v", err)
+	}
+	ownership, exists, err := index.GetRunBackend(t.Context(), spec.RunID)
+	if err != nil || !exists {
+		t.Fatalf("GetRunBackend exists=%v err=%v", exists, err)
+	}
+	if ownership.LifecycleState != "running" {
+		t.Fatalf("lifecycle = %q, want running", ownership.LifecycleState)
+	}
+
+	if err := index.Bind(t.Context(), spec, agentos.RunStatus{
+		RunID:          spec.RunID,
+		LifecycleState: agentosruntime.RunBackendLifecycleClaiming,
+	}); err != nil {
+		t.Fatalf("Bind replay claim: %v", err)
+	}
+	ownership, exists, err = index.GetRunBackend(t.Context(), spec.RunID)
+	if err != nil || !exists {
+		t.Fatalf("GetRunBackend replay exists=%v err=%v", exists, err)
+	}
+	if ownership.LifecycleState != "running" {
+		t.Fatalf("lifecycle after replay claim = %q, want running", ownership.LifecycleState)
 	}
 }
 

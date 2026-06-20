@@ -319,15 +319,28 @@ func TestAgentOSPlanPostgresDurablePersistence(t *testing.T) {
 		Backend:        runSpec.Backend,
 		IdempotencyKey: "standalone-run-start-" + suffix,
 	}
-	if err := routeIndex.Bind(ctx, standaloneRun); err != nil {
+	standaloneStatus := agentos.RunStatus{RunID: standaloneRun.RunID, LifecycleState: "running"}
+	if err := routeIndex.Bind(ctx, standaloneRun, standaloneStatus); err != nil {
 		t.Fatalf("Bind standalone first: %v", err)
 	}
-	if err := routeIndex.Bind(ctx, standaloneRun); err != nil {
+	if err := routeIndex.Bind(ctx, standaloneRun, standaloneStatus); err != nil {
 		t.Fatalf("Bind standalone replay: %v", err)
 	}
+	if err := routeIndex.Bind(ctx, standaloneRun, agentos.RunStatus{
+		RunID:          standaloneRun.RunID,
+		LifecycleState: agentosruntime.RunBackendLifecycleClaiming,
+	}); err != nil {
+		t.Fatalf("Bind standalone replay claim: %v", err)
+	}
+	assertPostgresRunBackendIndexRecord(t, pg, standaloneRun.RunID, postgresRunBackendIndexExpectation{
+		BackendKind:    string(standaloneRun.Backend.Kind),
+		BackendName:    standaloneRun.Backend.Name,
+		IdempotencyKey: standaloneRun.IdempotencyKey,
+		LifecycleState: standaloneStatus.LifecycleState,
+	})
 	standaloneChangedBackend := standaloneRun
 	standaloneChangedBackend.Backend = agentos.BackendRef{Kind: agentos.BackendKindHTTP, Name: "other-backend"}
-	if err := routeIndex.Bind(ctx, standaloneChangedBackend); !errors.Is(err, agentos.ErrInvalidBackendRef) {
+	if err := routeIndex.Bind(ctx, standaloneChangedBackend, standaloneStatus); !errors.Is(err, agentos.ErrInvalidBackendRef) {
 		t.Fatalf("Bind standalone changed backend error = %v, want ErrInvalidBackendRef", err)
 	}
 
