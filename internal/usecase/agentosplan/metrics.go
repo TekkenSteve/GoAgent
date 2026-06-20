@@ -37,6 +37,8 @@ const (
 	metricUnitCents   = "cents"
 )
 
+const planMetricSampleTimestampPrecision = time.Microsecond
+
 // PlanMetricSample is a low-cardinality metric event. Plan/node/run/event
 // identity fields are intentionally not labels; Prometheus exporters can use
 // them for idempotent projection checkpoints without creating unbounded label

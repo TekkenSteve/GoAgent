@@ -62,6 +62,7 @@ func TestAgentOSPlanPostgresDurablePersistence(t *testing.T) {
 	assertPostgresTrigger(t, pg, "plan_events_append_only")
 	assertPostgresTrigger(t, pg, "audit_logs_append_only")
 	assertPostgresTrigger(t, pg, "artifacts_append_only")
+	assertPostgresTrigger(t, pg, "plan_metric_samples_append_only")
 	assertPostgresTriggerAbsent(t, pg, "audit_logs_delivered_command_audit")
 
 	ctx := t.Context()
@@ -977,6 +978,12 @@ func TestAgentOSPlanPostgresPlanRefsAndMetricCheckpoints(t *testing.T) {
 	if sampleCount != 1 {
 		t.Fatalf("metric sample count = %d, want 1", sampleCount)
 	}
+	if _, err := pg.Pool.Exec(ctx, `UPDATE plan_metric_samples SET value = 2 WHERE plan_id = $1 AND event_id = $2`, sample.PlanID, sample.EventID); err == nil {
+		t.Fatal("direct metric sample update succeeded, want append-only trigger rejection")
+	}
+	if _, err := pg.Pool.Exec(ctx, `DELETE FROM plan_metric_samples WHERE plan_id = $1 AND event_id = $2`, sample.PlanID, sample.EventID); err == nil {
+		t.Fatal("direct metric sample delete succeeded, want append-only trigger rejection")
+	}
 	changedSample := sample
 	changedSample.Value = 2
 	if err := planRepo.RecordPlanMetric(ctx, changedSample); !errors.Is(err, agentos.ErrInvalidRunPlan) {
@@ -1384,6 +1391,7 @@ func applyAgentOSPlanMigrations(t *testing.T, pg *postgres.Postgres) {
 		"20260620000011_protect_plan_events_append_only.up.sql",
 		"20260620000012_protect_audit_logs_append_only.up.sql",
 		"20260620000013_protect_artifacts_append_only.up.sql",
+		"20260620000014_protect_plan_metric_samples_append_only.up.sql",
 	} {
 		path := filepath.Join("..", "..", "..", "migrations", migration)
 		data, err := os.ReadFile(path)

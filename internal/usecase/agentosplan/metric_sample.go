@@ -2,10 +2,22 @@ package agentosplan
 
 import (
 	"fmt"
+	"maps"
 	"math"
 
 	"github.com/TekkenSteve/GoAgent/agentos"
 )
+
+// NormalizePlanMetricSample returns the canonical representation used for
+// durable metric sample idempotency.
+func NormalizePlanMetricSample(sample PlanMetricSample) PlanMetricSample {
+	sample.Timestamp = sample.Timestamp.UTC().Truncate(planMetricSampleTimestampPrecision)
+	if sample.Labels == nil {
+		sample.Labels = map[string]string{}
+	}
+
+	return sample
+}
 
 // ValidatePlanMetricSample verifies the durable identity and tenant scope of a
 // projected PlanMetricSample before a sink records it.
@@ -41,6 +53,29 @@ func ValidatePlanMetricSample(sample PlanMetricSample) error {
 		if key == "" {
 			return fmt.Errorf("%w: metric label key is required", agentos.ErrInvalidRunPlan)
 		}
+	}
+
+	return nil
+}
+
+// ValidatePlanMetricSampleIdempotency verifies that a replayed metric sample is
+// the same durable fact as the existing sample for its idempotency key.
+func ValidatePlanMetricSampleIdempotency(existing, requested PlanMetricSample) error {
+	existing = NormalizePlanMetricSample(existing)
+	requested = NormalizePlanMetricSample(requested)
+	if existing.Name != requested.Name ||
+		existing.PlanID != requested.PlanID ||
+		existing.AccountID != requested.AccountID ||
+		existing.ProjectID != requested.ProjectID ||
+		existing.NodeID != requested.NodeID ||
+		existing.RunID != requested.RunID ||
+		existing.EventID != requested.EventID ||
+		existing.Sequence != requested.Sequence ||
+		existing.Value != requested.Value ||
+		existing.Unit != requested.Unit ||
+		!existing.Timestamp.Equal(requested.Timestamp) ||
+		!maps.Equal(existing.Labels, requested.Labels) {
+		return fmt.Errorf("%w: metric sample identity conflict for plan %q event %q", agentos.ErrInvalidRunPlan, requested.PlanID, requested.EventID)
 	}
 
 	return nil

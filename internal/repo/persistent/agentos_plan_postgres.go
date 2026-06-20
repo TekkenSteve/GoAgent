@@ -1035,6 +1035,7 @@ WHERE plan_metric_checkpoints.sequence <= EXCLUDED.sequence`,
 }
 
 func (r *AgentOSPlanRepo) RecordPlanMetric(ctx context.Context, sample agentosplan.PlanMetricSample) error {
+	sample = agentosplan.NormalizePlanMetricSample(sample)
 	if err := agentosplan.ValidatePlanMetricSample(sample); err != nil {
 		return err
 	}
@@ -1053,7 +1054,6 @@ func (r *AgentOSPlanRepo) RecordPlanMetric(ctx context.Context, sample agentospl
 	if err != nil {
 		return fmt.Errorf("AgentOSPlanRepo - RecordPlanMetric - marshal labels: %w", err)
 	}
-	sample.Timestamp = sample.Timestamp.UTC().Truncate(time.Microsecond)
 	result, err := r.Pool.Exec(ctx, `
 INSERT INTO plan_metric_samples (
     metric_name,
@@ -1069,14 +1069,7 @@ INSERT INTO plan_metric_samples (
     labels_json,
     sample_timestamp
 ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)
-ON CONFLICT (metric_name, plan_id, node_id, run_id, event_id, sequence) DO UPDATE SET
-    created_at = plan_metric_samples.created_at
-WHERE plan_metric_samples.account_id = EXCLUDED.account_id
-  AND plan_metric_samples.project_id = EXCLUDED.project_id
-  AND plan_metric_samples.value = EXCLUDED.value
-  AND plan_metric_samples.unit = EXCLUDED.unit
-  AND plan_metric_samples.labels_json = EXCLUDED.labels_json
-  AND plan_metric_samples.sample_timestamp = EXCLUDED.sample_timestamp`,
+ON CONFLICT DO NOTHING`,
 		string(sample.Name),
 		sample.PlanID,
 		sample.AccountID,
@@ -1091,13 +1084,83 @@ WHERE plan_metric_samples.account_id = EXCLUDED.account_id
 		sample.Timestamp,
 	)
 	if err != nil {
-		return fmt.Errorf("AgentOSPlanRepo - RecordPlanMetric - upsert: %w", err)
+		return fmt.Errorf("AgentOSPlanRepo - RecordPlanMetric - insert: %w", err)
 	}
-	if result.RowsAffected() == 0 {
+	if result.RowsAffected() == 1 {
+		return nil
+	}
+
+	existing, exists, err := r.planMetricSampleByKey(ctx, sample.Key())
+	if err != nil {
+		return err
+	}
+	if !exists {
 		return fmt.Errorf("%w: metric sample identity conflict for plan %q event %q", agentos.ErrInvalidRunPlan, sample.PlanID, sample.EventID)
 	}
 
-	return nil
+	return agentosplan.ValidatePlanMetricSampleIdempotency(existing, sample)
+}
+
+func (r *AgentOSPlanRepo) planMetricSampleByKey(ctx context.Context, key agentosplan.PlanMetricSampleKey) (agentosplan.PlanMetricSample, bool, error) {
+	var sample agentosplan.PlanMetricSample
+	var name string
+	var labelsJSON []byte
+	err := r.Pool.QueryRow(ctx, `
+SELECT
+    metric_name,
+    plan_id,
+    account_id,
+    project_id,
+    node_id,
+    run_id,
+    event_id,
+    sequence,
+    value,
+    unit,
+    labels_json,
+    sample_timestamp
+FROM plan_metric_samples
+WHERE metric_name = $1
+  AND plan_id = $2
+  AND node_id = $3
+  AND run_id = $4
+  AND event_id = $5
+  AND sequence = $6`,
+		string(key.Name),
+		key.PlanID,
+		key.NodeID,
+		key.RunID,
+		key.EventID,
+		key.Sequence,
+	).Scan(
+		&name,
+		&sample.PlanID,
+		&sample.AccountID,
+		&sample.ProjectID,
+		&sample.NodeID,
+		&sample.RunID,
+		&sample.EventID,
+		&sample.Sequence,
+		&sample.Value,
+		&sample.Unit,
+		&labelsJSON,
+		&sample.Timestamp,
+	)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return agentosplan.PlanMetricSample{}, false, nil
+		}
+
+		return agentosplan.PlanMetricSample{}, false, fmt.Errorf("AgentOSPlanRepo - planMetricSampleByKey - query: %w", err)
+	}
+	if len(labelsJSON) > 0 {
+		if err := json.Unmarshal(labelsJSON, &sample.Labels); err != nil {
+			return agentosplan.PlanMetricSample{}, false, fmt.Errorf("AgentOSPlanRepo - planMetricSampleByKey - decode labels: %w", err)
+		}
+	}
+	sample.Name = agentosplan.PlanMetricName(name)
+
+	return sample, true, nil
 }
 
 func planMetricLabelsForStorage(labels map[string]string) map[string]string {

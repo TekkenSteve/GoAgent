@@ -29,6 +29,29 @@ func TestValidatePlanMetricSampleRejectsNonFiniteValue(t *testing.T) {
 	}
 }
 
+func TestValidatePlanMetricSampleIdempotencyNormalizesReplay(t *testing.T) {
+	first := validPlanMetricSample()
+	first.Labels = nil
+	replay := first
+	replay.Timestamp = first.Timestamp.Local().Add(123 * time.Nanosecond)
+	replay.Labels = map[string]string{}
+
+	if err := ValidatePlanMetricSampleIdempotency(first, replay); err != nil {
+		t.Fatalf("ValidatePlanMetricSampleIdempotency: %v", err)
+	}
+}
+
+func TestValidatePlanMetricSampleIdempotencyRejectsChangedValue(t *testing.T) {
+	first := validPlanMetricSample()
+	replay := first
+	replay.Value = 2
+
+	err := ValidatePlanMetricSampleIdempotency(first, replay)
+	if !errors.Is(err, agentos.ErrInvalidRunPlan) {
+		t.Fatalf("ValidatePlanMetricSampleIdempotency error = %v, want ErrInvalidRunPlan", err)
+	}
+}
+
 func validPlanMetricSample() PlanMetricSample {
 	return PlanMetricSample{
 		Name:      PlanMetricPlanStartedTotal,
