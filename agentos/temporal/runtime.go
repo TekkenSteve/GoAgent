@@ -29,9 +29,11 @@ type runtime struct {
 
 type runtimeRunBackendIndexFactory func(cfg RuntimeConfig) (RunBackendIndex, func() error, error)
 
+var ErrRuntimePostgresURLRequired = errors.New("agentos temporal runtime: postgres url is required")
+
 var newRuntimeRunBackendIndex = func(cfg RuntimeConfig) (RunBackendIndex, func() error, error) {
 	if cfg.PostgresURL == "" {
-		return nil, nil, nil
+		return nil, nil, ErrRuntimePostgresURLRequired
 	}
 	pg, err := newRuntimePostgres(cfg)
 	if err != nil {

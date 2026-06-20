@@ -23,8 +23,9 @@ func main() {
 		TemporalAddress:   env("AGENTFW_TEMPORAL_ADDRESS", "127.0.0.1:7233"),
 		TemporalNamespace: env("AGENTFW_TEMPORAL_NAMESPACE", "default"),
 		TemporalTaskQueue: env("AGENTFW_TEMPORAL_TASK_QUEUE", "agent-framework"),
+		PostgresURL:       os.Getenv("PG_URL"),
 		RedisURL:          os.Getenv("REDIS_URL"),
-	}, agentostemporal.WithRunBackendIndex(agentostemporal.NewEphemeralRunBackendIndex()))
+	})
 	if err != nil {
 		log.Fatalf("new runtime: %v", err)
 	}

@@ -93,6 +93,22 @@ func TestRuntimeOptionsWithDefaultRunBackendIndexPropagatesFactoryError(t *testi
 	}
 }
 
+func TestRuntimeOptionsWithDefaultRunBackendIndexRequiresPostgresURL(t *testing.T) {
+	rt := &runtime{}
+
+	_, err := rt.runtimeOptionsWithDefaultRunBackendIndex(
+		RuntimeConfig{},
+		runtimeOptions{},
+		newRuntimeRunBackendIndex,
+	)
+	if !errors.Is(err, ErrRuntimePostgresURLRequired) {
+		t.Fatalf("error = %v, want %v", err, ErrRuntimePostgresURLRequired)
+	}
+	if len(rt.closers) != 0 {
+		t.Fatalf("closers = %d, want 0", len(rt.closers))
+	}
+}
+
 type fakeRunBackendIndex struct{}
 
 func (fakeRunBackendIndex) Bind(context.Context, agentos.RunSpec) error {

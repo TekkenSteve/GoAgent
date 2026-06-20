@@ -4,7 +4,6 @@ import (
 	"context"
 
 	"github.com/TekkenSteve/GoAgent/agentos"
-	"github.com/TekkenSteve/GoAgent/internal/repo/memory"
 )
 
 // RuntimeConfig configures the default Temporal/Redis runtime implementation.
@@ -124,12 +123,6 @@ func WithRunBackendSelector(selector RunBackendSelector) RuntimeOption {
 	return func(opts *runtimeOptions) {
 		opts.backendSelector = selector
 	}
-}
-
-// NewEphemeralRunBackendIndex creates a process-local run route index for
-// embedded demos and tests. Production runtimes should inject a durable index.
-func NewEphemeralRunBackendIndex() RunBackendIndex {
-	return memory.NewAgentOSRunIndex()
 }
 
 // WorkerConfig configures registration of GoAgent workflows and activities into
