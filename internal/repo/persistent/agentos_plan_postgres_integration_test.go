@@ -63,6 +63,7 @@ func TestAgentOSPlanPostgresDurablePersistence(t *testing.T) {
 	assertPostgresTrigger(t, pg, "audit_logs_append_only")
 	assertPostgresTrigger(t, pg, "artifacts_append_only")
 	assertPostgresTrigger(t, pg, "plan_metric_samples_append_only")
+	assertPostgresTrigger(t, pg, "run_backend_ownership_immutable")
 	assertPostgresTriggerAbsent(t, pg, "audit_logs_delivered_command_audit")
 
 	ctx := t.Context()
@@ -401,6 +402,12 @@ INSERT INTO plan_commands (
 	if resolved != runSpec.Backend {
 		t.Fatalf("Resolve = %#v, want %#v", resolved, runSpec.Backend)
 	}
+	if _, err := pg.Pool.Exec(ctx, `UPDATE run_backend_index SET backend_name = 'hijacked' WHERE run_id = $1`, runSpec.RunID); err == nil {
+		t.Fatal("direct run backend ownership update succeeded, want immutable ownership trigger rejection")
+	}
+	if _, err := pg.Pool.Exec(ctx, `DELETE FROM run_backend_index WHERE run_id = $1`, runSpec.RunID); err == nil {
+		t.Fatal("direct run backend ownership delete succeeded, want immutable ownership trigger rejection")
+	}
 	changedRun := runSpec
 	changedRun.RunID = runSpec.RunID + "-changed"
 	if err := routeIndex.BindPlanNode(ctx, spec.PlanID, spec.Nodes[0].NodeID, changedRun, agentos.RunStatus{RunID: changedRun.RunID}); !errors.Is(err, agentos.ErrInvalidRunSpec) {
@@ -488,6 +495,20 @@ INSERT INTO plan_commands (
 		LifecycleState: standaloneStatus.LifecycleState,
 	})
 	assertPostgresStandaloneRunBackendIndexUsesNullPlanNode(t, pg, standaloneRun.RunID)
+	if err := routeIndex.Bind(ctx, standaloneRun, agentos.RunStatus{
+		RunID:          standaloneRun.RunID,
+		LifecycleState: "succeeded",
+	}); err != nil {
+		t.Fatalf("Bind standalone lifecycle update: %v", err)
+	}
+	assertPostgresRunBackendIndexRecord(t, pg, standaloneRun.RunID, postgresRunBackendIndexExpectation{
+		AccountID:      standaloneRun.AccountID,
+		ProjectID:      standaloneRun.ProjectID,
+		BackendKind:    string(standaloneRun.Backend.Kind),
+		BackendName:    standaloneRun.Backend.Name,
+		IdempotencyKey: standaloneRun.IdempotencyKey,
+		LifecycleState: "succeeded",
+	})
 	standaloneChangedBackend := standaloneRun
 	standaloneChangedBackend.Backend = agentos.BackendRef{Kind: agentos.BackendKindHTTP, Name: "other-backend"}
 	if err := routeIndex.Bind(ctx, standaloneChangedBackend, standaloneStatus); !errors.Is(err, agentos.ErrInvalidBackendRef) {
@@ -1392,6 +1413,7 @@ func applyAgentOSPlanMigrations(t *testing.T, pg *postgres.Postgres) {
 		"20260620000012_protect_audit_logs_append_only.up.sql",
 		"20260620000013_protect_artifacts_append_only.up.sql",
 		"20260620000014_protect_plan_metric_samples_append_only.up.sql",
+		"20260620000015_protect_run_backend_ownership.up.sql",
 	} {
 		path := filepath.Join("..", "..", "..", "migrations", migration)
 		data, err := os.ReadFile(path)
