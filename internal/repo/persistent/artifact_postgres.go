@@ -125,9 +125,7 @@ INSERT INTO artifacts (
     idempotency_key,
     created_at
 ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)
-ON CONFLICT (artifact_id) DO UPDATE SET
-    artifact_id = artifacts.artifact_id
-WHERE artifacts.idempotency_key = EXCLUDED.idempotency_key
+ON CONFLICT DO NOTHING
 RETURNING `+strings.Join(artifactColumns(), ", "),
 		ref.ArtifactID,
 		ref.PlanID,
@@ -148,6 +146,18 @@ RETURNING `+strings.Join(artifactColumns(), ", "),
 	stored, err := scanArtifactRef(row)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
+			existing, exists, lookupErr := r.artifactByIdempotencyKey(ctx, ref.PlanID, scope, idempotencyKey)
+			if lookupErr != nil {
+				return agentos.ArtifactRef{}, lookupErr
+			}
+			if exists {
+				if err := agentosplan.ValidateArtifactPublishIdempotency(existing, ref); err != nil {
+					return agentos.ArtifactRef{}, err
+				}
+
+				return existing, nil
+			}
+
 			return agentos.ArtifactRef{}, fmt.Errorf("%w: artifact id %q already exists with a different idempotency key", agentos.ErrInvalidArtifact, ref.ArtifactID)
 		}
 		if isPostgresUniqueViolation(err) {

@@ -61,6 +61,7 @@ func TestAgentOSPlanPostgresDurablePersistence(t *testing.T) {
 	assertPostgresTrigger(t, pg, "plan_commands_delivered_audit")
 	assertPostgresTrigger(t, pg, "plan_events_append_only")
 	assertPostgresTrigger(t, pg, "audit_logs_append_only")
+	assertPostgresTrigger(t, pg, "artifacts_append_only")
 	assertPostgresTriggerAbsent(t, pg, "audit_logs_delivered_command_audit")
 
 	ctx := t.Context()
@@ -510,6 +511,12 @@ INSERT INTO plan_commands (
 	}
 	if replayedArtifact.ArtifactID != storedArtifact.ArtifactID {
 		t.Fatalf("Artifact replay = %#v, want %#v", replayedArtifact, storedArtifact)
+	}
+	if _, err := pg.Pool.Exec(ctx, `UPDATE artifacts SET metadata_json = '{}'::jsonb WHERE artifact_id = $1`, storedArtifact.ArtifactID); err == nil {
+		t.Fatal("direct artifact update succeeded, want append-only trigger rejection")
+	}
+	if _, err := pg.Pool.Exec(ctx, `DELETE FROM artifacts WHERE artifact_id = $1`, storedArtifact.ArtifactID); err == nil {
+		t.Fatal("direct artifact delete succeeded, want append-only trigger rejection")
 	}
 	loadedArtifact, payload, err := artifactStore.Get(ctx, agentos.PlanArtifactScope{
 		PlanID:     spec.PlanID,
@@ -1376,6 +1383,7 @@ func applyAgentOSPlanMigrations(t *testing.T, pg *postgres.Postgres) {
 		"20260620000010_protect_delivered_command_audits.up.sql",
 		"20260620000011_protect_plan_events_append_only.up.sql",
 		"20260620000012_protect_audit_logs_append_only.up.sql",
+		"20260620000013_protect_artifacts_append_only.up.sql",
 	} {
 		path := filepath.Join("..", "..", "..", "migrations", migration)
 		data, err := os.ReadFile(path)
