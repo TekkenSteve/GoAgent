@@ -196,7 +196,7 @@ const (
 )
 
 // PlanCommandRecord is the durable command/outbox entry written before
-// delivering a control-plane signal to PlanWorkflow.
+// delivering a control-plane operation to PlanWorkflow or starting it.
 type PlanCommandRecord struct {
 	CommandID      string
 	PlanID         string
@@ -237,7 +237,7 @@ type PlanCommandScope struct {
 	Limit    int
 }
 
-// PlanCommandStore persists recoverable signal/control commands.
+// PlanCommandStore persists recoverable plan start/signal/control commands.
 type PlanCommandStore interface {
 	RecordPlanCommand(ctx context.Context, command PlanCommandRecord) (PlanCommandRecord, bool, error)
 	GetPlanCommand(ctx context.Context, ref PlanCommandRef) (PlanCommandRecord, bool, error)

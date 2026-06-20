@@ -154,6 +154,12 @@ func (r *planRuntime) StartPlan(ctx context.Context, spec agentos.RunPlanSpec) (
 	if r.planIndex == nil {
 		return agentos.RunPlanStatus{}, errPlanRuntimePlanIndexRequired
 	}
+	if r.commandStore == nil {
+		return agentos.RunPlanStatus{}, errPlanRuntimeCommandStoreRequired
+	}
+	if r.auditStore == nil {
+		return agentos.RunPlanStatus{}, errPlanRuntimeAuditStoreRequired
+	}
 
 	status := agentosplan.NewState(spec, time.Now().UTC()).Status
 	status, created, err := r.planIndex.CreatePlan(ctx, spec, status)
@@ -163,29 +169,27 @@ func (r *planRuntime) StartPlan(ctx context.Context, spec agentos.RunPlanSpec) (
 	if !created && status.LifecycleState != agentos.PlanLifecyclePending {
 		return status, nil
 	}
-	if created {
-		if _, err := r.recordPlanAudit(ctx, agentosplan.AuditRecord{
-			PlanID:         spec.PlanID,
-			AccountID:      spec.AccountID,
-			ProjectID:      spec.ProjectID,
-			Action:         agentosplan.AuditActionPlanStart,
-			IdempotencyKey: spec.IdempotencyKey,
-			Payload: map[string]any{
-				"thread_id":  spec.ThreadID,
-				"account_id": spec.AccountID,
-				"project_id": spec.ProjectID,
-			},
-		}); err != nil {
-			return agentos.RunPlanStatus{}, err
-		}
+	record := planStartAuditRecord(spec)
+	command, err := r.recordPlanCommand(ctx, planCommandFromAuditRecord(record))
+	if err != nil {
+		return agentos.RunPlanStatus{}, err
+	}
+	if command.Status == agentosplan.PlanCommandDelivered {
+		_, err := r.recordPlanAudit(ctx, record)
+
+		return status, err
 	}
 
-	_, err = r.temporalClient.ExecuteWorkflow(ctx, client.StartWorkflowOptions{
-		ID:        planWorkflowID(spec.PlanID),
-		TaskQueue: r.taskQueue,
-	}, PlanWorkflowName, planWorkflowInput{Spec: spec})
-	if err != nil && !sdktemporal.IsWorkflowExecutionAlreadyStartedError(err) {
-		return agentos.RunPlanStatus{}, fmt.Errorf("agentos temporal plan runtime - start plan workflow: %w", err)
+	if err := r.executePlanWorkflow(ctx, spec); err != nil {
+		markErr := r.markPlanCommandFailed(ctx, command, err)
+
+		return agentos.RunPlanStatus{}, errors.Join(err, markErr)
+	}
+	if _, err := r.recordPlanAudit(ctx, record); err != nil {
+		return agentos.RunPlanStatus{}, err
+	}
+	if err := r.markPlanCommandDelivered(ctx, command); err != nil {
+		return agentos.RunPlanStatus{}, err
 	}
 
 	return status, nil
@@ -251,10 +255,10 @@ func (r *planRuntime) SignalPlan(ctx context.Context, ref agentos.PlanRef, signa
 
 		return errors.Join(fmt.Errorf("agentos temporal plan runtime - signal plan workflow: %w", err), markErr)
 	}
-	if err := r.markPlanCommandDelivered(ctx, command); err != nil {
+	if _, err := r.recordPlanAudit(ctx, record); err != nil {
 		return err
 	}
-	if _, err := r.recordPlanAudit(ctx, record); err != nil {
+	if err := r.markPlanCommandDelivered(ctx, command); err != nil {
 		return err
 	}
 
@@ -293,10 +297,10 @@ func (r *planRuntime) ControlPlan(ctx context.Context, ref agentos.PlanRef, cont
 
 		return errors.Join(fmt.Errorf("agentos temporal plan runtime - control plan workflow: %w", err), markErr)
 	}
-	if err := r.markPlanCommandDelivered(ctx, command); err != nil {
+	if _, err := r.recordPlanAudit(ctx, record); err != nil {
 		return err
 	}
-	if _, err := r.recordPlanAudit(ctx, record); err != nil {
+	if err := r.markPlanCommandDelivered(ctx, command); err != nil {
 		return err
 	}
 
@@ -438,7 +442,7 @@ func (r *planRuntime) GetPlanArtifact(ctx context.Context, scope agentos.PlanArt
 // RecoverPlanCommands redelivers recoverable RunPlan control-plane commands
 // from the durable outbox.
 func (r *planRuntime) RecoverPlanCommands(ctx context.Context, limit int) (PlanCommandRecoveryResult, error) {
-	reconciler := newPlanCommandReconciler(r.temporalClient, r.commandStore, r.auditStore)
+	reconciler := newPlanCommandReconciler(r.temporalClient, r.taskQueue, r.commandStore, r.auditStore, r.planIndex)
 
 	return reconciler.Recover(ctx, limit)
 }
@@ -499,6 +503,41 @@ func (r *planRuntime) markPlanCommandFailed(ctx context.Context, command agentos
 
 func planWorkflowID(planID string) string {
 	return "agentos-plan-" + planID
+}
+
+func (r *planRuntime) executePlanWorkflow(ctx context.Context, spec agentos.RunPlanSpec) error {
+	return executePlanWorkflow(ctx, r.temporalClient, r.taskQueue, spec)
+}
+
+func executePlanWorkflow(ctx context.Context, temporalClient planTemporalClient, taskQueue string, spec agentos.RunPlanSpec) error {
+	if temporalClient == nil {
+		return errors.New("agentos temporal plan runtime: temporal client is not configured")
+	}
+
+	_, err := temporalClient.ExecuteWorkflow(ctx, client.StartWorkflowOptions{
+		ID:        planWorkflowID(spec.PlanID),
+		TaskQueue: taskQueue,
+	}, PlanWorkflowName, planWorkflowInput{Spec: spec})
+	if err != nil && !sdktemporal.IsWorkflowExecutionAlreadyStartedError(err) {
+		return fmt.Errorf("agentos temporal plan runtime - start plan workflow: %w", err)
+	}
+
+	return nil
+}
+
+func planStartAuditRecord(spec agentos.RunPlanSpec) agentosplan.AuditRecord {
+	return agentosplan.AuditRecord{
+		PlanID:         spec.PlanID,
+		AccountID:      spec.AccountID,
+		ProjectID:      spec.ProjectID,
+		Action:         agentosplan.AuditActionPlanStart,
+		IdempotencyKey: spec.IdempotencyKey,
+		Payload: map[string]any{
+			"thread_id":  spec.ThreadID,
+			"account_id": spec.AccountID,
+			"project_id": spec.ProjectID,
+		},
+	}
 }
 
 func planSignalAuditRecord(ref agentos.PlanRef, signal agentos.Signal) agentosplan.AuditRecord {

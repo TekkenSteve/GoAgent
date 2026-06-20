@@ -210,7 +210,7 @@ func TestPlanRuntimeStartPlanDoesNotOverwriteWorkflowOwnedState(t *testing.T) {
 			})
 		},
 	}
-	rt := &planRuntime{temporalClient: temporalClient, planIndex: store, auditStore: store}
+	rt := &planRuntime{temporalClient: temporalClient, taskQueue: "agentos-test", planIndex: store, commandStore: store, auditStore: store}
 
 	if _, err := rt.StartPlan(t.Context(), spec); err != nil {
 		t.Fatalf("StartPlan: %v", err)
@@ -225,6 +225,106 @@ func TestPlanRuntimeStartPlanDoesNotOverwriteWorkflowOwnedState(t *testing.T) {
 		got.Nodes[0].LifecycleState != agentos.PlanNodeRunning ||
 		got.Nodes[0].RunID != "run-research" {
 		t.Fatalf("plan status was overwritten by runtime start path: %#v", got)
+	}
+}
+
+func TestPlanRuntimeStartPlanDoesNotAuditFailedDelivery(t *testing.T) {
+	store := agentosplan.NewMemoryPlanStore()
+	spec := agentos.RunPlanSpec{
+		PlanID:         "plan-1",
+		AccountID:      "acct-1",
+		ProjectID:      "proj-1",
+		IdempotencyKey: "plan-start-1",
+	}
+	temporalClient := &fakePlanTemporalClient{executeErr: errors.New("temporal unavailable")}
+	rt := &planRuntime{temporalClient: temporalClient, taskQueue: "agentos-test", planIndex: store, commandStore: store, auditStore: store}
+
+	_, err := rt.StartPlan(t.Context(), spec)
+	if err == nil {
+		t.Fatal("StartPlan succeeded, want delivery error")
+	}
+	if temporalClient.executeCount != 1 {
+		t.Fatalf("execute count = %d, want 1", temporalClient.executeCount)
+	}
+	ref := agentos.PlanRef{PlanID: spec.PlanID, AccountID: spec.AccountID, ProjectID: spec.ProjectID}
+	if _, exists, lookupErr := store.GetAuditRecord(t.Context(), planAuditRef(ref, spec.IdempotencyKey)); lookupErr != nil || exists {
+		t.Fatalf("audit exists=%v err=%v, want no audit", exists, lookupErr)
+	}
+	command, exists, lookupErr := store.GetPlanCommand(t.Context(), planCommandRef(ref, spec.IdempotencyKey))
+	if lookupErr != nil || !exists {
+		t.Fatalf("command exists=%v err=%v", exists, lookupErr)
+	}
+	if command.Status != agentosplan.PlanCommandFailed || command.FailureReason == "" {
+		t.Fatalf("command = %#v, want failed with reason", command)
+	}
+}
+
+func TestPlanRuntimeStartPlanRetriesFailedCommand(t *testing.T) {
+	store := agentosplan.NewMemoryPlanStore()
+	spec := agentos.RunPlanSpec{
+		PlanID:         "plan-1",
+		AccountID:      "acct-1",
+		ProjectID:      "proj-1",
+		IdempotencyKey: "plan-start-1",
+	}
+	temporalClient := &fakePlanTemporalClient{executeErr: errors.New("temporal unavailable")}
+	rt := &planRuntime{temporalClient: temporalClient, taskQueue: "agentos-test", planIndex: store, commandStore: store, auditStore: store}
+
+	if _, err := rt.StartPlan(t.Context(), spec); err == nil {
+		t.Fatal("StartPlan succeeded, want delivery error")
+	}
+	temporalClient.executeErr = nil
+	if _, err := rt.StartPlan(t.Context(), spec); err != nil {
+		t.Fatalf("StartPlan retry: %v", err)
+	}
+
+	if temporalClient.executeCount != 2 {
+		t.Fatalf("execute count = %d, want retry delivery", temporalClient.executeCount)
+	}
+	ref := agentos.PlanRef{PlanID: spec.PlanID, AccountID: spec.AccountID, ProjectID: spec.ProjectID}
+	command, exists, err := store.GetPlanCommand(t.Context(), planCommandRef(ref, spec.IdempotencyKey))
+	if err != nil || !exists {
+		t.Fatalf("command exists=%v err=%v", exists, err)
+	}
+	if command.Status != agentosplan.PlanCommandDelivered {
+		t.Fatalf("command = %#v, want delivered", command)
+	}
+	if _, exists, err := store.GetAuditRecord(t.Context(), planAuditRef(ref, spec.IdempotencyKey)); err != nil || !exists {
+		t.Fatalf("audit exists=%v err=%v", exists, err)
+	}
+}
+
+func TestPlanRuntimeStartPlanSkipsDeliveryWhenCommandDelivered(t *testing.T) {
+	store := agentosplan.NewMemoryPlanStore()
+	spec := agentos.RunPlanSpec{
+		PlanID:         "plan-1",
+		AccountID:      "acct-1",
+		ProjectID:      "proj-1",
+		IdempotencyKey: "plan-start-1",
+	}
+	status := agentosplan.NewState(spec, time.Now().UTC()).Status
+	if _, _, err := store.CreatePlan(t.Context(), spec, status); err != nil {
+		t.Fatalf("CreatePlan: %v", err)
+	}
+	command, _, err := store.RecordPlanCommand(t.Context(), planCommandFromAuditRecord(planStartAuditRecord(spec)))
+	if err != nil {
+		t.Fatalf("RecordPlanCommand: %v", err)
+	}
+	if _, err := store.MarkPlanCommandDelivered(t.Context(), agentosplan.PlanCommandRefFromRecord(command)); err != nil {
+		t.Fatalf("MarkPlanCommandDelivered: %v", err)
+	}
+	temporalClient := &fakePlanTemporalClient{executeErr: errors.New("should not start workflow")}
+	rt := &planRuntime{temporalClient: temporalClient, taskQueue: "agentos-test", planIndex: store, commandStore: store, auditStore: store}
+
+	if _, err := rt.StartPlan(t.Context(), spec); err != nil {
+		t.Fatalf("StartPlan: %v", err)
+	}
+	if temporalClient.executeCount != 0 {
+		t.Fatalf("execute count = %d, want 0", temporalClient.executeCount)
+	}
+	ref := agentos.PlanRef{PlanID: spec.PlanID, AccountID: spec.AccountID, ProjectID: spec.ProjectID}
+	if _, exists, err := store.GetAuditRecord(t.Context(), planAuditRef(ref, spec.IdempotencyKey)); err != nil || !exists {
+		t.Fatalf("audit exists=%v err=%v", exists, err)
 	}
 }
 
@@ -645,6 +745,46 @@ func TestPlanRuntimeSignalPlanRetriesFailedCommand(t *testing.T) {
 	}
 }
 
+func TestPlanRuntimeSignalPlanKeepsCommandRecoverableWhenAuditFails(t *testing.T) {
+	store, ref := newPlanRuntimeTestStore(t)
+	temporalClient := &fakePlanTemporalClient{}
+	rt := &planRuntime{
+		temporalClient: temporalClient,
+		commandStore:   store,
+		auditStore:     failingAuditStore{AuditStore: store, err: errors.New("audit unavailable")},
+		planIndex:      store,
+	}
+	signal := agentos.Signal{
+		Type:           agentos.SignalPlanApprove,
+		IdempotencyKey: "approve-1",
+		ActorID:        "operator-1",
+	}
+
+	err := rt.SignalPlan(t.Context(), ref, signal)
+	if err == nil {
+		t.Fatal("SignalPlan succeeded, want audit error")
+	}
+	if temporalClient.signalCount != 1 {
+		t.Fatalf("signal count = %d, want 1", temporalClient.signalCount)
+	}
+	command, exists, lookupErr := store.GetPlanCommand(t.Context(), planCommandRef(ref, signal.IdempotencyKey))
+	if lookupErr != nil || !exists {
+		t.Fatalf("command exists=%v err=%v", exists, lookupErr)
+	}
+	if command.Status != agentosplan.PlanCommandPending {
+		t.Fatalf("command = %#v, want pending for recovery", command)
+	}
+}
+
+type failingAuditStore struct {
+	agentosplan.AuditStore
+	err error
+}
+
+func (s failingAuditStore) RecordAudit(context.Context, agentosplan.AuditRecord) (agentosplan.AuditRecord, bool, error) {
+	return agentosplan.AuditRecord{}, false, s.err
+}
+
 func TestPlanRuntimeSignalPlanSkipsDeliveryWhenCommandDelivered(t *testing.T) {
 	store, ref := newPlanRuntimeTestStore(t)
 	signal := agentos.Signal{
@@ -826,16 +966,22 @@ func (i *scopedOnlyPlanIndex) GetPlanByRef(_ context.Context, ref agentos.PlanRe
 }
 
 type fakePlanTemporalClient struct {
-	executeFunc      func(context.Context, client.StartWorkflowOptions, interface{}, ...interface{}) error
-	executeErr       error
-	signalWorkflowID string
-	signalName       string
-	signalPayload    any
-	signalCount      int
-	signalErr        error
+	executeFunc       func(context.Context, client.StartWorkflowOptions, interface{}, ...interface{}) error
+	executeErr        error
+	executeWorkflowID string
+	executeTaskQueue  string
+	executeCount      int
+	signalWorkflowID  string
+	signalName        string
+	signalPayload     any
+	signalCount       int
+	signalErr         error
 }
 
 func (c *fakePlanTemporalClient) ExecuteWorkflow(ctx context.Context, options client.StartWorkflowOptions, workflow interface{}, args ...interface{}) (client.WorkflowRun, error) {
+	c.executeWorkflowID = options.ID
+	c.executeTaskQueue = options.TaskQueue
+	c.executeCount++
 	if c.executeFunc != nil {
 		if err := c.executeFunc(ctx, options, workflow, args...); err != nil {
 			return nil, err

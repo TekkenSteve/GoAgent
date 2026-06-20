@@ -11,15 +11,25 @@ import (
 
 type planCommandReconciler struct {
 	temporalClient planTemporalClient
+	taskQueue      string
 	commandStore   agentosplan.PlanCommandStore
 	auditStore     agentosplan.AuditStore
+	planIndex      agentosplan.PlanIndex
 }
 
-func newPlanCommandReconciler(temporalClient planTemporalClient, commandStore agentosplan.PlanCommandStore, auditStore agentosplan.AuditStore) *planCommandReconciler {
+func newPlanCommandReconciler(
+	temporalClient planTemporalClient,
+	taskQueue string,
+	commandStore agentosplan.PlanCommandStore,
+	auditStore agentosplan.AuditStore,
+	planIndex agentosplan.PlanIndex,
+) *planCommandReconciler {
 	return &planCommandReconciler{
 		temporalClient: temporalClient,
+		taskQueue:      taskQueue,
 		commandStore:   commandStore,
 		auditStore:     auditStore,
+		planIndex:      planIndex,
 	}
 }
 
@@ -32,6 +42,9 @@ func (r *planCommandReconciler) Recover(ctx context.Context, limit int) (PlanCom
 	}
 	if r.auditStore == nil {
 		return PlanCommandRecoveryResult{}, errPlanRuntimeAuditStoreRequired
+	}
+	if r.planIndex == nil {
+		return PlanCommandRecoveryResult{}, errPlanRuntimePlanIndexRequired
 	}
 
 	commands, err := r.commandStore.ListRecoverablePlanCommands(ctx, agentosplan.PlanCommandScope{Limit: limit})
@@ -58,6 +71,9 @@ func (r *planCommandReconciler) deliver(ctx context.Context, command agentosplan
 	if command.Status == agentosplan.PlanCommandDelivered {
 		return nil
 	}
+	if command.Action == agentosplan.AuditActionPlanStart {
+		return r.deliverPlanStart(ctx, command)
+	}
 
 	signalName, payload, auditRecord, err := commandDeliveryPayload(command)
 	if err != nil {
@@ -73,14 +89,48 @@ func (r *planCommandReconciler) deliver(ctx context.Context, command agentosplan
 
 		return errors.Join(fmt.Errorf("agentos temporal plan command reconciler - signal workflow: %w", err), markErr)
 	}
-	if _, err := r.commandStore.MarkPlanCommandDelivered(ctx, agentosplan.PlanCommandRefFromRecord(command)); err != nil {
+	if _, _, err := r.auditStore.RecordAudit(ctx, auditRecord); err != nil {
 		return err
 	}
-	if _, _, err := r.auditStore.RecordAudit(ctx, auditRecord); err != nil {
+	if _, err := r.commandStore.MarkPlanCommandDelivered(ctx, agentosplan.PlanCommandRefFromRecord(command)); err != nil {
 		return err
 	}
 
 	return nil
+}
+
+func (r *planCommandReconciler) deliverPlanStart(ctx context.Context, command agentosplan.PlanCommandRecord) error {
+	spec, _, exists, err := r.planIndex.GetPlanByRef(ctx, planRefFromCommand(command))
+	if err != nil {
+		return r.markCommandFailed(ctx, command, err)
+	}
+	if !exists {
+		return r.markCommandFailed(ctx, command, fmt.Errorf("%w: %s", agentos.ErrPlanRouteNotFound, command.PlanID))
+	}
+	if command.IdempotencyKey != spec.IdempotencyKey {
+		err := fmt.Errorf("%w: plan.start command idempotency key does not match plan start request", agentos.ErrInvalidRunPlan)
+
+		return r.markCommandFailed(ctx, command, err)
+	}
+
+	auditRecord := planStartAuditRecord(spec)
+	if err := executePlanWorkflow(ctx, r.temporalClient, r.taskQueue, spec); err != nil {
+		return r.markCommandFailed(ctx, command, err)
+	}
+	if _, _, err := r.auditStore.RecordAudit(ctx, auditRecord); err != nil {
+		return err
+	}
+	if _, err := r.commandStore.MarkPlanCommandDelivered(ctx, agentosplan.PlanCommandRefFromRecord(command)); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func (r *planCommandReconciler) markCommandFailed(ctx context.Context, command agentosplan.PlanCommandRecord, cause error) error {
+	_, markErr := r.commandStore.MarkPlanCommandFailed(ctx, agentosplan.PlanCommandRefFromRecord(command), cause.Error())
+
+	return errors.Join(cause, markErr)
 }
 
 func commandDeliveryPayload(command agentosplan.PlanCommandRecord) (string, any, agentosplan.AuditRecord, error) {

@@ -33,7 +33,7 @@ func TestPlanCommandReconcilerDeliversRecoverableCommands(t *testing.T) {
 	}
 
 	temporalClient := &fakePlanTemporalClient{}
-	reconciler := newPlanCommandReconciler(temporalClient, store, store)
+	reconciler := newPlanCommandReconciler(temporalClient, "agentos-test", store, store, store)
 	result, err := reconciler.Recover(t.Context(), 0)
 	if err != nil {
 		t.Fatalf("Recover: %v", err)
@@ -75,7 +75,7 @@ func TestPlanCommandReconcilerMarksInvalidPayloadFailed(t *testing.T) {
 	}
 
 	temporalClient := &fakePlanTemporalClient{}
-	reconciler := newPlanCommandReconciler(temporalClient, store, store)
+	reconciler := newPlanCommandReconciler(temporalClient, "agentos-test", store, store, store)
 	result, err := reconciler.Recover(t.Context(), 0)
 	if !errors.Is(err, agentos.ErrInvalidRunPlan) {
 		t.Fatalf("Recover error = %v, want ErrInvalidRunPlan", err)
@@ -106,7 +106,7 @@ func TestWorkerKitRecoverPlanCommandsUsesReconciler(t *testing.T) {
 		t.Fatalf("RecordPlanCommand: %v", err)
 	}
 
-	kit := &WorkerKit{planCommandReconciler: newPlanCommandReconciler(&fakePlanTemporalClient{}, store, store)}
+	kit := &WorkerKit{planCommandReconciler: newPlanCommandReconciler(&fakePlanTemporalClient{}, "agentos-test", store, store, store)}
 	result, err := kit.RecoverPlanCommands(t.Context(), 1)
 	if err != nil {
 		t.Fatalf("RecoverPlanCommands: %v", err)
@@ -128,7 +128,7 @@ func TestPlanRuntimeRecoverPlanCommandsUsesReconciler(t *testing.T) {
 	}
 
 	temporalClient := &fakePlanTemporalClient{}
-	rt := &planRuntime{temporalClient: temporalClient, commandStore: store, auditStore: store}
+	rt := &planRuntime{temporalClient: temporalClient, taskQueue: "agentos-test", commandStore: store, auditStore: store, planIndex: store}
 	result, err := rt.RecoverPlanCommands(t.Context(), 1)
 	if err != nil {
 		t.Fatalf("RecoverPlanCommands: %v", err)
@@ -138,5 +138,39 @@ func TestPlanRuntimeRecoverPlanCommandsUsesReconciler(t *testing.T) {
 	}
 	if temporalClient.signalCount != 1 {
 		t.Fatalf("signal count = %d, want 1", temporalClient.signalCount)
+	}
+}
+
+func TestPlanCommandReconcilerDeliversPlanStart(t *testing.T) {
+	store, ref := newPlanRuntimeTestStore(t)
+	spec, _, exists, err := store.GetPlanByRef(t.Context(), ref)
+	if err != nil || !exists {
+		t.Fatalf("GetPlanByRef exists=%v err=%v", exists, err)
+	}
+	if _, _, err := store.RecordPlanCommand(t.Context(), planCommandFromAuditRecord(planStartAuditRecord(spec))); err != nil {
+		t.Fatalf("RecordPlanCommand: %v", err)
+	}
+
+	temporalClient := &fakePlanTemporalClient{}
+	reconciler := newPlanCommandReconciler(temporalClient, "agentos-test", store, store, store)
+	result, err := reconciler.Recover(t.Context(), 1)
+	if err != nil {
+		t.Fatalf("Recover: %v", err)
+	}
+	if result.Scanned != 1 || result.Delivered != 1 || result.Failed != 0 {
+		t.Fatalf("result = %#v", result)
+	}
+	if temporalClient.executeCount != 1 || temporalClient.executeTaskQueue != "agentos-test" {
+		t.Fatalf("execute count=%d taskQueue=%q", temporalClient.executeCount, temporalClient.executeTaskQueue)
+	}
+	command, exists, err := store.GetPlanCommand(t.Context(), planCommandRef(ref, spec.IdempotencyKey))
+	if err != nil || !exists {
+		t.Fatalf("command exists=%v err=%v", exists, err)
+	}
+	if command.Status != agentosplan.PlanCommandDelivered {
+		t.Fatalf("command = %#v, want delivered", command)
+	}
+	if _, exists, err := store.GetAuditRecord(t.Context(), planAuditRef(ref, spec.IdempotencyKey)); err != nil || !exists {
+		t.Fatalf("audit exists=%v err=%v", exists, err)
 	}
 }
