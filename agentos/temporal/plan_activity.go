@@ -27,25 +27,6 @@ type PlanNodeStarter interface {
 	StartPlanNode(ctx context.Context, planID, nodeID string, spec agentos.RunSpec) (agentos.RunStatus, error)
 }
 
-// NewPlanActivities creates plan activities backed by an AgentOS runtime.
-func NewPlanActivities(runtime agentos.Runtime) *PlanActivities {
-	activities, err := NewPlanActivitiesWithCapabilities(runtime, nil)
-	if err != nil {
-		panic(err)
-	}
-
-	return activities
-}
-
-// NewPlanActivitiesWithCapabilities creates plan activities with a static
-// capability catalog used by RunPlan validation.
-func NewPlanActivitiesWithCapabilities(runtime agentos.Runtime, capabilities []agentos.Capability) (*PlanActivities, error) {
-	store := agentosplan.NewMemoryPlanStore()
-	artifactStore := agentosplan.NewMemoryArtifactStore()
-
-	return NewPlanActivitiesWithStores(runtime, capabilities, store, store, nil, artifactStore)
-}
-
 // NewPlanActivitiesWithStores creates plan activities with explicit durable
 // state and event stores.
 func NewPlanActivitiesWithStores(

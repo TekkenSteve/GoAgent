@@ -13,7 +13,7 @@ import (
 
 func TestPlanActivitiesStartStatusControl(t *testing.T) {
 	runtime := &fakePlanRuntime{}
-	activities := NewPlanActivities(runtime)
+	activities := newTestPlanActivities(t, runtime)
 	ref := agentos.BackendRef{Kind: agentos.BackendKindNative, Name: agentos.BackendNameGoAgentNative}
 
 	started, err := activities.StartPlanNodeActivity(context.Background(), startPlanNodeInput{
@@ -51,7 +51,7 @@ func TestPlanActivitiesStartStatusControl(t *testing.T) {
 
 func TestPlanActivitiesResolvePlanNodeInputMapsInput(t *testing.T) {
 	runtime := &fakePlanRuntime{}
-	activities := NewPlanActivities(runtime)
+	activities := newTestPlanActivities(t, runtime)
 	ref := agentos.BackendRef{Kind: agentos.BackendKindNative, Name: agentos.BackendNameGoAgentNative}
 
 	resolved, err := activities.ResolvePlanNodeInputActivity(context.Background(), resolvePlanNodeInputInput{
@@ -91,7 +91,7 @@ func TestPlanActivitiesResolvePlanNodeInputMapsInput(t *testing.T) {
 
 func TestPlanActivitiesResolvePlanNodeInputDereferencesArtifactPayload(t *testing.T) {
 	ctx := context.Background()
-	activities := NewPlanActivities(&fakePlanRuntime{})
+	activities := newTestPlanActivities(t, &fakePlanRuntime{})
 	ref, err := activities.ArtifactStore.Put(ctx, agentos.ArtifactRef{
 		ArtifactID: "artifact-summary",
 		PlanID:     "plan-1",
@@ -139,7 +139,7 @@ func TestPlanActivitiesResolvePlanNodeInputDereferencesArtifactPayload(t *testin
 }
 
 func TestPlanActivitiesPublishArtifactsIsIdempotent(t *testing.T) {
-	activities := NewPlanActivities(&fakePlanRuntime{})
+	activities := newTestPlanActivities(t, &fakePlanRuntime{})
 	input := publishPlanArtifactsInput{
 		PlanID: "plan-1",
 		Node: agentos.PlanNodeSpec{
@@ -175,7 +175,7 @@ func TestPlanActivitiesPublishArtifactsIsIdempotent(t *testing.T) {
 
 func TestPlanActivitiesPublishArtifactsRetainsStoredPayload(t *testing.T) {
 	ctx := context.Background()
-	activities := NewPlanActivities(&fakePlanRuntime{})
+	activities := newTestPlanActivities(t, &fakePlanRuntime{})
 	node := agentos.PlanNodeSpec{NodeID: "research"}
 	status := agentos.RunStatus{RunID: "run-research"}
 	key, err := agentosplan.ArtifactPublishIdempotencyKey("plan-1", node.NodeID, status.RunID, "summary")
@@ -223,11 +223,10 @@ func TestPlanActivitiesPublishArtifactsRetainsStoredPayload(t *testing.T) {
 
 func TestPlanActivitiesPublishArtifactsValidatesSuccessfulOutputContract(t *testing.T) {
 	ref := agentos.BackendRef{Kind: agentos.BackendKindHTTP, Name: "research"}
-	activities, err := NewPlanActivitiesWithCapabilities(&fakePlanRuntime{}, []agentos.Capability{
-		{
-			Backend: ref,
-			Name:    "run",
-			OutputSchema: json.RawMessage(`{
+	activities := newTestPlanActivities(t, &fakePlanRuntime{}, agentos.Capability{
+		Backend: ref,
+		Name:    "run",
+		OutputSchema: json.RawMessage(`{
 				"type": "object",
 				"properties": {
 					"artifacts": {
@@ -249,13 +248,9 @@ func TestPlanActivitiesPublishArtifactsValidatesSuccessfulOutputContract(t *test
 				},
 				"required": ["artifacts"]
 			}`),
-		},
 	})
-	if err != nil {
-		t.Fatalf("NewPlanActivitiesWithCapabilities: %v", err)
-	}
 
-	_, err = activities.PublishPlanArtifactsActivity(context.Background(), publishPlanArtifactsInput{
+	_, err := activities.PublishPlanArtifactsActivity(context.Background(), publishPlanArtifactsInput{
 		PlanID: "plan-1",
 		Node: agentos.PlanNodeSpec{
 			NodeID:     "research",
@@ -285,7 +280,7 @@ func TestPlanActivitiesPublishArtifactsValidatesSuccessfulOutputContract(t *test
 }
 
 func TestPlanActivitiesPublishArtifactsDoesNotRequireOutputsForFailedRun(t *testing.T) {
-	activities := NewPlanActivities(&fakePlanRuntime{})
+	activities := newTestPlanActivities(t, &fakePlanRuntime{})
 	_, err := activities.PublishPlanArtifactsActivity(context.Background(), publishPlanArtifactsInput{
 		PlanID: "plan-1",
 		Node: agentos.PlanNodeSpec{
@@ -305,7 +300,7 @@ func TestPlanActivitiesPublishArtifactsDoesNotRequireOutputsForFailedRun(t *test
 }
 
 func TestPlanActivitiesPersistPlanStatePublishesStoredEvent(t *testing.T) {
-	activities := NewPlanActivities(&fakePlanRuntime{})
+	activities := newTestPlanActivities(t, &fakePlanRuntime{})
 	publisher := &fakePlanEventPublisher{}
 	activities.PlanEventPublisher = publisher
 
@@ -406,14 +401,12 @@ func TestPlanActivitiesEvaluatePlanExpansionValidatesDelta(t *testing.T) {
 
 func TestPlanActivitiesValidatePlanUsesCapabilityCatalog(t *testing.T) {
 	ref := agentos.BackendRef{Kind: agentos.BackendKindHTTP, Name: "research"}
-	activities, err := NewPlanActivitiesWithCapabilities(&fakePlanRuntime{}, []agentos.Capability{
-		{Backend: ref, Name: "known"},
+	activities := newTestPlanActivities(t, &fakePlanRuntime{}, agentos.Capability{
+		Backend: ref,
+		Name:    "known",
 	})
-	if err != nil {
-		t.Fatalf("NewPlanActivitiesWithCapabilities: %v", err)
-	}
 
-	_, err = activities.ValidatePlanActivity(context.Background(), validatePlanInput{
+	_, err := activities.ValidatePlanActivity(context.Background(), validatePlanInput{
 		Spec: agentos.RunPlanSpec{
 			PlanID: "plan-1",
 			Nodes: []agentos.PlanNodeSpec{
@@ -457,12 +450,11 @@ func TestPlanActivitiesValidatePlanUsesCapabilityCatalog(t *testing.T) {
 
 func TestPlanActivitiesValidatePlanReturnsCapabilityControls(t *testing.T) {
 	ref := agentos.BackendRef{Kind: agentos.BackendKindHTTP, Name: "research"}
-	activities, err := NewPlanActivitiesWithCapabilities(&fakePlanRuntime{}, []agentos.Capability{
-		{Backend: ref, Name: "known", Controls: []agentos.ControlOperation{agentos.ControlPause, agentos.ControlResume}},
+	activities := newTestPlanActivities(t, &fakePlanRuntime{}, agentos.Capability{
+		Backend:  ref,
+		Name:     "known",
+		Controls: []agentos.ControlOperation{agentos.ControlPause, agentos.ControlResume},
 	})
-	if err != nil {
-		t.Fatalf("NewPlanActivitiesWithCapabilities: %v", err)
-	}
 
 	output, err := activities.ValidatePlanActivity(context.Background(), validatePlanInput{
 		Spec: agentos.RunPlanSpec{
@@ -529,6 +521,25 @@ func TestPlanActivitiesValidatePlanUsesInjectedCapabilityCatalog(t *testing.T) {
 	if got := output.ControlsByNode["research"]; len(got) != 1 || got[0] != agentos.ControlCancel {
 		t.Fatalf("controls = %#v", output.ControlsByNode)
 	}
+}
+
+func newTestPlanActivities(t *testing.T, runtime agentos.Runtime, capabilities ...agentos.Capability) *PlanActivities {
+	t.Helper()
+
+	store := agentosplan.NewMemoryPlanStore()
+	activities, err := NewPlanActivitiesWithStores(
+		runtime,
+		capabilities,
+		store,
+		store,
+		nil,
+		agentosplan.NewMemoryArtifactStore(),
+	)
+	if err != nil {
+		t.Fatalf("NewPlanActivitiesWithStores: %v", err)
+	}
+
+	return activities
 }
 
 type fakePlanRuntime struct {

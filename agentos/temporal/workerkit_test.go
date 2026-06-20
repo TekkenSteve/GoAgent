@@ -63,7 +63,7 @@ func TestNewWorkerKitRequiresS3ArtifactStoreBucket(t *testing.T) {
 }
 
 func TestWorkerKitRegistersPlanWorkflowAndActivities(t *testing.T) {
-	kit := &WorkerKit{planActivities: NewPlanActivities(&fakePlanRuntime{})}
+	kit := &WorkerKit{planActivities: newTestPlanActivities(t, &fakePlanRuntime{})}
 	worker := &fakeWorker{}
 
 	if err := kit.Register(worker); err != nil {
