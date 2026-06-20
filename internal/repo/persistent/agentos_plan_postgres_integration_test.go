@@ -58,6 +58,7 @@ func TestAgentOSPlanPostgresDurablePersistence(t *testing.T) {
 	assertPostgresForeignKeyConstraint(t, pg, "audit_logs_plan_node_fk")
 	assertPostgresForeignKeyConstraint(t, pg, "audit_logs_plan_node_run_fk")
 	assertPostgresTrigger(t, pg, "plan_commands_status_lifecycle")
+	assertPostgresTrigger(t, pg, "plan_commands_delivered_audit")
 
 	ctx := t.Context()
 	planRepo := NewAgentOSPlanRepo(pg)
@@ -257,6 +258,9 @@ INSERT INTO plan_commands (
 	}
 	if _, err := planRepo.MarkPlanCommandDelivered(ctx, agentosplan.PlanCommandRefFromRecord(command)); !errors.Is(err, agentos.ErrInvalidRunPlan) {
 		t.Fatalf("MarkPlanCommandDelivered without audit error = %v, want ErrInvalidRunPlan", err)
+	}
+	if _, err := pg.Pool.Exec(ctx, `UPDATE plan_commands SET status = 'delivered' WHERE command_id = $1`, command.CommandID); err == nil {
+		t.Fatal("direct plan command delivered update without audit succeeded")
 	}
 	if _, _, err := planRepo.RecordAudit(ctx, agentosplan.AuditRecordFromPlanCommand(command)); err != nil {
 		t.Fatalf("RecordAudit for command: %v", err)
@@ -1345,6 +1349,8 @@ func applyAgentOSPlanMigrations(t *testing.T, pg *postgres.Postgres) {
 		"20260620000005_constrain_artifact_plan_scope.up.sql",
 		"20260620000006_constrain_audit_log_plan_scope.up.sql",
 		"20260620000007_enforce_plan_command_lifecycle.up.sql",
+		"20260620000008_add_plan_event_transition_snapshots.up.sql",
+		"20260620000009_require_delivered_command_audit.up.sql",
 	} {
 		path := filepath.Join("..", "..", "..", "migrations", migration)
 		data, err := os.ReadFile(path)
