@@ -131,6 +131,93 @@ func TestHTTPAgentOSRunPlanNativeCancelV1(t *testing.T) {
 	requirePlanAudit(t, audits, agentos.PlanAuditActionControl)
 }
 
+func TestHTTPAgentOSRunPlanMixedBackendsV1(t *testing.T) {
+	now := time.Now().UnixNano()
+	planID := fmt.Sprintf("e2e-mixed-plan-%d", now)
+	nativeRunID := fmt.Sprintf("e2e-mixed-native-%d", now)
+	temporalRunID := fmt.Sprintf("e2e-mixed-temporal-%d", now)
+	httpRunID := fmt.Sprintf("e2e-mixed-http-%d", now)
+	grpcRunID := fmt.Sprintf("e2e-mixed-grpc-%d", now)
+
+	nativeBackend := agentos.BackendRef{Kind: agentos.BackendKindNative, Name: agentos.BackendNameGoAgentNative}
+	temporalBackend := agentos.BackendRef{Kind: agentos.BackendKindTemporalExternal, Name: "mock-temporal"}
+	httpBackend := agentos.BackendRef{Kind: agentos.BackendKindHTTP, Name: "mock-http"}
+	grpcBackend := agentos.BackendRef{Kind: agentos.BackendKindGRPC, Name: "mock-grpc"}
+
+	started := startAgentOSPlanSpec(t, agentos.RunPlanSpec{
+		PlanID:         planID,
+		ThreadID:       planID + "-thread",
+		AccountID:      agentOSPlanAccountID,
+		ProjectID:      agentOSPlanProjectID,
+		IdempotencyKey: planID + "-start",
+		RequestedAt:    time.Now().UTC(),
+		Policy:         agentos.PlanPolicy{MaxParallelNodes: 4},
+		Nodes: []agentos.PlanNodeSpec{
+			mixedPlanNode("native", nativeRunID, nativeBackend, "Start a native AgentOS plan integration test and wait for follow-up input."),
+			mixedPlanNode("temporal", temporalRunID, temporalBackend, "temporal external child run"),
+			mixedPlanNode("http", httpRunID, httpBackend, "http child run"),
+			mixedPlanNode("grpc", grpcRunID, grpcBackend, "grpc child run"),
+		},
+	})
+	if started.PlanID != planID {
+		t.Fatalf("start status = %#v", started)
+	}
+
+	running := waitForPlanNodeStates(t, planID, map[string]string{
+		"native":   agentos.PlanNodeRunning,
+		"temporal": agentos.PlanNodeSucceeded,
+		"http":     agentos.PlanNodeSucceeded,
+		"grpc":     agentos.PlanNodeSucceeded,
+	})
+	requirePlanNodeBackend(t, running, "native", nativeRunID, nativeBackend)
+	requirePlanNodeBackend(t, running, "temporal", temporalRunID, temporalBackend)
+	requirePlanNodeBackend(t, running, "http", httpRunID, httpBackend)
+	requirePlanNodeBackend(t, running, "grpc", grpcRunID, grpcBackend)
+
+	description := getAgentOSPlanDescription(t, planID)
+	if len(description.Topology.Nodes) != 4 {
+		t.Fatalf("description topology = %#v", description.Topology)
+	}
+
+	events := listAgentOSPlanEvents(t, planID)
+	requirePlanEvent(t, events, agentos.EventPlanStarted)
+	requirePlanEvent(t, events, agentos.EventPlanNodeSucceeded)
+	requirePlanEvent(t, events, agentos.EventUsageReported)
+
+	traces := listAgentOSPlanDebugTraces(t, planID)
+	requireCapabilityTraceForBackend(t, traces, nativeBackend)
+	requireCapabilityTraceForBackend(t, traces, temporalBackend)
+	requireCapabilityTraceForBackend(t, traces, httpBackend)
+	requireCapabilityTraceForBackend(t, traces, grpcBackend)
+
+	controlAgentOSPlan(t, planID, agentos.ControlCancel, fmt.Sprintf("%s-cancel", planID))
+	canceled := waitForPlanLifecycle(t, planID, agentos.PlanLifecycleCanceled)
+	canceledNative := requirePlanNode(t, canceled, "native")
+	if canceledNative.LifecycleState != agentos.PlanNodeCanceled {
+		t.Fatalf("native node after plan cancel = %#v", canceledNative)
+	}
+
+	audits := listAgentOSPlanAudits(t, planID)
+	requirePlanAudit(t, audits, agentos.PlanAuditActionStart)
+	requirePlanAudit(t, audits, agentos.PlanAuditActionControl)
+}
+
+func mixedPlanNode(nodeID, runID string, backend agentos.BackendRef, message string) agentos.PlanNodeSpec {
+	return agentos.PlanNodeSpec{
+		NodeID:     nodeID,
+		Capability: agentos.CapabilityRun,
+		Run: agentos.RunSpec{
+			RunID:          runID,
+			ThreadID:       runID + "-thread",
+			AccountID:      agentOSPlanAccountID,
+			ProjectID:      agentOSPlanProjectID,
+			UserMessage:    message,
+			IdempotencyKey: runID + "-start",
+			Backend:        backend,
+		},
+	}
+}
+
 func startAgentOSPlan(t *testing.T, planID, runID string) planStatus {
 	t.Helper()
 
@@ -160,6 +247,12 @@ func startAgentOSPlan(t *testing.T, planID, runID string) planStatus {
 			},
 		},
 	}
+	return startAgentOSPlanSpec(t, spec)
+}
+
+func startAgentOSPlanSpec(t *testing.T, spec agentos.RunPlanSpec) planStatus {
+	t.Helper()
+
 	body, err := json.Marshal(spec)
 	if err != nil {
 		t.Fatalf("startAgentOSPlan: marshal: %v", err)
@@ -200,6 +293,31 @@ func waitForPlanNodeState(t *testing.T, planID, nodeID, lifecycle string) planSt
 	}
 
 	t.Fatalf("timed out waiting for plan %s node %s to reach %s", planID, nodeID, lifecycle)
+
+	return planStatus{}
+}
+
+func waitForPlanNodeStates(t *testing.T, planID string, expected map[string]string) planStatus {
+	t.Helper()
+
+	for range 60 {
+		status := getAgentOSPlanStatus(t, planID)
+		matches := 0
+		for nodeID, lifecycle := range expected {
+			for _, node := range status.Nodes {
+				if node.NodeID == nodeID && node.LifecycleState == lifecycle {
+					matches++
+					break
+				}
+			}
+		}
+		if matches == len(expected) {
+			return status
+		}
+		time.Sleep(time.Second)
+	}
+
+	t.Fatalf("timed out waiting for plan %s nodes to reach %#v", planID, expected)
 
 	return planStatus{}
 }
@@ -352,6 +470,15 @@ func requirePlanNode(t *testing.T, status planStatus, nodeID string) planNodeSta
 	return planNodeStatus{}
 }
 
+func requirePlanNodeBackend(t *testing.T, status planStatus, nodeID, runID string, backend agentos.BackendRef) {
+	t.Helper()
+
+	node := requirePlanNode(t, status, nodeID)
+	if node.RunID != runID || node.Backend != backend {
+		t.Fatalf("node %s = %#v, want run %s backend %#v", nodeID, node, runID, backend)
+	}
+}
+
 func requirePlanEvent(t *testing.T, events []planEvent, eventType agentos.EventType) {
 	t.Helper()
 
@@ -379,6 +506,21 @@ func requireCapabilityTrace(t *testing.T, traces []planDebugTrace) {
 	}
 
 	t.Fatalf("missing native capability trace in %#v", traces)
+}
+
+func requireCapabilityTraceForBackend(t *testing.T, traces []planDebugTrace, backend agentos.BackendRef) {
+	t.Helper()
+
+	for _, trace := range traces {
+		if trace.Capability == nil {
+			continue
+		}
+		if trace.Capability.Backend == backend && trace.Capability.Capability == agentos.CapabilityRun {
+			return
+		}
+	}
+
+	t.Fatalf("missing capability trace for backend %#v in %#v", backend, traces)
 }
 
 func requirePlanAudit(t *testing.T, audits []planAuditRecord, action agentos.PlanAuditAction) {
