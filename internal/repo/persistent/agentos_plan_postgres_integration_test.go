@@ -129,6 +129,14 @@ func TestAgentOSPlanPostgresDurablePersistence(t *testing.T) {
 	if len(events) != 1 || events[0].EventID != firstEvent.EventID {
 		t.Fatalf("ListPlanEvents = %#v", events)
 	}
+	assertPostgresPlanEventScope(t, pg, firstEvent.EventID, spec.AccountID, spec.ProjectID)
+	if _, err := planRepo.ListPlanEvents(ctx, agentos.PlanStreamScope{
+		PlanID:    spec.PlanID,
+		AccountID: "acct-other",
+		ProjectID: spec.ProjectID,
+	}, 0); !errors.Is(err, agentos.ErrPlanRouteNotFound) {
+		t.Fatalf("ListPlanEvents mismatch error = %v, want ErrPlanRouteNotFound", err)
+	}
 
 	audit, created, err := planRepo.RecordAudit(ctx, agentosplan.AuditRecord{
 		PlanID:         spec.PlanID,
@@ -654,6 +662,23 @@ func postgresIntegrationPlanStreamScope(spec agentos.RunPlanSpec) agentos.PlanSt
 		PlanID:    spec.PlanID,
 		AccountID: spec.AccountID,
 		ProjectID: spec.ProjectID,
+	}
+}
+
+func assertPostgresPlanEventScope(t *testing.T, pg *postgres.Postgres, eventID, accountID, projectID string) {
+	t.Helper()
+
+	var storedAccountID string
+	var storedProjectID string
+	err := pg.Pool.QueryRow(t.Context(), `
+SELECT account_id, project_id
+FROM plan_events
+WHERE event_id = $1`, eventID).Scan(&storedAccountID, &storedProjectID)
+	if err != nil {
+		t.Fatalf("read plan event tenant scope: %v", err)
+	}
+	if storedAccountID != accountID || storedProjectID != projectID {
+		t.Fatalf("plan event tenant scope = %s/%s, want %s/%s", storedAccountID, storedProjectID, accountID, projectID)
 	}
 }
 
