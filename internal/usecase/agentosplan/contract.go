@@ -138,9 +138,17 @@ type PlanEventPublisher interface {
 	PublishPlanEvent(ctx context.Context, event agentos.PlanEvent) error
 }
 
+// PlanEventSubscription is the typed live tail for public RunPlan events.
+// Public Runtime APIs project these typed events into agentos.Event only at the
+// subscription boundary.
+type PlanEventSubscription interface {
+	Events() <-chan agentos.PlanEvent
+	Close() error
+}
+
 // PlanEventSubscriber subscribes to the live PlanEvent tail.
 type PlanEventSubscriber interface {
-	SubscribePlanEvents(ctx context.Context, scope agentos.PlanStreamScope) (agentos.Subscription, error)
+	SubscribePlanEvents(ctx context.Context, scope agentos.PlanStreamScope) (PlanEventSubscription, error)
 }
 
 // AuditAction identifies durable control-plane actions.

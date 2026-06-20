@@ -40,9 +40,10 @@ func TestNewPlanReplaySubscriptionPreservesPlanScopeInPayload(t *testing.T) {
 }
 
 func TestNewPlanReplayThenLiveSubscription(t *testing.T) {
-	liveEvents := make(chan agentos.Event, 1)
-	live := &fakeAgentOSSubscription{events: liveEvents}
-	sub := newPlanReplayThenLiveSubscription([]agentos.PlanEvent{
+	liveEvents := make(chan agentos.PlanEvent, 1)
+	live := &fakePlanEventSubscription{events: liveEvents}
+	scope := agentos.PlanStreamScope{PlanID: "plan-1", AccountID: "acct-1", ProjectID: "proj-1"}
+	sub := newPlanReplayThenLiveSubscription(scope, []agentos.PlanEvent{
 		{
 			Event: agentos.Event{
 				EventID:   "evt-replay",
@@ -60,7 +61,16 @@ func TestNewPlanReplayThenLiveSubscription(t *testing.T) {
 		t.Fatalf("replay event = %#v", replay)
 	}
 
-	liveEvents <- agentos.Event{EventID: "evt-live", EventType: agentos.EventPlanNodeStarted, Sequence: 2}
+	liveEvents <- agentos.PlanEvent{
+		Event: agentos.Event{
+			EventID:   "evt-live",
+			EventType: agentos.EventPlanNodeStarted,
+			Sequence:  2,
+		},
+		PlanID:    "plan-1",
+		AccountID: "acct-1",
+		ProjectID: "proj-1",
+	}
 	gotLive := <-sub.Events()
 	if gotLive.EventID != "evt-live" {
 		t.Fatalf("live event = %#v", gotLive)
@@ -75,9 +85,10 @@ func TestNewPlanReplayThenLiveSubscription(t *testing.T) {
 }
 
 func TestNewPlanReplayThenLiveSubscriptionAfterFiltersCoveredLiveEvents(t *testing.T) {
-	liveEvents := make(chan agentos.Event, 2)
-	live := &fakeAgentOSSubscription{events: liveEvents}
-	sub := newPlanReplayThenLiveSubscriptionAfter([]agentos.PlanEvent{
+	liveEvents := make(chan agentos.PlanEvent, 3)
+	live := &fakePlanEventSubscription{events: liveEvents}
+	scope := agentos.PlanStreamScope{PlanID: "plan-1", AccountID: "acct-1", ProjectID: "proj-1"}
+	sub := newPlanReplayThenLiveSubscriptionAfter(scope, []agentos.PlanEvent{
 		{
 			Event: agentos.Event{
 				EventID:   "evt-catch-up",
@@ -94,8 +105,36 @@ func TestNewPlanReplayThenLiveSubscriptionAfterFiltersCoveredLiveEvents(t *testi
 	if replay.EventID != "evt-catch-up" {
 		t.Fatalf("replay event = %#v", replay)
 	}
-	liveEvents <- agentos.Event{EventID: "evt-duplicate", EventType: agentos.EventPlanNodeStarted, Sequence: 2}
-	liveEvents <- agentos.Event{EventID: "evt-live", EventType: agentos.EventPlanNodeSucceeded, Sequence: 3}
+	liveEvents <- agentos.PlanEvent{
+		Event: agentos.Event{
+			EventID:   "evt-duplicate",
+			EventType: agentos.EventPlanNodeStarted,
+			Sequence:  2,
+		},
+		PlanID:    "plan-1",
+		AccountID: "acct-1",
+		ProjectID: "proj-1",
+	}
+	liveEvents <- agentos.PlanEvent{
+		Event: agentos.Event{
+			EventID:   "evt-other-plan",
+			EventType: agentos.EventPlanNodeStarted,
+			Sequence:  3,
+		},
+		PlanID:    "plan-other",
+		AccountID: "acct-1",
+		ProjectID: "proj-1",
+	}
+	liveEvents <- agentos.PlanEvent{
+		Event: agentos.Event{
+			EventID:   "evt-live",
+			EventType: agentos.EventPlanNodeSucceeded,
+			Sequence:  4,
+		},
+		PlanID:    "plan-1",
+		AccountID: "acct-1",
+		ProjectID: "proj-1",
+	}
 
 	gotLive := <-sub.Events()
 	if gotLive.EventID != "evt-live" {
@@ -113,16 +152,16 @@ func TestLastPlanEventSequence(t *testing.T) {
 	}
 }
 
-type fakeAgentOSSubscription struct {
-	events <-chan agentos.Event
+type fakePlanEventSubscription struct {
+	events <-chan agentos.PlanEvent
 	closed bool
 }
 
-func (s *fakeAgentOSSubscription) Events() <-chan agentos.Event {
+func (s *fakePlanEventSubscription) Events() <-chan agentos.PlanEvent {
 	return s.events
 }
 
-func (s *fakeAgentOSSubscription) Close() error {
+func (s *fakePlanEventSubscription) Close() error {
 	s.closed = true
 
 	return nil

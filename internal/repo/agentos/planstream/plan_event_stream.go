@@ -98,7 +98,7 @@ func (s *RedisPlanEventStream) PublishPlanEvent(ctx context.Context, event agent
 
 // SubscribePlanEvents subscribes to live PlanEvents. Durable replay and
 // catch-up are owned by the Postgres PlanEventStore.
-func (s *RedisPlanEventStream) SubscribePlanEvents(_ context.Context, scope agentos.PlanStreamScope) (agentos.Subscription, error) {
+func (s *RedisPlanEventStream) SubscribePlanEvents(_ context.Context, scope agentos.PlanStreamScope) (agentosplan.PlanEventSubscription, error) {
 	if err := agentosplan.ValidatePlanStreamScope(scope); err != nil {
 		return nil, err
 	}
@@ -107,7 +107,7 @@ func (s *RedisPlanEventStream) SubscribePlanEvents(_ context.Context, scope agen
 	}
 
 	hubSub := s.hub.Subscribe(planEventStreamKey(planStreamRef(scope)), planEventSubscriptionStartID(scope))
-	out := make(chan agentos.Event, subscriberBufferSize)
+	out := make(chan agentos.PlanEvent, subscriberBufferSize)
 	go func() {
 		defer close(out)
 		for entry := range hubSub.C {
@@ -116,7 +116,7 @@ func (s *RedisPlanEventStream) SubscribePlanEvents(_ context.Context, scope agen
 				continue
 			}
 
-			out <- planEvent.ToEvent()
+			out <- planEvent
 		}
 	}()
 
@@ -151,11 +151,11 @@ func (s *RedisPlanEventStream) planEventAt(ctx context.Context, streamKey string
 }
 
 type planLiveSubscription struct {
-	events <-chan agentos.Event
+	events <-chan agentos.PlanEvent
 	close  func() error
 }
 
-func (s *planLiveSubscription) Events() <-chan agentos.Event {
+func (s *planLiveSubscription) Events() <-chan agentos.PlanEvent {
 	return s.events
 }
 

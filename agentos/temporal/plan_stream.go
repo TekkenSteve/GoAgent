@@ -4,6 +4,7 @@ import (
 	"sync"
 
 	"github.com/TekkenSteve/GoAgent/agentos"
+	"github.com/TekkenSteve/GoAgent/internal/usecase/agentosplan"
 )
 
 func newPlanReplaySubscription(planEvents []agentos.PlanEvent) agentos.Subscription {
@@ -16,11 +17,11 @@ func newPlanReplaySubscription(planEvents []agentos.PlanEvent) agentos.Subscript
 	return &subscription{events: out}
 }
 
-func newPlanReplayThenLiveSubscription(planEvents []agentos.PlanEvent, live agentos.Subscription) agentos.Subscription {
-	return newPlanReplayThenLiveSubscriptionAfter(planEvents, live, 0)
+func newPlanReplayThenLiveSubscription(scope agentos.PlanStreamScope, planEvents []agentos.PlanEvent, live agentosplan.PlanEventSubscription) agentos.Subscription {
+	return newPlanReplayThenLiveSubscriptionAfter(scope, planEvents, live, 0)
 }
 
-func newPlanReplayThenLiveSubscriptionAfter(planEvents []agentos.PlanEvent, live agentos.Subscription, liveAfterSequence int64) agentos.Subscription {
+func newPlanReplayThenLiveSubscriptionAfter(scope agentos.PlanStreamScope, planEvents []agentos.PlanEvent, live agentosplan.PlanEventSubscription, liveAfterSequence int64) agentos.Subscription {
 	if live == nil {
 		return newPlanReplaySubscription(planEvents)
 	}
@@ -45,13 +46,13 @@ func newPlanReplayThenLiveSubscriptionAfter(planEvents []agentos.PlanEvent, live
 				if !ok {
 					return
 				}
-				if event.Sequence <= liveAfterSequence {
+				if event.Sequence <= liveAfterSequence || !planEventMatchesSubscriptionScope(event, scope) {
 					continue
 				}
 				select {
 				case <-done:
 					return
-				case out <- event:
+				case out <- event.ToEvent():
 				}
 			}
 		}
@@ -69,6 +70,26 @@ func newPlanReplayThenLiveSubscriptionAfter(planEvents []agentos.PlanEvent, live
 			return err
 		},
 	}
+}
+
+func planEventMatchesSubscriptionScope(event agentos.PlanEvent, scope agentos.PlanStreamScope) bool {
+	if event.PlanID != scope.PlanID {
+		return false
+	}
+	if event.AccountID != scope.AccountID {
+		return false
+	}
+	if event.ProjectID != scope.ProjectID {
+		return false
+	}
+	if scope.NodeID != "" && event.NodeID != scope.NodeID {
+		return false
+	}
+	if scope.RunID != "" && event.RunID != scope.RunID {
+		return false
+	}
+
+	return true
 }
 
 func lastPlanEventSequence(afterSequence int64, planEvents []agentos.PlanEvent) int64 {

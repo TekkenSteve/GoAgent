@@ -1070,7 +1070,7 @@ type catchUpPlanEventSubscriber struct {
 	append func(context.Context, agentos.PlanStreamScope) error
 }
 
-func (s *catchUpPlanEventSubscriber) SubscribePlanEvents(ctx context.Context, scope agentos.PlanStreamScope) (agentos.Subscription, error) {
+func (s *catchUpPlanEventSubscriber) SubscribePlanEvents(ctx context.Context, scope agentos.PlanStreamScope) (agentosplan.PlanEventSubscription, error) {
 	s.scope = scope
 	if s.append != nil {
 		if err := s.append(ctx, scope); err != nil {
@@ -1078,5 +1078,5 @@ func (s *catchUpPlanEventSubscriber) SubscribePlanEvents(ctx context.Context, sc
 		}
 	}
 
-	return &fakeAgentOSSubscription{events: make(chan agentos.Event)}, nil
+	return &fakePlanEventSubscription{events: make(chan agentos.PlanEvent)}, nil
 }
