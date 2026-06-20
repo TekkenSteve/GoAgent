@@ -15,10 +15,11 @@ func TestPlanCommandReconcilerDeliversRecoverableCommands(t *testing.T) {
 		IdempotencyKey: "approve-1",
 		ActorID:        "operator-1",
 	}
-	if _, _, err := store.RecordPlanCommand(t.Context(), planCommandFromAuditRecord(planSignalAuditRecord(ref, signal))); err != nil {
+	signalCommand, _, err := store.RecordPlanCommand(t.Context(), planCommandFromAuditRecord(planSignalAuditRecord(ref, signal)))
+	if err != nil {
 		t.Fatalf("RecordPlanCommand signal: %v", err)
 	}
-	if _, err := store.MarkPlanCommandFailed(t.Context(), signal.IdempotencyKey, "previous delivery failed"); err != nil {
+	if _, err := store.MarkPlanCommandFailed(t.Context(), agentosplan.PlanCommandRefFromRecord(signalCommand), "previous delivery failed"); err != nil {
 		t.Fatalf("MarkPlanCommandFailed: %v", err)
 	}
 	control := agentos.ControlRequest{
@@ -44,14 +45,14 @@ func TestPlanCommandReconcilerDeliversRecoverableCommands(t *testing.T) {
 		t.Fatalf("signal count = %d, want 2", temporalClient.signalCount)
 	}
 	for _, key := range []string{signal.IdempotencyKey, control.IdempotencyKey} {
-		command, exists, err := store.GetPlanCommand(t.Context(), key)
+		command, exists, err := store.GetPlanCommand(t.Context(), planCommandRef(ref, key))
 		if err != nil || !exists {
 			t.Fatalf("command %s exists=%v err=%v", key, exists, err)
 		}
 		if command.Status != agentosplan.PlanCommandDelivered {
 			t.Fatalf("command %s = %#v, want delivered", key, command)
 		}
-		if _, exists, err := store.GetAuditRecord(t.Context(), key); err != nil || !exists {
+		if _, exists, err := store.GetAuditRecord(t.Context(), planAuditRef(ref, key)); err != nil || !exists {
 			t.Fatalf("audit %s exists=%v err=%v", key, exists, err)
 		}
 	}
@@ -85,7 +86,7 @@ func TestPlanCommandReconcilerMarksInvalidPayloadFailed(t *testing.T) {
 	if temporalClient.signalCount != 0 {
 		t.Fatalf("signal count = %d, want 0", temporalClient.signalCount)
 	}
-	command, exists, lookupErr := store.GetPlanCommand(t.Context(), "invalid-signal-1")
+	command, exists, lookupErr := store.GetPlanCommand(t.Context(), planCommandRef(ref, "invalid-signal-1"))
 	if lookupErr != nil || !exists {
 		t.Fatalf("command exists=%v err=%v", exists, lookupErr)
 	}

@@ -33,3 +33,25 @@ func RecoverablePlanCommandStatuses(scope PlanCommandScope) ([]PlanCommandStatus
 
 	return statuses, nil
 }
+
+func ValidatePlanCommandRef(ref PlanCommandRef) error {
+	if err := ValidatePlanRef(agentos.PlanRef{PlanID: ref.PlanID, AccountID: ref.AccountID, ProjectID: ref.ProjectID}); err != nil {
+		return err
+	}
+	if ref.IdempotencyKey == "" {
+		return fmt.Errorf("%w: command idempotency key is required", agentos.ErrInvalidRunPlan)
+	}
+
+	return nil
+}
+
+func ValidateAuditRef(ref AuditRef) error {
+	if err := ValidatePlanRef(agentos.PlanRef{PlanID: ref.PlanID, AccountID: ref.AccountID, ProjectID: ref.ProjectID}); err != nil {
+		return err
+	}
+	if ref.IdempotencyKey == "" {
+		return fmt.Errorf("%w: audit idempotency key is required", agentos.ErrInvalidRunPlan)
+	}
+
+	return nil
+}

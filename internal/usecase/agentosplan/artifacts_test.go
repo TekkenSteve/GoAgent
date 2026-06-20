@@ -73,6 +73,30 @@ func TestMemoryArtifactStorePutIsIdempotent(t *testing.T) {
 	}
 }
 
+func TestMemoryArtifactStoreScopesIdempotencyKeyByPlan(t *testing.T) {
+	store := NewMemoryArtifactStore()
+	first, err := store.Put(context.Background(), agentos.ArtifactRef{
+		PlanID: "plan-1",
+		Name:   "summary",
+		Kind:   agentos.ArtifactKindObject,
+	}, map[string]any{"value": "first"}, "shared-key")
+	if err != nil {
+		t.Fatalf("first Put: %v", err)
+	}
+
+	second, err := store.Put(context.Background(), agentos.ArtifactRef{
+		PlanID: "plan-2",
+		Name:   "summary",
+		Kind:   agentos.ArtifactKindObject,
+	}, map[string]any{"value": "second"}, "shared-key")
+	if err != nil {
+		t.Fatalf("second Put: %v", err)
+	}
+	if second.ArtifactID == first.ArtifactID {
+		t.Fatalf("artifact id = %q for both plans", first.ArtifactID)
+	}
+}
+
 func TestMemoryArtifactStoreRejectsDifferentIdempotencyReplay(t *testing.T) {
 	store := NewMemoryArtifactStore()
 	_, err := store.Put(context.Background(), agentos.ArtifactRef{

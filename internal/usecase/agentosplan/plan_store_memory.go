@@ -16,16 +16,22 @@ type MemoryPlanStore struct {
 	mu        sync.RWMutex
 	specs     map[string]agentos.RunPlanSpec
 	statuses  map[string]agentos.RunPlanStatus
-	planKeys  map[string]string
+	planKeys  map[planStartKey]string
 	events    map[string][]agentos.PlanEvent
 	eventKeys map[planEventIdempotencyKey]agentos.PlanEvent
-	commands  map[string]PlanCommandRecord
-	auditKeys map[string]AuditRecord
+	commands  map[PlanCommandRef]PlanCommandRecord
+	auditKeys map[AuditRef]AuditRecord
 	metrics   map[planMetricCheckpointKey]PlanMetricCheckpoint
 }
 
 type planEventIdempotencyKey struct {
 	PlanID         string
+	IdempotencyKey string
+}
+
+type planStartKey struct {
+	AccountID      string
+	ProjectID      string
 	IdempotencyKey string
 }
 
@@ -50,11 +56,11 @@ func NewMemoryPlanStore() *MemoryPlanStore {
 	return &MemoryPlanStore{
 		specs:     make(map[string]agentos.RunPlanSpec),
 		statuses:  make(map[string]agentos.RunPlanStatus),
-		planKeys:  make(map[string]string),
+		planKeys:  make(map[planStartKey]string),
 		events:    make(map[string][]agentos.PlanEvent),
 		eventKeys: make(map[planEventIdempotencyKey]agentos.PlanEvent),
-		commands:  make(map[string]PlanCommandRecord),
-		auditKeys: make(map[string]AuditRecord),
+		commands:  make(map[PlanCommandRef]PlanCommandRecord),
+		auditKeys: make(map[AuditRef]AuditRecord),
 		metrics:   make(map[planMetricCheckpointKey]PlanMetricCheckpoint),
 	}
 }
@@ -66,8 +72,13 @@ func (s *MemoryPlanStore) CreatePlan(ctx context.Context, spec agentos.RunPlanSp
 	if spec.IdempotencyKey == "" {
 		return agentos.RunPlanStatus{}, false, fmt.Errorf("%w: plan idempotency key is required", agentos.ErrInvalidRunPlan)
 	}
+	key := planStartKey{
+		AccountID:      spec.AccountID,
+		ProjectID:      spec.ProjectID,
+		IdempotencyKey: spec.IdempotencyKey,
+	}
 	s.mu.RLock()
-	if existingPlanID, exists := s.planKeys[spec.IdempotencyKey]; exists {
+	if existingPlanID, exists := s.planKeys[key]; exists {
 		existingSpec := s.specs[existingPlanID]
 		existingStatus := s.statuses[existingPlanID]
 		s.mu.RUnlock()
@@ -204,12 +215,17 @@ func (s *MemoryPlanStore) SavePlanState(_ context.Context, snapshot PlanStateSna
 			return err
 		}
 	}
-	if existingPlanID, ok := s.planKeys[snapshot.Spec.IdempotencyKey]; ok && existingPlanID != snapshot.Spec.PlanID {
+	key := planStartKey{
+		AccountID:      snapshot.Spec.AccountID,
+		ProjectID:      snapshot.Spec.ProjectID,
+		IdempotencyKey: snapshot.Spec.IdempotencyKey,
+	}
+	if existingPlanID, ok := s.planKeys[key]; ok && existingPlanID != snapshot.Spec.PlanID {
 		return fmt.Errorf("%w: plan idempotency key belongs to plan %q", agentos.ErrInvalidRunPlan, existingPlanID)
 	}
 	s.specs[snapshot.Spec.PlanID] = snapshot.Spec
 	s.statuses[snapshot.Spec.PlanID] = snapshot.Status
-	s.planKeys[snapshot.Spec.IdempotencyKey] = snapshot.Spec.PlanID
+	s.planKeys[key] = snapshot.Spec.PlanID
 
 	return nil
 }
@@ -369,7 +385,8 @@ func (s *MemoryPlanStore) RecordAudit(_ context.Context, record AuditRecord) (Au
 	}
 	record.AccountID = spec.AccountID
 	record.ProjectID = spec.ProjectID
-	if existing, ok := s.auditKeys[record.IdempotencyKey]; ok {
+	ref := AuditRefFromRecord(record)
+	if existing, ok := s.auditKeys[ref]; ok {
 		if err := ValidateAuditIdempotency(existing, record); err != nil {
 			return AuditRecord{}, false, err
 		}
@@ -377,7 +394,7 @@ func (s *MemoryPlanStore) RecordAudit(_ context.Context, record AuditRecord) (Au
 		return existing, false, nil
 	}
 	if record.AuditID == "" {
-		record.AuditID = AuditIDFromIdempotencyKey(record.IdempotencyKey)
+		record.AuditID = AuditIDFromRef(ref)
 	}
 	if record.CreatedAt.IsZero() {
 		record.CreatedAt = time.Now().UTC()
@@ -385,7 +402,7 @@ func (s *MemoryPlanStore) RecordAudit(_ context.Context, record AuditRecord) (Au
 	if record.Payload == nil {
 		record.Payload = map[string]any{}
 	}
-	s.auditKeys[record.IdempotencyKey] = record
+	s.auditKeys[ref] = record
 
 	return record, true, nil
 }
@@ -408,7 +425,8 @@ func (s *MemoryPlanStore) RecordPlanCommand(_ context.Context, command PlanComma
 	}
 	command.AccountID = spec.AccountID
 	command.ProjectID = spec.ProjectID
-	if existing, ok := s.commands[command.IdempotencyKey]; ok {
+	ref := PlanCommandRefFromRecord(command)
+	if existing, ok := s.commands[ref]; ok {
 		if err := ValidatePlanCommandIdempotency(existing, command); err != nil {
 			return PlanCommandRecord{}, false, err
 		}
@@ -416,7 +434,7 @@ func (s *MemoryPlanStore) RecordPlanCommand(_ context.Context, command PlanComma
 		return existing, false, nil
 	}
 	if command.CommandID == "" {
-		command.CommandID = PlanCommandIDFromIdempotencyKey(command.IdempotencyKey)
+		command.CommandID = PlanCommandIDFromRef(ref)
 	}
 	if command.Status == "" {
 		command.Status = PlanCommandPending
@@ -430,19 +448,19 @@ func (s *MemoryPlanStore) RecordPlanCommand(_ context.Context, command PlanComma
 	if command.Payload == nil {
 		command.Payload = map[string]any{}
 	}
-	s.commands[command.IdempotencyKey] = command
+	s.commands[ref] = command
 
 	return command, true, nil
 }
 
-func (s *MemoryPlanStore) GetPlanCommand(_ context.Context, idempotencyKey string) (PlanCommandRecord, bool, error) {
-	if idempotencyKey == "" {
-		return PlanCommandRecord{}, false, fmt.Errorf("%w: command idempotency key is required", agentos.ErrInvalidRunPlan)
+func (s *MemoryPlanStore) GetPlanCommand(_ context.Context, ref PlanCommandRef) (PlanCommandRecord, bool, error) {
+	if err := ValidatePlanCommandRef(ref); err != nil {
+		return PlanCommandRecord{}, false, err
 	}
 
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	command, ok := s.commands[idempotencyKey]
+	command, ok := s.commands[ref]
 
 	return command, ok, nil
 }
@@ -486,41 +504,41 @@ func (s *MemoryPlanStore) ListRecoverablePlanCommands(_ context.Context, scope P
 	return commands, nil
 }
 
-func (s *MemoryPlanStore) MarkPlanCommandDelivered(_ context.Context, idempotencyKey string) (PlanCommandRecord, error) {
-	return s.updatePlanCommandStatus(idempotencyKey, PlanCommandDelivered, "")
+func (s *MemoryPlanStore) MarkPlanCommandDelivered(_ context.Context, ref PlanCommandRef) (PlanCommandRecord, error) {
+	return s.updatePlanCommandStatus(ref, PlanCommandDelivered, "")
 }
 
-func (s *MemoryPlanStore) MarkPlanCommandFailed(_ context.Context, idempotencyKey string, reason string) (PlanCommandRecord, error) {
-	return s.updatePlanCommandStatus(idempotencyKey, PlanCommandFailed, reason)
+func (s *MemoryPlanStore) MarkPlanCommandFailed(_ context.Context, ref PlanCommandRef, reason string) (PlanCommandRecord, error) {
+	return s.updatePlanCommandStatus(ref, PlanCommandFailed, reason)
 }
 
-func (s *MemoryPlanStore) updatePlanCommandStatus(idempotencyKey string, status PlanCommandStatus, reason string) (PlanCommandRecord, error) {
-	if idempotencyKey == "" {
-		return PlanCommandRecord{}, fmt.Errorf("%w: command idempotency key is required", agentos.ErrInvalidRunPlan)
+func (s *MemoryPlanStore) updatePlanCommandStatus(ref PlanCommandRef, status PlanCommandStatus, reason string) (PlanCommandRecord, error) {
+	if err := ValidatePlanCommandRef(ref); err != nil {
+		return PlanCommandRecord{}, err
 	}
 
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	command, ok := s.commands[idempotencyKey]
+	command, ok := s.commands[ref]
 	if !ok {
-		return PlanCommandRecord{}, fmt.Errorf("%w: command %q", agentos.ErrInvalidRunPlan, idempotencyKey)
+		return PlanCommandRecord{}, fmt.Errorf("%w: command %q", agentos.ErrInvalidRunPlan, ref.IdempotencyKey)
 	}
 	command.Status = status
 	command.FailureReason = reason
 	command.UpdatedAt = time.Now().UTC()
-	s.commands[idempotencyKey] = command
+	s.commands[ref] = command
 
 	return command, nil
 }
 
-func (s *MemoryPlanStore) GetAuditRecord(_ context.Context, idempotencyKey string) (AuditRecord, bool, error) {
-	if idempotencyKey == "" {
-		return AuditRecord{}, false, fmt.Errorf("%w: audit idempotency key is required", agentos.ErrInvalidRunPlan)
+func (s *MemoryPlanStore) GetAuditRecord(_ context.Context, ref AuditRef) (AuditRecord, bool, error) {
+	if err := ValidateAuditRef(ref); err != nil {
+		return AuditRecord{}, false, err
 	}
 
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	record, ok := s.auditKeys[idempotencyKey]
+	record, ok := s.auditKeys[ref]
 
 	return record, ok, nil
 }

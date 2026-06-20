@@ -34,7 +34,7 @@ func (r *AgentOSPlanRepo) CreatePlan(ctx context.Context, spec agentos.RunPlanSp
 	if status.PlanID == "" {
 		status.PlanID = spec.PlanID
 	}
-	existingSpec, existing, exists, err := r.planByIdempotencyKey(ctx, spec.IdempotencyKey)
+	existingSpec, existing, exists, err := r.planByIdempotencyKey(ctx, spec.AccountID, spec.ProjectID, spec.IdempotencyKey)
 	if err != nil {
 		return agentos.RunPlanStatus{}, false, err
 	}
@@ -62,7 +62,7 @@ func (r *AgentOSPlanRepo) CreatePlan(ctx context.Context, spec agentos.RunPlanSp
 		IdempotencyKey: spec.IdempotencyKey,
 	}); err != nil {
 		if isPostgresUniqueViolation(err) {
-			existingSpec, existing, exists, lookupErr := r.planByIdempotencyKey(ctx, spec.IdempotencyKey)
+			existingSpec, existing, exists, lookupErr := r.planByIdempotencyKey(ctx, spec.AccountID, spec.ProjectID, spec.IdempotencyKey)
 			if lookupErr != nil {
 				return agentos.RunPlanStatus{}, false, lookupErr
 			}
@@ -467,7 +467,7 @@ func (r *AgentOSPlanRepo) loadPlanNodeStatuses(ctx context.Context, planID strin
 	return nodes, nil
 }
 
-func (r *AgentOSPlanRepo) planByIdempotencyKey(ctx context.Context, idempotencyKey string) (agentos.RunPlanSpec, agentos.RunPlanStatus, bool, error) {
+func (r *AgentOSPlanRepo) planByIdempotencyKey(ctx context.Context, accountID, projectID, idempotencyKey string) (agentos.RunPlanSpec, agentos.RunPlanStatus, bool, error) {
 	if idempotencyKey == "" {
 		return agentos.RunPlanSpec{}, agentos.RunPlanStatus{}, false, fmt.Errorf("%w: plan idempotency key is required", agentos.ErrInvalidRunPlan)
 	}
@@ -475,7 +475,7 @@ func (r *AgentOSPlanRepo) planByIdempotencyKey(ctx context.Context, idempotencyK
 	sql, args, err := r.Builder.
 		Select("spec_json", "status_json").
 		From("plans").
-		Where(sq.Eq{"idempotency_key": idempotencyKey}).
+		Where(sq.Eq{"account_id": accountID, "project_id": projectID, "idempotency_key": idempotencyKey}).
 		ToSql()
 	if err != nil {
 		return agentos.RunPlanSpec{}, agentos.RunPlanStatus{}, false, fmt.Errorf("AgentOSPlanRepo - planByIdempotencyKey - builder: %w", err)
@@ -961,7 +961,8 @@ func (r *AgentOSPlanRepo) RecordAudit(ctx context.Context, record agentosplan.Au
 	}
 	record.AccountID = scope.AccountID
 	record.ProjectID = scope.ProjectID
-	existing, exists, err := r.GetAuditRecord(ctx, record.IdempotencyKey)
+	ref := agentosplan.AuditRefFromRecord(record)
+	existing, exists, err := r.GetAuditRecord(ctx, ref)
 	if err != nil {
 		return agentosplan.AuditRecord{}, false, err
 	}
@@ -973,7 +974,7 @@ func (r *AgentOSPlanRepo) RecordAudit(ctx context.Context, record agentosplan.Au
 		return existing, false, nil
 	}
 	if record.AuditID == "" {
-		record.AuditID = agentosplan.AuditIDFromIdempotencyKey(record.IdempotencyKey)
+		record.AuditID = agentosplan.AuditIDFromRef(ref)
 	}
 	if record.CreatedAt.IsZero() {
 		record.CreatedAt = time.Now().UTC()
@@ -1014,7 +1015,7 @@ INSERT INTO audit_logs (
 	)
 	if err != nil {
 		if isPostgresUniqueViolation(err) {
-			existing, exists, lookupErr := r.GetAuditRecord(ctx, record.IdempotencyKey)
+			existing, exists, lookupErr := r.GetAuditRecord(ctx, ref)
 			if lookupErr != nil {
 				return agentosplan.AuditRecord{}, false, lookupErr
 			}
@@ -1033,15 +1034,20 @@ INSERT INTO audit_logs (
 	return record, true, nil
 }
 
-func (r *AgentOSPlanRepo) GetAuditRecord(ctx context.Context, idempotencyKey string) (agentosplan.AuditRecord, bool, error) {
-	if idempotencyKey == "" {
-		return agentosplan.AuditRecord{}, false, fmt.Errorf("%w: audit idempotency key is required", agentos.ErrInvalidRunPlan)
+func (r *AgentOSPlanRepo) GetAuditRecord(ctx context.Context, ref agentosplan.AuditRef) (agentosplan.AuditRecord, bool, error) {
+	if err := agentosplan.ValidateAuditRef(ref); err != nil {
+		return agentosplan.AuditRecord{}, false, err
 	}
 
 	sql, args, err := r.Builder.
 		Select("audit_id", "plan_id", "account_id", "project_id", "run_id", "node_id", "actor_id", "action", "idempotency_key", "payload_json", "created_at").
 		From("audit_logs").
-		Where(sq.Eq{"idempotency_key": idempotencyKey}).
+		Where(sq.Eq{
+			"plan_id":         ref.PlanID,
+			"account_id":      ref.AccountID,
+			"project_id":      ref.ProjectID,
+			"idempotency_key": ref.IdempotencyKey,
+		}).
 		ToSql()
 	if err != nil {
 		return agentosplan.AuditRecord{}, false, fmt.Errorf("AgentOSPlanRepo - GetAuditRecord - builder: %w", err)
@@ -1188,7 +1194,8 @@ func (r *AgentOSPlanRepo) RecordPlanCommand(ctx context.Context, command agentos
 	}
 	command.AccountID = scope.AccountID
 	command.ProjectID = scope.ProjectID
-	existing, exists, err := r.GetPlanCommand(ctx, command.IdempotencyKey)
+	ref := agentosplan.PlanCommandRefFromRecord(command)
+	existing, exists, err := r.GetPlanCommand(ctx, ref)
 	if err != nil {
 		return agentosplan.PlanCommandRecord{}, false, err
 	}
@@ -1200,7 +1207,7 @@ func (r *AgentOSPlanRepo) RecordPlanCommand(ctx context.Context, command agentos
 		return existing, false, nil
 	}
 	if command.CommandID == "" {
-		command.CommandID = agentosplan.PlanCommandIDFromIdempotencyKey(command.IdempotencyKey)
+		command.CommandID = agentosplan.PlanCommandIDFromRef(ref)
 	}
 	if command.Status == "" {
 		command.Status = agentosplan.PlanCommandPending
@@ -1249,7 +1256,7 @@ INSERT INTO plan_commands (
 	)
 	if err != nil {
 		if isPostgresUniqueViolation(err) {
-			existing, exists, lookupErr := r.GetPlanCommand(ctx, command.IdempotencyKey)
+			existing, exists, lookupErr := r.GetPlanCommand(ctx, ref)
 			if lookupErr != nil {
 				return agentosplan.PlanCommandRecord{}, false, lookupErr
 			}
@@ -1268,15 +1275,20 @@ INSERT INTO plan_commands (
 	return command, true, nil
 }
 
-func (r *AgentOSPlanRepo) GetPlanCommand(ctx context.Context, idempotencyKey string) (agentosplan.PlanCommandRecord, bool, error) {
-	if idempotencyKey == "" {
-		return agentosplan.PlanCommandRecord{}, false, fmt.Errorf("%w: command idempotency key is required", agentos.ErrInvalidRunPlan)
+func (r *AgentOSPlanRepo) GetPlanCommand(ctx context.Context, ref agentosplan.PlanCommandRef) (agentosplan.PlanCommandRecord, bool, error) {
+	if err := agentosplan.ValidatePlanCommandRef(ref); err != nil {
+		return agentosplan.PlanCommandRecord{}, false, err
 	}
 
 	sql, args, err := r.Builder.
 		Select("command_id", "plan_id", "account_id", "project_id", "actor_id", "action", "idempotency_key", "payload_json", "status", "failure_reason", "created_at", "updated_at").
 		From("plan_commands").
-		Where(sq.Eq{"idempotency_key": idempotencyKey}).
+		Where(sq.Eq{
+			"plan_id":         ref.PlanID,
+			"account_id":      ref.AccountID,
+			"project_id":      ref.ProjectID,
+			"idempotency_key": ref.IdempotencyKey,
+		}).
 		ToSql()
 	if err != nil {
 		return agentosplan.PlanCommandRecord{}, false, fmt.Errorf("AgentOSPlanRepo - GetPlanCommand - builder: %w", err)
@@ -1344,25 +1356,25 @@ func (r *AgentOSPlanRepo) ListRecoverablePlanCommands(ctx context.Context, scope
 	return commands, nil
 }
 
-func (r *AgentOSPlanRepo) MarkPlanCommandDelivered(ctx context.Context, idempotencyKey string) (agentosplan.PlanCommandRecord, error) {
-	return r.updatePlanCommandStatus(ctx, idempotencyKey, agentosplan.PlanCommandDelivered, "")
+func (r *AgentOSPlanRepo) MarkPlanCommandDelivered(ctx context.Context, ref agentosplan.PlanCommandRef) (agentosplan.PlanCommandRecord, error) {
+	return r.updatePlanCommandStatus(ctx, ref, agentosplan.PlanCommandDelivered, "")
 }
 
-func (r *AgentOSPlanRepo) MarkPlanCommandFailed(ctx context.Context, idempotencyKey string, reason string) (agentosplan.PlanCommandRecord, error) {
-	return r.updatePlanCommandStatus(ctx, idempotencyKey, agentosplan.PlanCommandFailed, reason)
+func (r *AgentOSPlanRepo) MarkPlanCommandFailed(ctx context.Context, ref agentosplan.PlanCommandRef, reason string) (agentosplan.PlanCommandRecord, error) {
+	return r.updatePlanCommandStatus(ctx, ref, agentosplan.PlanCommandFailed, reason)
 }
 
-func (r *AgentOSPlanRepo) updatePlanCommandStatus(ctx context.Context, idempotencyKey string, status agentosplan.PlanCommandStatus, reason string) (agentosplan.PlanCommandRecord, error) {
-	if idempotencyKey == "" {
-		return agentosplan.PlanCommandRecord{}, fmt.Errorf("%w: command idempotency key is required", agentos.ErrInvalidRunPlan)
+func (r *AgentOSPlanRepo) updatePlanCommandStatus(ctx context.Context, ref agentosplan.PlanCommandRef, status agentosplan.PlanCommandStatus, reason string) (agentosplan.PlanCommandRecord, error) {
+	if err := agentosplan.ValidatePlanCommandRef(ref); err != nil {
+		return agentosplan.PlanCommandRecord{}, err
 	}
 
-	command, exists, err := r.GetPlanCommand(ctx, idempotencyKey)
+	command, exists, err := r.GetPlanCommand(ctx, ref)
 	if err != nil {
 		return agentosplan.PlanCommandRecord{}, err
 	}
 	if !exists {
-		return agentosplan.PlanCommandRecord{}, fmt.Errorf("%w: command %q", agentos.ErrInvalidRunPlan, idempotencyKey)
+		return agentosplan.PlanCommandRecord{}, fmt.Errorf("%w: command %q", agentos.ErrInvalidRunPlan, ref.IdempotencyKey)
 	}
 	command.Status = status
 	command.FailureReason = reason
@@ -1371,12 +1383,15 @@ func (r *AgentOSPlanRepo) updatePlanCommandStatus(ctx context.Context, idempoten
 	sql := `
 UPDATE plan_commands
 SET status = $2,
-    failure_reason = $3,
-    updated_at = $4
-WHERE idempotency_key = $1
-RETURNING command_id, plan_id, account_id, project_id, actor_id, action, idempotency_key, payload_json, status, failure_reason, created_at, updated_at`
+	    failure_reason = $3,
+	    updated_at = $4
+	WHERE plan_id = $5
+	  AND account_id = $6
+	  AND project_id = $7
+	  AND idempotency_key = $1
+	RETURNING command_id, plan_id, account_id, project_id, actor_id, action, idempotency_key, payload_json, status, failure_reason, created_at, updated_at`
 
-	return r.scanPlanCommandRow(ctx, r.Pool.QueryRow(ctx, sql, idempotencyKey, string(command.Status), command.FailureReason, command.UpdatedAt))
+	return r.scanPlanCommandRow(ctx, r.Pool.QueryRow(ctx, sql, ref.IdempotencyKey, string(command.Status), command.FailureReason, command.UpdatedAt, ref.PlanID, ref.AccountID, ref.ProjectID))
 }
 
 func (r *AgentOSPlanRepo) scanPlanCommandRow(_ context.Context, scanner interface{ Scan(dest ...any) error }) (agentosplan.PlanCommandRecord, error) {

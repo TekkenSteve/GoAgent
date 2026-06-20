@@ -177,26 +177,56 @@ func normalizeAuditPayload(payload map[string]any) map[string]any {
 	return payload
 }
 
-// ArtifactIDFromIdempotencyKey creates the stable artifact identity used when
-// callers do not provide one explicitly.
-func ArtifactIDFromIdempotencyKey(idempotencyKey string) string {
-	sum := sha256.Sum256([]byte(idempotencyKey))
+// ArtifactIDFromRef creates the stable artifact identity used when callers do
+// not provide one explicitly. Artifact IDs are globally addressed, so the plan
+// identity participates in the generated ID.
+func ArtifactIDFromRef(planID, idempotencyKey string) string {
+	data, _ := json.Marshal(struct {
+		PlanID         string `json:"plan_id"`
+		IdempotencyKey string `json:"idempotency_key"`
+	}{
+		PlanID:         planID,
+		IdempotencyKey: idempotencyKey,
+	})
+	sum := sha256.Sum256(data)
 
 	return hex.EncodeToString(sum[:])
 }
 
-// PlanCommandIDFromIdempotencyKey creates the stable command identity used when
-// callers do not provide one explicitly.
-func PlanCommandIDFromIdempotencyKey(idempotencyKey string) string {
-	sum := sha256.Sum256([]byte(idempotencyKey))
+// PlanCommandIDFromRef creates the stable command identity used when callers do
+// not provide one explicitly. Idempotency is tenant and plan scoped.
+func PlanCommandIDFromRef(ref PlanCommandRef) string {
+	data, _ := json.Marshal(struct {
+		PlanID         string `json:"plan_id"`
+		AccountID      string `json:"account_id"`
+		ProjectID      string `json:"project_id"`
+		IdempotencyKey string `json:"idempotency_key"`
+	}{
+		PlanID:         ref.PlanID,
+		AccountID:      ref.AccountID,
+		ProjectID:      ref.ProjectID,
+		IdempotencyKey: ref.IdempotencyKey,
+	})
+	sum := sha256.Sum256(data)
 
 	return "command:" + hex.EncodeToString(sum[:])
 }
 
-// AuditIDFromIdempotencyKey creates the stable audit identity used when callers
-// do not provide one explicitly.
-func AuditIDFromIdempotencyKey(idempotencyKey string) string {
-	sum := sha256.Sum256([]byte(idempotencyKey))
+// AuditIDFromRef creates the stable audit identity used when callers do not
+// provide one explicitly. Idempotency is tenant and plan scoped.
+func AuditIDFromRef(ref AuditRef) string {
+	data, _ := json.Marshal(struct {
+		PlanID         string `json:"plan_id"`
+		AccountID      string `json:"account_id"`
+		ProjectID      string `json:"project_id"`
+		IdempotencyKey string `json:"idempotency_key"`
+	}{
+		PlanID:         ref.PlanID,
+		AccountID:      ref.AccountID,
+		ProjectID:      ref.ProjectID,
+		IdempotencyKey: ref.IdempotencyKey,
+	})
+	sum := sha256.Sum256(data)
 
 	return "audit:" + hex.EncodeToString(sum[:])
 }

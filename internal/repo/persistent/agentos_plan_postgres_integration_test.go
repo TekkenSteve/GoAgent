@@ -206,7 +206,7 @@ func TestAgentOSPlanPostgresDurablePersistence(t *testing.T) {
 	if created || commandReplay.CommandID != command.CommandID {
 		t.Fatalf("RecordPlanCommand replay = %#v created=%v, want %#v created=false", commandReplay, created, command)
 	}
-	deliveredCommand, err := planRepo.MarkPlanCommandDelivered(ctx, command.IdempotencyKey)
+	deliveredCommand, err := planRepo.MarkPlanCommandDelivered(ctx, agentosplan.PlanCommandRefFromRecord(command))
 	if err != nil {
 		t.Fatalf("MarkPlanCommandDelivered: %v", err)
 	}
@@ -226,7 +226,7 @@ func TestAgentOSPlanPostgresDurablePersistence(t *testing.T) {
 	if !created {
 		t.Fatal("failed command was not created")
 	}
-	if _, err := planRepo.MarkPlanCommandFailed(ctx, failedCommand.IdempotencyKey, "temporal unavailable"); err != nil {
+	if _, err := planRepo.MarkPlanCommandFailed(ctx, agentosplan.PlanCommandRefFromRecord(failedCommand), "temporal unavailable"); err != nil {
 		t.Fatalf("MarkPlanCommandFailed: %v", err)
 	}
 	recoverableCommands, err := planRepo.ListRecoverablePlanCommands(ctx, agentosplan.PlanCommandScope{
@@ -911,6 +911,7 @@ func applyAgentOSPlanMigrations(t *testing.T, pg *postgres.Postgres) {
 		"20260619000006_create_plan_metric_checkpoints.up.sql",
 		"20260619000007_create_plan_metric_samples.up.sql",
 		"20260619000008_create_agentos_artifact_schemas.up.sql",
+		"20260620000001_scope_agentos_idempotency_keys.up.sql",
 	} {
 		path := filepath.Join("..", "..", "..", "migrations", migration)
 		data, err := os.ReadFile(path)

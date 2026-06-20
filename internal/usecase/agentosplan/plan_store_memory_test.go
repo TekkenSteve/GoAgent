@@ -152,13 +152,29 @@ func TestMemoryPlanStoreCreatePlanRejectsReusedKeyForDifferentRequest(t *testing
 	}
 }
 
-func TestMemoryPlanStoreCreatePlanRejectsReusedKeyForDifferentPlan(t *testing.T) {
+func TestMemoryPlanStoreCreatePlanAllowsReusedKeyAcrossTenantScope(t *testing.T) {
 	store := NewMemoryPlanStore()
 	if _, _, err := store.CreatePlan(context.Background(), testRunPlanSpec("plan-1", "start-key"), agentos.RunPlanStatus{PlanID: "plan-1"}); err != nil {
 		t.Fatalf("CreatePlan first: %v", err)
 	}
 
 	_, _, err := store.CreatePlan(context.Background(), testRunPlanSpec("plan-2", "start-key"), agentos.RunPlanStatus{PlanID: "plan-2"})
+	if err != nil {
+		t.Fatalf("CreatePlan different tenant: %v", err)
+	}
+}
+
+func TestMemoryPlanStoreCreatePlanRejectsReusedKeyWithinTenantScope(t *testing.T) {
+	store := NewMemoryPlanStore()
+	first := testRunPlanSpec("plan-1", "start-key")
+	if _, _, err := store.CreatePlan(context.Background(), first, agentos.RunPlanStatus{PlanID: first.PlanID}); err != nil {
+		t.Fatalf("CreatePlan first: %v", err)
+	}
+	second := testRunPlanSpec("plan-2", "start-key")
+	second.AccountID = first.AccountID
+	second.ProjectID = first.ProjectID
+
+	_, _, err := store.CreatePlan(context.Background(), second, agentos.RunPlanStatus{PlanID: second.PlanID})
 	if !errors.Is(err, agentos.ErrInvalidRunPlan) {
 		t.Fatalf("error = %v, want ErrInvalidRunPlan", err)
 	}
@@ -184,11 +200,12 @@ func TestMemoryPlanStoreGetAuditRecord(t *testing.T) {
 		Action:         AuditActionPlanControl,
 		IdempotencyKey: "control-1",
 	}
-	if _, _, err := store.RecordAudit(context.Background(), record); err != nil {
+	stored, _, err := store.RecordAudit(context.Background(), record)
+	if err != nil {
 		t.Fatalf("RecordAudit: %v", err)
 	}
 
-	got, exists, err := store.GetAuditRecord(context.Background(), "control-1")
+	got, exists, err := store.GetAuditRecord(context.Background(), AuditRefFromRecord(stored))
 	if err != nil {
 		t.Fatalf("GetAuditRecord: %v", err)
 	}
@@ -222,6 +239,29 @@ func TestMemoryPlanStoreRejectsAuditKeyReuseWithDifferentRequest(t *testing.T) {
 	}
 }
 
+func TestMemoryPlanStoreAllowsAuditKeyReuseAcrossPlans(t *testing.T) {
+	store := NewMemoryPlanStore()
+	first := createMemoryPlanForTest(t, context.Background(), store, "plan-1")
+	second := createMemoryPlanForTest(t, context.Background(), store, "plan-2")
+
+	if _, _, err := store.RecordAudit(context.Background(), AuditRecord{
+		PlanID:         first.PlanID,
+		Action:         AuditActionPlanSignal,
+		IdempotencyKey: "signal-1",
+		Payload:        map[string]any{"type": string(agentos.SignalPlanApprove)},
+	}); err != nil {
+		t.Fatalf("RecordAudit first: %v", err)
+	}
+	if _, _, err := store.RecordAudit(context.Background(), AuditRecord{
+		PlanID:         second.PlanID,
+		Action:         AuditActionPlanSignal,
+		IdempotencyKey: "signal-1",
+		Payload:        map[string]any{"type": string(agentos.SignalPlanReject)},
+	}); err != nil {
+		t.Fatalf("RecordAudit second: %v", err)
+	}
+}
+
 func TestMemoryPlanStorePlanCommandLifecycleIsIdempotent(t *testing.T) {
 	store := NewMemoryPlanStore()
 	spec := createMemoryPlanForTest(t, context.Background(), store, "plan-1")
@@ -250,7 +290,7 @@ func TestMemoryPlanStorePlanCommandLifecycleIsIdempotent(t *testing.T) {
 		t.Fatalf("replay = %#v created=%v, want %#v created=false", replay, created, first)
 	}
 
-	delivered, err := store.MarkPlanCommandDelivered(context.Background(), command.IdempotencyKey)
+	delivered, err := store.MarkPlanCommandDelivered(context.Background(), PlanCommandRefFromRecord(first))
 	if err != nil {
 		t.Fatalf("MarkPlanCommandDelivered: %v", err)
 	}
@@ -292,15 +332,17 @@ func TestMemoryPlanStoreListRecoverablePlanCommands(t *testing.T) {
 			UpdatedAt:      time.Date(2026, 6, 19, 12, 2, 0, 0, time.UTC),
 		},
 	}
-	for _, command := range commands {
-		if _, _, err := store.RecordPlanCommand(ctx, command); err != nil {
+	for i, command := range commands {
+		stored, _, err := store.RecordPlanCommand(ctx, command)
+		if err != nil {
 			t.Fatalf("RecordPlanCommand %s: %v", command.CommandID, err)
 		}
+		commands[i] = stored
 	}
-	if _, err := store.MarkPlanCommandDelivered(ctx, "command-delivered"); err != nil {
+	if _, err := store.MarkPlanCommandDelivered(ctx, PlanCommandRefFromRecord(commands[0])); err != nil {
 		t.Fatalf("MarkPlanCommandDelivered: %v", err)
 	}
-	if _, err := store.MarkPlanCommandFailed(ctx, "command-failed", "temporal unavailable"); err != nil {
+	if _, err := store.MarkPlanCommandFailed(ctx, PlanCommandRefFromRecord(commands[2]), "temporal unavailable"); err != nil {
 		t.Fatalf("MarkPlanCommandFailed: %v", err)
 	}
 
@@ -357,6 +399,31 @@ func TestMemoryPlanStoreRejectsCommandKeyReuseWithDifferentRequest(t *testing.T)
 	_, _, err := store.RecordPlanCommand(context.Background(), changed)
 	if !errors.Is(err, agentos.ErrInvalidRunPlan) {
 		t.Fatalf("error = %v, want ErrInvalidRunPlan", err)
+	}
+}
+
+func TestMemoryPlanStoreAllowsCommandKeyReuseAcrossPlans(t *testing.T) {
+	store := NewMemoryPlanStore()
+	first := createMemoryPlanForTest(t, context.Background(), store, "plan-1")
+	second := createMemoryPlanForTest(t, context.Background(), store, "plan-2")
+
+	if _, _, err := store.RecordPlanCommand(context.Background(), PlanCommandRecord{
+		PlanID:         first.PlanID,
+		ActorID:        "operator-1",
+		Action:         AuditActionPlanSignal,
+		IdempotencyKey: "signal-1",
+		Payload:        map[string]any{"type": string(agentos.SignalPlanApprove)},
+	}); err != nil {
+		t.Fatalf("RecordPlanCommand first: %v", err)
+	}
+	if _, _, err := store.RecordPlanCommand(context.Background(), PlanCommandRecord{
+		PlanID:         second.PlanID,
+		ActorID:        "operator-1",
+		Action:         AuditActionPlanSignal,
+		IdempotencyKey: "signal-1",
+		Payload:        map[string]any{"type": string(agentos.SignalPlanReject)},
+	}); err != nil {
+		t.Fatalf("RecordPlanCommand second: %v", err)
 	}
 }
 

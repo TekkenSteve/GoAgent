@@ -64,14 +64,19 @@ func (r *RunBackendIndexRepo) Get(ctx context.Context, runID string) (entity.Run
 	return record, exists, nil
 }
 
-func (r *RunBackendIndexRepo) runByIdempotencyKey(ctx context.Context, idempotencyKey string) (entity.RunBackendIndexRecord, bool, error) {
+func (r *RunBackendIndexRepo) runByIdempotencyKey(ctx context.Context, record entity.RunBackendIndexRecord) (entity.RunBackendIndexRecord, bool, error) {
+	idempotencyKey := record.IdempotencyKey
 	if idempotencyKey == "" {
 		return entity.RunBackendIndexRecord{}, false, fmt.Errorf("%w: run backend idempotency key is required", agentos.ErrInvalidRunSpec)
 	}
 	sql, args, err := r.Builder.
 		Select(runBackendIndexColumns()...).
 		From("run_backend_index").
-		Where(sq.Eq{"idempotency_key": idempotencyKey}).
+		Where(sq.Eq{
+			"account_id":      record.AccountID,
+			"project_id":      record.ProjectID,
+			"idempotency_key": idempotencyKey,
+		}).
 		ToSql()
 	if err != nil {
 		return entity.RunBackendIndexRecord{}, false, fmt.Errorf("RunBackendIndexRepo - runByIdempotencyKey - builder: %w", err)
@@ -91,7 +96,7 @@ func (r *RunBackendIndexRepo) upsert(ctx context.Context, record entity.RunBacke
 		return err
 	}
 	if record.IdempotencyKey != "" {
-		existing, exists, err := r.runByIdempotencyKey(ctx, record.IdempotencyKey)
+		existing, exists, err := r.runByIdempotencyKey(ctx, record)
 		if err != nil {
 			return err
 		}
@@ -134,7 +139,7 @@ func (r *RunBackendIndexRepo) upsert(ctx context.Context, record entity.RunBacke
 	tag, err := r.Pool.Exec(ctx, sql, args...)
 	if err != nil {
 		if isPostgresUniqueViolation(err) && record.IdempotencyKey != "" {
-			existing, exists, lookupErr := r.runByIdempotencyKey(ctx, record.IdempotencyKey)
+			existing, exists, lookupErr := r.runByIdempotencyKey(ctx, record)
 			if lookupErr != nil {
 				return lookupErr
 			}

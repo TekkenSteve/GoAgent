@@ -52,7 +52,7 @@ func (r *AgentOSArtifactRepo) Put(ctx context.Context, ref agentos.ArtifactRef, 
 		return agentos.ArtifactRef{}, fmt.Errorf("%w: %s", agentos.ErrPlanRouteNotFound, ref.PlanID)
 	}
 	if ref.ArtifactID == "" {
-		ref.ArtifactID = agentosplan.ArtifactIDFromIdempotencyKey(idempotencyKey)
+		ref.ArtifactID = agentosplan.ArtifactIDFromRef(ref.PlanID, idempotencyKey)
 	}
 	if ref.CreatedAt.IsZero() {
 		ref.CreatedAt = time.Now().UTC()
@@ -69,7 +69,7 @@ func (r *AgentOSArtifactRepo) Put(ctx context.Context, ref agentos.ArtifactRef, 
 		ref.Digest = agentosplan.DigestArtifactPayload(encodedPayload)
 	}
 
-	existing, exists, err := r.artifactByIdempotencyKey(ctx, idempotencyKey)
+	existing, exists, err := r.artifactByIdempotencyKey(ctx, ref.PlanID, scope, idempotencyKey)
 	if err != nil {
 		return agentos.ArtifactRef{}, err
 	}
@@ -142,7 +142,7 @@ RETURNING `+strings.Join(artifactColumns(), ", "),
 			return agentos.ArtifactRef{}, fmt.Errorf("%w: artifact id %q already exists with a different idempotency key", agentos.ErrInvalidArtifact, ref.ArtifactID)
 		}
 		if isPostgresUniqueViolation(err) {
-			existing, exists, lookupErr := r.artifactByIdempotencyKey(ctx, idempotencyKey)
+			existing, exists, lookupErr := r.artifactByIdempotencyKey(ctx, ref.PlanID, scope, idempotencyKey)
 			if lookupErr != nil {
 				return agentos.ArtifactRef{}, lookupErr
 			}
@@ -231,8 +231,13 @@ func (r *AgentOSArtifactRepo) List(ctx context.Context, scope agentos.PlanArtifa
 	return refs, nil
 }
 
-func (r *AgentOSArtifactRepo) artifactByIdempotencyKey(ctx context.Context, key string) (agentos.ArtifactRef, bool, error) {
-	return r.getRef(ctx, sq.Eq{"idempotency_key": key})
+func (r *AgentOSArtifactRepo) artifactByIdempotencyKey(ctx context.Context, planID string, scope planTenantScope, key string) (agentos.ArtifactRef, bool, error) {
+	return r.getRef(ctx, sq.Eq{
+		"plan_id":         planID,
+		"account_id":      scope.AccountID,
+		"project_id":      scope.ProjectID,
+		"idempotency_key": key,
+	})
 }
 
 func artifactScopeWhere(scope agentos.PlanArtifactScope) sq.Eq {

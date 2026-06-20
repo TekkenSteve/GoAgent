@@ -15,8 +15,13 @@ type MemoryArtifactStore struct {
 	mu        sync.RWMutex
 	artifacts map[string]storedArtifact
 	byPlan    map[string][]string
-	byKey     map[string]string
+	byKey     map[artifactIdempotencyKey]string
 	now       func() time.Time
+}
+
+type artifactIdempotencyKey struct {
+	PlanID         string
+	IdempotencyKey string
 }
 
 type storedArtifact struct {
@@ -29,7 +34,7 @@ func NewMemoryArtifactStore() *MemoryArtifactStore {
 	return &MemoryArtifactStore{
 		artifacts: make(map[string]storedArtifact),
 		byPlan:    make(map[string][]string),
-		byKey:     make(map[string]string),
+		byKey:     make(map[artifactIdempotencyKey]string),
 		now:       func() time.Time { return time.Now().UTC() },
 	}
 }
@@ -58,7 +63,7 @@ func (s *MemoryArtifactStore) Put(_ context.Context, artifact agentos.ArtifactRe
 		artifact.Digest = DigestArtifactPayload(encodedPayload)
 	}
 	if artifact.ArtifactID == "" {
-		artifact.ArtifactID = ArtifactIDFromIdempotencyKey(idempotencyKey)
+		artifact.ArtifactID = ArtifactIDFromRef(artifact.PlanID, idempotencyKey)
 	}
 	if artifact.CreatedAt.IsZero() {
 		artifact.CreatedAt = s.now()
@@ -66,8 +71,9 @@ func (s *MemoryArtifactStore) Put(_ context.Context, artifact agentos.ArtifactRe
 
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	key := artifactIdempotencyKey{PlanID: artifact.PlanID, IdempotencyKey: idempotencyKey}
 	if idempotencyKey != "" {
-		if artifactID, exists := s.byKey[idempotencyKey]; exists {
+		if artifactID, exists := s.byKey[key]; exists {
 			existing := s.artifacts[artifactID]
 			if err := ValidateArtifactPublishIdempotency(existing.ref, artifact); err != nil {
 				return agentos.ArtifactRef{}, err
@@ -81,7 +87,7 @@ func (s *MemoryArtifactStore) Put(_ context.Context, artifact agentos.ArtifactRe
 	}
 	s.artifacts[artifact.ArtifactID] = storedArtifact{ref: artifact, payload: payload}
 	if idempotencyKey != "" {
-		s.byKey[idempotencyKey] = artifact.ArtifactID
+		s.byKey[key] = artifact.ArtifactID
 	}
 	s.byPlan[artifact.PlanID] = append(s.byPlan[artifact.PlanID], artifact.ArtifactID)
 

@@ -247,11 +247,11 @@ func (r *planRuntime) SignalPlan(ctx context.Context, ref agentos.PlanRef, signa
 	}
 
 	if err := r.temporalClient.SignalWorkflow(ctx, planWorkflowID(ref.PlanID), "", PlanSignalName, signal); err != nil {
-		markErr := r.markPlanCommandFailed(ctx, command.IdempotencyKey, err)
+		markErr := r.markPlanCommandFailed(ctx, command, err)
 
 		return errors.Join(fmt.Errorf("agentos temporal plan runtime - signal plan workflow: %w", err), markErr)
 	}
-	if err := r.markPlanCommandDelivered(ctx, command.IdempotencyKey); err != nil {
+	if err := r.markPlanCommandDelivered(ctx, command); err != nil {
 		return err
 	}
 	if _, err := r.recordPlanAudit(ctx, record); err != nil {
@@ -289,11 +289,11 @@ func (r *planRuntime) ControlPlan(ctx context.Context, ref agentos.PlanRef, cont
 	}
 
 	if err := r.temporalClient.SignalWorkflow(ctx, planWorkflowID(ref.PlanID), "", PlanControlSignalName, control); err != nil {
-		markErr := r.markPlanCommandFailed(ctx, command.IdempotencyKey, err)
+		markErr := r.markPlanCommandFailed(ctx, command, err)
 
 		return errors.Join(fmt.Errorf("agentos temporal plan runtime - control plan workflow: %w", err), markErr)
 	}
-	if err := r.markPlanCommandDelivered(ctx, command.IdempotencyKey); err != nil {
+	if err := r.markPlanCommandDelivered(ctx, command); err != nil {
 		return err
 	}
 	if _, err := r.recordPlanAudit(ctx, record); err != nil {
@@ -477,22 +477,22 @@ func (r *planRuntime) recordPlanCommand(ctx context.Context, command agentosplan
 	return stored, err
 }
 
-func (r *planRuntime) markPlanCommandDelivered(ctx context.Context, idempotencyKey string) error {
+func (r *planRuntime) markPlanCommandDelivered(ctx context.Context, command agentosplan.PlanCommandRecord) error {
 	if r.commandStore == nil {
 		return errPlanRuntimeCommandStoreRequired
 	}
 
-	_, err := r.commandStore.MarkPlanCommandDelivered(ctx, idempotencyKey)
+	_, err := r.commandStore.MarkPlanCommandDelivered(ctx, agentosplan.PlanCommandRefFromRecord(command))
 
 	return err
 }
 
-func (r *planRuntime) markPlanCommandFailed(ctx context.Context, idempotencyKey string, cause error) error {
+func (r *planRuntime) markPlanCommandFailed(ctx context.Context, command agentosplan.PlanCommandRecord, cause error) error {
 	if r.commandStore == nil {
 		return errPlanRuntimeCommandStoreRequired
 	}
 
-	_, err := r.commandStore.MarkPlanCommandFailed(ctx, idempotencyKey, cause.Error())
+	_, err := r.commandStore.MarkPlanCommandFailed(ctx, agentosplan.PlanCommandRefFromRecord(command), cause.Error())
 
 	return err
 }

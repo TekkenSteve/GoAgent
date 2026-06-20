@@ -161,11 +161,28 @@ type AuditRecord struct {
 	CreatedAt      time.Time
 }
 
+// AuditRef identifies one idempotent audit record inside a tenant-scoped plan.
+type AuditRef struct {
+	PlanID         string
+	AccountID      string
+	ProjectID      string
+	IdempotencyKey string
+}
+
+func AuditRefFromRecord(record AuditRecord) AuditRef {
+	return AuditRef{
+		PlanID:         record.PlanID,
+		AccountID:      record.AccountID,
+		ProjectID:      record.ProjectID,
+		IdempotencyKey: record.IdempotencyKey,
+	}
+}
+
 // AuditStore persists idempotent control-plane audit records. List operations
 // must carry the full account/project plan scope.
 type AuditStore interface {
 	RecordAudit(ctx context.Context, record AuditRecord) (AuditRecord, bool, error)
-	GetAuditRecord(ctx context.Context, idempotencyKey string) (AuditRecord, bool, error)
+	GetAuditRecord(ctx context.Context, ref AuditRef) (AuditRecord, bool, error)
 	ListAuditRecords(ctx context.Context, scope agentos.PlanAuditScope) ([]agentos.PlanAuditRecord, error)
 }
 
@@ -195,6 +212,23 @@ type PlanCommandRecord struct {
 	UpdatedAt      time.Time
 }
 
+// PlanCommandRef identifies one durable command in a tenant-scoped plan.
+type PlanCommandRef struct {
+	PlanID         string
+	AccountID      string
+	ProjectID      string
+	IdempotencyKey string
+}
+
+func PlanCommandRefFromRecord(command PlanCommandRecord) PlanCommandRef {
+	return PlanCommandRef{
+		PlanID:         command.PlanID,
+		AccountID:      command.AccountID,
+		ProjectID:      command.ProjectID,
+		IdempotencyKey: command.IdempotencyKey,
+	}
+}
+
 // PlanCommandScope selects recoverable command outbox entries.
 type PlanCommandScope struct {
 	PlanID   string
@@ -206,10 +240,10 @@ type PlanCommandScope struct {
 // PlanCommandStore persists recoverable signal/control commands.
 type PlanCommandStore interface {
 	RecordPlanCommand(ctx context.Context, command PlanCommandRecord) (PlanCommandRecord, bool, error)
-	GetPlanCommand(ctx context.Context, idempotencyKey string) (PlanCommandRecord, bool, error)
+	GetPlanCommand(ctx context.Context, ref PlanCommandRef) (PlanCommandRecord, bool, error)
 	ListRecoverablePlanCommands(ctx context.Context, scope PlanCommandScope) ([]PlanCommandRecord, error)
-	MarkPlanCommandDelivered(ctx context.Context, idempotencyKey string) (PlanCommandRecord, error)
-	MarkPlanCommandFailed(ctx context.Context, idempotencyKey string, reason string) (PlanCommandRecord, error)
+	MarkPlanCommandDelivered(ctx context.Context, ref PlanCommandRef) (PlanCommandRecord, error)
+	MarkPlanCommandFailed(ctx context.Context, ref PlanCommandRef, reason string) (PlanCommandRecord, error)
 }
 
 // Runner starts and controls backend-owned child runs.

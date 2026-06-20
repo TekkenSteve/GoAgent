@@ -61,7 +61,7 @@ func (r *planCommandReconciler) deliver(ctx context.Context, command agentosplan
 
 	signalName, payload, auditRecord, err := commandDeliveryPayload(command)
 	if err != nil {
-		if _, markErr := r.commandStore.MarkPlanCommandFailed(ctx, command.IdempotencyKey, err.Error()); markErr != nil {
+		if _, markErr := r.commandStore.MarkPlanCommandFailed(ctx, agentosplan.PlanCommandRefFromRecord(command), err.Error()); markErr != nil {
 			return errors.Join(err, markErr)
 		}
 
@@ -69,11 +69,11 @@ func (r *planCommandReconciler) deliver(ctx context.Context, command agentosplan
 	}
 
 	if err := r.temporalClient.SignalWorkflow(ctx, planWorkflowID(command.PlanID), "", signalName, payload); err != nil {
-		_, markErr := r.commandStore.MarkPlanCommandFailed(ctx, command.IdempotencyKey, err.Error())
+		_, markErr := r.commandStore.MarkPlanCommandFailed(ctx, agentosplan.PlanCommandRefFromRecord(command), err.Error())
 
 		return errors.Join(fmt.Errorf("agentos temporal plan command reconciler - signal workflow: %w", err), markErr)
 	}
-	if _, err := r.commandStore.MarkPlanCommandDelivered(ctx, command.IdempotencyKey); err != nil {
+	if _, err := r.commandStore.MarkPlanCommandDelivered(ctx, agentosplan.PlanCommandRefFromRecord(command)); err != nil {
 		return err
 	}
 	if _, _, err := r.auditStore.RecordAudit(ctx, auditRecord); err != nil {

@@ -600,10 +600,10 @@ func TestPlanRuntimeSignalPlanDoesNotAuditFailedDelivery(t *testing.T) {
 	if temporalClient.signalCount != 1 {
 		t.Fatalf("signal count = %d, want 1", temporalClient.signalCount)
 	}
-	if _, exists, lookupErr := store.GetAuditRecord(t.Context(), "approve-1"); lookupErr != nil || exists {
+	if _, exists, lookupErr := store.GetAuditRecord(t.Context(), planAuditRef(ref, "approve-1")); lookupErr != nil || exists {
 		t.Fatalf("audit exists=%v err=%v, want no audit", exists, lookupErr)
 	}
-	command, exists, lookupErr := store.GetPlanCommand(t.Context(), "approve-1")
+	command, exists, lookupErr := store.GetPlanCommand(t.Context(), planCommandRef(ref, "approve-1"))
 	if lookupErr != nil || !exists {
 		t.Fatalf("command exists=%v err=%v", exists, lookupErr)
 	}
@@ -633,14 +633,14 @@ func TestPlanRuntimeSignalPlanRetriesFailedCommand(t *testing.T) {
 	if temporalClient.signalCount != 2 {
 		t.Fatalf("signal count = %d, want retry delivery", temporalClient.signalCount)
 	}
-	command, exists, err := store.GetPlanCommand(t.Context(), signal.IdempotencyKey)
+	command, exists, err := store.GetPlanCommand(t.Context(), planCommandRef(ref, signal.IdempotencyKey))
 	if err != nil || !exists {
 		t.Fatalf("command exists=%v err=%v", exists, err)
 	}
 	if command.Status != agentosplan.PlanCommandDelivered {
 		t.Fatalf("command = %#v, want delivered", command)
 	}
-	if _, exists, err := store.GetAuditRecord(t.Context(), signal.IdempotencyKey); err != nil || !exists {
+	if _, exists, err := store.GetAuditRecord(t.Context(), planAuditRef(ref, signal.IdempotencyKey)); err != nil || !exists {
 		t.Fatalf("audit exists=%v err=%v", exists, err)
 	}
 }
@@ -656,7 +656,7 @@ func TestPlanRuntimeSignalPlanSkipsDeliveryWhenCommandDelivered(t *testing.T) {
 	if err != nil {
 		t.Fatalf("RecordPlanCommand: %v", err)
 	}
-	if _, err := store.MarkPlanCommandDelivered(t.Context(), command.IdempotencyKey); err != nil {
+	if _, err := store.MarkPlanCommandDelivered(t.Context(), agentosplan.PlanCommandRefFromRecord(command)); err != nil {
 		t.Fatalf("MarkPlanCommandDelivered: %v", err)
 	}
 	temporalClient := &fakePlanTemporalClient{signalErr: errors.New("should not signal")}
@@ -668,7 +668,7 @@ func TestPlanRuntimeSignalPlanSkipsDeliveryWhenCommandDelivered(t *testing.T) {
 	if temporalClient.signalCount != 0 {
 		t.Fatalf("signal count = %d, want 0", temporalClient.signalCount)
 	}
-	if _, exists, err := store.GetAuditRecord(t.Context(), "approve-1"); err != nil || !exists {
+	if _, exists, err := store.GetAuditRecord(t.Context(), planAuditRef(ref, "approve-1")); err != nil || !exists {
 		t.Fatalf("audit exists=%v err=%v", exists, err)
 	}
 }
@@ -714,14 +714,14 @@ func TestPlanRuntimeControlPlanAuditsAfterDelivery(t *testing.T) {
 	if temporalClient.signalName != PlanControlSignalName || temporalClient.signalCount != 1 {
 		t.Fatalf("signal name=%q count=%d", temporalClient.signalName, temporalClient.signalCount)
 	}
-	record, exists, err := store.GetAuditRecord(t.Context(), "cancel-1")
+	record, exists, err := store.GetAuditRecord(t.Context(), planAuditRef(ref, "cancel-1"))
 	if err != nil || !exists {
 		t.Fatalf("audit exists=%v err=%v", exists, err)
 	}
 	if record.ActorID != "operator-1" || record.Action != agentosplan.AuditActionPlanControl {
 		t.Fatalf("audit = %#v", record)
 	}
-	command, exists, err := store.GetPlanCommand(t.Context(), "cancel-1")
+	command, exists, err := store.GetPlanCommand(t.Context(), planCommandRef(ref, "cancel-1"))
 	if err != nil || !exists {
 		t.Fatalf("command exists=%v err=%v", exists, err)
 	}
@@ -780,6 +780,24 @@ func newPlanRuntimeTestStore(t *testing.T) (*agentosplan.MemoryPlanStore, agento
 	}
 
 	return store, agentos.PlanRef{PlanID: spec.PlanID, AccountID: spec.AccountID, ProjectID: spec.ProjectID}
+}
+
+func planCommandRef(ref agentos.PlanRef, idempotencyKey string) agentosplan.PlanCommandRef {
+	return agentosplan.PlanCommandRef{
+		PlanID:         ref.PlanID,
+		AccountID:      ref.AccountID,
+		ProjectID:      ref.ProjectID,
+		IdempotencyKey: idempotencyKey,
+	}
+}
+
+func planAuditRef(ref agentos.PlanRef, idempotencyKey string) agentosplan.AuditRef {
+	return agentosplan.AuditRef{
+		PlanID:         ref.PlanID,
+		AccountID:      ref.AccountID,
+		ProjectID:      ref.ProjectID,
+		IdempotencyKey: idempotencyKey,
+	}
 }
 
 type scopedOnlyPlanIndex struct {
