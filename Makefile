@@ -7,6 +7,8 @@ include .env.example
 export
 endif
 
+GO ?= go
+
 BASE_STACK = docker compose -f docker-compose.yml
 INTEGRATION_TEST_STACK = $(BASE_STACK) -f docker-compose-integration-test.yml
 ALL_STACK = $(INTEGRATION_TEST_STACK)
@@ -39,7 +41,7 @@ compose-down: ### Down docker compose
 .PHONY: compose-down
 
 swag-v1: ### swag init
-	go tool swag init --dir internal/controller/restapi,internal/controller/restapi/v1/request,internal/controller/restapi/v1/response,agentos \
+	$(GO) tool swag init --dir internal/controller/restapi,internal/controller/restapi/v1/request,internal/controller/restapi/v1/response,agentos \
 		-g router.go --output docs --parseInternal --parseDependency
 .PHONY: swag-v1
 
@@ -52,7 +54,7 @@ proto-v1: ### generate source files from proto
 .PHONY: proto-v1
 
 deps: ### deps tidy + verify
-	go mod tidy && go mod verify
+	$(GO) mod tidy && $(GO) mod verify
 .PHONY: deps
 
 deps-audit: ### check dependencies vulnerabilities
@@ -60,18 +62,18 @@ deps-audit: ### check dependencies vulnerabilities
 .PHONY: deps-audit
 
 fix-diff: ### Show code changes by `go fix`
-	go fix -diff ./...
+	$(GO) fix -diff ./...
 .PHONY: fix-diff
 
 format: ### Run code formatter
-	go fix ./...
+	$(GO) fix ./...
 	gofumpt -l -w .
 	gci write . --skip-generated -s standard -s default
 .PHONY: format
 
 run: deps swag-v1 proto-v1 ### swag run for API v1
-	go mod download && \
-	CGO_ENABLED=0 go run -tags migrate ./cmd/app
+	$(GO) mod download && \
+	CGO_ENABLED=0 $(GO) run -tags migrate ./cmd/app
 .PHONY: run
 
 docker-rm-volume: ### remove docker volume
@@ -99,10 +101,10 @@ check-import-boundary: ### enforce public AgentOS import boundaries
 .PHONY: check-import-boundary
 
 agentos-plan-schema: ### generate AgentOS RunPlan JSON Schema
-	go run ./cmd/agentos-plan schema --kind run-plan --out docs/schemas/run_plan.schema.json
-	go run ./cmd/agentos-plan schema --kind plan-delta --out docs/schemas/plan_delta.schema.json
-	go run ./cmd/agentos-plan schema --kind capability-catalog --out docs/schemas/capability_catalog.schema.json
-	go run ./cmd/agentos-plan schema --kind artifact-schema-catalog --out docs/schemas/artifact_schema_catalog.schema.json
+	$(GO) run ./cmd/agentos-plan schema --kind run-plan --out docs/schemas/run_plan.schema.json
+	$(GO) run ./cmd/agentos-plan schema --kind plan-delta --out docs/schemas/plan_delta.schema.json
+	$(GO) run ./cmd/agentos-plan schema --kind capability-catalog --out docs/schemas/capability_catalog.schema.json
+	$(GO) run ./cmd/agentos-plan schema --kind artifact-schema-catalog --out docs/schemas/artifact_schema_catalog.schema.json
 .PHONY: agentos-plan-schema
 
 check-agentos-plan-schema: agentos-plan-schema ### verify committed AgentOS RunPlan schemas are current
@@ -118,17 +120,17 @@ agentfw-security-suite: ### run agent framework security validation suites
 .PHONY: agentfw-security-suite
 
 test: ### run test
-	go test -v -race -covermode atomic -coverprofile=coverage.txt \
+	$(GO) test -v -race -covermode atomic -coverprofile=coverage.txt \
 		./agentos/... ./internal/... ./pkg/...
 .PHONY: test
 
 integration-test: ### run integration-test
-	go clean -testcache && go test -v ./integration-test/...
+	$(GO) clean -testcache && $(GO) test -v ./integration-test/...
 .PHONY: integration-test
 
 postgres-integration-test: ### run Postgres-backed AgentOS persistence integration tests
 	@test -n "$(GOAGENT_POSTGRES_TEST_URL)" || (echo "GOAGENT_POSTGRES_TEST_URL is required" >&2; exit 1)
-	go clean -testcache && go test -tags postgres_integration -v ./internal/repo/persistent
+	$(GO) clean -testcache && $(GO) test -tags postgres_integration -v ./internal/repo/persistent
 .PHONY: postgres-integration-test
 
 mock: ### run mockgen
@@ -145,8 +147,8 @@ migrate-up: ### migration up
 .PHONY: migrate-up
 
 bin-deps: ### install tools
-	go install tool
-	go install -tags 'postgres' github.com/golang-migrate/migrate/v4/cmd/migrate
+	$(GO) install tool
+	$(GO) install -tags 'postgres' github.com/golang-migrate/migrate/v4/cmd/migrate
 .PHONY: bin-deps
 
 pre-commit: swag-v1 proto-v1 mock format linter-golangci test ### run pre-commit
