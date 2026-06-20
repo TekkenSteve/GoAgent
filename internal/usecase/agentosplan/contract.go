@@ -231,10 +231,12 @@ func PlanCommandRefFromRecord(command PlanCommandRecord) PlanCommandRef {
 
 // PlanCommandScope selects recoverable command outbox entries.
 type PlanCommandScope struct {
-	PlanID   string
-	Action   AuditAction
-	Statuses []PlanCommandStatus
-	Limit    int
+	PlanID    string
+	AccountID string
+	ProjectID string
+	Action    AuditAction
+	Statuses  []PlanCommandStatus
+	Limit     int
 }
 
 // PlanCommandStore persists recoverable plan start/signal/control commands.

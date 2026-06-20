@@ -12,6 +12,9 @@ func RecoverablePlanCommandStatuses(scope PlanCommandScope) ([]PlanCommandStatus
 	if scope.Limit < 0 {
 		return nil, fmt.Errorf("%w: command limit must be non-negative", agentos.ErrInvalidRunPlan)
 	}
+	if (scope.AccountID == "") != (scope.ProjectID == "") {
+		return nil, fmt.Errorf("%w: command account_id and project_id must be provided together", agentos.ErrInvalidPlanScope)
+	}
 	if len(scope.Statuses) == 0 {
 		return []PlanCommandStatus{PlanCommandPending, PlanCommandFailed}, nil
 	}

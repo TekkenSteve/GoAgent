@@ -303,6 +303,7 @@ func TestMemoryPlanStoreListRecoverablePlanCommands(t *testing.T) {
 	ctx := context.Background()
 	store := NewMemoryPlanStore()
 	spec := createMemoryPlanForTest(t, ctx, store, "plan-1")
+	otherSpec := createMemoryPlanForTest(t, ctx, store, "plan-2")
 	commands := []PlanCommandRecord{
 		{
 			CommandID:      "command-delivered",
@@ -331,6 +332,15 @@ func TestMemoryPlanStoreListRecoverablePlanCommands(t *testing.T) {
 			CreatedAt:      time.Date(2026, 6, 19, 12, 2, 0, 0, time.UTC),
 			UpdatedAt:      time.Date(2026, 6, 19, 12, 2, 0, 0, time.UTC),
 		},
+		{
+			CommandID:      "command-other-tenant",
+			PlanID:         otherSpec.PlanID,
+			Action:         AuditActionPlanSignal,
+			IdempotencyKey: "command-other-tenant",
+			Payload:        map[string]any{"type": string(agentos.SignalPlanReject)},
+			CreatedAt:      time.Date(2026, 6, 19, 12, 3, 0, 0, time.UTC),
+			UpdatedAt:      time.Date(2026, 6, 19, 12, 3, 0, 0, time.UTC),
+		},
 	}
 	for i, command := range commands {
 		stored, _, err := store.RecordPlanCommand(ctx, command)
@@ -344,6 +354,9 @@ func TestMemoryPlanStoreListRecoverablePlanCommands(t *testing.T) {
 	}
 	if _, err := store.MarkPlanCommandFailed(ctx, PlanCommandRefFromRecord(commands[2]), "temporal unavailable"); err != nil {
 		t.Fatalf("MarkPlanCommandFailed: %v", err)
+	}
+	if _, err := store.MarkPlanCommandFailed(ctx, PlanCommandRefFromRecord(commands[3]), "temporal unavailable"); err != nil {
+		t.Fatalf("MarkPlanCommandFailed other tenant: %v", err)
 	}
 
 	got, err := store.ListRecoverablePlanCommands(ctx, PlanCommandScope{
@@ -369,6 +382,18 @@ func TestMemoryPlanStoreListRecoverablePlanCommands(t *testing.T) {
 	if len(got) != 1 || got[0].CommandID != "command-failed" {
 		t.Fatalf("failed commands = %#v", got)
 	}
+
+	got, err = store.ListRecoverablePlanCommands(ctx, PlanCommandScope{
+		AccountID: spec.AccountID,
+		ProjectID: spec.ProjectID,
+		Statuses:  []PlanCommandStatus{PlanCommandFailed},
+	})
+	if err != nil {
+		t.Fatalf("ListRecoverablePlanCommands tenant scoped: %v", err)
+	}
+	if len(got) != 1 || got[0].CommandID != "command-failed" {
+		t.Fatalf("tenant scoped failed commands = %#v", got)
+	}
 }
 
 func TestRecoverablePlanCommandStatusesRejectsDelivered(t *testing.T) {
@@ -377,6 +402,18 @@ func TestRecoverablePlanCommandStatusesRejectsDelivered(t *testing.T) {
 	})
 	if !errors.Is(err, agentos.ErrInvalidRunPlan) {
 		t.Fatalf("error = %v, want ErrInvalidRunPlan", err)
+	}
+}
+
+func TestRecoverablePlanCommandStatusesRejectsPartialTenantScope(t *testing.T) {
+	for _, scope := range []PlanCommandScope{
+		{AccountID: "acct-1"},
+		{ProjectID: "proj-1"},
+	} {
+		_, err := RecoverablePlanCommandStatuses(scope)
+		if !errors.Is(err, agentos.ErrInvalidPlanScope) {
+			t.Fatalf("RecoverablePlanCommandStatuses(%#v) error = %v, want ErrInvalidPlanScope", scope, err)
+		}
 	}
 }
 

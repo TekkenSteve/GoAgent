@@ -1325,6 +1325,12 @@ func (r *AgentOSPlanRepo) ListRecoverablePlanCommands(ctx context.Context, scope
 	if scope.PlanID != "" {
 		builder = builder.Where(sq.Eq{"plan_id": scope.PlanID})
 	}
+	if scope.AccountID != "" {
+		builder = builder.Where(sq.Eq{"account_id": scope.AccountID})
+	}
+	if scope.ProjectID != "" {
+		builder = builder.Where(sq.Eq{"project_id": scope.ProjectID})
+	}
 	if scope.Action != "" {
 		builder = builder.Where(sq.Eq{"action": string(scope.Action)})
 	}

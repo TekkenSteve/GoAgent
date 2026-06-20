@@ -482,6 +482,12 @@ func (s *MemoryPlanStore) ListRecoverablePlanCommands(_ context.Context, scope P
 		if scope.PlanID != "" && command.PlanID != scope.PlanID {
 			continue
 		}
+		if scope.AccountID != "" && command.AccountID != scope.AccountID {
+			continue
+		}
+		if scope.ProjectID != "" && command.ProjectID != scope.ProjectID {
+			continue
+		}
 		if scope.Action != "" && command.Action != scope.Action {
 			continue
 		}

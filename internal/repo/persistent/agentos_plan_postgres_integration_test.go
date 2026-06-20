@@ -231,8 +231,10 @@ func TestAgentOSPlanPostgresDurablePersistence(t *testing.T) {
 		t.Fatalf("MarkPlanCommandFailed: %v", err)
 	}
 	recoverableCommands, err := planRepo.ListRecoverablePlanCommands(ctx, agentosplan.PlanCommandScope{
-		PlanID:   spec.PlanID,
-		Statuses: []agentosplan.PlanCommandStatus{agentosplan.PlanCommandFailed},
+		PlanID:    spec.PlanID,
+		AccountID: spec.AccountID,
+		ProjectID: spec.ProjectID,
+		Statuses:  []agentosplan.PlanCommandStatus{agentosplan.PlanCommandFailed},
 	})
 	if err != nil {
 		t.Fatalf("ListRecoverablePlanCommands: %v", err)
