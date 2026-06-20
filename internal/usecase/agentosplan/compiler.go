@@ -2,11 +2,9 @@ package agentosplan
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 
 	"github.com/TekkenSteve/GoAgent/agentos"
-	"sigs.k8s.io/yaml"
 )
 
 // RunPlanCompiler parses serialized plans into validated executable plans.
@@ -16,9 +14,9 @@ type RunPlanCompiler struct {
 
 // CompileJSON compiles JSON into an executable RunPlan.
 func (c RunPlanCompiler) CompileJSON(ctx context.Context, data []byte) (ExecutablePlan, error) {
-	var spec agentos.RunPlanSpec
-	if err := json.Unmarshal(data, &spec); err != nil {
-		return ExecutablePlan{}, fmt.Errorf("%w: decode json: %s", agentos.ErrInvalidRunPlan, err)
+	spec, err := DecodeWireJSON[agentos.RunPlanSpec](data)
+	if err != nil {
+		return ExecutablePlan{}, err
 	}
 
 	return c.Validator.Validate(ctx, spec)
@@ -26,19 +24,19 @@ func (c RunPlanCompiler) CompileJSON(ctx context.Context, data []byte) (Executab
 
 // CompileYAML compiles YAML into an executable RunPlan.
 func (c RunPlanCompiler) CompileYAML(ctx context.Context, data []byte) (ExecutablePlan, error) {
-	jsonData, err := yaml.YAMLToJSON(data)
+	spec, err := DecodeWireYAML[agentos.RunPlanSpec](data)
 	if err != nil {
-		return ExecutablePlan{}, fmt.Errorf("%w: decode yaml: %s", agentos.ErrInvalidRunPlan, err)
+		return ExecutablePlan{}, err
 	}
 
-	return c.CompileJSON(ctx, jsonData)
+	return c.Validator.Validate(ctx, spec)
 }
 
 // CompileDeltaJSON decodes JSON PlanDelta and validates the expanded plan.
 func (c RunPlanCompiler) CompileDeltaJSON(ctx context.Context, base agentos.RunPlanSpec, data []byte, expansionCount int32) (agentos.RunPlanSpec, ExecutablePlan, error) {
-	var delta PlanDelta
-	if err := json.Unmarshal(data, &delta); err != nil {
-		return agentos.RunPlanSpec{}, ExecutablePlan{}, fmt.Errorf("%w: decode delta json: %s", agentos.ErrInvalidRunPlan, err)
+	delta, err := DecodeWireJSON[PlanDelta](data)
+	if err != nil {
+		return agentos.RunPlanSpec{}, ExecutablePlan{}, fmt.Errorf("decode delta: %w", err)
 	}
 
 	return ApplyDelta(ctx, c.Validator, base, delta, expansionCount)
@@ -46,10 +44,10 @@ func (c RunPlanCompiler) CompileDeltaJSON(ctx context.Context, base agentos.RunP
 
 // CompileDeltaYAML decodes YAML PlanDelta and validates the expanded plan.
 func (c RunPlanCompiler) CompileDeltaYAML(ctx context.Context, base agentos.RunPlanSpec, data []byte, expansionCount int32) (agentos.RunPlanSpec, ExecutablePlan, error) {
-	jsonData, err := yaml.YAMLToJSON(data)
+	delta, err := DecodeWireYAML[PlanDelta](data)
 	if err != nil {
-		return agentos.RunPlanSpec{}, ExecutablePlan{}, fmt.Errorf("%w: decode delta yaml: %s", agentos.ErrInvalidRunPlan, err)
+		return agentos.RunPlanSpec{}, ExecutablePlan{}, fmt.Errorf("decode delta: %w", err)
 	}
 
-	return c.CompileDeltaJSON(ctx, base, jsonData, expansionCount)
+	return ApplyDelta(ctx, c.Validator, base, delta, expansionCount)
 }

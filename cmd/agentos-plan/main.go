@@ -693,23 +693,57 @@ func encodeWire(format string, value any) ([]byte, error) {
 func decodeWire(format string, data []byte, target any) error {
 	switch format {
 	case "json":
-		if err := json.Unmarshal(data, target); err != nil {
-			return fmt.Errorf("decode json: %w", err)
+		return decodeWireJSONTarget(data, target)
+	case "yaml":
+		return decodeWireYAMLTarget(data, target)
+	default:
+		return fmt.Errorf("unsupported format %q", format)
+	}
+}
+
+func decodeWireJSONTarget(data []byte, target any) error {
+	switch value := target.(type) {
+	case *agentos.CapabilityCatalogSpec:
+		decoded, err := agentosplan.DecodeWireJSON[agentos.CapabilityCatalogSpec](data)
+		if err != nil {
+			return err
 		}
+		*value = decoded
 
 		return nil
-	case "yaml":
-		jsonData, err := yaml.YAMLToJSON(data)
+	case *agentos.ArtifactSchemaCatalogSpec:
+		decoded, err := agentosplan.DecodeWireJSON[agentos.ArtifactSchemaCatalogSpec](data)
 		if err != nil {
-			return fmt.Errorf("decode yaml: %w", err)
+			return err
 		}
-		if err := json.Unmarshal(jsonData, target); err != nil {
-			return fmt.Errorf("decode yaml json: %w", err)
-		}
+		*value = decoded
 
 		return nil
 	default:
-		return fmt.Errorf("unsupported format %q", format)
+		return fmt.Errorf("unsupported decode target %T", target)
+	}
+}
+
+func decodeWireYAMLTarget(data []byte, target any) error {
+	switch value := target.(type) {
+	case *agentos.CapabilityCatalogSpec:
+		decoded, err := agentosplan.DecodeWireYAML[agentos.CapabilityCatalogSpec](data)
+		if err != nil {
+			return err
+		}
+		*value = decoded
+
+		return nil
+	case *agentos.ArtifactSchemaCatalogSpec:
+		decoded, err := agentosplan.DecodeWireYAML[agentos.ArtifactSchemaCatalogSpec](data)
+		if err != nil {
+			return err
+		}
+		*value = decoded
+
+		return nil
+	default:
+		return fmt.Errorf("unsupported decode target %T", target)
 	}
 }
 

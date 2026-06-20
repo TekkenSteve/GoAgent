@@ -83,8 +83,8 @@ func DecodePlanDeltaPayload(payload any) (PlanDelta, error) {
 	if err != nil {
 		return PlanDelta{}, fmt.Errorf("encode payload: %w", err)
 	}
-	var delta PlanDelta
-	if err := json.Unmarshal(data, &delta); err != nil {
+	delta, err := DecodeWireJSON[PlanDelta](data)
+	if err != nil {
 		return PlanDelta{}, fmt.Errorf("decode payload: %w", err)
 	}
 

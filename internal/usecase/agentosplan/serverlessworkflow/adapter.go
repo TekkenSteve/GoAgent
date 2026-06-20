@@ -134,7 +134,8 @@ func (a Adapter) Import(ctx context.Context, workflow Workflow) (agentos.RunPlan
 	}
 
 	var extension runPlanExtension
-	if err := json.Unmarshal(raw, &extension); err != nil {
+	extension, err := agentosplan.DecodeWireJSON[runPlanExtension](raw)
+	if err != nil {
 		return agentos.RunPlanSpec{}, fmt.Errorf("%w: decode run plan extension: %s", agentos.ErrInvalidRunPlan, err)
 	}
 	if _, err := a.Validator.Validate(ctx, extension.Spec); err != nil {
@@ -151,8 +152,8 @@ func MarshalJSON(workflow Workflow) ([]byte, error) {
 
 // UnmarshalJSON parses a Serverless Workflow JSON document.
 func UnmarshalJSON(data []byte) (Workflow, error) {
-	var workflow Workflow
-	if err := json.Unmarshal(data, &workflow); err != nil {
+	workflow, err := agentosplan.DecodeWireJSON[Workflow](data)
+	if err != nil {
 		return Workflow{}, fmt.Errorf("%w: decode serverless workflow json: %s", agentos.ErrInvalidRunPlan, err)
 	}
 
@@ -171,12 +172,12 @@ func MarshalYAML(workflow Workflow) ([]byte, error) {
 
 // UnmarshalYAML parses a Serverless Workflow YAML document.
 func UnmarshalYAML(data []byte) (Workflow, error) {
-	jsonData, err := yaml.YAMLToJSON(data)
+	workflow, err := agentosplan.DecodeWireYAML[Workflow](data)
 	if err != nil {
 		return Workflow{}, fmt.Errorf("%w: decode serverless workflow yaml: %s", agentos.ErrInvalidRunPlan, err)
 	}
 
-	return UnmarshalJSON(jsonData)
+	return workflow, nil
 }
 
 func (tasks TaskList) MarshalJSON() ([]byte, error) {
@@ -192,8 +193,8 @@ func (tasks TaskList) MarshalJSON() ([]byte, error) {
 }
 
 func (tasks *TaskList) UnmarshalJSON(data []byte) error {
-	var rawTasks []map[string]TaskDefinition
-	if err := json.Unmarshal(data, &rawTasks); err != nil {
+	rawTasks, err := agentosplan.DecodeWireJSON[[]map[string]TaskDefinition](data)
+	if err != nil {
 		return fmt.Errorf("%w: decode serverless workflow tasks: %s", agentos.ErrInvalidRunPlan, err)
 	}
 	decoded := make(TaskList, 0, len(rawTasks))

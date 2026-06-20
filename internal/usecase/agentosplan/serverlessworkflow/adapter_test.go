@@ -100,6 +100,48 @@ func TestTaskListRejectsAmbiguousTaskObjects(t *testing.T) {
 	}
 }
 
+func TestUnmarshalRejectsUnknownWorkflowFields(t *testing.T) {
+	_, err := UnmarshalJSON([]byte(`{
+	  "document": {"dsl": "1.0.3", "name": "unknown"},
+	  "do": [],
+	  "listen": {}
+	}`))
+	if !errors.Is(err, agentos.ErrInvalidRunPlan) {
+		t.Fatalf("UnmarshalJSON error = %v, want ErrInvalidRunPlan", err)
+	}
+}
+
+func TestTaskListRejectsUnknownTaskDefinitionFields(t *testing.T) {
+	data := []byte(`[{"a":{"call":"agentos.run","foreach":[]}}]`)
+	var tasks TaskList
+	err := json.Unmarshal(data, &tasks)
+	if !errors.Is(err, agentos.ErrInvalidRunPlan) {
+		t.Fatalf("Unmarshal error = %v, want ErrInvalidRunPlan", err)
+	}
+}
+
+func TestAdapterRejectsUnknownRunPlanExtensionFields(t *testing.T) {
+	adapter := testAdapter(t)
+	specPayload, err := json.Marshal(testRunPlanSpec())
+	if err != nil {
+		t.Fatalf("Marshal spec: %v", err)
+	}
+	raw := json.RawMessage(`{"spec":` + string(specPayload) + `,"specc":{}}`)
+
+	_, err = adapter.Import(context.Background(), Workflow{
+		Document: Document{DSL: DSLVersion, Name: "bad-extension"},
+		Do:       TaskList{},
+		Use: Use{
+			Extensions: map[string]json.RawMessage{
+				AgentOSRunPlanKey: raw,
+			},
+		},
+	})
+	if !errors.Is(err, agentos.ErrInvalidRunPlan) {
+		t.Fatalf("Import error = %v, want ErrInvalidRunPlan", err)
+	}
+}
+
 func testAdapter(t *testing.T) Adapter {
 	t.Helper()
 	ref := agentos.BackendRef{Kind: agentos.BackendKindHTTP, Name: "research"}

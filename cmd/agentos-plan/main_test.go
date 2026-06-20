@@ -188,6 +188,40 @@ func TestCompileCommandAcceptsJSONWireFormat(t *testing.T) {
 	}
 }
 
+func TestCompileCommandRejectsUnknownCapabilityCatalogField(t *testing.T) {
+	dir := t.TempDir()
+	planPath := filepath.Join(dir, "plan.yaml")
+	capabilitiesPath := filepath.Join(dir, "capabilities.yaml")
+	if err := os.WriteFile(planPath, []byte(capabilityPlanYAML), 0o644); err != nil {
+		t.Fatalf("WriteFile plan: %v", err)
+	}
+	if err := os.WriteFile(capabilitiesPath, []byte(`
+capabilities:
+  - backend:
+      kind: http
+      name: research
+    name: research
+    capabilty: typo
+`), 0o644); err != nil {
+		t.Fatalf("WriteFile capabilities: %v", err)
+	}
+
+	var stdout, stderr bytes.Buffer
+	code := run([]string{
+		"compile",
+		"--file", planPath,
+		"--format", "yaml",
+		"--capabilities", capabilitiesPath,
+		"--capabilities-format", "yaml",
+	}, &stdout, &stderr)
+	if code == 0 {
+		t.Fatalf("compile succeeded with unknown capability field; stdout=%s", stdout.String())
+	}
+	if !strings.Contains(stderr.String(), `unknown field "capabilty"`) {
+		t.Fatalf("stderr = %s", stderr.String())
+	}
+}
+
 func TestValidateCommandUsesArtifactSchemaCatalog(t *testing.T) {
 	dir := t.TempDir()
 	planPath := filepath.Join(dir, "plan.yaml")
@@ -219,6 +253,40 @@ func TestValidateCommandUsesArtifactSchemaCatalog(t *testing.T) {
 	}, &stdout, &stderr)
 	if code != 0 {
 		t.Fatalf("validate with artifact schemas code = %d stderr = %s", code, stderr.String())
+	}
+}
+
+func TestValidateCommandRejectsUnknownArtifactSchemaCatalogField(t *testing.T) {
+	dir := t.TempDir()
+	planPath := filepath.Join(dir, "plan.yaml")
+	schemasPath := filepath.Join(dir, "artifact-schemas.yaml")
+	if err := os.WriteFile(planPath, []byte(artifactSchemaPlanYAML), 0o644); err != nil {
+		t.Fatalf("WriteFile plan: %v", err)
+	}
+	if err := os.WriteFile(schemasPath, []byte(`
+artifact_schemas:
+  - ref: schema:summary
+    description: Summary artifact
+    schema:
+      type: object
+    scheam: typo
+`), 0o644); err != nil {
+		t.Fatalf("WriteFile artifact schemas: %v", err)
+	}
+
+	var stdout, stderr bytes.Buffer
+	code := run([]string{
+		"validate",
+		"--file", planPath,
+		"--format", "yaml",
+		"--artifact-schemas", schemasPath,
+		"--artifact-schemas-format", "yaml",
+	}, &stdout, &stderr)
+	if code == 0 {
+		t.Fatalf("validate succeeded with unknown artifact schema field; stdout=%s", stdout.String())
+	}
+	if !strings.Contains(stderr.String(), `unknown field "scheam"`) {
+		t.Fatalf("stderr = %s", stderr.String())
 	}
 }
 

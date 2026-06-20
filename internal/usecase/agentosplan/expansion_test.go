@@ -3,6 +3,7 @@ package agentosplan
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
@@ -122,6 +123,32 @@ func TestArtifactPlanDeltaProviderFailsWhenPayloadMissing(t *testing.T) {
 	})
 	if !errors.Is(err, agentos.ErrArtifactNotFound) {
 		t.Fatalf("error = %v, want ErrArtifactNotFound", err)
+	}
+}
+
+func TestDecodePlanDeltaPayloadRejectsUnknownFields(t *testing.T) {
+	t.Parallel()
+
+	_, err := DecodePlanDeltaPayload(map[string]any{
+		"nodes": []any{
+			map[string]any{
+				"node_id":    "expanded",
+				"unexpected": true,
+				"run": map[string]any{
+					"run_id": "run-expanded",
+					"backend": map[string]any{
+						"kind": "native",
+						"name": "goagent-native",
+					},
+				},
+			},
+		},
+	})
+	if !errors.Is(err, agentos.ErrInvalidRunPlan) {
+		t.Fatalf("error = %v, want ErrInvalidRunPlan", err)
+	}
+	if !strings.Contains(err.Error(), `unknown field "unexpected"`) {
+		t.Fatalf("error = %v, want unknown field", err)
 	}
 }
 
