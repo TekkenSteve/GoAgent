@@ -20,7 +20,7 @@ func TestRedisPlanEventStreamPublishesPlanEvent(t *testing.T) {
 		t.Fatalf("PublishPlanEvent: %v", err)
 	}
 
-	entry, ok := fake.entry(planEventStreamKey("plan-1"), "7-0")
+	entry, ok := fake.entry(planEventStreamKey(testPlanRef()), "7-0")
 	if !ok {
 		t.Fatalf("missing redis entry: %#v", fake.entries)
 	}
@@ -31,7 +31,7 @@ func TestRedisPlanEventStreamPublishesPlanEvent(t *testing.T) {
 	if stored.EventID != event.EventID || stored.PlanID != event.PlanID || stored.Sequence != event.Sequence {
 		t.Fatalf("stored = %#v, want %#v", stored, event)
 	}
-	if fake.expiredKey != planEventStreamKey("plan-1") {
+	if fake.expiredKey != planEventStreamKey(testPlanRef()) {
 		t.Fatalf("expired key = %q", fake.expiredKey)
 	}
 }
@@ -40,7 +40,7 @@ func TestRedisPlanEventStreamPublishIsIdempotent(t *testing.T) {
 	fake := newFakePlanEventRedis()
 	stream := newRedisPlanEventStream(fake, nil)
 	event := testPlanEvent("evt-1", 7)
-	fake.store(planEventStreamKey("plan-1"), "7-0", event)
+	fake.store(planEventStreamKey(testPlanRef()), "7-0", event)
 
 	if err := stream.PublishPlanEvent(context.Background(), event); err != nil {
 		t.Fatalf("PublishPlanEvent duplicate: %v", err)
@@ -55,7 +55,7 @@ func TestRedisPlanEventStreamPublishComparesCanonicalPlanEvent(t *testing.T) {
 	stream := newRedisPlanEventStream(fake, nil)
 	event := testPlanEvent("evt-1", 7)
 	event.Payload = map[string]any{"attempt": 1}
-	fake.store(planEventStreamKey("plan-1"), "7-0", event)
+	fake.store(planEventStreamKey(testPlanRef()), "7-0", event)
 
 	if err := stream.PublishPlanEvent(context.Background(), event); err != nil {
 		t.Fatalf("PublishPlanEvent duplicate with numeric payload: %v", err)
@@ -68,7 +68,7 @@ func TestRedisPlanEventStreamPublishComparesCanonicalPlanEvent(t *testing.T) {
 func TestRedisPlanEventStreamRejectsSequenceCollision(t *testing.T) {
 	fake := newFakePlanEventRedis()
 	stream := newRedisPlanEventStream(fake, nil)
-	fake.store(planEventStreamKey("plan-1"), "7-0", testPlanEvent("evt-existing", 7))
+	fake.store(planEventStreamKey(testPlanRef()), "7-0", testPlanEvent("evt-existing", 7))
 
 	err := stream.PublishPlanEvent(context.Background(), testPlanEvent("evt-new", 7))
 	if !errors.Is(err, agentos.ErrInvalidPlanEvent) {
@@ -80,7 +80,7 @@ func TestRedisPlanEventStreamRejectsSameSequenceWithDifferentPayload(t *testing.
 	fake := newFakePlanEventRedis()
 	stream := newRedisPlanEventStream(fake, nil)
 	existing := testPlanEvent("evt-1", 7)
-	fake.store(planEventStreamKey("plan-1"), "7-0", existing)
+	fake.store(planEventStreamKey(testPlanRef()), "7-0", existing)
 	changed := existing
 	changed.Payload = map[string]any{"ok": false}
 
@@ -107,6 +107,37 @@ func TestRedisPlanEventStreamSubscribeRequiresTenantScope(t *testing.T) {
 	}
 }
 
+func TestPlanEventMatchesScopeRejectsTenantMismatch(t *testing.T) {
+	event := testPlanEvent("evt-1", 7)
+	for _, scope := range []agentos.PlanStreamScope{
+		{PlanID: event.PlanID, AccountID: "acct-other", ProjectID: event.ProjectID},
+		{PlanID: event.PlanID, AccountID: event.AccountID, ProjectID: "proj-other"},
+	} {
+		if planEventMatchesScope(event, scope) {
+			t.Fatalf("planEventMatchesScope(%#v, %#v) = true, want false", event, scope)
+		}
+	}
+
+	if !planEventMatchesScope(event, agentos.PlanStreamScope{
+		PlanID:    event.PlanID,
+		AccountID: event.AccountID,
+		ProjectID: event.ProjectID,
+	}) {
+		t.Fatal("planEventMatchesScope rejected matching tenant scope")
+	}
+}
+
+func TestPlanEventStreamKeyIncludesTenantScope(t *testing.T) {
+	if planEventStreamKey(agentos.PlanRef{PlanID: "plan-1", AccountID: "acct-1", ProjectID: "proj-1"}) ==
+		planEventStreamKey(agentos.PlanRef{PlanID: "plan-1", AccountID: "acct-2", ProjectID: "proj-1"}) {
+		t.Fatal("plan event stream key must include account id")
+	}
+	if planEventStreamKey(agentos.PlanRef{PlanID: "plan-1", AccountID: "acct-1", ProjectID: "proj-1"}) ==
+		planEventStreamKey(agentos.PlanRef{PlanID: "plan-1", AccountID: "acct-1", ProjectID: "proj-2"}) {
+		t.Fatal("plan event stream key must include project id")
+	}
+}
+
 func testPlanEvent(eventID string, sequence int64) agentos.PlanEvent {
 	return agentos.PlanEvent{
 		Event: agentos.Event{
@@ -117,9 +148,15 @@ func testPlanEvent(eventID string, sequence int64) agentos.PlanEvent {
 			Timestamp: time.Date(2026, 6, 19, 10, 0, 0, 0, time.UTC),
 			Payload:   map[string]any{"ok": true},
 		},
-		PlanID: "plan-1",
-		NodeID: "node-1",
+		PlanID:    "plan-1",
+		AccountID: "acct-1",
+		ProjectID: "proj-1",
+		NodeID:    "node-1",
 	}
+}
+
+func testPlanRef() agentos.PlanRef {
+	return agentos.PlanRef{PlanID: "plan-1", AccountID: "acct-1", ProjectID: "proj-1"}
 }
 
 type fakePlanEventRedis struct {

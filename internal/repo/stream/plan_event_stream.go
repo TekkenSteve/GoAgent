@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"net/url"
 	"strconv"
 	"time"
 
@@ -57,7 +58,7 @@ func (s *RedisPlanEventStream) PublishPlanEvent(ctx context.Context, event agent
 		return err
 	}
 
-	streamKey := planEventStreamKey(event.PlanID)
+	streamKey := planEventStreamKey(planEventRef(event))
 	entryID := planEventEntryID(event.Sequence)
 	existing, exists, err := s.planEventAt(ctx, streamKey, entryID)
 	if err != nil {
@@ -99,7 +100,7 @@ func (s *RedisPlanEventStream) SubscribePlanEvents(_ context.Context, scope agen
 		return nil, fmt.Errorf("%w: redis plan event subscriber is not configured", agentos.ErrInvalidStreamScope)
 	}
 
-	hubSub := s.hub.Subscribe(planEventStreamKey(scope.PlanID), planEventEntryID(scope.AfterSequence))
+	hubSub := s.hub.Subscribe(planEventStreamKey(planStreamRef(scope)), planEventEntryID(scope.AfterSequence))
 	out := make(chan agentos.Event, planEventSubscriberBufferSize)
 	go func() {
 		defer close(out)
@@ -109,7 +110,7 @@ func (s *RedisPlanEventStream) SubscribePlanEvents(_ context.Context, scope agen
 				continue
 			}
 
-			out <- eventFromPlanEvent(planEvent)
+			out <- planEvent.ToEvent()
 		}
 	}()
 
@@ -189,23 +190,14 @@ func decodePlanEventStreamValue(value any) (agentos.PlanEvent, error) {
 	}
 }
 
-func eventFromPlanEvent(planEvent agentos.PlanEvent) agentos.Event {
-	event := planEvent.Event
-	payload := make(map[string]any, len(event.Payload)+2)
-	for key, value := range event.Payload {
-		payload[key] = value
-	}
-	payload["plan_id"] = planEvent.PlanID
-	if planEvent.NodeID != "" {
-		payload["node_id"] = planEvent.NodeID
-	}
-	event.Payload = payload
-
-	return event
-}
-
 func planEventMatchesScope(event agentos.PlanEvent, scope agentos.PlanStreamScope) bool {
 	if event.PlanID != scope.PlanID {
+		return false
+	}
+	if event.AccountID != scope.AccountID {
+		return false
+	}
+	if event.ProjectID != scope.ProjectID {
 		return false
 	}
 	if scope.NodeID != "" && event.NodeID != scope.NodeID {
@@ -231,8 +223,27 @@ func ensureSamePlanEvent(existing agentos.PlanEvent, expected agentos.PlanEvent)
 	return fmt.Errorf("%w: plan event sequence %d already belongs to event %q", agentos.ErrInvalidPlanEvent, expected.Sequence, existing.EventID)
 }
 
-func planEventStreamKey(planID string) string {
-	return "agentos:plan:events:" + planID
+func planEventStreamKey(ref agentos.PlanRef) string {
+	return "agentos:plan:events:" +
+		url.PathEscape(ref.AccountID) + ":" +
+		url.PathEscape(ref.ProjectID) + ":" +
+		url.PathEscape(ref.PlanID)
+}
+
+func planEventRef(event agentos.PlanEvent) agentos.PlanRef {
+	return agentos.PlanRef{
+		PlanID:    event.PlanID,
+		AccountID: event.AccountID,
+		ProjectID: event.ProjectID,
+	}
+}
+
+func planStreamRef(scope agentos.PlanStreamScope) agentos.PlanRef {
+	return agentos.PlanRef{
+		PlanID:    scope.PlanID,
+		AccountID: scope.AccountID,
+		ProjectID: scope.ProjectID,
+	}
 }
 
 func planEventEntryID(sequence int64) string {

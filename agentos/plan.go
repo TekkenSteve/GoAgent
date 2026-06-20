@@ -334,8 +334,10 @@ type PlanDebugTraceScope struct {
 // PlanEvent is the public event envelope for plan-level events.
 type PlanEvent struct {
 	Event
-	PlanID string `json:"plan_id"`
-	NodeID string `json:"node_id,omitempty"`
+	PlanID    string `json:"plan_id"`
+	AccountID string `json:"account_id"`
+	ProjectID string `json:"project_id"`
+	NodeID    string `json:"node_id,omitempty"`
 }
 
 // PlanDebugTrace is a typed debug projection over durable plan events. It keeps

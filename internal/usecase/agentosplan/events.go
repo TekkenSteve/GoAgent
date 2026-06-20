@@ -40,6 +40,9 @@ const (
 // PlanEventFromStateEvent maps a deterministic reducer transition to the public
 // PlanEvent envelope used by durable event stores and UI timelines.
 func PlanEventFromStateEvent(spec agentos.RunPlanSpec, status agentos.RunPlanStatus, event StateEvent) (agentos.PlanEvent, string, error) {
+	if err := ValidateRunPlanScope(spec); err != nil {
+		return agentos.PlanEvent{}, "", err
+	}
 	eventType, err := planEventType(event.Kind)
 	if err != nil {
 		return agentos.PlanEvent{}, "", err
@@ -104,8 +107,10 @@ func PlanEventFromStateEvent(spec agentos.RunPlanSpec, status agentos.RunPlanSta
 			Source:    "agentos.plan",
 			Payload:   payload,
 		},
-		PlanID: spec.PlanID,
-		NodeID: event.NodeID,
+		PlanID:    spec.PlanID,
+		AccountID: spec.AccountID,
+		ProjectID: spec.ProjectID,
+		NodeID:    event.NodeID,
 	}
 
 	key, err := StateEventIdempotencyKey(spec.PlanID, event)

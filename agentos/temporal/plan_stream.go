@@ -9,7 +9,7 @@ import (
 func newPlanReplaySubscription(planEvents []agentos.PlanEvent) agentos.Subscription {
 	out := make(chan agentos.Event, len(planEvents))
 	for _, planEvent := range planEvents {
-		out <- eventFromPlanEvent(planEvent)
+		out <- planEvent.ToEvent()
 	}
 	close(out)
 
@@ -34,7 +34,7 @@ func newPlanReplayThenLiveSubscriptionAfter(planEvents []agentos.PlanEvent, live
 			select {
 			case <-done:
 				return
-			case out <- eventFromPlanEvent(planEvent):
+			case out <- planEvent.ToEvent():
 			}
 		}
 		for {
@@ -69,21 +69,6 @@ func newPlanReplayThenLiveSubscriptionAfter(planEvents []agentos.PlanEvent, live
 			return err
 		},
 	}
-}
-
-func eventFromPlanEvent(planEvent agentos.PlanEvent) agentos.Event {
-	event := planEvent.Event
-	payload := make(map[string]any, len(event.Payload)+2)
-	for key, value := range event.Payload {
-		payload[key] = value
-	}
-	payload["plan_id"] = planEvent.PlanID
-	if planEvent.NodeID != "" {
-		payload["node_id"] = planEvent.NodeID
-	}
-	event.Payload = payload
-
-	return event
 }
 
 func lastPlanEventSequence(afterSequence int64, planEvents []agentos.PlanEvent) int64 {

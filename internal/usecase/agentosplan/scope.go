@@ -22,6 +22,21 @@ func ValidatePlanRef(ref agentos.PlanRef) error {
 	return nil
 }
 
+// ValidateRunPlanScope requires durable plans to carry their tenant boundary.
+func ValidateRunPlanScope(spec agentos.RunPlanSpec) error {
+	if spec.PlanID == "" {
+		return fmt.Errorf("%w: plan id is required", agentos.ErrInvalidRunPlan)
+	}
+	if spec.AccountID == "" {
+		return fmt.Errorf("%w: account id is required", agentos.ErrInvalidRunPlan)
+	}
+	if spec.ProjectID == "" {
+		return fmt.Errorf("%w: project id is required", agentos.ErrInvalidRunPlan)
+	}
+
+	return nil
+}
+
 // ValidatePlanStreamScope validates event replay/subscribe scope.
 func ValidatePlanStreamScope(scope agentos.PlanStreamScope) error {
 	return ValidatePlanRef(agentos.PlanRef{
@@ -112,4 +127,28 @@ func ValidatePlanTenantAccess(ref agentos.PlanRef, spec agentos.RunPlanSpec) err
 	}
 
 	return nil
+}
+
+// ScopePlanEventToSpec assigns the durable plan scope to an append request and
+// rejects caller-provided scope that does not match the stored plan.
+func ScopePlanEventToSpec(event agentos.PlanEvent, spec agentos.RunPlanSpec) (agentos.PlanEvent, error) {
+	if err := ValidateRunPlanScope(spec); err != nil {
+		return agentos.PlanEvent{}, err
+	}
+	if event.PlanID == "" {
+		return agentos.PlanEvent{}, fmt.Errorf("%w: plan id is required", agentos.ErrInvalidPlanEvent)
+	}
+	if event.PlanID != spec.PlanID {
+		return agentos.PlanEvent{}, fmt.Errorf("%w: event plan %q does not match stored plan %q", agentos.ErrInvalidPlanEvent, event.PlanID, spec.PlanID)
+	}
+	if event.AccountID != "" && event.AccountID != spec.AccountID {
+		return agentos.PlanEvent{}, fmt.Errorf("%w: event account %q does not match stored plan account %q", agentos.ErrInvalidPlanEvent, event.AccountID, spec.AccountID)
+	}
+	if event.ProjectID != "" && event.ProjectID != spec.ProjectID {
+		return agentos.PlanEvent{}, fmt.Errorf("%w: event project %q does not match stored plan project %q", agentos.ErrInvalidPlanEvent, event.ProjectID, spec.ProjectID)
+	}
+	event.AccountID = spec.AccountID
+	event.ProjectID = spec.ProjectID
+
+	return event, nil
 }

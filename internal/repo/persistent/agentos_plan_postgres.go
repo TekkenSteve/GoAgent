@@ -215,8 +215,8 @@ func (r *AgentOSPlanRepo) SavePlanState(ctx context.Context, snapshot agentospla
 }
 
 func normalizePlanStateSnapshotForPostgres(snapshot agentosplan.PlanStateSnapshot) (agentosplan.PlanStateSnapshot, error) {
-	if snapshot.Spec.PlanID == "" {
-		return agentosplan.PlanStateSnapshot{}, fmt.Errorf("%w: plan id is required", agentos.ErrInvalidRunPlan)
+	if err := agentosplan.ValidateRunPlanScope(snapshot.Spec); err != nil {
+		return agentosplan.PlanStateSnapshot{}, err
 	}
 	if snapshot.Spec.IdempotencyKey == "" {
 		return agentosplan.PlanStateSnapshot{}, fmt.Errorf("%w: plan idempotency key is required", agentos.ErrInvalidRunPlan)
@@ -586,6 +586,10 @@ func (r *AgentOSPlanRepo) PersistPlanTransition(ctx context.Context, snapshot ag
 	if event.PlanID != snapshot.Spec.PlanID {
 		return agentos.PlanEvent{}, fmt.Errorf("%w: event plan %q does not match snapshot plan %q", agentos.ErrInvalidPlanEvent, event.PlanID, snapshot.Spec.PlanID)
 	}
+	event, err = agentosplan.ScopePlanEventToSpec(event, snapshot.Spec)
+	if err != nil {
+		return agentos.PlanEvent{}, err
+	}
 
 	tx, err := r.Pool.Begin(ctx)
 	if err != nil {
@@ -684,6 +688,15 @@ FOR UPDATE`, event.PlanID).Scan(&currentSequence, &scope.AccountID, &scope.Proje
 
 		return agentos.PlanEvent{}, fmt.Errorf("AgentOSPlanRepo - AppendPlanEvent - lock plan: %w", err)
 	}
+	event, err = agentosplan.ScopePlanEventToSpec(event, agentos.RunPlanSpec{
+		PlanID:    event.PlanID,
+		AccountID: scope.AccountID,
+		ProjectID: scope.ProjectID,
+	})
+	if err != nil {
+		return agentos.PlanEvent{}, err
+	}
+	requestedEvent = event
 
 	existing, exists, err := r.planEventByIdempotencyKeyWith(ctx, tx, scope, event.PlanID, idempotencyKey)
 	if err != nil {

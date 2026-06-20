@@ -338,6 +338,8 @@ do: []
 
 const capabilityPlanYAML = `
 plan_id: plan-cli
+account_id: acct-cli
+project_id: proj-cli
 nodes:
   - node_id: research
     capability: research
@@ -352,6 +354,8 @@ nodes:
 
 const deltaBasePlanYAML = `
 plan_id: plan-delta-cli
+account_id: acct-delta-cli
+project_id: proj-delta-cli
 policy:
   max_nodes: 2
 nodes:
@@ -365,6 +369,8 @@ nodes:
 
 const deltaBasePlanMaxOneYAML = `
 plan_id: plan-delta-cli
+account_id: acct-delta-cli
+project_id: proj-delta-cli
 policy:
   max_nodes: 1
 nodes:

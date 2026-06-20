@@ -417,6 +417,8 @@ func TestPlanActivitiesPersistPlanStatePublishesStoredEvent(t *testing.T) {
 	activities.PlanEventPublisher = publisher
 	spec := agentos.RunPlanSpec{
 		PlanID:         "plan-1",
+		AccountID:      "acct-1",
+		ProjectID:      "proj-1",
 		IdempotencyKey: "plan-start-key",
 	}
 	status := agentos.RunPlanStatus{
@@ -453,6 +455,8 @@ func TestPlanActivitiesPersistPlanStateDoesNotFailOnLivePublishError(t *testing.
 	activities.PlanEventPublisher = publisher
 	spec := agentos.RunPlanSpec{
 		PlanID:         "plan-1",
+		AccountID:      "acct-1",
+		ProjectID:      "proj-1",
 		IdempotencyKey: "plan-start-key",
 	}
 	status := agentos.RunPlanStatus{
@@ -492,6 +496,8 @@ func TestPlanActivitiesPersistPlanStateDoesNotPublishWhenDurableTransitionFails(
 	_, err := activities.PersistPlanStateActivity(context.Background(), persistPlanStateInput{
 		Spec: agentos.RunPlanSpec{
 			PlanID:         "plan-1",
+			AccountID:      "acct-1",
+			ProjectID:      "proj-1",
 			IdempotencyKey: "plan-start-key",
 		},
 		Status: agentos.RunPlanStatus{
@@ -589,7 +595,9 @@ func TestPlanActivitiesValidatePlanUsesCapabilityCatalog(t *testing.T) {
 
 	_, err := activities.ValidatePlanActivity(context.Background(), validatePlanInput{
 		Spec: agentos.RunPlanSpec{
-			PlanID: "plan-1",
+			PlanID:    "plan-1",
+			AccountID: "acct-1",
+			ProjectID: "proj-1",
 			Nodes: []agentos.PlanNodeSpec{
 				{
 					NodeID:     "research",
@@ -608,7 +616,9 @@ func TestPlanActivitiesValidatePlanUsesCapabilityCatalog(t *testing.T) {
 
 	output, err := activities.ValidatePlanActivity(context.Background(), validatePlanInput{
 		Spec: agentos.RunPlanSpec{
-			PlanID: "plan-2",
+			PlanID:    "plan-2",
+			AccountID: "acct-2",
+			ProjectID: "proj-2",
 			Nodes: []agentos.PlanNodeSpec{
 				{
 					NodeID:     "research",
@@ -639,7 +649,9 @@ func TestPlanActivitiesValidatePlanReturnsCapabilityControls(t *testing.T) {
 
 	output, err := activities.ValidatePlanActivity(context.Background(), validatePlanInput{
 		Spec: agentos.RunPlanSpec{
-			PlanID: "plan-1",
+			PlanID:    "plan-1",
+			AccountID: "acct-1",
+			ProjectID: "proj-1",
 			Nodes: []agentos.PlanNodeSpec{
 				{
 					NodeID:     "research",
@@ -682,7 +694,9 @@ func TestPlanActivitiesValidatePlanUsesInjectedCapabilityCatalog(t *testing.T) {
 
 	output, err := activities.ValidatePlanActivity(context.Background(), validatePlanInput{
 		Spec: agentos.RunPlanSpec{
-			PlanID: "plan-1",
+			PlanID:    "plan-1",
+			AccountID: "acct-1",
+			ProjectID: "proj-1",
 			Nodes: []agentos.PlanNodeSpec{
 				{
 					NodeID:     "research",

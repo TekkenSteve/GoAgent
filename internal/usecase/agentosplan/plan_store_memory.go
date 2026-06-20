@@ -232,8 +232,8 @@ func (s *MemoryPlanStore) SavePlanState(_ context.Context, snapshot PlanStateSna
 }
 
 func normalizeMemoryPlanStateSnapshot(snapshot PlanStateSnapshot) (PlanStateSnapshot, error) {
-	if snapshot.Spec.PlanID == "" {
-		return PlanStateSnapshot{}, fmt.Errorf("%w: plan id is required", agentos.ErrInvalidRunPlan)
+	if err := ValidateRunPlanScope(snapshot.Spec); err != nil {
+		return PlanStateSnapshot{}, err
 	}
 	if snapshot.Spec.IdempotencyKey == "" {
 		return PlanStateSnapshot{}, fmt.Errorf("%w: plan idempotency key is required", agentos.ErrInvalidRunPlan)
@@ -290,6 +290,10 @@ func (s *MemoryPlanStore) PersistPlanTransition(_ context.Context, snapshot Plan
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
+	requestedEvent, err = ScopePlanEventToSpec(requestedEvent, snapshot.Spec)
+	if err != nil {
+		return agentos.PlanEvent{}, err
+	}
 	key := planEventIdempotencyKey{PlanID: requestedEvent.PlanID, IdempotencyKey: idempotencyKey}
 	if existing, ok := s.eventKeys[key]; ok {
 		if err := ValidatePlanEventIdempotency(existing, requestedEvent); err != nil {
@@ -338,8 +342,13 @@ func (s *MemoryPlanStore) AppendPlanEvent(_ context.Context, event agentos.PlanE
 }
 
 func (s *MemoryPlanStore) appendPlanEventLocked(event agentos.PlanEvent, idempotencyKey string) (agentos.PlanEvent, error) {
-	if _, ok := s.specs[event.PlanID]; !ok {
+	spec, ok := s.specs[event.PlanID]
+	if !ok {
 		return agentos.PlanEvent{}, fmt.Errorf("%w: %s", agentos.ErrPlanRouteNotFound, event.PlanID)
+	}
+	event, err := ScopePlanEventToSpec(event, spec)
+	if err != nil {
+		return agentos.PlanEvent{}, err
 	}
 	key := planEventIdempotencyKey{PlanID: event.PlanID, IdempotencyKey: idempotencyKey}
 	if existing, ok := s.eventKeys[key]; ok {

@@ -16,8 +16,10 @@ func TestNewPlanReplaySubscriptionPreservesPlanScopeInPayload(t *testing.T) {
 				Sequence:  1,
 				Payload:   map[string]any{"existing": true},
 			},
-			PlanID: "plan-1",
-			NodeID: "node-1",
+			PlanID:    "plan-1",
+			AccountID: "acct-1",
+			ProjectID: "proj-1",
+			NodeID:    "node-1",
 		},
 	})
 
@@ -25,7 +27,11 @@ func TestNewPlanReplaySubscriptionPreservesPlanScopeInPayload(t *testing.T) {
 	if !ok {
 		t.Fatal("subscription closed before replay event")
 	}
-	if event.Payload["plan_id"] != "plan-1" || event.Payload["node_id"] != "node-1" || event.Payload["existing"] != true {
+	if event.Payload["plan_id"] != "plan-1" ||
+		event.Payload["account_id"] != "acct-1" ||
+		event.Payload["project_id"] != "proj-1" ||
+		event.Payload["node_id"] != "node-1" ||
+		event.Payload["existing"] != true {
 		t.Fatalf("payload = %#v", event.Payload)
 	}
 	if _, ok := <-sub.Events(); ok {
@@ -43,7 +49,9 @@ func TestNewPlanReplayThenLiveSubscription(t *testing.T) {
 				EventType: agentos.EventPlanStarted,
 				Sequence:  1,
 			},
-			PlanID: "plan-1",
+			PlanID:    "plan-1",
+			AccountID: "acct-1",
+			ProjectID: "proj-1",
 		},
 	}, live)
 
@@ -76,7 +84,9 @@ func TestNewPlanReplayThenLiveSubscriptionAfterFiltersCoveredLiveEvents(t *testi
 				EventType: agentos.EventPlanNodeStarted,
 				Sequence:  2,
 			},
-			PlanID: "plan-1",
+			PlanID:    "plan-1",
+			AccountID: "acct-1",
+			ProjectID: "proj-1",
 		},
 	}, live, 2)
 

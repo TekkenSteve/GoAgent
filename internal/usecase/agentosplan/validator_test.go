@@ -240,7 +240,9 @@ func TestSchedulerActivatesErrorEdge(t *testing.T) {
 	ctx := context.Background()
 	ref := agentos.BackendRef{Kind: agentos.BackendKindNative, Name: agentos.BackendNameGoAgentNative}
 	spec := agentos.RunPlanSpec{
-		PlanID: "plan-error-edge",
+		PlanID:    "plan-error-edge",
+		AccountID: "acct-plan-error-edge",
+		ProjectID: "proj-plan-error-edge",
 		Nodes: []agentos.PlanNodeSpec{
 			{
 				NodeID: "attempt",
@@ -286,7 +288,9 @@ func TestSchedulerJoinAny(t *testing.T) {
 	ctx := context.Background()
 	ref := agentos.BackendRef{Kind: agentos.BackendKindNative, Name: agentos.BackendNameGoAgentNative}
 	spec := agentos.RunPlanSpec{
-		PlanID: "plan-join-any",
+		PlanID:    "plan-join-any",
+		AccountID: "acct-plan-join-any",
+		ProjectID: "proj-plan-join-any",
 		Nodes: []agentos.PlanNodeSpec{
 			{NodeID: "left", Run: agentos.RunSpec{RunID: "run-left", Backend: ref}},
 			{NodeID: "right", Run: agentos.RunSpec{RunID: "run-right", Backend: ref}},
@@ -368,6 +372,8 @@ func TestCompilerYAML(t *testing.T) {
 	ref := agentos.BackendRef{Kind: agentos.BackendKindNative, Name: agentos.BackendNameGoAgentNative}
 	data := []byte(`
 plan_id: plan-yaml
+account_id: acct-plan-yaml
+project_id: proj-plan-yaml
 nodes:
   - node_id: only
     run:
@@ -387,7 +393,9 @@ nodes:
 
 func samplePlan(ref agentos.BackendRef) agentos.RunPlanSpec {
 	return agentos.RunPlanSpec{
-		PlanID: "plan-1",
+		PlanID:    "plan-1",
+		AccountID: "acct-plan-1",
+		ProjectID: "proj-plan-1",
 		Inputs: map[string]any{
 			"enabled": true,
 		},

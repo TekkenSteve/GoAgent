@@ -462,7 +462,7 @@ func TestAgentOSPlanPostgresSavePlanStateRequiresIdempotencyKey(t *testing.T) {
 	planRepo := NewAgentOSPlanRepo(pg)
 
 	err := planRepo.SavePlanState(ctx, agentosplan.PlanStateSnapshot{
-		Spec:   agentos.RunPlanSpec{PlanID: "plan-state-key-required-" + suffix},
+		Spec:   agentos.RunPlanSpec{PlanID: "plan-state-key-required-" + suffix, AccountID: "acct-" + suffix, ProjectID: "proj-" + suffix},
 		Status: agentos.RunPlanStatus{PlanID: "plan-state-key-required-" + suffix},
 	})
 	if !errors.Is(err, agentos.ErrInvalidRunPlan) {

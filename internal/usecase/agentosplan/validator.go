@@ -35,8 +35,8 @@ type ExecutablePlan struct {
 
 // Validate returns a deterministic executable plan or a precise validation error.
 func (v Validator) Validate(ctx context.Context, spec agentos.RunPlanSpec) (ExecutablePlan, error) {
-	if spec.PlanID == "" {
-		return ExecutablePlan{}, fmt.Errorf("%w: plan id is required", agentos.ErrInvalidRunPlan)
+	if err := ValidateRunPlanScope(spec); err != nil {
+		return ExecutablePlan{}, err
 	}
 	policy := normalizePolicy(spec.Policy)
 	if policy.MaxHistoryEvents > 0 && policy.ContinueAsNewEvents > policy.MaxHistoryEvents {

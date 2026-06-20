@@ -159,7 +159,9 @@ func TestPlanEventCodecRoundTrip(t *testing.T) {
 				"reason": "started",
 			},
 		},
-		PlanID: "plan-1",
+		PlanID:    "plan-1",
+		AccountID: "acct-1",
+		ProjectID: "proj-1",
 	}
 
 	data, err := MarshalPlanEvent(event)
@@ -182,6 +184,39 @@ func TestPlanEventCodecRejectsMissingPlanID(t *testing.T) {
 	}
 }
 
+func TestPlanEventCodecRejectsMissingTenantScope(t *testing.T) {
+	valid := PlanEvent{
+		Event: Event{
+			EventID:   "evt-1",
+			EventType: EventPlanStarted,
+			Sequence:  1,
+			Timestamp: time.Date(2026, 6, 20, 12, 0, 0, 0, time.UTC),
+		},
+		PlanID:    "plan-1",
+		AccountID: "acct-1",
+		ProjectID: "proj-1",
+	}
+	cases := map[string]PlanEvent{
+		"account id": func() PlanEvent {
+			event := valid
+			event.AccountID = ""
+			return event
+		}(),
+		"project id": func() PlanEvent {
+			event := valid
+			event.ProjectID = ""
+			return event
+		}(),
+	}
+	for name, event := range cases {
+		t.Run(name, func(t *testing.T) {
+			if _, err := MarshalPlanEvent(event); !errors.Is(err, ErrInvalidPlanEvent) {
+				t.Fatalf("MarshalPlanEvent error = %v, want ErrInvalidPlanEvent", err)
+			}
+		})
+	}
+}
+
 func TestPlanEventCodecRequiresStoredEventIdentity(t *testing.T) {
 	valid := PlanEvent{
 		Event: Event{
@@ -190,7 +225,9 @@ func TestPlanEventCodecRequiresStoredEventIdentity(t *testing.T) {
 			Sequence:  1,
 			Timestamp: time.Date(2026, 6, 19, 12, 0, 0, 0, time.UTC),
 		},
-		PlanID: "plan-1",
+		PlanID:    "plan-1",
+		AccountID: "acct-1",
+		ProjectID: "proj-1",
 	}
 	cases := map[string]PlanEvent{
 		"event id": func() PlanEvent {

@@ -263,6 +263,8 @@ func ValidatePlanEventIdempotency(existing agentos.PlanEvent, requested agentos.
 
 type planEventIdempotencyFields struct {
 	PlanID    string            `json:"plan_id"`
+	AccountID string            `json:"account_id"`
+	ProjectID string            `json:"project_id"`
 	NodeID    string            `json:"node_id,omitempty"`
 	RunID     string            `json:"run_id,omitempty"`
 	ThreadID  string            `json:"thread_id,omitempty"`
@@ -274,6 +276,8 @@ type planEventIdempotencyFields struct {
 func planEventIdempotencyIdentity(event agentos.PlanEvent) planEventIdempotencyFields {
 	return planEventIdempotencyFields{
 		PlanID:    event.PlanID,
+		AccountID: event.AccountID,
+		ProjectID: event.ProjectID,
 		NodeID:    event.NodeID,
 		RunID:     event.RunID,
 		ThreadID:  event.ThreadID,

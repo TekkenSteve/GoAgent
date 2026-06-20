@@ -50,6 +50,7 @@ func TestPlanWorkflowExecutesSuccessEdgeAndPublishesArtifacts(t *testing.T) {
 			"run-verify": {RunID: "run-verify", LifecycleState: "completed"},
 		},
 	}
+	spec = planWorkflowTestSpec(spec)
 	env := newPlanWorkflowTestEnv(t, mocks, spec)
 
 	env.ExecuteWorkflow(PlanWorkflow, planWorkflowInput{Spec: spec})
@@ -100,6 +101,7 @@ func TestPlanWorkflowFailsNodeWhenRequiredInputArtifactIsMissing(t *testing.T) {
 			"run-research": {RunID: "run-research", LifecycleState: "completed"},
 		},
 	}
+	spec = planWorkflowTestSpec(spec)
 	env := newPlanWorkflowTestEnv(t, mocks, spec)
 
 	env.ExecuteWorkflow(PlanWorkflow, planWorkflowInput{Spec: spec})
@@ -152,6 +154,7 @@ func TestPlanWorkflowPublishesDebugTraceEvents(t *testing.T) {
 			"run-research": {RunID: "run-research", LifecycleState: "completed"},
 		},
 	}
+	spec = planWorkflowTestSpec(spec)
 	env := newPlanWorkflowTestEnvWithStores(t, mocks, []agentos.Capability{
 		{Backend: ref, Name: "run", Controls: []agentos.ControlOperation{agentos.ControlCancel}},
 	}, store, agentosplan.NewMemoryArtifactStore(), spec)
@@ -199,6 +202,7 @@ func TestPlanWorkflowErrorEdgeRunsRecoveryButPlanRemainsFailed(t *testing.T) {
 			"run-recover": {RunID: "run-recover", LifecycleState: "completed"},
 		},
 	}
+	spec = planWorkflowTestSpec(spec)
 	env := newPlanWorkflowTestEnv(t, mocks, spec)
 
 	env.ExecuteWorkflow(PlanWorkflow, planWorkflowInput{Spec: spec})
@@ -235,6 +239,7 @@ func TestPlanWorkflowRetriesFailedNodeAttempt(t *testing.T) {
 			"run-flaky-attempt-2": {RunID: "run-flaky-attempt-2", LifecycleState: "completed"},
 		},
 	}
+	spec = planWorkflowTestSpec(spec)
 	env := newPlanWorkflowTestEnv(t, mocks, spec)
 
 	env.ExecuteWorkflow(PlanWorkflow, planWorkflowInput{Spec: spec})
@@ -297,6 +302,7 @@ func TestPlanWorkflowAppliesPlanDeltaArtifact(t *testing.T) {
 			"run-expanded": {RunID: "run-expanded", LifecycleState: "completed"},
 		},
 	}
+	spec = planWorkflowTestSpec(spec)
 	env := newPlanWorkflowTestEnvWithStores(t, mocks, nil, store, artifactStore, spec)
 
 	env.ExecuteWorkflow(PlanWorkflow, planWorkflowInput{Spec: spec})
@@ -343,6 +349,7 @@ func TestPlanWorkflowCancelsTimedOutNode(t *testing.T) {
 			"run-slow": {RunID: "run-slow", LifecycleState: "running"},
 		},
 	}
+	spec = planWorkflowTestSpec(spec)
 	env := newPlanWorkflowTestEnv(t, mocks, spec)
 
 	env.ExecuteWorkflow(PlanWorkflow, planWorkflowInput{Spec: spec})
@@ -380,6 +387,7 @@ func TestPlanWorkflowCancelsActiveNodesWhenPlanTimesOut(t *testing.T) {
 			"run-slow": {RunID: "run-slow", LifecycleState: "running"},
 		},
 	}
+	spec = planWorkflowTestSpec(spec)
 	env := newPlanWorkflowTestEnv(t, mocks, spec)
 
 	env.ExecuteWorkflow(PlanWorkflow, planWorkflowInput{Spec: spec})
@@ -425,6 +433,7 @@ func TestPlanWorkflowCancelsActiveNodesWhenBudgetExceeded(t *testing.T) {
 			"run-slow": {RunID: "run-slow", LifecycleState: "running"},
 		},
 	}
+	spec = planWorkflowTestSpec(spec)
 	env := newPlanWorkflowTestEnv(t, mocks, spec)
 
 	env.ExecuteWorkflow(PlanWorkflow, planWorkflowInput{Spec: spec})
@@ -543,6 +552,7 @@ func TestPlanWorkflowRetriesFailedNodeFromSignal(t *testing.T) {
 			},
 		},
 	}
+	spec = planWorkflowTestSpec(spec)
 	env := newPlanWorkflowTestEnv(t, mocks, spec)
 	env.RegisterDelayedCallback(func() {
 		env.SignalWorkflow(PlanSignalName, agentos.Signal{
@@ -593,6 +603,7 @@ func TestPlanWorkflowRejectsManualRetryBeyondMaxAttempts(t *testing.T) {
 			},
 		},
 	}
+	spec = planWorkflowTestSpec(spec)
 	env := newPlanWorkflowTestEnvWithStores(t, mocks, nil, store, agentosplan.NewMemoryArtifactStore(), spec)
 	env.RegisterDelayedCallback(func() {
 		env.SignalWorkflow(PlanSignalName, agentos.Signal{
@@ -641,6 +652,7 @@ func TestPlanWorkflowRejectSignalFailsRunningPlan(t *testing.T) {
 			},
 		},
 	}
+	spec = planWorkflowTestSpec(spec)
 	env := newPlanWorkflowTestEnv(t, mocks, spec)
 	env.RegisterDelayedCallback(func() {
 		env.SignalWorkflow(PlanSignalName, agentos.Signal{
@@ -694,6 +706,7 @@ func TestPlanWorkflowApproveSignalUnblocksPausedPlan(t *testing.T) {
 			},
 		},
 	}
+	spec = planWorkflowTestSpec(spec)
 	env := newPlanWorkflowTestEnvWithCapabilities(t, mocks, []agentos.Capability{
 		{Backend: ref, Name: "pausable", Controls: []agentos.ControlOperation{agentos.ControlPause}},
 	}, spec)
@@ -770,6 +783,7 @@ func TestPlanWorkflowContinuesAsNewWhenHistoryLimitReached(t *testing.T) {
 		},
 	}
 	mocks := &planWorkflowMocks{}
+	spec = planWorkflowTestSpec(spec)
 	env := newPlanWorkflowTestEnv(t, mocks, spec)
 	env.SetCurrentHistoryLength(10)
 
@@ -796,6 +810,7 @@ func TestPlanWorkflowFailsWhenMaxIterationsExceeded(t *testing.T) {
 	}
 	store := agentosplan.NewMemoryPlanStore()
 	mocks := &planWorkflowMocks{}
+	spec = planWorkflowTestSpec(spec)
 	env := newPlanWorkflowTestEnvWithStores(t, mocks, nil, store, agentosplan.NewMemoryArtifactStore(), spec)
 
 	env.ExecuteWorkflow(PlanWorkflow, planWorkflowInput{Spec: spec})
@@ -871,6 +886,17 @@ func createPlanForWorkflowTest(t *testing.T, index agentosplan.PlanIndex, spec a
 	if _, _, err := index.CreatePlan(context.Background(), spec, status); err != nil {
 		t.Fatalf("CreatePlan: %v", err)
 	}
+}
+
+func planWorkflowTestSpec(spec agentos.RunPlanSpec) agentos.RunPlanSpec {
+	if spec.AccountID == "" {
+		spec.AccountID = "acct-" + spec.PlanID
+	}
+	if spec.ProjectID == "" {
+		spec.ProjectID = "proj-" + spec.PlanID
+	}
+
+	return spec
 }
 
 func (m *planWorkflowMocks) start(_ context.Context, input startPlanNodeInput) (startPlanNodeOutput, error) {
