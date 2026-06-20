@@ -19,11 +19,20 @@ func normalizeRunArtifacts(planID string, node agentos.PlanNodeSpec, status agen
 		if ref.ArtifactID == "" && ref.URI == "" {
 			return nil, fmt.Errorf("%w: node %q artifact %q requires artifact id or uri", agentos.ErrInvalidArtifact, node.NodeID, ref.Name)
 		}
+		if ref.PlanID != "" && ref.PlanID != planID {
+			return nil, fmt.Errorf("%w: node %q artifact %q belongs to plan %q", agentos.ErrInvalidArtifact, node.NodeID, ref.Name, ref.PlanID)
+		}
 		if ref.PlanID == "" {
 			ref.PlanID = planID
 		}
+		if ref.NodeID != "" && ref.NodeID != node.NodeID {
+			return nil, fmt.Errorf("%w: node %q artifact %q belongs to node %q", agentos.ErrInvalidArtifact, node.NodeID, ref.Name, ref.NodeID)
+		}
 		if ref.NodeID == "" {
 			ref.NodeID = node.NodeID
+		}
+		if ref.RunID != "" && status.RunID != "" && ref.RunID != status.RunID {
+			return nil, fmt.Errorf("%w: node %q artifact %q belongs to run %q", agentos.ErrInvalidArtifact, node.NodeID, ref.Name, ref.RunID)
 		}
 		if ref.RunID == "" {
 			ref.RunID = status.RunID

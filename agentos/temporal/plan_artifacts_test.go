@@ -32,6 +32,54 @@ func TestNormalizeRunArtifactsAddsPlanNodeAndRunRefs(t *testing.T) {
 	}
 }
 
+func TestNormalizeRunArtifactsRejectsMismatchedOwnership(t *testing.T) {
+	node := agentos.PlanNodeSpec{NodeID: "research"}
+	status := agentos.RunStatus{RunID: "run-research"}
+
+	for _, test := range []struct {
+		name string
+		ref  agentos.ArtifactRef
+	}{
+		{
+			name: "plan",
+			ref: agentos.ArtifactRef{
+				ArtifactID: "artifact-1",
+				PlanID:     "other-plan",
+				Name:       "summary",
+				Kind:       agentos.ArtifactKindObject,
+			},
+		},
+		{
+			name: "node",
+			ref: agentos.ArtifactRef{
+				ArtifactID: "artifact-1",
+				NodeID:     "other-node",
+				Name:       "summary",
+				Kind:       agentos.ArtifactKindObject,
+			},
+		},
+		{
+			name: "run",
+			ref: agentos.ArtifactRef{
+				ArtifactID: "artifact-1",
+				RunID:      "other-run",
+				Name:       "summary",
+				Kind:       agentos.ArtifactKindObject,
+			},
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			_, err := normalizeRunArtifacts("plan-1", node, agentos.RunStatus{
+				RunID:     status.RunID,
+				Artifacts: []agentos.ArtifactRef{test.ref},
+			})
+			if !errors.Is(err, agentos.ErrInvalidArtifact) {
+				t.Fatalf("normalizeRunArtifacts error = %v, want ErrInvalidArtifact", err)
+			}
+		})
+	}
+}
+
 func TestValidateRequiredArtifactsRejectsMissingOutput(t *testing.T) {
 	err := validateRequiredArtifacts(
 		[]agentos.ArtifactSpec{{Name: "summary", Kind: agentos.ArtifactKindObject, Required: true}},

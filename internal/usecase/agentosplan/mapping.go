@@ -73,6 +73,12 @@ func resolveMappingValue(ctx context.Context, store ArtifactStore, expressions V
 
 			return nil, nil
 		}
+		if ref.PlanID != "" && ref.PlanID != spec.PlanID {
+			return nil, fmt.Errorf("%w: artifact %q belongs to plan %q", agentos.ErrInvalidArtifact, mapping.SourceArtifact, ref.PlanID)
+		}
+		if ref.ArtifactID == "" {
+			return nil, fmt.Errorf("%w: artifact %q has no artifact id", agentos.ErrInvalidArtifact, mapping.SourceArtifact)
+		}
 		_, payload, err := store.Get(ctx, agentos.PlanArtifactScope{
 			PlanID:     spec.PlanID,
 			AccountID:  spec.AccountID,

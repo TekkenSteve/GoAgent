@@ -187,3 +187,66 @@ func TestResolveRunInputFailsWhenArtifactPayloadIsMissing(t *testing.T) {
 		t.Fatalf("error = %v, want ErrArtifactNotFound", err)
 	}
 }
+
+func TestResolveRunInputRejectsArtifactRefFromDifferentPlan(t *testing.T) {
+	_, err := ResolveRunInput(
+		context.Background(),
+		NewMemoryArtifactStore(),
+		nil,
+		agentos.RunPlanSpec{PlanID: "plan-1", AccountID: "acct-1", ProjectID: "proj-1"},
+		agentos.RunPlanStatus{
+			PlanID: "plan-1",
+			Artifacts: []agentos.ArtifactRef{
+				{
+					ArtifactID: "artifact-summary",
+					PlanID:     "other-plan",
+					NodeID:     "research",
+					Name:       "summary",
+					Kind:       agentos.ArtifactKindObject,
+				},
+			},
+		},
+		agentos.PlanNodeSpec{
+			NodeID: "verify",
+			Run:    agentos.RunSpec{RunID: "run-verify"},
+			Inputs: []agentos.InputMapping{
+				{Target: "summary", SourceNodeID: "research", SourceArtifact: "summary", Required: true},
+			},
+		},
+		nil,
+	)
+	if !errors.Is(err, agentos.ErrInvalidArtifact) {
+		t.Fatalf("error = %v, want ErrInvalidArtifact", err)
+	}
+}
+
+func TestResolveRunInputRejectsArtifactRefWithoutID(t *testing.T) {
+	_, err := ResolveRunInput(
+		context.Background(),
+		NewMemoryArtifactStore(),
+		nil,
+		agentos.RunPlanSpec{PlanID: "plan-1", AccountID: "acct-1", ProjectID: "proj-1"},
+		agentos.RunPlanStatus{
+			PlanID: "plan-1",
+			Artifacts: []agentos.ArtifactRef{
+				{
+					PlanID: "plan-1",
+					NodeID: "research",
+					Name:   "summary",
+					Kind:   agentos.ArtifactKindObject,
+				},
+			},
+		},
+		agentos.PlanNodeSpec{
+			NodeID: "verify",
+			Run:    agentos.RunSpec{RunID: "run-verify"},
+			Inputs: []agentos.InputMapping{
+				{Target: "summary", SourceNodeID: "research", SourceArtifact: "summary", Required: true},
+			},
+		},
+		nil,
+	)
+	if !errors.Is(err, agentos.ErrInvalidArtifact) {
+		t.Fatalf("error = %v, want ErrInvalidArtifact", err)
+	}
+}
