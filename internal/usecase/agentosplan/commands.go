@@ -94,6 +94,27 @@ func ValidatePlanCommandRef(ref PlanCommandRef) error {
 	return nil
 }
 
+// AuditRecordFromPlanCommand returns the durable audit record that must exist
+// before a command may become delivered. Delivered commands are terminal, so
+// this keeps the control-plane outbox and audit trail in lockstep.
+func AuditRecordFromPlanCommand(command PlanCommandRecord) AuditRecord {
+	return AuditRecord{
+		PlanID:         command.PlanID,
+		AccountID:      command.AccountID,
+		ProjectID:      command.ProjectID,
+		ActorID:        command.ActorID,
+		Action:         command.Action,
+		IdempotencyKey: command.IdempotencyKey,
+		Payload:        command.Payload,
+	}
+}
+
+// ValidatePlanCommandDeliveredAudit verifies that the audit record for a
+// delivered command matches the original command envelope.
+func ValidatePlanCommandDeliveredAudit(command PlanCommandRecord, audit AuditRecord) error {
+	return ValidateAuditIdempotency(audit, AuditRecordFromPlanCommand(command))
+}
+
 func ValidateAuditRef(ref AuditRef) error {
 	if err := ValidatePlanRef(agentos.PlanRef{PlanID: ref.PlanID, AccountID: ref.AccountID, ProjectID: ref.ProjectID}); err != nil {
 		return err

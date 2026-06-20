@@ -255,6 +255,12 @@ INSERT INTO plan_commands (
 	if created || commandReplay.CommandID != command.CommandID {
 		t.Fatalf("RecordPlanCommand replay = %#v created=%v, want %#v created=false", commandReplay, created, command)
 	}
+	if _, err := planRepo.MarkPlanCommandDelivered(ctx, agentosplan.PlanCommandRefFromRecord(command)); !errors.Is(err, agentos.ErrInvalidRunPlan) {
+		t.Fatalf("MarkPlanCommandDelivered without audit error = %v, want ErrInvalidRunPlan", err)
+	}
+	if _, _, err := planRepo.RecordAudit(ctx, agentosplan.AuditRecordFromPlanCommand(command)); err != nil {
+		t.Fatalf("RecordAudit for command: %v", err)
+	}
 	deliveredCommand, err := planRepo.MarkPlanCommandDelivered(ctx, agentosplan.PlanCommandRefFromRecord(command))
 	if err != nil {
 		t.Fatalf("MarkPlanCommandDelivered: %v", err)

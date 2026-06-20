@@ -1594,6 +1594,11 @@ func (r *AgentOSPlanRepo) updatePlanCommandStatus(ctx context.Context, ref agent
 	if err := agentosplan.ValidatePlanCommandStatusTransition(command.Status, status); err != nil {
 		return agentosplan.PlanCommandRecord{}, err
 	}
+	if status == agentosplan.PlanCommandDelivered {
+		if err := r.validatePlanCommandDeliveredAudit(ctx, command); err != nil {
+			return agentosplan.PlanCommandRecord{}, err
+		}
+	}
 	command.Status = status
 	command.FailureReason = reason
 	command.UpdatedAt = time.Now().UTC()
@@ -1610,6 +1615,19 @@ SET status = $2,
 	RETURNING command_id, plan_id, account_id, project_id, actor_id, action, idempotency_key, payload_json, status, failure_reason, created_at, updated_at`
 
 	return r.scanPlanCommandRow(ctx, r.Pool.QueryRow(ctx, sql, ref.IdempotencyKey, string(command.Status), command.FailureReason, command.UpdatedAt, ref.PlanID, ref.AccountID, ref.ProjectID))
+}
+
+func (r *AgentOSPlanRepo) validatePlanCommandDeliveredAudit(ctx context.Context, command agentosplan.PlanCommandRecord) error {
+	ref := agentosplan.AuditRefFromRecord(agentosplan.AuditRecordFromPlanCommand(command))
+	audit, exists, err := r.GetAuditRecord(ctx, ref)
+	if err != nil {
+		return err
+	}
+	if !exists {
+		return fmt.Errorf("%w: delivered command requires durable audit %q", agentos.ErrInvalidRunPlan, command.IdempotencyKey)
+	}
+
+	return agentosplan.ValidatePlanCommandDeliveredAudit(command, audit)
 }
 
 func (r *AgentOSPlanRepo) scanPlanCommandRow(_ context.Context, scanner interface{ Scan(dest ...any) error }) (agentosplan.PlanCommandRecord, error) {

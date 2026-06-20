@@ -636,6 +636,15 @@ func (s *MemoryPlanStore) updatePlanCommandStatus(ref PlanCommandRef, status Pla
 	if err := ValidatePlanCommandStatusTransition(command.Status, status); err != nil {
 		return PlanCommandRecord{}, err
 	}
+	if status == PlanCommandDelivered {
+		audit, ok := s.auditKeys[AuditRefFromRecord(AuditRecordFromPlanCommand(command))]
+		if !ok {
+			return PlanCommandRecord{}, fmt.Errorf("%w: delivered command requires durable audit %q", agentos.ErrInvalidRunPlan, ref.IdempotencyKey)
+		}
+		if err := ValidatePlanCommandDeliveredAudit(command, audit); err != nil {
+			return PlanCommandRecord{}, err
+		}
+	}
 	command.Status = status
 	command.FailureReason = reason
 	command.UpdatedAt = time.Now().UTC()

@@ -487,6 +487,12 @@ func TestMemoryPlanStorePlanCommandLifecycleIsIdempotent(t *testing.T) {
 		t.Fatalf("replay = %#v created=%v, want %#v created=false", replay, created, first)
 	}
 
+	if _, err := store.MarkPlanCommandDelivered(context.Background(), PlanCommandRefFromRecord(first)); !errors.Is(err, agentos.ErrInvalidRunPlan) {
+		t.Fatalf("MarkPlanCommandDelivered without audit error = %v, want ErrInvalidRunPlan", err)
+	}
+	if _, _, err := store.RecordAudit(context.Background(), AuditRecordFromPlanCommand(first)); err != nil {
+		t.Fatalf("RecordAudit for command: %v", err)
+	}
 	delivered, err := store.MarkPlanCommandDelivered(context.Background(), PlanCommandRefFromRecord(first))
 	if err != nil {
 		t.Fatalf("MarkPlanCommandDelivered: %v", err)
@@ -555,6 +561,9 @@ func TestMemoryPlanStoreListRecoverablePlanCommands(t *testing.T) {
 			t.Fatalf("RecordPlanCommand %s: %v", command.CommandID, err)
 		}
 		commands[i] = stored
+	}
+	if _, _, err := store.RecordAudit(ctx, AuditRecordFromPlanCommand(commands[0])); err != nil {
+		t.Fatalf("RecordAudit delivered command: %v", err)
 	}
 	if _, err := store.MarkPlanCommandDelivered(ctx, PlanCommandRefFromRecord(commands[0])); err != nil {
 		t.Fatalf("MarkPlanCommandDelivered: %v", err)

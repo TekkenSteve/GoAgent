@@ -309,6 +309,9 @@ func TestPlanRuntimeStartPlanSkipsDeliveryWhenCommandDelivered(t *testing.T) {
 	if err != nil {
 		t.Fatalf("RecordPlanCommand: %v", err)
 	}
+	if _, _, err := store.RecordAudit(t.Context(), agentosplan.AuditRecordFromPlanCommand(command)); err != nil {
+		t.Fatalf("RecordAudit for command: %v", err)
+	}
 	if _, err := store.MarkPlanCommandDelivered(t.Context(), agentosplan.PlanCommandRefFromRecord(command)); err != nil {
 		t.Fatalf("MarkPlanCommandDelivered: %v", err)
 	}
@@ -796,6 +799,9 @@ func TestPlanRuntimeSignalPlanSkipsDeliveryWhenCommandDelivered(t *testing.T) {
 	command, _, err := store.RecordPlanCommand(t.Context(), planCommandFromAuditRecord(planSignalAuditRecord(ref, signal)))
 	if err != nil {
 		t.Fatalf("RecordPlanCommand: %v", err)
+	}
+	if _, _, err := store.RecordAudit(t.Context(), agentosplan.AuditRecordFromPlanCommand(command)); err != nil {
+		t.Fatalf("RecordAudit for command: %v", err)
 	}
 	if _, err := store.MarkPlanCommandDelivered(t.Context(), agentosplan.PlanCommandRefFromRecord(command)); err != nil {
 		t.Fatalf("MarkPlanCommandDelivered: %v", err)
