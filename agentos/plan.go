@@ -2,6 +2,7 @@ package agentos
 
 import (
 	"encoding/json"
+	"reflect"
 	"time"
 
 	"github.com/google/jsonschema-go/jsonschema"
@@ -96,6 +97,12 @@ type ArtifactSchema struct {
 	Schema      json.RawMessage `json:"schema"`
 }
 
+// ArtifactSchemaCatalogSpec is the public wire format for schema declarations
+// referenced by ArtifactSpec.SchemaRef.
+type ArtifactSchemaCatalogSpec struct {
+	ArtifactSchemas []ArtifactSchema `json:"artifact_schemas"`
+}
+
 // ArtifactKind identifies public artifact payload categories.
 type ArtifactKind string
 
@@ -152,6 +159,12 @@ type Capability struct {
 	OutputSchema json.RawMessage    `json:"output_schema,omitempty"`
 	Signals      []SignalType       `json:"signals,omitempty"`
 	Controls     []ControlOperation `json:"controls,omitempty"`
+}
+
+// CapabilityCatalogSpec is the public wire format for backend capability
+// declarations used by RunPlan validation.
+type CapabilityCatalogSpec struct {
+	Capabilities []Capability `json:"capabilities"`
 }
 
 // PlanPolicy constrains global plan execution and bounded expansion.
@@ -426,17 +439,34 @@ type PlanAuditRecord struct {
 
 // RunPlanSpecJSONSchema returns a JSON Schema inferred from RunPlanSpec.
 func RunPlanSpecJSONSchema() ([]byte, error) {
-	schema, err := jsonschema.For[RunPlanSpec](nil)
-	if err != nil {
-		return nil, err
-	}
-
-	return json.MarshalIndent(schema, "", "  ")
+	return jsonSchemaFor[RunPlanSpec]()
 }
 
 // PlanDeltaSpecJSONSchema returns a JSON Schema inferred from PlanDeltaSpec.
 func PlanDeltaSpecJSONSchema() ([]byte, error) {
-	schema, err := jsonschema.For[PlanDeltaSpec](nil)
+	return jsonSchemaFor[PlanDeltaSpec]()
+}
+
+// CapabilityCatalogSpecJSONSchema returns a JSON Schema inferred from
+// CapabilityCatalogSpec.
+func CapabilityCatalogSpecJSONSchema() ([]byte, error) {
+	return jsonSchemaFor[CapabilityCatalogSpec]()
+}
+
+// ArtifactSchemaCatalogSpecJSONSchema returns a JSON Schema inferred from
+// ArtifactSchemaCatalogSpec.
+func ArtifactSchemaCatalogSpecJSONSchema() ([]byte, error) {
+	return jsonSchemaFor[ArtifactSchemaCatalogSpec]()
+}
+
+func jsonSchemaFor[T any]() ([]byte, error) {
+	schema, err := jsonschema.For[T](&jsonschema.ForOptions{
+		TypeSchemas: map[reflect.Type]*jsonschema.Schema{
+			reflect.TypeFor[json.RawMessage](): {
+				Type: "object",
+			},
+		},
+	})
 	if err != nil {
 		return nil, err
 	}

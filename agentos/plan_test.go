@@ -40,6 +40,36 @@ func TestPlanDeltaSpecJSONSchema(t *testing.T) {
 	}
 }
 
+func TestCapabilityCatalogSpecJSONSchema(t *testing.T) {
+	data, err := CapabilityCatalogSpecJSONSchema()
+	if err != nil {
+		t.Fatalf("CapabilityCatalogSpecJSONSchema: %v", err)
+	}
+
+	var schema map[string]any
+	if err := json.Unmarshal(data, &schema); err != nil {
+		t.Fatalf("schema json: %v", err)
+	}
+	if len(schema) == 0 {
+		t.Fatal("schema is empty")
+	}
+}
+
+func TestArtifactSchemaCatalogSpecJSONSchema(t *testing.T) {
+	data, err := ArtifactSchemaCatalogSpecJSONSchema()
+	if err != nil {
+		t.Fatalf("ArtifactSchemaCatalogSpecJSONSchema: %v", err)
+	}
+
+	var schema map[string]any
+	if err := json.Unmarshal(data, &schema); err != nil {
+		t.Fatalf("schema json: %v", err)
+	}
+	if len(schema) == 0 {
+		t.Fatal("schema is empty")
+	}
+}
+
 func TestRunPlanSpecJSONSchemaFileIsCurrent(t *testing.T) {
 	generated, err := RunPlanSpecJSONSchema()
 	if err != nil {
@@ -68,11 +98,41 @@ func TestPlanDeltaSpecJSONSchemaFileIsCurrent(t *testing.T) {
 	}
 }
 
+func TestCapabilityCatalogSpecJSONSchemaFileIsCurrent(t *testing.T) {
+	generated, err := CapabilityCatalogSpecJSONSchema()
+	if err != nil {
+		t.Fatalf("CapabilityCatalogSpecJSONSchema: %v", err)
+	}
+	stored, err := os.ReadFile("../docs/schemas/capability_catalog.schema.json")
+	if err != nil {
+		t.Fatalf("ReadFile schema: %v", err)
+	}
+	if string(stored) != string(generated) {
+		t.Fatal("docs/schemas/capability_catalog.schema.json is stale; run make agentos-plan-schema")
+	}
+}
+
+func TestArtifactSchemaCatalogSpecJSONSchemaFileIsCurrent(t *testing.T) {
+	generated, err := ArtifactSchemaCatalogSpecJSONSchema()
+	if err != nil {
+		t.Fatalf("ArtifactSchemaCatalogSpecJSONSchema: %v", err)
+	}
+	stored, err := os.ReadFile("../docs/schemas/artifact_schema_catalog.schema.json")
+	if err != nil {
+		t.Fatalf("ReadFile schema: %v", err)
+	}
+	if string(stored) != string(generated) {
+		t.Fatal("docs/schemas/artifact_schema_catalog.schema.json is stale; run make agentos-plan-schema")
+	}
+}
+
 func TestRunPlanPublicTypesDoNotExposeInternalEntity(t *testing.T) {
 	publicTypes := []reflect.Type{
 		reflect.TypeOf(RunPlanSpec{}),
 		reflect.TypeOf(PlanNodeSpec{}),
 		reflect.TypeOf(PlanEdgeSpec{}),
+		reflect.TypeOf(CapabilityCatalogSpec{}),
+		reflect.TypeOf(ArtifactSchemaCatalogSpec{}),
 		reflect.TypeOf(RunPlanStatus{}),
 		reflect.TypeOf(PlanNodeStatus{}),
 		reflect.TypeOf(RunStatus{}),

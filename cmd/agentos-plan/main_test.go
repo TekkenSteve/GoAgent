@@ -55,6 +55,52 @@ func TestSchemaCommandWritesPlanDeltaSchema(t *testing.T) {
 	}
 }
 
+func TestSchemaCommandWritesCapabilityCatalogSchema(t *testing.T) {
+	dir := t.TempDir()
+	out := filepath.Join(dir, "capability_catalog.schema.json")
+	var stdout, stderr bytes.Buffer
+
+	code := run([]string{"schema", "--kind", "capability-catalog", "--out", out}, &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("run schema code = %d stderr = %s", code, stderr.String())
+	}
+
+	data, err := os.ReadFile(out)
+	if err != nil {
+		t.Fatalf("ReadFile: %v", err)
+	}
+	var schema map[string]any
+	if err := json.Unmarshal(data, &schema); err != nil {
+		t.Fatalf("schema json: %v", err)
+	}
+	if len(schema) == 0 {
+		t.Fatal("schema is empty")
+	}
+}
+
+func TestSchemaCommandWritesArtifactSchemaCatalogSchema(t *testing.T) {
+	dir := t.TempDir()
+	out := filepath.Join(dir, "artifact_schema_catalog.schema.json")
+	var stdout, stderr bytes.Buffer
+
+	code := run([]string{"schema", "--kind", "artifact-schema-catalog", "--out", out}, &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("run schema code = %d stderr = %s", code, stderr.String())
+	}
+
+	data, err := os.ReadFile(out)
+	if err != nil {
+		t.Fatalf("ReadFile: %v", err)
+	}
+	var schema map[string]any
+	if err := json.Unmarshal(data, &schema); err != nil {
+		t.Fatalf("schema json: %v", err)
+	}
+	if len(schema) == 0 {
+		t.Fatal("schema is empty")
+	}
+}
+
 func TestValidateCommandRequiresCapabilityCatalogForCapabilityPlan(t *testing.T) {
 	dir := t.TempDir()
 	planPath := filepath.Join(dir, "plan.yaml")

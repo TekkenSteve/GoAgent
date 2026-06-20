@@ -17,14 +17,6 @@ import (
 	"sigs.k8s.io/yaml"
 )
 
-type capabilityCatalogFile struct {
-	Capabilities []agentos.Capability `json:"capabilities"`
-}
-
-type artifactSchemaCatalogFile struct {
-	ArtifactSchemas []agentos.ArtifactSchema `json:"artifact_schemas"`
-}
-
 type compiledPlanOutput struct {
 	Spec  agentos.RunPlanSpec `json:"spec"`
 	Order []string            `json:"order"`
@@ -33,8 +25,10 @@ type compiledPlanOutput struct {
 type schemaKind string
 
 const (
-	schemaKindRunPlan   schemaKind = "run-plan"
-	schemaKindPlanDelta schemaKind = "plan-delta"
+	schemaKindRunPlan               schemaKind = "run-plan"
+	schemaKindPlanDelta             schemaKind = "plan-delta"
+	schemaKindCapabilityCatalog     schemaKind = "capability-catalog"
+	schemaKindArtifactSchemaCatalog schemaKind = "artifact-schema-catalog"
 )
 
 func main() {
@@ -75,7 +69,7 @@ func runSchema(args []string, stdout io.Writer, stderr io.Writer) int {
 	fs := flag.NewFlagSet("schema", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	outPath := fs.String("out", "", "write schema to path instead of stdout")
-	kind := fs.String("kind", string(schemaKindRunPlan), "schema kind: run-plan or plan-delta")
+	kind := fs.String("kind", string(schemaKindRunPlan), "schema kind: run-plan, plan-delta, capability-catalog, or artifact-schema-catalog")
 	if err := fs.Parse(args); err != nil {
 		return 2
 	}
@@ -101,8 +95,12 @@ func schemaForKind(kind schemaKind) ([]byte, error) {
 		return agentos.RunPlanSpecJSONSchema()
 	case schemaKindPlanDelta:
 		return agentos.PlanDeltaSpecJSONSchema()
+	case schemaKindCapabilityCatalog:
+		return agentos.CapabilityCatalogSpecJSONSchema()
+	case schemaKindArtifactSchemaCatalog:
+		return agentos.ArtifactSchemaCatalogSpecJSONSchema()
 	default:
-		return nil, fmt.Errorf("schema kind must be %q or %q, got %q", schemaKindRunPlan, schemaKindPlanDelta, kind)
+		return nil, fmt.Errorf("unsupported schema kind %q", kind)
 	}
 }
 
@@ -644,7 +642,7 @@ func loadCapabilityCatalog(path string, format string) (agentosplan.CapabilityCa
 	if err != nil {
 		return nil, err
 	}
-	var catalogFile capabilityCatalogFile
+	var catalogFile agentos.CapabilityCatalogSpec
 	if err := decodeWire(format, data, &catalogFile); err != nil {
 		return nil, err
 	}
@@ -660,7 +658,7 @@ func loadArtifactSchemaCatalog(path string, format string) (agentosplan.Artifact
 	if err != nil {
 		return nil, err
 	}
-	var catalogFile artifactSchemaCatalogFile
+	var catalogFile agentos.ArtifactSchemaCatalogSpec
 	if err := decodeWire(format, data, &catalogFile); err != nil {
 		return nil, err
 	}
