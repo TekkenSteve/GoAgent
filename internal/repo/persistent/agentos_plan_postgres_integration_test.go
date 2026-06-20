@@ -59,6 +59,7 @@ func TestAgentOSPlanPostgresDurablePersistence(t *testing.T) {
 	assertPostgresForeignKeyConstraint(t, pg, "audit_logs_plan_node_run_fk")
 	assertPostgresTrigger(t, pg, "plan_commands_status_lifecycle")
 	assertPostgresTrigger(t, pg, "plan_commands_delivered_audit")
+	assertPostgresTrigger(t, pg, "plan_commands_identity_immutable")
 	assertPostgresTrigger(t, pg, "plan_events_append_only")
 	assertPostgresTrigger(t, pg, "audit_logs_append_only")
 	assertPostgresTrigger(t, pg, "artifacts_append_only")
@@ -282,6 +283,15 @@ INSERT INTO plan_commands (
 	if created || commandReplay.CommandID != command.CommandID {
 		t.Fatalf("RecordPlanCommand replay = %#v created=%v, want %#v created=false", commandReplay, created, command)
 	}
+	if _, err := pg.Pool.Exec(ctx, `UPDATE plan_commands SET payload_json = '{"operation":"pause"}'::jsonb WHERE command_id = $1`, command.CommandID); err == nil {
+		t.Fatal("direct plan command payload update succeeded, want immutable identity trigger rejection")
+	}
+	if _, err := pg.Pool.Exec(ctx, `UPDATE plan_commands SET failure_reason = 'not failed' WHERE command_id = $1`, command.CommandID); err == nil {
+		t.Fatal("direct pending plan command failure reason update succeeded")
+	}
+	if _, err := pg.Pool.Exec(ctx, `DELETE FROM plan_commands WHERE command_id = $1`, command.CommandID); err == nil {
+		t.Fatal("direct plan command delete succeeded, want immutable identity trigger rejection")
+	}
 	if _, err := planRepo.MarkPlanCommandDelivered(ctx, agentosplan.PlanCommandRefFromRecord(command)); !errors.Is(err, agentos.ErrInvalidRunPlan) {
 		t.Fatalf("MarkPlanCommandDelivered without audit error = %v, want ErrInvalidRunPlan", err)
 	}
@@ -301,6 +311,9 @@ INSERT INTO plan_commands (
 	}
 	if _, err := planRepo.MarkPlanCommandFailed(ctx, agentosplan.PlanCommandRefFromRecord(command), "late failure"); !errors.Is(err, agentos.ErrInvalidRunPlan) {
 		t.Fatalf("MarkPlanCommandFailed delivered command error = %v, want ErrInvalidRunPlan", err)
+	}
+	if _, err := pg.Pool.Exec(ctx, `UPDATE plan_commands SET failure_reason = 'late reason' WHERE command_id = $1`, command.CommandID); err == nil {
+		t.Fatal("direct delivered plan command failure reason update succeeded")
 	}
 	if _, err := pg.Pool.Exec(ctx, `UPDATE plan_commands SET status = 'failed' WHERE command_id = $1`, command.CommandID); err == nil {
 		t.Fatal("direct plan command delivered->failed update succeeded")
@@ -326,6 +339,13 @@ INSERT INTO plan_commands (
 	}
 	if _, err := planRepo.MarkPlanCommandFailed(ctx, agentosplan.PlanCommandRefFromRecord(failedCommand), "temporal unavailable"); err != nil {
 		t.Fatalf("MarkPlanCommandFailed: %v", err)
+	}
+	refreshedFailedCommand, err := planRepo.MarkPlanCommandFailed(ctx, agentosplan.PlanCommandRefFromRecord(failedCommand), "temporal still unavailable")
+	if err != nil {
+		t.Fatalf("MarkPlanCommandFailed refresh: %v", err)
+	}
+	if refreshedFailedCommand.FailureReason != "temporal still unavailable" {
+		t.Fatalf("refreshed failed command reason = %q", refreshedFailedCommand.FailureReason)
 	}
 	recoverableCommands, err := planRepo.ListRecoverablePlanCommands(ctx, agentosplan.PlanCommandScope{
 		PlanID:    spec.PlanID,
@@ -1429,6 +1449,7 @@ func applyAgentOSPlanMigrations(t *testing.T, pg *postgres.Postgres) {
 		"20260620000014_protect_plan_metric_samples_append_only.up.sql",
 		"20260620000015_protect_run_backend_ownership.up.sql",
 		"20260620000016_protect_plan_identity.up.sql",
+		"20260620000017_protect_plan_command_identity.up.sql",
 	} {
 		path := filepath.Join("..", "..", "..", "migrations", migration)
 		data, err := os.ReadFile(path)
