@@ -89,6 +89,11 @@ func (r *AgentOSArtifactRepo) Put(ctx context.Context, ref agentos.ArtifactRef, 
 			return agentos.ArtifactRef{}, err
 		}
 	}
+	if existing, exists, err := r.artifactByID(ctx, ref.ArtifactID); err != nil {
+		return agentos.ArtifactRef{}, err
+	} else if exists {
+		return agentos.ArtifactRef{}, artifactIDConflictError(existing, ref.ArtifactID)
+	}
 
 	if payload != nil {
 		if r.blob == nil {
@@ -158,7 +163,7 @@ RETURNING `+strings.Join(artifactColumns(), ", "),
 				return existing, nil
 			}
 
-			return agentos.ArtifactRef{}, fmt.Errorf("%w: artifact id %q already exists with a different idempotency key", agentos.ErrInvalidArtifact, ref.ArtifactID)
+			return agentos.ArtifactRef{}, artifactIDConflictError(agentos.ArtifactRef{}, ref.ArtifactID)
 		}
 		if isPostgresUniqueViolation(err) {
 			existing, exists, lookupErr := r.artifactByIdempotencyKey(ctx, ref.PlanID, scope, idempotencyKey)
@@ -310,6 +315,23 @@ func (r *AgentOSArtifactRepo) artifactByIdempotencyKey(ctx context.Context, plan
 		"project_id":      scope.ProjectID,
 		"idempotency_key": key,
 	})
+}
+
+func (r *AgentOSArtifactRepo) artifactByID(ctx context.Context, artifactID string) (agentos.ArtifactRef, bool, error) {
+	if artifactID == "" {
+		return agentos.ArtifactRef{}, false, fmt.Errorf("%w: artifact id is required", agentos.ErrInvalidArtifact)
+	}
+
+	return r.getRef(ctx, sq.Eq{"artifact_id": artifactID})
+}
+
+func artifactIDConflictError(existing agentos.ArtifactRef, requestedID string) error {
+	artifactID := requestedID
+	if artifactID == "" {
+		artifactID = existing.ArtifactID
+	}
+
+	return fmt.Errorf("%w: artifact id %q already exists with a different idempotency key", agentos.ErrInvalidArtifact, artifactID)
 }
 
 func artifactScopeWhere(scope agentos.PlanArtifactScope) sq.Eq {

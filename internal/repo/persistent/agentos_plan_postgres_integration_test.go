@@ -1165,7 +1165,8 @@ func TestAgentOSPlanPostgresPlanRefsAndMetricCheckpoints(t *testing.T) {
 
 func TestAgentOSArtifactPostgresRejectsDifferentIdempotencyReplay(t *testing.T) {
 	ctx, pg, suffix := newAgentOSPlanPostgresIntegrationDB(t)
-	blobStore, err := artifactblob.NewLocalBlobStore(t.TempDir())
+	blobRoot := t.TempDir()
+	blobStore, err := artifactblob.NewLocalBlobStore(blobRoot)
 	if err != nil {
 		t.Fatalf("NewLocalBlobStore: %v", err)
 	}
@@ -1253,6 +1254,16 @@ func TestAgentOSArtifactPostgresRejectsDifferentIdempotencyReplay(t *testing.T) 
 		MediaType:  ref.MediaType,
 	}, map[string]any{"summary": "ok"}, "artifact-other-key-"+suffix); !errors.Is(err, agentos.ErrInvalidArtifact) {
 		t.Fatalf("Artifact Put reused artifact id error = %v, want ErrInvalidArtifact", err)
+	}
+	conflictPayload, _, err := agentosplan.EncodeArtifactPayload(map[string]any{"summary": "ok"}, ref.MediaType)
+	if err != nil {
+		t.Fatalf("EncodeArtifactPayload conflict payload: %v", err)
+	}
+	conflictBlobKey := artifactBlobKey(first.ArtifactID, agentosplan.DigestArtifactPayload(conflictPayload))
+	if _, err := os.Stat(filepath.Join(blobRoot, filepath.FromSlash(conflictBlobKey))); err == nil {
+		t.Fatalf("rejected artifact id conflict wrote blob %q", conflictBlobKey)
+	} else if !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("stat rejected conflict blob %q: %v", conflictBlobKey, err)
 	}
 
 	loaded, payload, err := artifactStore.Get(ctx, agentos.PlanArtifactScope{
