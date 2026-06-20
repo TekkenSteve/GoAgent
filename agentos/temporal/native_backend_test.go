@@ -8,7 +8,36 @@ import (
 	"github.com/TekkenSteve/GoAgent/agentos"
 	"github.com/TekkenSteve/GoAgent/internal/agentfw/orchestration"
 	"github.com/TekkenSteve/GoAgent/internal/entity"
+	"github.com/TekkenSteve/GoAgent/internal/usecase/agentosruntime/agentosruntimetest"
 )
+
+func TestTemporalNativeBackendConformance(t *testing.T) {
+	probe := &agentosruntimetest.SubscriberProbe{}
+	executor := &fakeNativeExecutor{
+		status: entity.RunStatus{
+			RunID:          "agentos-conformance-run",
+			LifecycleState: "running",
+			UpdatedAt:      time.Date(2026, 6, 16, 12, 1, 0, 0, time.UTC),
+		},
+	}
+	backend := newTemporalNativeBackend(executor, probe)
+
+	agentosruntimetest.RunBackendConformance(t, agentosruntimetest.BackendConformanceCase{
+		Name:            "native",
+		Backend:         backend,
+		Ref:             agentos.BackendRef{Kind: agentos.BackendKindNative, Name: agentos.BackendNameGoAgentNative},
+		StatusState:     "running",
+		SubscriberProbe: probe,
+	})
+
+	if executor.start == nil ||
+		executor.start.RunID != "agentos-conformance-run" ||
+		executor.start.UserMessage != "hello" ||
+		executor.userMessageRunID != "agentos-conformance-run" ||
+		executor.canceledRunID != "agentos-conformance-run" {
+		t.Fatalf("native backend calls were not routed through the shared contract: %#v", executor)
+	}
+}
 
 func TestTemporalNativeBackendSignalUserMessage(t *testing.T) {
 	executor := &fakeNativeExecutor{}
@@ -69,27 +98,52 @@ func TestTemporalNativeBackendCapabilitiesIncludeUserMessage(t *testing.T) {
 }
 
 type fakeNativeExecutor struct {
+	start            *entity.ExecuteRequest
+	status           entity.RunStatus
 	userMessageRunID string
 	userMessage      orchestration.UserMessageSignal
+	pausedRunID      string
+	resumedRunID     string
+	canceledRunID    string
 }
 
-func (e *fakeNativeExecutor) StartExecution(context.Context, *entity.ExecuteRequest) (entity.RunStatus, error) {
-	return entity.RunStatus{}, nil
+func (e *fakeNativeExecutor) StartExecution(_ context.Context, req *entity.ExecuteRequest) (entity.RunStatus, error) {
+	e.start = req
+
+	return entity.RunStatus{
+		RunID:          req.RunID,
+		LifecycleState: "created",
+		UpdatedAt:      time.Date(2026, 6, 16, 12, 0, 0, 0, time.UTC),
+	}, nil
 }
 
 func (e *fakeNativeExecutor) GetStatus(context.Context, string) (entity.RunStatus, error) {
-	return entity.RunStatus{}, nil
+	if e.status.RunID == "" {
+		e.status = entity.RunStatus{
+			RunID:          "run-1",
+			LifecycleState: "running",
+			UpdatedAt:      time.Date(2026, 6, 16, 12, 1, 0, 0, time.UTC),
+		}
+	}
+
+	return e.status, nil
 }
 
-func (e *fakeNativeExecutor) Pause(context.Context, string) error {
+func (e *fakeNativeExecutor) Pause(_ context.Context, runID string) error {
+	e.pausedRunID = runID
+
 	return nil
 }
 
-func (e *fakeNativeExecutor) Resume(context.Context, string) error {
+func (e *fakeNativeExecutor) Resume(_ context.Context, runID string) error {
+	e.resumedRunID = runID
+
 	return nil
 }
 
-func (e *fakeNativeExecutor) Cancel(context.Context, string) error {
+func (e *fakeNativeExecutor) Cancel(_ context.Context, runID string) error {
+	e.canceledRunID = runID
+
 	return nil
 }
 
