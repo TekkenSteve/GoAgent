@@ -60,6 +60,7 @@ func TestAgentOSPlanPostgresDurablePersistence(t *testing.T) {
 	assertPostgresTrigger(t, pg, "plan_commands_status_lifecycle")
 	assertPostgresTrigger(t, pg, "plan_commands_delivered_audit")
 	assertPostgresTrigger(t, pg, "audit_logs_delivered_command_audit")
+	assertPostgresTrigger(t, pg, "plan_events_append_only")
 
 	ctx := t.Context()
 	planRepo := NewAgentOSPlanRepo(pg)
@@ -674,6 +675,12 @@ func TestAgentOSPlanPostgresPlanEventIdempotencyDoesNotAdvanceSequence(t *testin
 	}
 	if replay.EventID != first.EventID || replay.Sequence != 1 {
 		t.Fatalf("replay = %#v, want first event at sequence 1", replay)
+	}
+	if _, err := pg.Pool.Exec(ctx, `UPDATE plan_events SET payload_json = '{}'::jsonb WHERE event_id = $1`, first.EventID); err == nil {
+		t.Fatal("direct plan_events update succeeded, want append-only trigger rejection")
+	}
+	if _, err := pg.Pool.Exec(ctx, `DELETE FROM plan_events WHERE event_id = $1`, first.EventID); err == nil {
+		t.Fatal("direct plan_events delete succeeded, want append-only trigger rejection")
 	}
 
 	changed := event
@@ -1360,6 +1367,7 @@ func applyAgentOSPlanMigrations(t *testing.T, pg *postgres.Postgres) {
 		"20260620000008_add_plan_event_transition_snapshots.up.sql",
 		"20260620000009_require_delivered_command_audit.up.sql",
 		"20260620000010_protect_delivered_command_audits.up.sql",
+		"20260620000011_protect_plan_events_append_only.up.sql",
 	} {
 		path := filepath.Join("..", "..", "..", "migrations", migration)
 		data, err := os.ReadFile(path)
