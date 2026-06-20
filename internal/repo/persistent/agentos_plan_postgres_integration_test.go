@@ -59,11 +59,17 @@ func TestAgentOSPlanPostgresDurablePersistence(t *testing.T) {
 	assertPostgresForeignKeyConstraint(t, pg, "run_backend_index_plan_node_fk")
 	assertPostgresForeignKeyConstraint(t, pg, "run_backend_index_plan_tenant_fk")
 	assertPostgresForeignKeyConstraint(t, pg, "artifacts_plan_fk")
+	assertPostgresForeignKeyConstraint(t, pg, "artifacts_plan_tenant_fk")
 	assertPostgresForeignKeyConstraint(t, pg, "artifacts_plan_node_fk")
 	assertPostgresForeignKeyConstraint(t, pg, "artifacts_plan_node_run_fk")
 	assertPostgresForeignKeyConstraint(t, pg, "audit_logs_plan_fk")
+	assertPostgresForeignKeyConstraint(t, pg, "audit_logs_plan_tenant_fk")
 	assertPostgresForeignKeyConstraint(t, pg, "audit_logs_plan_node_fk")
 	assertPostgresForeignKeyConstraint(t, pg, "audit_logs_plan_node_run_fk")
+	assertPostgresForeignKeyConstraint(t, pg, "plan_events_plan_tenant_fk")
+	assertPostgresForeignKeyConstraint(t, pg, "plan_commands_plan_tenant_fk")
+	assertPostgresForeignKeyConstraint(t, pg, "plan_metric_checkpoints_plan_tenant_fk")
+	assertPostgresForeignKeyConstraint(t, pg, "plan_metric_samples_plan_tenant_fk")
 	assertPostgresTrigger(t, pg, "plan_commands_status_lifecycle")
 	assertPostgresTrigger(t, pg, "plan_commands_delivered_audit")
 	assertPostgresTrigger(t, pg, "plan_commands_identity_immutable")
@@ -157,6 +163,28 @@ INSERT INTO plan_commands (
 		"invalid-initial-status-"+suffix,
 	); err == nil {
 		t.Fatal("direct plan command insert with delivered status succeeded")
+	}
+	if _, err := pg.Pool.Exec(ctx, `
+INSERT INTO plan_commands (
+    command_id,
+    plan_id,
+    account_id,
+    project_id,
+    actor_id,
+    action,
+    idempotency_key,
+    payload_json,
+    status
+) VALUES ($1,$2,$3,$4,$5,$6,$7,'{}'::jsonb,'pending')`,
+		"wrong-tenant-command-"+suffix,
+		spec.PlanID,
+		"wrong-"+spec.AccountID,
+		spec.ProjectID,
+		"operator-1",
+		string(agentosplan.AuditActionPlanControl),
+		"wrong-tenant-command-"+suffix,
+	); err == nil {
+		t.Fatal("direct plan command insert with mismatched tenant succeeded")
 	}
 	stateConstraintSpec := postgresIntegrationPlanSpec("plan-state-json-"+suffix, "plan-state-json-start-"+suffix)
 	stateConstraintStatus := agentosplan.NewState(stateConstraintSpec, time.Now().UTC()).Status
@@ -1535,6 +1563,7 @@ func applyAgentOSPlanMigrations(t *testing.T, pg *postgres.Postgres) {
 		"20260620000018_constrain_plan_event_json.up.sql",
 		"20260620000019_constrain_plan_state_json.up.sql",
 		"20260620000020_constrain_run_backend_plan_tenant.up.sql",
+		"20260620000021_constrain_plan_record_tenants.up.sql",
 	} {
 		path := filepath.Join("..", "..", "..", "migrations", migration)
 		data, err := os.ReadFile(path)
