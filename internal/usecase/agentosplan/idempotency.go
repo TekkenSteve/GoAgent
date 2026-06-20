@@ -59,6 +59,9 @@ func ValidatePlanStateIdentity(existing agentos.RunPlanSpec, requested agentos.R
 	if !bytes.Equal(existingJSON, requestedJSON) {
 		return fmt.Errorf("%w: plan %q state changed immutable fields", agentos.ErrInvalidRunPlan, existing.PlanID)
 	}
+	if err := validateTopologyExpansion(existing, requested); err != nil {
+		return err
+	}
 
 	return nil
 }
@@ -145,6 +148,44 @@ func planStateIdentity(spec agentos.RunPlanSpec) planStateIdentityFields {
 		Metadata:       spec.Metadata,
 		Policy:         spec.Policy,
 	}
+}
+
+func validateTopologyExpansion(existing, requested agentos.RunPlanSpec) error {
+	requestedNodes := make(map[string]agentos.PlanNodeSpec, len(requested.Nodes))
+	for _, node := range requested.Nodes {
+		requestedNodes[node.NodeID] = node
+	}
+	for _, node := range existing.Nodes {
+		requestedNode, exists := requestedNodes[node.NodeID]
+		if !exists {
+			return fmt.Errorf("%w: plan %q removed existing node %q", agentos.ErrInvalidRunPlan, existing.PlanID, node.NodeID)
+		}
+		if !jsonEqual(node, requestedNode) {
+			return fmt.Errorf("%w: plan %q changed existing node %q", agentos.ErrInvalidRunPlan, existing.PlanID, node.NodeID)
+		}
+	}
+
+	requestedEdges := make(map[string]struct{}, len(requested.Edges))
+	for _, edge := range requested.Edges {
+		requestedEdges[jsonKey(edge)] = struct{}{}
+	}
+	for _, edge := range existing.Edges {
+		if _, exists := requestedEdges[jsonKey(edge)]; !exists {
+			return fmt.Errorf("%w: plan %q removed or changed existing edge %q", agentos.ErrInvalidRunPlan, existing.PlanID, edge.EdgeID)
+		}
+	}
+
+	return nil
+}
+
+func jsonEqual(left, right any) bool {
+	return jsonKey(left) == jsonKey(right)
+}
+
+func jsonKey(value any) string {
+	data, _ := json.Marshal(value)
+
+	return string(data)
 }
 
 // ValidateAuditIdempotency verifies that an audit idempotency key is replayed

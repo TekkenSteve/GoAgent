@@ -59,6 +59,49 @@ func TestValidatePlanStateIdentityAllowsWorkflowOwnedTopologyExpansion(t *testin
 	}
 }
 
+func TestValidatePlanStateIdentityRejectsTopologyShrink(t *testing.T) {
+	ref := agentos.BackendRef{Kind: agentos.BackendKindNative, Name: agentos.BackendNameGoAgentNative}
+	existing := agentos.RunPlanSpec{
+		PlanID:         "plan-1",
+		AccountID:      "account-1",
+		ProjectID:      "project-1",
+		IdempotencyKey: "start-key",
+		Nodes: []agentos.PlanNodeSpec{
+			{NodeID: "seed", Run: agentos.RunSpec{RunID: "run-seed", Backend: ref}},
+			{NodeID: "verify", Run: agentos.RunSpec{RunID: "run-verify", Backend: ref}},
+		},
+		Edges: []agentos.PlanEdgeSpec{{EdgeID: "seed-verify", From: "seed", To: "verify", On: agentos.EdgeOnSuccess}},
+	}
+	requested := existing
+	requested.Nodes = requested.Nodes[:1]
+
+	err := ValidatePlanStateIdentity(existing, requested)
+	if !errors.Is(err, agentos.ErrInvalidRunPlan) {
+		t.Fatalf("error = %v, want ErrInvalidRunPlan", err)
+	}
+}
+
+func TestValidatePlanStateIdentityRejectsExistingNodeMutation(t *testing.T) {
+	ref := agentos.BackendRef{Kind: agentos.BackendKindNative, Name: agentos.BackendNameGoAgentNative}
+	existing := agentos.RunPlanSpec{
+		PlanID:         "plan-1",
+		AccountID:      "account-1",
+		ProjectID:      "project-1",
+		IdempotencyKey: "start-key",
+		Nodes: []agentos.PlanNodeSpec{
+			{NodeID: "seed", Run: agentos.RunSpec{RunID: "run-seed", Backend: ref}},
+		},
+	}
+	requested := existing
+	requested.Nodes = append([]agentos.PlanNodeSpec(nil), existing.Nodes...)
+	requested.Nodes[0].Run.Backend = agentos.BackendRef{Kind: agentos.BackendKindHTTP, Name: "other"}
+
+	err := ValidatePlanStateIdentity(existing, requested)
+	if !errors.Is(err, agentos.ErrInvalidRunPlan) {
+		t.Fatalf("error = %v, want ErrInvalidRunPlan", err)
+	}
+}
+
 func TestValidatePlanStateIdentityRejectsImmutableFieldChange(t *testing.T) {
 	existing := agentos.RunPlanSpec{
 		PlanID:         "plan-1",

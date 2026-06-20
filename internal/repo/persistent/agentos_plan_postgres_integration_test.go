@@ -64,6 +64,8 @@ func TestAgentOSPlanPostgresDurablePersistence(t *testing.T) {
 	assertPostgresTrigger(t, pg, "artifacts_append_only")
 	assertPostgresTrigger(t, pg, "plan_metric_samples_append_only")
 	assertPostgresTrigger(t, pg, "run_backend_ownership_immutable")
+	assertPostgresTrigger(t, pg, "plan_identity_immutable")
+	assertPostgresTrigger(t, pg, "plan_node_identity_immutable")
 	assertPostgresTriggerAbsent(t, pg, "audit_logs_delivered_command_audit")
 
 	ctx := t.Context()
@@ -113,6 +115,18 @@ func TestAgentOSPlanPostgresDurablePersistence(t *testing.T) {
 		Status: nodeStatus,
 	}); err != nil {
 		t.Fatalf("SavePlanState node source: %v", err)
+	}
+	if _, err := pg.Pool.Exec(ctx, `UPDATE plans SET account_id = 'hijacked' WHERE plan_id = $1`, spec.PlanID); err == nil {
+		t.Fatal("direct plan identity update succeeded, want immutable identity trigger rejection")
+	}
+	if _, err := pg.Pool.Exec(ctx, `DELETE FROM plans WHERE plan_id = $1`, spec.PlanID); err == nil {
+		t.Fatal("direct plan delete succeeded, want immutable identity trigger rejection")
+	}
+	if _, err := pg.Pool.Exec(ctx, `UPDATE plan_nodes SET backend_name = 'hijacked' WHERE plan_id = $1 AND node_id = $2`, spec.PlanID, spec.Nodes[0].NodeID); err == nil {
+		t.Fatal("direct plan node identity update succeeded, want immutable identity trigger rejection")
+	}
+	if _, err := pg.Pool.Exec(ctx, `DELETE FROM plan_nodes WHERE plan_id = $1 AND node_id = $2`, spec.PlanID, spec.Nodes[0].NodeID); err == nil {
+		t.Fatal("direct plan node delete succeeded, want immutable identity trigger rejection")
 	}
 	if _, err := pg.Pool.Exec(ctx, `
 INSERT INTO plan_commands (
@@ -1414,6 +1428,7 @@ func applyAgentOSPlanMigrations(t *testing.T, pg *postgres.Postgres) {
 		"20260620000013_protect_artifacts_append_only.up.sql",
 		"20260620000014_protect_plan_metric_samples_append_only.up.sql",
 		"20260620000015_protect_run_backend_ownership.up.sql",
+		"20260620000016_protect_plan_identity.up.sql",
 	} {
 		path := filepath.Join("..", "..", "..", "migrations", migration)
 		data, err := os.ReadFile(path)
