@@ -67,6 +67,14 @@ func TestNormalizeRunArtifactsRejectsMismatchedOwnership(t *testing.T) {
 				Kind:       agentos.ArtifactKindObject,
 			},
 		},
+		{
+			name: "uri-only",
+			ref: agentos.ArtifactRef{
+				URI:  "s3://artifacts/plan-1/artifact-1",
+				Name: "summary",
+				Kind: agentos.ArtifactKindObject,
+			},
+		},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			_, err := normalizeRunArtifacts("plan-1", node, agentos.RunStatus{

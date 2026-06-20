@@ -16,8 +16,8 @@ func normalizeRunArtifacts(planID string, node agentos.PlanNodeSpec, status agen
 		if ref.Kind == "" {
 			return nil, fmt.Errorf("%w: node %q artifact %q kind is required", agentos.ErrInvalidArtifact, node.NodeID, ref.Name)
 		}
-		if ref.ArtifactID == "" && ref.URI == "" {
-			return nil, fmt.Errorf("%w: node %q artifact %q requires artifact id or uri", agentos.ErrInvalidArtifact, node.NodeID, ref.Name)
+		if ref.ArtifactID == "" {
+			return nil, fmt.Errorf("%w: node %q artifact %q requires artifact id", agentos.ErrInvalidArtifact, node.NodeID, ref.Name)
 		}
 		if ref.PlanID != "" && ref.PlanID != planID {
 			return nil, fmt.Errorf("%w: node %q artifact %q belongs to plan %q", agentos.ErrInvalidArtifact, node.NodeID, ref.Name, ref.PlanID)
