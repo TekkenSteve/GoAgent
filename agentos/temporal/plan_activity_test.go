@@ -536,7 +536,11 @@ func TestPlanActivitiesEvaluatePlanExpansionValidatesDelta(t *testing.T) {
 		Kind:       agentos.ArtifactKindPlanDelta,
 	}, agentosplan.PlanDelta{
 		Nodes: []agentos.PlanNodeSpec{
-			{NodeID: "expanded", Run: agentos.RunSpec{RunID: "run-expanded", Backend: ref}},
+			{
+				NodeID:     "expanded",
+				Capability: "expand",
+				Run:        agentos.RunSpec{RunID: "run-expanded", Backend: ref},
+			},
 		},
 		Edges: []agentos.PlanEdgeSpec{
 			{EdgeID: "seed-expanded", From: "seed", To: "expanded", On: agentos.EdgeOnSuccess},
@@ -547,7 +551,13 @@ func TestPlanActivitiesEvaluatePlanExpansionValidatesDelta(t *testing.T) {
 	}
 	activities, err := NewPlanActivitiesWithStores(
 		&fakePlanRuntime{},
-		nil,
+		[]agentos.Capability{
+			{
+				Backend:  ref,
+				Name:     "expand",
+				Controls: []agentos.ControlOperation{agentos.ControlPause, agentos.ControlResume},
+			},
+		},
 		agentosplan.NewMemoryPlanStore(),
 		nil,
 		artifactStore,
@@ -587,6 +597,16 @@ func TestPlanActivitiesEvaluatePlanExpansionValidatesDelta(t *testing.T) {
 	}
 	if output.Plan.NodeByID["expanded"].Run.RunID != "run-expanded" {
 		t.Fatalf("expanded executable plan = %#v", output.Plan.NodeByID)
+	}
+	if got := output.ControlsByNode["expanded"]; len(got) != 2 || got[0] != agentos.ControlPause || got[1] != agentos.ControlResume {
+		t.Fatalf("expanded controls = %#v", output.ControlsByNode)
+	}
+	trace, ok := output.CapabilitiesByNode["expanded"]
+	if !ok {
+		t.Fatalf("expanded capability trace missing: %#v", output.CapabilitiesByNode)
+	}
+	if trace.Backend != ref || trace.Capability != "expand" {
+		t.Fatalf("expanded capability trace = %#v", trace)
 	}
 }
 

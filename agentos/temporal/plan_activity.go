@@ -363,11 +363,12 @@ type evaluatePlanExpansionInput struct {
 }
 
 type evaluatePlanExpansionOutput struct {
-	Expanded       bool
-	Delta          agentosplan.PlanDelta
-	Spec           agentos.RunPlanSpec
-	Plan           agentosplan.ExecutablePlan
-	ControlsByNode map[string][]agentos.ControlOperation
+	Expanded           bool
+	Delta              agentosplan.PlanDelta
+	Spec               agentos.RunPlanSpec
+	Plan               agentosplan.ExecutablePlan
+	ControlsByNode     map[string][]agentos.ControlOperation
+	CapabilitiesByNode map[string]agentosplan.CapabilitySelectionTrace
 }
 
 // EvaluatePlanExpansionActivity materializes and validates workflow-owned
@@ -397,13 +398,18 @@ func (a *PlanActivities) EvaluatePlanExpansionActivity(ctx context.Context, inpu
 	if err != nil {
 		return evaluatePlanExpansionOutput{}, err
 	}
+	capabilitiesByNode, err := a.capabilitiesByNode(ctx, plan)
+	if err != nil {
+		return evaluatePlanExpansionOutput{}, err
+	}
 
 	return evaluatePlanExpansionOutput{
-		Expanded:       true,
-		Delta:          delta,
-		Spec:           nextSpec,
-		Plan:           plan,
-		ControlsByNode: controlsByNode,
+		Expanded:           true,
+		Delta:              delta,
+		Spec:               nextSpec,
+		Plan:               plan,
+		ControlsByNode:     controlsByNode,
+		CapabilitiesByNode: capabilitiesByNode,
 	}, nil
 }
 

@@ -290,7 +290,11 @@ func TestPlanWorkflowAppliesPlanDeltaArtifact(t *testing.T) {
 		Kind:       agentos.ArtifactKindPlanDelta,
 	}, agentosplan.PlanDelta{
 		Nodes: []agentos.PlanNodeSpec{
-			{NodeID: "expanded", Run: agentos.RunSpec{RunID: "run-expanded", Backend: ref}},
+			{
+				NodeID:     "expanded",
+				Capability: "expand",
+				Run:        agentos.RunSpec{RunID: "run-expanded", Backend: ref},
+			},
 		},
 		Edges: []agentos.PlanEdgeSpec{
 			{EdgeID: "seed-expanded", From: "seed", To: "expanded", On: agentos.EdgeOnSuccess},
@@ -309,7 +313,12 @@ func TestPlanWorkflowAppliesPlanDeltaArtifact(t *testing.T) {
 		},
 	}
 	spec = planWorkflowTestSpec(spec)
-	env := newPlanWorkflowTestEnvWithStores(t, mocks, nil, store, artifactStore, spec)
+	env := newPlanWorkflowTestEnvWithStores(t, mocks, []agentos.Capability{
+		{
+			Backend: ref,
+			Name:    "expand",
+		},
+	}, store, artifactStore, spec)
 
 	env.ExecuteWorkflow(PlanWorkflow, planWorkflowInput{Spec: spec})
 
@@ -327,10 +336,15 @@ func TestPlanWorkflowAppliesPlanDeltaArtifact(t *testing.T) {
 	events, err := store.ListPlanEvents(context.Background(), planWorkflowEventScope(spec), 0)
 	require.NoError(t, err)
 	eventTypes := make([]agentos.EventType, 0, len(events))
+	expandedCapabilitySelected := false
 	for _, event := range events {
 		eventTypes = append(eventTypes, event.EventType)
+		if event.EventType == agentos.EventCapabilitySelected && event.NodeID == "expanded" {
+			expandedCapabilitySelected = true
+		}
 	}
 	require.Contains(t, eventTypes, agentos.EventPlanExpanded)
+	require.True(t, expandedCapabilitySelected)
 }
 
 func TestPlanWorkflowCancelsTimedOutNode(t *testing.T) {

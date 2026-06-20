@@ -545,6 +545,7 @@ func applyPlanExpansion(activityCtx workflow.Context, workflowCtx workflow.Conte
 	*spec = nextSpec
 	validation.Plan = expanded.Plan
 	validation.ControlsByNode = expanded.ControlsByNode
+	validation.CapabilitiesByNode = expanded.CapabilitiesByNode
 	(*expansionCount)++
 
 	return nil
