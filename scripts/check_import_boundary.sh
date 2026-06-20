@@ -26,6 +26,12 @@ if repo_grep 'github\.com/TekkenSteve/GoAgent/internal/' examples docs; then
   exit 1
 fi
 
+if repo_grep '(/v1)?/orchestration/(execute|status)|github\.com/TekkenSteve/GoAgent/examples/client' \
+  README.md README_CN.md README_RU.md; then
+  echo "public README files must document the AgentOS control plane, not legacy native orchestration routes or example-client imports" >&2
+  exit 1
+fi
+
 if repo_grep 'github\.com/TekkenSteve/GoAgent/internal/(repo|agentfw)(/|")' \
   internal/usecase/agentosruntime; then
   echo "AgentOS runtime usecase must not import repo or agentfw infrastructure packages" >&2

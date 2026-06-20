@@ -76,9 +76,6 @@ make compose-up-all
   - `POST /v1/agentos/plans/{plan_id}/signals` — отправка plan-сигналов retry, approve или reject
   - `POST /v1/agentos/plans/{plan_id}/control` — pause, resume или cancel для RunPlan
   - `GET /v1/agentos/plans/{plan_id}/events` — поток событий RunPlan через SSE
-- **Оркестрация API**:
-  - `POST /v1/orchestration/execute` — запуск многошагового рабочего процесса
-  - `GET /v1/orchestration/status/{run_id}` — проверка статуса оркестрации
 - **Шаблоны API**:
   - `POST /v1/templates/import` — импорт шаблона из YAML
   - `GET /v1/templates/` — список шаблонов
@@ -127,43 +124,22 @@ GoAgent организован вокруг небольшой публично�
 
 ### Архитектура
 
-Фреймворк состоит из:
+Native backend GoAgent состоит из:
 
 1. **Среда выполнения агентов** — ReAct цикл: `думай → действуй → наблюдай → повторяй` с абстракцией LLM провайдера
 2. **Система инструментов** — Определения инструментов с JSON Schema, абстракция исполнителя, интеграция MCP серверов
-3. **Система команд** — Иерархическая композиция команд с рекурсивным расширением в плоскую очередь шагов
-4. **Движок оркестрации** — Temporal рабочий процесс, выполняющий шаги с разрешением зависимостей, параллельным разветвлением, динамическими мутациями и сигналами
+3. **Система команд** — Иерархическая композиция команд внутри native backend
+4. **Temporal Worker Kit** — Регистрация workflow/activity для durable native execution
 
-### Типы шагов
+Очереди native step, расширение команд и внутренняя graph-логика backend являются деталями реализации. Внешние control-plane клиенты должны описывать межфреймворковую оркестрацию через AgentOS `RunSpec` и `RunPlanSpec`, а не через native step payload.
 
-| Тип | Назначение |
-|------|-----------|
-| `agent` | Выполнение агента с промптом |
-| `tool` | Прямое выполнение инструмента |
-| `wait` | Ожидание Temporal сигнала (HITL) или таймаута |
-| `split` | Разветвление на параллельные подшаги |
-| `join` | Сбор параллельных результатов |
-| `eval` | Условная оценка с динамической мутацией шагов |
+### REST Examples
 
-### Паттерны оркестрации (Режим 1 — HTTP клиент)
+Директория `examples/http/` содержит REST-примеры AgentOS:
 
-Директория `examples/http/` содержит исполняемые демонстрации с использованием HTTP клиентского SDK:
-
-| Паттерн | Файл | Ключевые концепции |
-|---------|------|-------------|
-| [ReAct](examples/http/react/) | Один агент + цикл инструментов | `AgentOSRunRequest`, опрос |
-| [Pipeline](examples/http/pipeline/) | Последовательные этапы обработки | Цепочка `depends_on` |
-| [DAG](examples/http/dag/) | Направленный ациклический граф | Разрешение множественных зависимостей |
-| [Research](examples/http/research/) | Параллельное исследование + синтез | `split`/`join`, `wait` (HITL) |
-| [Supervisor-Worker](examples/http/supervisor-worker/) | Декомпозиция + параллельные исполнители | `split`/`join`, агент-супервизор |
-| [Router](examples/http/router/) | Условное ветвление | `eval` + мутация `OnResult` |
-| [Reflexion](examples/http/reflexion/) | Цикл самокритики и улучшения | `eval` + динамическое уточнение |
-| [Plan-and-Execute](examples/http/plan-and-execute/) | План → параллельное выполнение → оценка | `split`/`join` + мутация `eval` |
-| [Exploratory](examples/http/exploratory/) | Самоизменяющаяся очередь шагов | `eval` + мутация `append_after` |
-| [ToT / LATS](examples/http/tot-lats/) | Множественные пути рассуждения | Параллельное исследование + выбор лучшего пути |
-| [Scientific](examples/http/scientific/) | Гипотеза → HITL → эксперимент | Сигнал `wait`, обработка таймаута |
-| [Team](examples/http/team/) | Многоагентная иерархия | `TeamSpec` + `SubTeams` |
-| [Hierarchical](examples/http/hierarchical/) | Руководитель → отделы | Вложенный `TeamSpec` с расширением |
+| Пример | Файл | Что демонстрирует |
+|---------|------|---------------|
+| [RunPlan](examples/http/runplan/) | `examples/http/runplan/main.go` | Запуск durable AgentOS RunPlan через REST с публичными типами `agentos` |
 
 ### Примеры встраивания библиотеки (Режим 2 — AgentOS Runtime)
 
@@ -174,6 +150,7 @@ GoAgent организован вокруг небольшой публично�
 | [ReAct](examples/embed/react/) | `examples/embed/react/main.go` | Запуск generic run через `agentos.Runtime` |
 | [Conversation](examples/embed/conversation/) | `examples/embed/conversation/main.go` | Запуск диалогового run через `agentos/temporal` |
 | [Tools](examples/embed/tools/) | `examples/embed/tools/main.go` | Запуск tool-capable prompt через runtime boundary |
+| [RunPlan](examples/embed/plan/) | `examples/embed/plan/main.go` | Запуск durable cross-backend plan через `agentos.PlanRuntime` |
 
 ### Только типы (Режим 3)
 
@@ -188,14 +165,29 @@ GoAgent поддерживает три способа интеграции, о�
 Запустите GoAgent как самостоятельный сервис. Приложение взаимодействует с ним через AgentOS REST control plane.
 
 ```go
-import "github.com/TekkenSteve/GoAgent/examples/client"
+import (
+    "bytes"
+    "encoding/json"
+    "net/http"
 
-c := client.New("http://localhost:8080", "my-account")
-status, _ := c.StartRun(ctx, client.AgentOSRunRequest{
+    "github.com/TekkenSteve/GoAgent/agentos"
+)
+
+body, _ := json.Marshal(agentos.RunSpec{
     RunID: "run-1",
+    AccountID: "acct-1",
+    ProjectID: "proj-1",
     UserMessage: "Сколько будет 2+2?",
-    Backend: client.BackendRef{Kind: "native", Name: "goagent-native"},
+    IdempotencyKey: "run-1-start",
+    Backend: agentos.BackendRef{
+        Kind: agentos.BackendKindNative,
+        Name: agentos.BackendNameGoAgentNative,
+    },
 })
+req, _ := http.NewRequestWithContext(ctx, http.MethodPost, "http://localhost:8080/v1/agentos/runs", bytes.NewReader(body))
+req.Header.Set("Content-Type", "application/json")
+resp, _ := http.DefaultClient.Do(req)
+defer resp.Body.Close()
 ```
 
 ### Режим 2 — Встраивание библиотеки

@@ -84,9 +84,6 @@ make compose-up-all
   - `GET /v1/agentos/plans/{plan_id}/audits` — Query durable plan audit records
   - `GET /v1/agentos/plans/{plan_id}/artifacts` — Query plan artifact refs
   - `GET /v1/agentos/plans/{plan_id}/artifacts/{artifact_id}` — Read one plan artifact document
-- **Orchestration API**:
-  - `POST /v1/orchestration/execute` — Start multi-step orchestration workflow
-  - `GET /v1/orchestration/status/{run_id}` — Poll orchestration status
 - **Templates API**:
   - `POST /v1/templates/import` — Import workflow template from YAML
   - `GET /v1/templates/` — List templates
@@ -135,43 +132,22 @@ Example configuration: [.env.example](.env.example)
 
 ### Architecture
 
-The agent framework consists of:
+The native GoAgent backend consists of:
 
 1. **Agent Runtime** — ReAct loop: `think → act → observe → repeat`, with LLM provider abstraction
 2. **Tool System** — Tool definitions with JSON Schema, executor abstraction, MCP server integration
-3. **Team System** — Hierarchical team composition with recursive expansion into flat step queues
-4. **Orchestration Engine** — Temporal workflow that executes steps with dependency resolution, parallel fan-out, dynamic mutation, and human-in-the-loop signals
+3. **Team System** — Hierarchical team composition inside the native backend
+4. **Temporal Worker Kit** — Workflow/activity registration for durable native execution
 
-### Step Types
+Native step queues, team expansion, and backend-internal graph logic are implementation details. External control-plane callers should model cross-framework orchestration with AgentOS `RunSpec` and `RunPlanSpec`, not native step payloads.
 
-| Type | Purpose |
-|------|---------|
-| `agent` | Execute an agent with a prompt |
-| `tool` | Execute a tool directly |
-| `wait` | Wait for a Temporal signal (HITL) or timeout |
-| `split` | Fan-out into parallel sub-steps |
-| `join` | Fan-in to gather parallel results |
-| `eval` | Conditional evaluation with dynamic step mutation |
+### REST Examples
 
-### Orchestration Patterns (Mode 1 — HTTP Client)
+The `examples/http/` directory contains AgentOS REST examples:
 
-The `examples/http/` directory contains runnable demonstrations using the HTTP client SDK:
-
-| Pattern | File | Key Concepts |
-|---------|------|-------------|
-| [ReAct](examples/http/react/) | Single agent + tool loop | `AgentOSRunRequest`, polling |
-| [Pipeline](examples/http/pipeline/) | Sequential processing stages | `depends_on` chain |
-| [DAG](examples/http/dag/) | Directed acyclic graph | Multi-dependency resolution |
-| [Research](examples/http/research/) | Parallel exploration + synthesis | `split`/`join`, `wait` (HITL) |
-| [Supervisor-Worker](examples/http/supervisor-worker/) | Decompose + parallel workers | `split`/`join`, supervisor agent |
-| [Router](examples/http/router/) | Conditional branching | `eval` + `OnResult` mutation |
-| [Reflexion](examples/http/reflexion/) | Self-critique quality loop | `eval` + dynamic refinement |
-| [Plan-and-Execute](examples/http/plan-and-execute/) | Plan → parallel execute → evaluate | `split`/`join` + `eval` mutation |
-| [Exploratory](examples/http/exploratory/) | Self-modifying step queue | `eval` + `append_after` mutation |
-| [ToT / LATS](examples/http/tot-lats/) | Multiple reasoning paths | Parallel exploration + best-path eval |
-| [Scientific](examples/http/scientific/) | Hypothesis → HITL → experiment | `wait` signal, timeout handling |
-| [Team](examples/http/team/) | Multi-agent hierarchy | `TeamSpec` + `SubTeams` |
-| [Hierarchical](examples/http/hierarchical/) | Executive → departments | Nested `TeamSpec` with expansion |
+| Example | File | What It Shows |
+|---------|------|---------------|
+| [RunPlan](examples/http/runplan/) | `examples/http/runplan/main.go` | Start a durable AgentOS RunPlan over REST using public `agentos` types |
 
 ### Library Embedding Examples (Mode 2 — AgentOS Runtime)
 
@@ -235,14 +211,29 @@ GoAgent can be consumed in three ways, from simple to deeply integrated:
 Run GoAgent as a standalone service. Your application talks to it through the AgentOS REST control plane.
 
 ```go
-import "github.com/TekkenSteve/GoAgent/examples/client"
+import (
+    "bytes"
+    "encoding/json"
+    "net/http"
 
-c := client.New("http://localhost:8080", "my-account")
-status, _ := c.StartRun(ctx, client.AgentOSRunRequest{
+    "github.com/TekkenSteve/GoAgent/agentos"
+)
+
+body, _ := json.Marshal(agentos.RunSpec{
     RunID: "run-1",
+    AccountID: "acct-1",
+    ProjectID: "proj-1",
     UserMessage: "What is 2+2?",
-    Backend: client.BackendRef{Kind: "native", Name: "goagent-native"},
+    IdempotencyKey: "run-1-start",
+    Backend: agentos.BackendRef{
+        Kind: agentos.BackendKindNative,
+        Name: agentos.BackendNameGoAgentNative,
+    },
 })
+req, _ := http.NewRequestWithContext(ctx, http.MethodPost, "http://localhost:8080/v1/agentos/runs", bytes.NewReader(body))
+req.Header.Set("Content-Type", "application/json")
+resp, _ := http.DefaultClient.Do(req)
+defer resp.Body.Close()
 ```
 
 ### Mode 2 — Library Embedding

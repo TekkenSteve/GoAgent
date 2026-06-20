@@ -76,9 +76,6 @@ make compose-up-all
   - `POST /v1/agentos/plans/{plan_id}/signals` — 发送 retry、approve、reject 等 plan 信号
   - `POST /v1/agentos/plans/{plan_id}/control` — 向 RunPlan 发送 pause、resume、cancel
   - `GET /v1/agentos/plans/{plan_id}/events` — 通过 SSE 订阅 RunPlan 事件
-- **编排 API**:
-  - `POST /v1/orchestration/execute` — 启动多步骤编排工作流
-  - `GET /v1/orchestration/status/{run_id}` — 轮询编排状态
 - **模板 API**:
   - `POST /v1/templates/import` — 从 YAML 导入工作流模板
   - `GET /v1/templates/` — 模板列表
@@ -127,43 +124,22 @@ GoAgent 围绕小而稳定的 **AgentOS SDK 边界** 和应用壳组织。实现
 
 ### 架构
 
-Agent 框架由以下部分组成：
+GoAgent native backend 由以下部分组成：
 
 1. **Agent 运行时** — ReAct 循环：`思考 → 行动 → 观察 → 重复`，带有 LLM 提供者抽象
 2. **工具系统** — 基于 JSON Schema 的工具定义、执行器抽象、MCP 服务器集成
-3. **团队系统** — 分层团队组合，支持递归扩展为扁平步骤队列
-4. **编排引擎** — Temporal 工作流，执行依赖解析、并行扇出、动态变更和人在回路中信号
+3. **团队系统** — native backend 内部的分层团队组合
+4. **Temporal Worker Kit** — 为 durable native execution 注册 workflow/activity
 
-### 步骤类型
+native step 队列、team expansion 和 backend 内部 graph 逻辑都是实现细节。外部控制面调用方应该使用 AgentOS `RunSpec` 和 `RunPlanSpec` 描述跨框架编排，而不是 native step payload。
 
-| 类型 | 用途 |
-|------|------|
-| `agent` | 使用提示执行 Agent |
-| `tool` | 直接执行工具 |
-| `wait` | 等待 Temporal 信号（HITL）或超时 |
-| `split` | 扇出到并行子步骤 |
-| `join` | 扇入收集并行结果 |
-| `eval` | 条件评估，支持动态步骤变更 |
+### REST 示例
 
-### 编排模式（方式一 — HTTP 客户端）
+`examples/http/` 目录包含 AgentOS REST 示例：
 
-`examples/http/` 目录包含使用 HTTP 客户端 SDK 的可运行演示：
-
-| 模式 | 文件 | 关键概念 |
-|---------|------|---------|
-| [ReAct](examples/http/react/) | 单 Agent + 工具循环 | `AgentOSRunRequest`、轮询 |
-| [Pipeline](examples/http/pipeline/) | 顺序处理阶段 | `depends_on` 链 |
-| [DAG](examples/http/dag/) | 有向无环图 | 多依赖解析 |
-| [Research](examples/http/research/) | 并行探索 + 综合 | `split`/`join`、`wait`（HITL） |
-| [Supervisor-Worker](examples/http/supervisor-worker/) | 分解 + 并行工作 | `split`/`join`、监督 Agent |
-| [Router](examples/http/router/) | 条件分支 | `eval` + `OnResult` 变更 |
-| [Reflexion](examples/http/reflexion/) | 自我批判质量循环 | `eval` + 动态优化 |
-| [Plan-and-Execute](examples/http/plan-and-execute/) | 计划 → 并行执行 → 评估 | `split`/`join` + `eval` 变更 |
-| [Exploratory](examples/http/exploratory/) | 自我修改步骤队列 | `eval` + `append_after` 变更 |
-| [ToT / LATS](examples/http/tot-lats/) | 多推理路径 | 并行探索 + 最优路径评估 |
-| [Scientific](examples/http/scientific/) | 假设 → HITL → 实验 | `wait` 信号、超时处理 |
-| [Team](examples/http/team/) | 多 Agent 层级 | `TeamSpec` + `SubTeams` |
-| [Hierarchical](examples/http/hierarchical/) | 高管 → 部门 | 嵌套 `TeamSpec` + 扩展 |
+| 示例 | 文件 | 展示内容 |
+|---------|------|---------------|
+| [RunPlan](examples/http/runplan/) | `examples/http/runplan/main.go` | 使用公共 `agentos` 类型通过 REST 启动 durable AgentOS RunPlan |
 
 ### 库嵌入示例（方式二 — AgentOS Runtime）
 
@@ -174,6 +150,7 @@ Agent 框架由以下部分组成：
 | [ReAct](examples/embed/react/) | `examples/embed/react/main.go` | 使用 `agentos.Runtime` 启动通用运行 |
 | [对话](examples/embed/conversation/) | `examples/embed/conversation/main.go` | 通过 `agentos/temporal` 启动对话运行 |
 | [工具](examples/embed/tools/) | `examples/embed/tools/main.go` | 通过运行时边界启动可使用工具的提示 |
+| [RunPlan](examples/embed/plan/) | `examples/embed/plan/main.go` | 使用 `agentos.PlanRuntime` 启动 durable 跨 backend plan |
 
 ### 仅使用类型（方式三）
 
@@ -188,14 +165,29 @@ GoAgent 支持三种集成方式，从简单到深度集成：
 将 GoAgent 作为独立服务运行，应用通过 AgentOS REST 控制面与其交互。
 
 ```go
-import "github.com/TekkenSteve/GoAgent/examples/client"
+import (
+    "bytes"
+    "encoding/json"
+    "net/http"
 
-c := client.New("http://localhost:8080", "my-account")
-status, _ := c.StartRun(ctx, client.AgentOSRunRequest{
+    "github.com/TekkenSteve/GoAgent/agentos"
+)
+
+body, _ := json.Marshal(agentos.RunSpec{
     RunID: "run-1",
+    AccountID: "acct-1",
+    ProjectID: "proj-1",
     UserMessage: "1+1 等于几？",
-    Backend: client.BackendRef{Kind: "native", Name: "goagent-native"},
+    IdempotencyKey: "run-1-start",
+    Backend: agentos.BackendRef{
+        Kind: agentos.BackendKindNative,
+        Name: agentos.BackendNameGoAgentNative,
+    },
 })
+req, _ := http.NewRequestWithContext(ctx, http.MethodPost, "http://localhost:8080/v1/agentos/runs", bytes.NewReader(body))
+req.Header.Set("Content-Type", "application/json")
+resp, _ := http.DefaultClient.Do(req)
+defer resp.Body.Close()
 ```
 
 ### 方式二 — 库嵌入
