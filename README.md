@@ -70,6 +70,7 @@ make compose-up-all
   - `POST /v1/agentos/runs/{run_id}/signals` — Send business input such as `user.message`
   - `POST /v1/agentos/runs/{run_id}/control` — Send pause, resume, or cancel
   - `POST /v1/agentos/runs/{run_id}/events` — Ingest backend events
+  - `GET /v1/agentos/plans/schemas/{kind}` — Read RunPlan authoring JSON Schema
   - `POST /v1/agentos/plans` — Start a durable cross-backend RunPlan
   - `GET /v1/agentos/plans/{plan_id}/status` — Poll aggregate plan status
   - `POST /v1/agentos/plans/{plan_id}/signals` — Send plan signals such as retry, approve, or reject
@@ -193,7 +194,9 @@ Native GoAgent `entity.Step` remains an internal detail of the GoAgent native ba
 
 Plan runtime query APIs are durable: status comes from the plan index, event history comes from the plan event store, audits come from the audit store, and artifact payloads come from the artifact store. SSE is only the live streaming transport layered on top of the durable event history.
 
-`cmd/agentos-plan` is the RunPlan DSL/compiler tool. It validates JSON/YAML
+`agentos.PlanJSONSchema` and `GET /v1/agentos/plans/schemas/{kind}` expose the
+public authoring schemas for editors and CI. `cmd/agentos-plan` is the RunPlan
+DSL/compiler tool. It validates JSON/YAML
 `RunPlanSpec`, generates JSON Schema, validates bounded `PlanDelta` expansion,
 and imports/exports Serverless Workflow as an edge interoperability format. The
 typed `agentos.RunPlanSpec` remains the source of truth.

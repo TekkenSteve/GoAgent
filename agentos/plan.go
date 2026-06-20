@@ -2,6 +2,7 @@ package agentos
 
 import (
 	"encoding/json"
+	"fmt"
 	"reflect"
 	"time"
 
@@ -459,6 +460,44 @@ func CapabilityCatalogSpecJSONSchema() ([]byte, error) {
 // ArtifactSchemaCatalogSpec.
 func ArtifactSchemaCatalogSpecJSONSchema() ([]byte, error) {
 	return jsonSchemaFor[ArtifactSchemaCatalogSpec]()
+}
+
+// PlanSchemaKind identifies a public RunPlan authoring schema.
+type PlanSchemaKind string
+
+const (
+	PlanSchemaKindRunPlan               PlanSchemaKind = "run-plan"
+	PlanSchemaKindPlanDelta             PlanSchemaKind = "plan-delta"
+	PlanSchemaKindCapabilityCatalog     PlanSchemaKind = "capability-catalog"
+	PlanSchemaKindArtifactSchemaCatalog PlanSchemaKind = "artifact-schema-catalog"
+)
+
+// PlanSchemaKinds returns the complete set of public RunPlan authoring schema
+// identifiers.
+func PlanSchemaKinds() []PlanSchemaKind {
+	return []PlanSchemaKind{
+		PlanSchemaKindRunPlan,
+		PlanSchemaKindPlanDelta,
+		PlanSchemaKindCapabilityCatalog,
+		PlanSchemaKindArtifactSchemaCatalog,
+	}
+}
+
+// PlanJSONSchema returns the public JSON Schema for one RunPlan authoring
+// contract.
+func PlanJSONSchema(kind PlanSchemaKind) ([]byte, error) {
+	switch kind {
+	case PlanSchemaKindRunPlan:
+		return RunPlanSpecJSONSchema()
+	case PlanSchemaKindPlanDelta:
+		return PlanDeltaSpecJSONSchema()
+	case PlanSchemaKindCapabilityCatalog:
+		return CapabilityCatalogSpecJSONSchema()
+	case PlanSchemaKindArtifactSchemaCatalog:
+		return ArtifactSchemaCatalogSpecJSONSchema()
+	default:
+		return nil, fmt.Errorf("%w: unsupported plan schema kind %q", ErrInvalidRunPlan, kind)
+	}
 }
 
 func jsonSchemaFor[T any]() ([]byte, error) {

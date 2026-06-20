@@ -342,6 +342,8 @@ definitions:
     type: object
   agentos.PlanEvent:
     properties:
+      account_id:
+        type: string
       event_id:
         type: string
       event_type:
@@ -352,6 +354,8 @@ definitions:
         additionalProperties: {}
         type: object
       plan_id:
+        type: string
+      project_id:
         type: string
       run_id:
         type: string
@@ -1504,6 +1508,34 @@ paths:
           schema:
             $ref: '#/definitions/response.Error'
       summary: Get AgentOS plan status
+      tags:
+      - agentos
+  /agentos/plans/schemas/{kind}:
+    get:
+      consumes:
+      - application/json
+      description: Return a public JSON Schema used to author AgentOS RunPlan wire
+        contracts.
+      operationId: agentos-plan-schema
+      parameters:
+      - description: 'Schema kind: run-plan, plan-delta, capability-catalog, artifact-schema-catalog'
+        in: path
+        name: kind
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/response.Error'
+      summary: Get AgentOS plan authoring schema
       tags:
       - agentos
   /agentos/runs:

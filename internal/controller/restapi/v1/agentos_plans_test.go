@@ -227,6 +227,33 @@ func TestAgentOSPlanRoutesUsePlanRuntime(t *testing.T) {
 	}
 }
 
+func TestAgentOSPlanSchemaRouteDoesNotRequirePlanRuntime(t *testing.T) {
+	app := fiber.New()
+	NewRoutes(app.Group("/v1"), nil, nil, logger.New("error"), nil, nil, nil, nil, nil, nil, nil)
+
+	resp := doAgentOSRouteRequest(t, app, http.MethodGet, "/v1/agentos/plans/schemas/run-plan", "")
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("schema status = %d", resp.StatusCode)
+	}
+	if contentType := resp.Header.Get("Content-Type"); !strings.Contains(contentType, "application/json") {
+		t.Fatalf("content type = %q", contentType)
+	}
+	var schema map[string]any
+	if err := json.NewDecoder(resp.Body).Decode(&schema); err != nil {
+		t.Fatalf("decode schema: %v", err)
+	}
+	if len(schema) == 0 {
+		t.Fatal("schema is empty")
+	}
+
+	resp = doAgentOSRouteRequest(t, app, http.MethodGet, "/v1/agentos/plans/schemas/unknown", "")
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("unknown schema status = %d, want %d", resp.StatusCode, http.StatusBadRequest)
+	}
+}
+
 func TestAgentOSPlanRoutesDoNotMutateRunningTopology(t *testing.T) {
 	app := fiber.New()
 	NewRoutes(app.Group("/v1"), nil, nil, logger.New("error"), nil, nil, nil, nil, nil, nil, newFakePlanRuntime())

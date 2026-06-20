@@ -62,6 +62,46 @@
                 }
             }
         },
+        "/agentos/plans/schemas/{kind}": {
+            "get": {
+                "description": "Return a public JSON Schema used to author AgentOS RunPlan wire contracts.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "agentos"
+                ],
+                "summary": "Get AgentOS plan authoring schema",
+                "operationId": "agentos-plan-schema",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Schema kind: run-plan, plan-delta, capability-catalog, artifact-schema-catalog",
+                        "name": "kind",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/response.Error"
+                        }
+                    }
+                }
+            }
+        },
         "/agentos/plans/{plan_id}/artifacts": {
             "get": {
                 "description": "Query durable artifact refs for a RunPlan.",
@@ -1693,6 +1733,9 @@
         "agentos.PlanEvent": {
             "type": "object",
             "properties": {
+                "account_id": {
+                    "type": "string"
+                },
                 "event_id": {
                     "type": "string"
                 },
@@ -1707,6 +1750,9 @@
                     "additionalProperties": {}
                 },
                 "plan_id": {
+                    "type": "string"
+                },
+                "project_id": {
                     "type": "string"
                 },
                 "run_id": {

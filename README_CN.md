@@ -70,6 +70,7 @@ make compose-up-all
   - `POST /v1/agentos/runs/{run_id}/signals` — 发送 `user.message` 等业务输入
   - `POST /v1/agentos/runs/{run_id}/control` — 发送 pause、resume、cancel
   - `POST /v1/agentos/runs/{run_id}/events` — 接收 backend 事件回写
+  - `GET /v1/agentos/plans/schemas/{kind}` — 读取 RunPlan 编写用 JSON Schema
   - `POST /v1/agentos/plans` — 启动跨 backend 的持久 RunPlan
   - `GET /v1/agentos/plans/{plan_id}/status` — 轮询 plan 聚合状态
   - `POST /v1/agentos/plans/{plan_id}/signals` — 发送 retry、approve、reject 等 plan 信号

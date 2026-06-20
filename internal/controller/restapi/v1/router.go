@@ -60,6 +60,7 @@ func NewRoutes(apiV1Group fiber.Router, t usecase.AgentExecutor, o usecase.Orche
 		apiV1Group.Post("/agentos/runs/:run_id/signals", r.signalAgentOSRun)
 		apiV1Group.Post("/agentos/runs/:run_id/control", r.controlAgentOSRun)
 	}
+	apiV1Group.Get("/agentos/plans/schemas/:kind", r.agentOSPlanSchema)
 	if planRuntime != nil {
 		apiV1Group.Post("/agentos/plans", r.startAgentOSPlan)
 		apiV1Group.Get("/agentos/plans/:plan_id/status", r.statusAgentOSPlan)

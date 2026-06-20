@@ -70,6 +70,40 @@ func TestArtifactSchemaCatalogSpecJSONSchema(t *testing.T) {
 	}
 }
 
+func TestPlanJSONSchemaDispatchesAllPublicKinds(t *testing.T) {
+	expectedKinds := []PlanSchemaKind{
+		PlanSchemaKindRunPlan,
+		PlanSchemaKindPlanDelta,
+		PlanSchemaKindCapabilityCatalog,
+		PlanSchemaKindArtifactSchemaCatalog,
+	}
+	kinds := PlanSchemaKinds()
+	if !reflect.DeepEqual(kinds, expectedKinds) {
+		t.Fatalf("schema kinds = %#v, want %#v", kinds, expectedKinds)
+	}
+
+	for _, kind := range kinds {
+		data, err := PlanJSONSchema(kind)
+		if err != nil {
+			t.Fatalf("PlanJSONSchema(%s): %v", kind, err)
+		}
+		var schema map[string]any
+		if err := json.Unmarshal(data, &schema); err != nil {
+			t.Fatalf("schema %s json: %v", kind, err)
+		}
+		if len(schema) == 0 {
+			t.Fatalf("schema %s is empty", kind)
+		}
+	}
+}
+
+func TestPlanJSONSchemaRejectsUnknownKind(t *testing.T) {
+	_, err := PlanJSONSchema("unknown")
+	if !errors.Is(err, ErrInvalidRunPlan) {
+		t.Fatalf("PlanJSONSchema unknown error = %v, want ErrInvalidRunPlan", err)
+	}
+}
+
 func TestRunPlanSpecJSONSchemaFileIsCurrent(t *testing.T) {
 	generated, err := RunPlanSpecJSONSchema()
 	if err != nil {

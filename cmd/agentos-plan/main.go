@@ -22,15 +22,6 @@ type compiledPlanOutput struct {
 	Order []string            `json:"order"`
 }
 
-type schemaKind string
-
-const (
-	schemaKindRunPlan               schemaKind = "run-plan"
-	schemaKindPlanDelta             schemaKind = "plan-delta"
-	schemaKindCapabilityCatalog     schemaKind = "capability-catalog"
-	schemaKindArtifactSchemaCatalog schemaKind = "artifact-schema-catalog"
-)
-
 func main() {
 	os.Exit(run(os.Args[1:], os.Stdout, os.Stderr))
 }
@@ -69,12 +60,12 @@ func runSchema(args []string, stdout io.Writer, stderr io.Writer) int {
 	fs := flag.NewFlagSet("schema", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	outPath := fs.String("out", "", "write schema to path instead of stdout")
-	kind := fs.String("kind", string(schemaKindRunPlan), "schema kind: run-plan, plan-delta, capability-catalog, or artifact-schema-catalog")
+	kind := fs.String("kind", string(agentos.PlanSchemaKindRunPlan), "schema kind: run-plan, plan-delta, capability-catalog, or artifact-schema-catalog")
 	if err := fs.Parse(args); err != nil {
 		return 2
 	}
 
-	schema, err := schemaForKind(schemaKind(*kind))
+	schema, err := agentos.PlanJSONSchema(agentos.PlanSchemaKind(*kind))
 	if err != nil {
 		_, _ = fmt.Fprintf(stderr, "generate schema: %v\n", err)
 
@@ -87,21 +78,6 @@ func runSchema(args []string, stdout io.Writer, stderr io.Writer) int {
 	}
 
 	return 0
-}
-
-func schemaForKind(kind schemaKind) ([]byte, error) {
-	switch kind {
-	case schemaKindRunPlan:
-		return agentos.RunPlanSpecJSONSchema()
-	case schemaKindPlanDelta:
-		return agentos.PlanDeltaSpecJSONSchema()
-	case schemaKindCapabilityCatalog:
-		return agentos.CapabilityCatalogSpecJSONSchema()
-	case schemaKindArtifactSchemaCatalog:
-		return agentos.ArtifactSchemaCatalogSpecJSONSchema()
-	default:
-		return nil, fmt.Errorf("unsupported schema kind %q", kind)
-	}
 }
 
 func runValidate(args []string, stdout io.Writer, stderr io.Writer) int {

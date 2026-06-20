@@ -70,6 +70,7 @@ make compose-up-all
   - `POST /v1/agentos/runs/{run_id}/signals` — отправка бизнес-сигналов, например `user.message`
   - `POST /v1/agentos/runs/{run_id}/control` — pause, resume или cancel
   - `POST /v1/agentos/runs/{run_id}/events` — прием событий backend
+  - `GET /v1/agentos/plans/schemas/{kind}` — JSON Schema для авторинга RunPlan
   - `POST /v1/agentos/plans` — запуск durable RunPlan для нескольких backend
   - `GET /v1/agentos/plans/{plan_id}/status` — проверка агрегированного статуса plan
   - `POST /v1/agentos/plans/{plan_id}/signals` — отправка plan-сигналов retry, approve или reject
