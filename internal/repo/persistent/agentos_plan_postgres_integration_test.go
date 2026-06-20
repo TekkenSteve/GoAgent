@@ -251,6 +251,17 @@ func TestAgentOSPlanPostgresDurablePersistence(t *testing.T) {
 	if err := routeIndex.BindPlanNode(ctx, spec.PlanID, spec.Nodes[0].NodeID, runSpec, runStatus); err != nil {
 		t.Fatalf("BindPlanNode replay: %v", err)
 	}
+	assertPostgresRunBackendIndexRecord(t, pg, runSpec.RunID, postgresRunBackendIndexExpectation{
+		PlanID:         spec.PlanID,
+		NodeID:         spec.Nodes[0].NodeID,
+		ThreadID:       runSpec.ThreadID,
+		AccountID:      spec.AccountID,
+		ProjectID:      spec.ProjectID,
+		BackendKind:    string(runSpec.Backend.Kind),
+		BackendName:    runSpec.Backend.Name,
+		IdempotencyKey: runSpec.IdempotencyKey,
+		LifecycleState: runStatus.LifecycleState,
+	})
 	resolved, err := routeIndex.Resolve(ctx, runSpec.RunID)
 	if err != nil {
 		t.Fatalf("Resolve: %v", err)
@@ -262,6 +273,24 @@ func TestAgentOSPlanPostgresDurablePersistence(t *testing.T) {
 	changedRun.RunID = runSpec.RunID + "-changed"
 	if err := routeIndex.BindPlanNode(ctx, spec.PlanID, spec.Nodes[0].NodeID, changedRun, agentos.RunStatus{RunID: changedRun.RunID}); !errors.Is(err, agentos.ErrInvalidRunSpec) {
 		t.Fatalf("BindPlanNode changed run error = %v, want ErrInvalidRunSpec", err)
+	}
+	changedKeyRun := runSpec
+	changedKeyRun.IdempotencyKey = runSpec.IdempotencyKey + "-changed"
+	if err := routeIndex.BindPlanNode(ctx, spec.PlanID, spec.Nodes[0].NodeID, changedKeyRun, runStatus); !errors.Is(err, agentos.ErrInvalidRunSpec) {
+		t.Fatalf("BindPlanNode changed idempotency key error = %v, want ErrInvalidRunSpec", err)
+	}
+	if err := routeIndex.BindPlanNode(ctx, spec.PlanID, spec.Nodes[0].NodeID, agentos.RunSpec{
+		RunID:     "missing-node-start-key-" + suffix,
+		ThreadID:  runSpec.ThreadID,
+		AccountID: runSpec.AccountID,
+		ProjectID: runSpec.ProjectID,
+		Backend:   runSpec.Backend,
+	}, agentos.RunStatus{RunID: "missing-node-start-key-" + suffix}); !errors.Is(err, agentos.ErrInvalidRunSpec) {
+		t.Fatalf("BindPlanNode missing idempotency key error = %v, want ErrInvalidRunSpec", err)
+	}
+	reusedNodeKey := runSpec
+	if err := routeIndex.BindPlanNode(ctx, spec.PlanID, "node-2", reusedNodeKey, runStatus); !errors.Is(err, agentos.ErrInvalidRunPlan) {
+		t.Fatalf("BindPlanNode reused node key error = %v, want ErrInvalidRunPlan", err)
 	}
 	standaloneRun := agentos.RunSpec{
 		RunID:          "standalone-" + suffix,
@@ -754,6 +783,44 @@ WHERE artifact_id = $1`, artifactID).Scan(&storedAccountID, &storedProjectID)
 	}
 	if storedAccountID != accountID || storedProjectID != projectID {
 		t.Fatalf("artifact tenant scope = %s/%s, want %s/%s", storedAccountID, storedProjectID, accountID, projectID)
+	}
+}
+
+type postgresRunBackendIndexExpectation struct {
+	PlanID         string
+	NodeID         string
+	ThreadID       string
+	AccountID      string
+	ProjectID      string
+	BackendKind    string
+	BackendName    string
+	IdempotencyKey string
+	LifecycleState string
+}
+
+func assertPostgresRunBackendIndexRecord(t *testing.T, pg *postgres.Postgres, runID string, want postgresRunBackendIndexExpectation) {
+	t.Helper()
+
+	var got postgresRunBackendIndexExpectation
+	err := pg.Pool.QueryRow(t.Context(), `
+SELECT plan_id, node_id, thread_id, account_id, project_id, backend_kind, backend_name, idempotency_key, lifecycle_state
+FROM run_backend_index
+WHERE run_id = $1`, runID).Scan(
+		&got.PlanID,
+		&got.NodeID,
+		&got.ThreadID,
+		&got.AccountID,
+		&got.ProjectID,
+		&got.BackendKind,
+		&got.BackendName,
+		&got.IdempotencyKey,
+		&got.LifecycleState,
+	)
+	if err != nil {
+		t.Fatalf("read run backend index row: %v", err)
+	}
+	if got != want {
+		t.Fatalf("run backend index row = %#v, want %#v", got, want)
 	}
 }
 
