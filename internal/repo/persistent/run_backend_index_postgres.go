@@ -2,6 +2,7 @@ package persistent
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"fmt"
 
@@ -28,7 +29,12 @@ func (r *RunBackendIndexRepo) Bind(ctx context.Context, spec agentos.RunSpec, st
 }
 
 func (r *RunBackendIndexRepo) BindPlanNode(ctx context.Context, planID, nodeID string, spec agentos.RunSpec, status agentos.RunStatus) error {
-	return r.upsert(ctx, agentosruntime.RunBackendIndexRecordFromPlanNode(planID, nodeID, spec, status), true)
+	record := agentosruntime.RunBackendIndexRecordFromPlanNode(planID, nodeID, spec, status)
+	if err := r.validatePlanNodeOwnership(ctx, record); err != nil {
+		return err
+	}
+
+	return r.upsert(ctx, record, true)
 }
 
 func (r *RunBackendIndexRepo) Resolve(ctx context.Context, runID string) (agentos.BackendRef, error) {
@@ -134,8 +140,8 @@ func (r *RunBackendIndexRepo) upsert(ctx context.Context, record entity.RunBacke
 		).
 		Values(
 			record.RunID,
-			record.PlanID,
-			record.NodeID,
+			nullableString(record.PlanID),
+			nullableString(record.NodeID),
 			record.ThreadID,
 			record.AccountID,
 			record.ProjectID,
@@ -182,6 +188,49 @@ func (r *RunBackendIndexRepo) upsert(ctx context.Context, record entity.RunBacke
 	return nil
 }
 
+func (r *RunBackendIndexRepo) validatePlanNodeOwnership(ctx context.Context, record entity.RunBackendIndexRecord) error {
+	record = agentosruntime.NormalizeRunBackendIndexRecord(record)
+	if err := agentosruntime.ValidateRunBackendIndexRecord(record, true); err != nil {
+		return err
+	}
+	if record.PlanID == "" {
+		return fmt.Errorf("%w: plan id is required", agentos.ErrInvalidRunPlan)
+	}
+	if record.NodeID == "" {
+		return fmt.Errorf("%w: node id is required", agentos.ErrInvalidRunPlan)
+	}
+
+	var accountID string
+	var projectID string
+	var storedNodeID sql.NullString
+	var storedRunID sql.NullString
+	err := r.Pool.QueryRow(ctx, `
+SELECT p.account_id, p.project_id, n.node_id, n.run_id
+FROM plans p
+LEFT JOIN plan_nodes n
+    ON n.plan_id = p.plan_id
+   AND n.node_id = $2
+WHERE p.plan_id = $1`, record.PlanID, record.NodeID).Scan(&accountID, &projectID, &storedNodeID, &storedRunID)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return fmt.Errorf("%w: %s", agentos.ErrPlanRouteNotFound, record.PlanID)
+		}
+
+		return fmt.Errorf("RunBackendIndexRepo - validatePlanNodeOwnership - query: %w", err)
+	}
+	if accountID != record.AccountID || projectID != record.ProjectID {
+		return fmt.Errorf("%w: %s", agentos.ErrPlanRouteNotFound, record.PlanID)
+	}
+	if !storedNodeID.Valid || storedNodeID.String == "" {
+		return fmt.Errorf("%w: plan node %q is not durable", agentos.ErrInvalidRunPlan, record.NodeID)
+	}
+	if storedRunID.Valid && storedRunID.String != "" && storedRunID.String != record.RunID {
+		return fmt.Errorf("%w: plan node %q has durable run id %q, got %q", agentos.ErrInvalidRunSpec, record.NodeID, storedRunID.String, record.RunID)
+	}
+
+	return nil
+}
+
 func (r *RunBackendIndexRepo) updateLifecycle(ctx context.Context, existing entity.RunBackendIndexRecord, requested entity.RunBackendIndexRecord) error {
 	lifecycle := requested.LifecycleState
 	if lifecycle == agentosruntime.RunBackendLifecycleClaiming && existing.LifecycleState != agentosruntime.RunBackendLifecycleClaiming {
@@ -206,8 +255,8 @@ WHERE run_id = $1`, existing.RunID, lifecycle)
 func runBackendIndexColumns() []string {
 	return []string{
 		"run_id",
-		"plan_id",
-		"node_id",
+		"COALESCE(plan_id, '') AS plan_id",
+		"COALESCE(node_id, '') AS node_id",
 		"thread_id",
 		"account_id",
 		"project_id",
@@ -249,4 +298,12 @@ func scanRunBackendIndexRecord(scanner runBackendIndexScanner) (entity.RunBacken
 	}
 
 	return record, true, nil
+}
+
+func nullableString(value string) any {
+	if value == "" {
+		return nil
+	}
+
+	return value
 }

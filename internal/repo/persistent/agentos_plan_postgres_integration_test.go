@@ -45,7 +45,9 @@ func TestAgentOSPlanPostgresDurablePersistence(t *testing.T) {
 		"plan_commands_project_id_required",
 		"plan_metric_checkpoints_account_id_required",
 		"plan_metric_checkpoints_project_id_required",
+		"run_backend_index_plan_node_pair",
 	)
+	assertPostgresForeignKeyConstraint(t, pg, "run_backend_index_plan_node_fk")
 
 	ctx := t.Context()
 	planRepo := NewAgentOSPlanRepo(pg)
@@ -328,6 +330,17 @@ func TestAgentOSPlanPostgresDurablePersistence(t *testing.T) {
 	if err := routeIndex.BindPlanNode(ctx, spec.PlanID, "node-2", reusedNodeKey, runStatus); !errors.Is(err, agentos.ErrInvalidRunPlan) {
 		t.Fatalf("BindPlanNode reused node key error = %v, want ErrInvalidRunPlan", err)
 	}
+	if err := routeIndex.BindPlanNode(ctx, "missing-plan-"+suffix, spec.Nodes[0].NodeID, runSpec, runStatus); !errors.Is(err, agentos.ErrPlanRouteNotFound) {
+		t.Fatalf("BindPlanNode missing plan error = %v, want ErrPlanRouteNotFound", err)
+	}
+	if err := routeIndex.BindPlanNode(ctx, spec.PlanID, "missing-node", runSpec, runStatus); !errors.Is(err, agentos.ErrInvalidRunPlan) {
+		t.Fatalf("BindPlanNode missing durable node error = %v, want ErrInvalidRunPlan", err)
+	}
+	wrongTenantRun := runSpec
+	wrongTenantRun.AccountID = "account-other-" + suffix
+	if err := routeIndex.BindPlanNode(ctx, spec.PlanID, spec.Nodes[0].NodeID, wrongTenantRun, runStatus); !errors.Is(err, agentos.ErrPlanRouteNotFound) {
+		t.Fatalf("BindPlanNode tenant mismatch error = %v, want ErrPlanRouteNotFound", err)
+	}
 	standaloneRun := agentos.RunSpec{
 		RunID:          "standalone-" + suffix,
 		AccountID:      spec.AccountID,
@@ -356,6 +369,7 @@ func TestAgentOSPlanPostgresDurablePersistence(t *testing.T) {
 		IdempotencyKey: standaloneRun.IdempotencyKey,
 		LifecycleState: standaloneStatus.LifecycleState,
 	})
+	assertPostgresStandaloneRunBackendIndexUsesNullPlanNode(t, pg, standaloneRun.RunID)
 	standaloneChangedBackend := standaloneRun
 	standaloneChangedBackend.Backend = agentos.BackendRef{Kind: agentos.BackendKindHTTP, Name: "other-backend"}
 	if err := routeIndex.Bind(ctx, standaloneChangedBackend, standaloneStatus); !errors.Is(err, agentos.ErrInvalidBackendRef) {
@@ -1049,7 +1063,7 @@ func assertPostgresRunBackendIndexRecord(t *testing.T, pg *postgres.Postgres, ru
 
 	var got postgresRunBackendIndexExpectation
 	err := pg.Pool.QueryRow(t.Context(), `
-SELECT plan_id, node_id, thread_id, account_id, project_id, backend_kind, backend_name, idempotency_key, lifecycle_state
+SELECT COALESCE(plan_id, ''), COALESCE(node_id, ''), thread_id, account_id, project_id, backend_kind, backend_name, idempotency_key, lifecycle_state
 FROM run_backend_index
 WHERE run_id = $1`, runID).Scan(
 		&got.PlanID,
@@ -1067,6 +1081,23 @@ WHERE run_id = $1`, runID).Scan(
 	}
 	if got != want {
 		t.Fatalf("run backend index row = %#v, want %#v", got, want)
+	}
+}
+
+func assertPostgresStandaloneRunBackendIndexUsesNullPlanNode(t *testing.T, pg *postgres.Postgres, runID string) {
+	t.Helper()
+
+	var planIDIsNull bool
+	var nodeIDIsNull bool
+	err := pg.Pool.QueryRow(t.Context(), `
+SELECT plan_id IS NULL, node_id IS NULL
+FROM run_backend_index
+WHERE run_id = $1`, runID).Scan(&planIDIsNull, &nodeIDIsNull)
+	if err != nil {
+		t.Fatalf("read standalone run backend null plan node: %v", err)
+	}
+	if !planIDIsNull || !nodeIDIsNull {
+		t.Fatalf("standalone run backend plan/node null = %v/%v, want true/true", planIDIsNull, nodeIDIsNull)
 	}
 }
 
@@ -1119,6 +1150,7 @@ func applyAgentOSPlanMigrations(t *testing.T, pg *postgres.Postgres) {
 		"20260620000001_scope_agentos_idempotency_keys.up.sql",
 		"20260620000002_scope_plan_event_idempotency_keys.up.sql",
 		"20260620000003_require_agentos_control_plane_scope.up.sql",
+		"20260620000004_constrain_run_backend_plan_nodes.up.sql",
 	} {
 		path := filepath.Join("..", "..", "..", "migrations", migration)
 		data, err := os.ReadFile(path)
@@ -1147,6 +1179,24 @@ SELECT EXISTS (
 		if !exists {
 			t.Fatalf("missing check constraint %s", name)
 		}
+	}
+}
+
+func assertPostgresForeignKeyConstraint(t *testing.T, pg *postgres.Postgres, name string) {
+	t.Helper()
+
+	var exists bool
+	if err := pg.Pool.QueryRow(t.Context(), `
+SELECT EXISTS (
+    SELECT 1
+    FROM pg_constraint
+    WHERE conname = $1
+      AND contype = 'f'
+)`, name).Scan(&exists); err != nil {
+		t.Fatalf("query foreign key constraint %s: %v", name, err)
+	}
+	if !exists {
+		t.Fatalf("missing foreign key constraint %s", name)
 	}
 }
 
