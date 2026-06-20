@@ -154,6 +154,7 @@ type agentOSPlanConsoleView struct {
 	Audits              []agentOSPlanConsoleAuditView
 	ControlEndpoint     string
 	SignalEndpoint      string
+	AuthorEndpoint      string
 	DescriptionEndpoint string
 	StatusEndpoint      string
 	EventsEndpoint      string
@@ -282,6 +283,7 @@ func newAgentOSPlanConsoleView(ref agentos.PlanRef, description agentos.RunPlanD
 		Audits:              newAgentOSPlanConsoleAuditViews(audits),
 		ControlEndpoint:     "control",
 		SignalEndpoint:      "signals",
+		AuthorEndpoint:      "/v1/agentos/plans/author",
 		DescriptionEndpoint: "description?" + scopeQuery,
 		StatusEndpoint:      "status?" + scopeQuery,
 		EventsEndpoint:      "events/history?" + scopeQuery,
@@ -869,6 +871,7 @@ pre {
       <h1>{{ .PlanID }}</h1>
     </div>
     <div class="toolbar" aria-label="Plan controls">
+      <a class="mono" href="{{ .AuthorEndpoint }}">author</a>
       <label class="field">Actor ID
         <input id="actor-id" name="actor_id" autocomplete="off" required>
       </label>

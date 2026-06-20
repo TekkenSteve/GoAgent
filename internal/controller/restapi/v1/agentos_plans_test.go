@@ -254,6 +254,71 @@ func TestAgentOSPlanSchemaRouteDoesNotRequirePlanRuntime(t *testing.T) {
 	}
 }
 
+func TestAgentOSPlanAuthorRouteDoesNotRequirePlanRuntime(t *testing.T) {
+	app := fiber.New()
+	NewRoutes(app.Group("/v1"), nil, nil, logger.New("error"), nil, nil, nil, nil, nil, nil, nil)
+
+	resp := doAgentOSRouteRequest(t, app, http.MethodGet, "/v1/agentos/plans/author", "")
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("author status = %d", resp.StatusCode)
+	}
+	if contentType := resp.Header.Get("Content-Type"); !strings.Contains(contentType, "text/html") {
+		t.Fatalf("content type = %q", contentType)
+	}
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatalf("read author: %v", err)
+	}
+	html := string(body)
+	for _, want := range []string{
+		"AgentOS Plan Author",
+		"RunPlanSpec",
+		`data-schema-endpoint="/v1/agentos/plans/schemas/run-plan"`,
+		`data-start-enabled="false"`,
+		`data-default-backend-name="goagent-native"`,
+		`data-default-capability="run"`,
+		`<option value="native">native</option>`,
+		`<option value="temporal_external">temporal_external</option>`,
+		`<option value="http">http</option>`,
+		`<option value="grpc">grpc</option>`,
+		`<option value="success">success</option>`,
+		`<option value="error">error</option>`,
+		`<option value="complete">complete</option>`,
+		`<option value="always">always</option>`,
+	} {
+		if !strings.Contains(html, want) {
+			t.Fatalf("author body missing %q:\n%s", want, html)
+		}
+	}
+}
+
+func TestAgentOSPlanAuthorRouteEnablesStartWithPlanRuntime(t *testing.T) {
+	app := fiber.New()
+	NewRoutes(app.Group("/v1"), nil, nil, logger.New("error"), nil, nil, nil, nil, nil, nil, newFakePlanRuntime())
+
+	resp := doAgentOSRouteRequest(t, app, http.MethodGet, "/v1/agentos/plans/author", "")
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("author status = %d", resp.StatusCode)
+	}
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatalf("read author: %v", err)
+	}
+	html := string(body)
+	for _, want := range []string{
+		`data-start-enabled="true"`,
+		`data-start-endpoint="/v1/agentos/plans"`,
+		`id="start-plan" class="button primary"`,
+	} {
+		if !strings.Contains(html, want) {
+			t.Fatalf("author body missing %q:\n%s", want, html)
+		}
+	}
+}
+
 func TestAgentOSPlanRoutesDoNotMutateRunningTopology(t *testing.T) {
 	app := fiber.New()
 	NewRoutes(app.Group("/v1"), nil, nil, logger.New("error"), nil, nil, nil, nil, nil, nil, newFakePlanRuntime())
@@ -455,6 +520,7 @@ func TestAgentOSPlanConsoleRendersRuntimeData(t *testing.T) {
 		`data-signal="plan.approve"`,
 		`data-signal="plan.reject"`,
 		`data-signal="plan.node.retry"`,
+		`href="/v1/agentos/plans/author"`,
 	} {
 		if !strings.Contains(html, want) {
 			t.Fatalf("console body missing %q:\n%s", want, html)
