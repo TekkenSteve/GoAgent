@@ -56,6 +56,7 @@ func TestAgentOSPlanPostgresDurablePersistence(t *testing.T) {
 	assertPostgresForeignKeyConstraint(t, pg, "audit_logs_plan_fk")
 	assertPostgresForeignKeyConstraint(t, pg, "audit_logs_plan_node_fk")
 	assertPostgresForeignKeyConstraint(t, pg, "audit_logs_plan_node_run_fk")
+	assertPostgresTrigger(t, pg, "plan_commands_status_lifecycle")
 
 	ctx := t.Context()
 	planRepo := NewAgentOSPlanRepo(pg)
@@ -105,6 +106,28 @@ func TestAgentOSPlanPostgresDurablePersistence(t *testing.T) {
 		IdempotencyKey: spec.IdempotencyKey,
 	}); err != nil {
 		t.Fatalf("SavePlanState node source: %v", err)
+	}
+	if _, err := pg.Pool.Exec(ctx, `
+INSERT INTO plan_commands (
+    command_id,
+    plan_id,
+    account_id,
+    project_id,
+    actor_id,
+    action,
+    idempotency_key,
+    payload_json,
+    status
+) VALUES ($1,$2,$3,$4,$5,$6,$7,'{}'::jsonb,'delivered')`,
+		"invalid-initial-status-"+suffix,
+		spec.PlanID,
+		spec.AccountID,
+		spec.ProjectID,
+		"operator-1",
+		string(agentosplan.AuditActionPlanControl),
+		"invalid-initial-status-"+suffix,
+	); err == nil {
+		t.Fatal("direct plan command insert with delivered status succeeded")
 	}
 	contradictoryStatus := nodeStatus
 	contradictoryStatus.Nodes = append([]agentos.PlanNodeStatus(nil), nodeStatus.Nodes...)
@@ -241,6 +264,9 @@ func TestAgentOSPlanPostgresDurablePersistence(t *testing.T) {
 	}
 	if _, err := planRepo.MarkPlanCommandFailed(ctx, agentosplan.PlanCommandRefFromRecord(command), "late failure"); !errors.Is(err, agentos.ErrInvalidRunPlan) {
 		t.Fatalf("MarkPlanCommandFailed delivered command error = %v, want ErrInvalidRunPlan", err)
+	}
+	if _, err := pg.Pool.Exec(ctx, `UPDATE plan_commands SET status = 'failed' WHERE command_id = $1`, command.CommandID); err == nil {
+		t.Fatal("direct plan command delivered->failed update succeeded")
 	}
 	failedCommand, created, err := planRepo.RecordPlanCommand(ctx, agentosplan.PlanCommandRecord{
 		PlanID:         spec.PlanID,
@@ -1239,6 +1265,7 @@ func applyAgentOSPlanMigrations(t *testing.T, pg *postgres.Postgres) {
 		"20260620000004_constrain_run_backend_plan_nodes.up.sql",
 		"20260620000005_constrain_artifact_plan_scope.up.sql",
 		"20260620000006_constrain_audit_log_plan_scope.up.sql",
+		"20260620000007_enforce_plan_command_lifecycle.up.sql",
 	} {
 		path := filepath.Join("..", "..", "..", "migrations", migration)
 		data, err := os.ReadFile(path)
@@ -1285,6 +1312,23 @@ SELECT EXISTS (
 	}
 	if !exists {
 		t.Fatalf("missing foreign key constraint %s", name)
+	}
+}
+
+func assertPostgresTrigger(t *testing.T, pg *postgres.Postgres, name string) {
+	t.Helper()
+
+	var count int
+	err := pg.Pool.QueryRow(t.Context(), `
+SELECT COUNT(*)
+FROM pg_trigger
+WHERE tgname = $1
+  AND NOT tgisinternal`, name).Scan(&count)
+	if err != nil {
+		t.Fatalf("query trigger %s: %v", name, err)
+	}
+	if count == 0 {
+		t.Fatalf("trigger %s is missing", name)
 	}
 }
 
