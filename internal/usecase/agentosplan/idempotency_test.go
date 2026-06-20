@@ -3,6 +3,7 @@ package agentosplan
 import (
 	"errors"
 	"testing"
+	"time"
 
 	"github.com/TekkenSteve/GoAgent/agentos"
 )
@@ -176,6 +177,34 @@ func TestValidatePlanEventIdempotencyRejectsDifferentPayload(t *testing.T) {
 			Payload:   map[string]any{"state": "failed"},
 		},
 		PlanID: "plan-1",
+	}
+
+	err := ValidatePlanEventIdempotency(existing, requested)
+	if !errors.Is(err, agentos.ErrInvalidPlanEvent) {
+		t.Fatalf("error = %v, want ErrInvalidPlanEvent", err)
+	}
+}
+
+func TestValidatePlanEventIdempotencyRejectsDifferentTimestamp(t *testing.T) {
+	existing := agentos.PlanEvent{
+		Event: agentos.Event{
+			EventID:   "plan-1:1",
+			EventType: agentos.EventPlanStarted,
+			Sequence:  1,
+			Timestamp: time.Date(2026, 6, 20, 12, 0, 0, 0, time.UTC),
+		},
+		PlanID:    "plan-1",
+		AccountID: "acct-1",
+		ProjectID: "proj-1",
+	}
+	requested := agentos.PlanEvent{
+		Event: agentos.Event{
+			EventType: agentos.EventPlanStarted,
+			Timestamp: time.Date(2026, 6, 20, 12, 1, 0, 0, time.UTC),
+		},
+		PlanID:    "plan-1",
+		AccountID: "acct-1",
+		ProjectID: "proj-1",
 	}
 
 	err := ValidatePlanEventIdempotency(existing, requested)

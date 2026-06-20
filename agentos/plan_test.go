@@ -255,6 +255,40 @@ func TestPlanEventCodecRequiresStoredEventIdentity(t *testing.T) {
 	}
 }
 
+func TestPlanEventToEventCarriesPlanScopeInPayload(t *testing.T) {
+	event := PlanEvent{
+		Event: Event{
+			EventID:   "evt-1",
+			EventType: EventPlanNodeStarted,
+			RunID:     "run-1",
+			Sequence:  3,
+			Timestamp: time.Date(2026, 6, 20, 12, 0, 0, 0, time.UTC),
+			Payload:   map[string]any{"status": "running"},
+		},
+		PlanID:    "plan-1",
+		AccountID: "acct-1",
+		ProjectID: "proj-1",
+		NodeID:    "node-1",
+	}
+
+	generic := event.ToEvent()
+	if generic.EventID != event.EventID || generic.EventType != event.EventType || generic.Sequence != event.Sequence {
+		t.Fatalf("generic event identity = %#v, want plan event identity %#v", generic, event.Event)
+	}
+	wantPayload := map[string]any{
+		"status":     "running",
+		"plan_id":    "plan-1",
+		"account_id": "acct-1",
+		"project_id": "proj-1",
+		"node_id":    "node-1",
+	}
+	for key, want := range wantPayload {
+		if got := generic.Payload[key]; got != want {
+			t.Fatalf("payload[%q] = %#v, want %#v in %#v", key, got, want, generic.Payload)
+		}
+	}
+}
+
 func TestSignalJSONUsesPublicWireFieldNames(t *testing.T) {
 	sentAt := time.Date(2026, 6, 20, 12, 30, 0, 0, time.UTC)
 	data, err := json.Marshal(Signal{

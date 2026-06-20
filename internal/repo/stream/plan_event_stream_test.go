@@ -50,6 +50,32 @@ func TestRedisPlanEventStreamPublishIsIdempotent(t *testing.T) {
 	}
 }
 
+func TestRedisPlanEventStreamPublishRequiresTenantScope(t *testing.T) {
+	stream := newRedisPlanEventStream(newFakePlanEventRedis(), nil)
+	valid := testPlanEvent("evt-1", 7)
+	cases := map[string]agentos.PlanEvent{
+		"account id": func() agentos.PlanEvent {
+			event := valid
+			event.AccountID = ""
+			return event
+		}(),
+		"project id": func() agentos.PlanEvent {
+			event := valid
+			event.ProjectID = ""
+			return event
+		}(),
+	}
+
+	for name, event := range cases {
+		t.Run(name, func(t *testing.T) {
+			err := stream.PublishPlanEvent(context.Background(), event)
+			if !errors.Is(err, agentos.ErrInvalidPlanEvent) {
+				t.Fatalf("PublishPlanEvent error = %v, want ErrInvalidPlanEvent", err)
+			}
+		})
+	}
+}
+
 func TestRedisPlanEventStreamPublishComparesCanonicalPlanEvent(t *testing.T) {
 	fake := newFakePlanEventRedis()
 	stream := newRedisPlanEventStream(fake, nil)
