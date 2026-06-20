@@ -105,8 +105,8 @@ func TestValidatorAcceptsArtifactSchemaRefWithCatalog(t *testing.T) {
 	ref := agentos.BackendRef{Kind: agentos.BackendKindNative, Name: agentos.BackendNameGoAgentNative}
 	spec := samplePlan(ref)
 	spec.Nodes[0].Outputs[0].SchemaRef = "schema:summary"
-	schemas, err := NewStaticArtifactSchemaCatalog(map[string]json.RawMessage{
-		"schema:summary": json.RawMessage(`{"type":"object"}`),
+	schemas, err := NewStaticArtifactSchemaCatalog([]agentos.ArtifactSchema{
+		{Ref: "schema:summary", Schema: json.RawMessage(`{"type":"object"}`)},
 	})
 	if err != nil {
 		t.Fatalf("NewStaticArtifactSchemaCatalog: %v", err)

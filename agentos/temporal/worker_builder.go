@@ -110,12 +110,20 @@ func newWorkerKit(ctx context.Context, cfg WorkerConfig) (*WorkerKit, error) {
 	}
 	artifactStore := temporalrepo.NewAgentOSArtifactRepo(pg, blobStore)
 	capabilityCatalog := temporalrepo.NewAgentOSCapabilityCatalogRepo(pg)
+	artifactSchemaCatalog := temporalrepo.NewAgentOSArtifactSchemaCatalogRepo(pg)
 	if err := agentosplan.RegisterCapabilities(ctx, capabilityCatalog, CapabilitiesWithDefaults(cfg.Capabilities)); err != nil {
 		temporalClient.Close()
 		_ = rdb.Close()
 		pg.Close()
 
 		return nil, fmt.Errorf("agentos temporal worker - register capabilities: %w", err)
+	}
+	if err := agentosplan.RegisterArtifactSchemas(ctx, artifactSchemaCatalog, cfg.ArtifactSchemas); err != nil {
+		temporalClient.Close()
+		_ = rdb.Close()
+		pg.Close()
+
+		return nil, fmt.Errorf("agentos temporal worker - register artifact schemas: %w", err)
 	}
 	planEventStream := repostream.NewRedisPlanEventStream(rdb)
 	planRuntime, err := NewRuntimeWithClient(ctx, RuntimeConfig{
@@ -134,7 +142,7 @@ func newWorkerKit(ctx context.Context, cfg WorkerConfig) (*WorkerKit, error) {
 
 		return nil, fmt.Errorf("agentos temporal worker - plan runtime: %w", err)
 	}
-	planActivities, err := NewPlanActivitiesWithCatalog(planRuntime, capabilityCatalog, planStore, planStore, planEventStream, artifactStore)
+	planActivities, err := NewPlanActivitiesWithCatalogAndSchemas(planRuntime, capabilityCatalog, artifactSchemaCatalog, planStore, planStore, planEventStream, artifactStore)
 	if err != nil {
 		temporalClient.Close()
 		_ = rdb.Close()

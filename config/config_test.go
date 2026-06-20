@@ -196,3 +196,26 @@ func TestAgentOSCapabilities(t *testing.T) {
 		t.Fatalf("unexpected capability config: %#v", got)
 	}
 }
+
+func TestAgentOSArtifactSchemas(t *testing.T) {
+	schemas, err := AgentOS{
+		ArtifactSchemasJSON: `[
+			{
+				"ref":"schema:summary",
+				"description":"Summary artifact",
+				"schema":{"type":"object","required":["summary"]}
+			}
+		]`,
+	}.ArtifactSchemas()
+	if err != nil {
+		t.Fatalf("ArtifactSchemas: %v", err)
+	}
+	if len(schemas) != 1 {
+		t.Fatalf("schema count = %d", len(schemas))
+	}
+
+	got := schemas[0]
+	if got.Ref != "schema:summary" || got.Description != "Summary artifact" || len(got.Schema) == 0 {
+		t.Fatalf("unexpected schema config: %#v", got)
+	}
+}

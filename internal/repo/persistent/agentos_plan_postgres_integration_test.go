@@ -40,6 +40,7 @@ func TestAgentOSPlanPostgresDurablePersistence(t *testing.T) {
 	}
 	artifactStore := NewAgentOSArtifactRepo(pg, blobStore)
 	capabilityCatalog := NewAgentOSCapabilityCatalogRepo(pg)
+	artifactSchemaCatalog := NewAgentOSArtifactSchemaCatalogRepo(pg)
 
 	suffix := time.Now().UTC().Format("20060102150405.000000000")
 	spec := postgresIntegrationPlanSpec("plan-"+suffix, "plan-start-"+suffix)
@@ -379,6 +380,46 @@ func TestAgentOSPlanPostgresDurablePersistence(t *testing.T) {
 	}
 	if _, _, err := capabilityCatalog.RegisterCapability(ctx, changedCapability, changedKey); !errors.Is(err, agentos.ErrInvalidRunPlan) {
 		t.Fatalf("RegisterCapability changed error = %v, want ErrInvalidRunPlan", err)
+	}
+
+	artifactSchema := agentos.ArtifactSchema{
+		Ref:         "schema:summary:" + suffix,
+		Description: "Summary artifact",
+		Schema:      json.RawMessage(`{"type":"object","required":["summary"]}`),
+	}
+	artifactSchemaKey, err := agentosplan.ArtifactSchemaRegistrationIdempotencyKey(artifactSchema)
+	if err != nil {
+		t.Fatalf("ArtifactSchemaRegistrationIdempotencyKey: %v", err)
+	}
+	registeredSchema, created, err := artifactSchemaCatalog.RegisterArtifactSchema(ctx, artifactSchema, artifactSchemaKey)
+	if err != nil {
+		t.Fatalf("RegisterArtifactSchema first: %v", err)
+	}
+	if !created || registeredSchema.Ref != artifactSchema.Ref {
+		t.Fatalf("RegisterArtifactSchema first = %#v created=%v", registeredSchema, created)
+	}
+	replayedSchema, created, err := artifactSchemaCatalog.RegisterArtifactSchema(ctx, artifactSchema, artifactSchemaKey)
+	if err != nil {
+		t.Fatalf("RegisterArtifactSchema replay: %v", err)
+	}
+	if created || replayedSchema.Ref != artifactSchema.Ref {
+		t.Fatalf("RegisterArtifactSchema replay = %#v created=%v", replayedSchema, created)
+	}
+	loadedSchema, ok, err := artifactSchemaCatalog.GetArtifactSchema(ctx, artifactSchema.Ref)
+	if err != nil {
+		t.Fatalf("GetArtifactSchema: %v", err)
+	}
+	if !ok || len(loadedSchema) == 0 {
+		t.Fatalf("GetArtifactSchema = %s ok=%v", string(loadedSchema), ok)
+	}
+	changedSchema := artifactSchema
+	changedSchema.Schema = json.RawMessage(`{"type":"object","required":["title"]}`)
+	changedSchemaKey, err := agentosplan.ArtifactSchemaRegistrationIdempotencyKey(changedSchema)
+	if err != nil {
+		t.Fatalf("ArtifactSchemaRegistrationIdempotencyKey changed: %v", err)
+	}
+	if _, _, err := artifactSchemaCatalog.RegisterArtifactSchema(ctx, changedSchema, changedSchemaKey); !errors.Is(err, agentos.ErrInvalidArtifact) {
+		t.Fatalf("RegisterArtifactSchema changed error = %v, want ErrInvalidArtifact", err)
 	}
 }
 
@@ -869,6 +910,7 @@ func applyAgentOSPlanMigrations(t *testing.T, pg *postgres.Postgres) {
 		"20260619000005_scope_plan_control_plane_records.up.sql",
 		"20260619000006_create_plan_metric_checkpoints.up.sql",
 		"20260619000007_create_plan_metric_samples.up.sql",
+		"20260619000008_create_agentos_artifact_schemas.up.sql",
 	} {
 		path := filepath.Join("..", "..", "..", "migrations", migration)
 		data, err := os.ReadFile(path)

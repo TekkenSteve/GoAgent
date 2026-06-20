@@ -21,6 +21,10 @@ type capabilityCatalogFile struct {
 	Capabilities []agentos.Capability `json:"capabilities"`
 }
 
+type artifactSchemaCatalogFile struct {
+	ArtifactSchemas []agentos.ArtifactSchema `json:"artifact_schemas"`
+}
+
 type compiledPlanOutput struct {
 	Spec  agentos.RunPlanSpec `json:"spec"`
 	Order []string            `json:"order"`
@@ -247,22 +251,26 @@ func runImportServerless(args []string, stdout io.Writer, stderr io.Writer) int 
 }
 
 type compileOptions struct {
-	filePath           string
-	format             string
-	capabilitiesPath   string
-	capabilitiesFormat string
-	outPath            string
+	filePath              string
+	format                string
+	capabilitiesPath      string
+	capabilitiesFormat    string
+	artifactSchemasPath   string
+	artifactSchemasFormat string
+	outPath               string
 }
 
 type deltaOptions struct {
-	basePath           string
-	baseFormat         string
-	filePath           string
-	format             string
-	capabilitiesPath   string
-	capabilitiesFormat string
-	expansionCount     int
-	outPath            string
+	basePath              string
+	baseFormat            string
+	filePath              string
+	format                string
+	capabilitiesPath      string
+	capabilitiesFormat    string
+	artifactSchemasPath   string
+	artifactSchemasFormat string
+	expansionCount        int
+	outPath               string
 }
 
 type serverlessExportOptions struct {
@@ -271,12 +279,14 @@ type serverlessExportOptions struct {
 }
 
 type serverlessImportOptions struct {
-	filePath           string
-	format             string
-	capabilitiesPath   string
-	capabilitiesFormat string
-	outputFormat       string
-	outPath            string
+	filePath              string
+	format                string
+	capabilitiesPath      string
+	capabilitiesFormat    string
+	artifactSchemasPath   string
+	artifactSchemasFormat string
+	outputFormat          string
+	outPath               string
 }
 
 func compilePlanCommand(args []string, stderr io.Writer) (agentosplan.ExecutablePlan, error) {
@@ -306,6 +316,8 @@ func newCompileFlagSet(name string, stderr io.Writer) *flag.FlagSet {
 	fs.String("format", "", "RunPlan format: json or yaml")
 	fs.String("capabilities", "", "capability catalog JSON/YAML file")
 	fs.String("capabilities-format", "", "capability catalog format: json or yaml")
+	fs.String("artifact-schemas", "", "artifact schema catalog JSON/YAML file")
+	fs.String("artifact-schemas-format", "", "artifact schema catalog format: json or yaml")
 	fs.String("out", "", "write compiled JSON to path instead of stdout")
 
 	return fs
@@ -320,6 +332,8 @@ func newDeltaFlagSet(name string, stderr io.Writer) *flag.FlagSet {
 	fs.String("format", "", "PlanDelta format: json or yaml")
 	fs.String("capabilities", "", "capability catalog JSON/YAML file")
 	fs.String("capabilities-format", "", "capability catalog format: json or yaml")
+	fs.String("artifact-schemas", "", "artifact schema catalog JSON/YAML file")
+	fs.String("artifact-schemas-format", "", "artifact schema catalog format: json or yaml")
 	fs.Int("expansion-count", 0, "already-applied expansion count")
 	fs.String("out", "", "write compiled JSON to path instead of stdout")
 
@@ -340,6 +354,8 @@ func newServerlessImportFlagSet(name string, stderr io.Writer) *flag.FlagSet {
 	fs.String("format", "", "Serverless Workflow format: json or yaml")
 	fs.String("capabilities", "", "capability catalog JSON/YAML file")
 	fs.String("capabilities-format", "", "capability catalog format: json or yaml")
+	fs.String("artifact-schemas", "", "artifact schema catalog JSON/YAML file")
+	fs.String("artifact-schemas-format", "", "artifact schema catalog format: json or yaml")
 	fs.String("out-format", "", "RunPlan output format: json or yaml")
 	fs.String("out", "", "write imported RunPlan to path instead of stdout")
 
@@ -351,11 +367,13 @@ func parseCompileFlags(fs *flag.FlagSet, args []string) (compileOptions, error) 
 		return compileOptions{}, err
 	}
 	opts := compileOptions{
-		filePath:           fs.Lookup("file").Value.String(),
-		format:             fs.Lookup("format").Value.String(),
-		capabilitiesPath:   fs.Lookup("capabilities").Value.String(),
-		capabilitiesFormat: fs.Lookup("capabilities-format").Value.String(),
-		outPath:            fs.Lookup("out").Value.String(),
+		filePath:              fs.Lookup("file").Value.String(),
+		format:                fs.Lookup("format").Value.String(),
+		capabilitiesPath:      fs.Lookup("capabilities").Value.String(),
+		capabilitiesFormat:    fs.Lookup("capabilities-format").Value.String(),
+		artifactSchemasPath:   fs.Lookup("artifact-schemas").Value.String(),
+		artifactSchemasFormat: fs.Lookup("artifact-schemas-format").Value.String(),
+		outPath:               fs.Lookup("out").Value.String(),
 	}
 	if opts.filePath == "" {
 		return compileOptions{}, errors.New("file is required")
@@ -370,6 +388,13 @@ func parseCompileFlags(fs *flag.FlagSet, args []string) (compileOptions, error) 
 	} else if opts.capabilitiesFormat != "" {
 		return compileOptions{}, errors.New("capabilities-format requires capabilities")
 	}
+	if opts.artifactSchemasPath != "" {
+		if err := validateWireFormat(opts.artifactSchemasFormat); err != nil {
+			return compileOptions{}, fmt.Errorf("artifact-schemas format: %w", err)
+		}
+	} else if opts.artifactSchemasFormat != "" {
+		return compileOptions{}, errors.New("artifact-schemas-format requires artifact-schemas")
+	}
 
 	return opts, nil
 }
@@ -383,14 +408,16 @@ func parseDeltaFlags(fs *flag.FlagSet, args []string) (deltaOptions, error) {
 		return deltaOptions{}, fmt.Errorf("expansion-count: %w", err)
 	}
 	opts := deltaOptions{
-		basePath:           fs.Lookup("base").Value.String(),
-		baseFormat:         fs.Lookup("base-format").Value.String(),
-		filePath:           fs.Lookup("file").Value.String(),
-		format:             fs.Lookup("format").Value.String(),
-		capabilitiesPath:   fs.Lookup("capabilities").Value.String(),
-		capabilitiesFormat: fs.Lookup("capabilities-format").Value.String(),
-		expansionCount:     expansionCount,
-		outPath:            fs.Lookup("out").Value.String(),
+		basePath:              fs.Lookup("base").Value.String(),
+		baseFormat:            fs.Lookup("base-format").Value.String(),
+		filePath:              fs.Lookup("file").Value.String(),
+		format:                fs.Lookup("format").Value.String(),
+		capabilitiesPath:      fs.Lookup("capabilities").Value.String(),
+		capabilitiesFormat:    fs.Lookup("capabilities-format").Value.String(),
+		artifactSchemasPath:   fs.Lookup("artifact-schemas").Value.String(),
+		artifactSchemasFormat: fs.Lookup("artifact-schemas-format").Value.String(),
+		expansionCount:        expansionCount,
+		outPath:               fs.Lookup("out").Value.String(),
 	}
 	if opts.basePath == "" {
 		return deltaOptions{}, errors.New("base is required")
@@ -410,6 +437,13 @@ func parseDeltaFlags(fs *flag.FlagSet, args []string) (deltaOptions, error) {
 		}
 	} else if opts.capabilitiesFormat != "" {
 		return deltaOptions{}, errors.New("capabilities-format requires capabilities")
+	}
+	if opts.artifactSchemasPath != "" {
+		if err := validateWireFormat(opts.artifactSchemasFormat); err != nil {
+			return deltaOptions{}, fmt.Errorf("artifact-schemas format: %w", err)
+		}
+	} else if opts.artifactSchemasFormat != "" {
+		return deltaOptions{}, errors.New("artifact-schemas-format requires artifact-schemas")
 	}
 	if opts.expansionCount < 0 {
 		return deltaOptions{}, errors.New("expansion-count cannot be negative")
@@ -439,12 +473,14 @@ func parseServerlessImportFlags(fs *flag.FlagSet, args []string) (serverlessImpo
 		return serverlessImportOptions{}, err
 	}
 	opts := serverlessImportOptions{
-		filePath:           fs.Lookup("file").Value.String(),
-		format:             fs.Lookup("format").Value.String(),
-		capabilitiesPath:   fs.Lookup("capabilities").Value.String(),
-		capabilitiesFormat: fs.Lookup("capabilities-format").Value.String(),
-		outputFormat:       fs.Lookup("out-format").Value.String(),
-		outPath:            fs.Lookup("out").Value.String(),
+		filePath:              fs.Lookup("file").Value.String(),
+		format:                fs.Lookup("format").Value.String(),
+		capabilitiesPath:      fs.Lookup("capabilities").Value.String(),
+		capabilitiesFormat:    fs.Lookup("capabilities-format").Value.String(),
+		artifactSchemasPath:   fs.Lookup("artifact-schemas").Value.String(),
+		artifactSchemasFormat: fs.Lookup("artifact-schemas-format").Value.String(),
+		outputFormat:          fs.Lookup("out-format").Value.String(),
+		outPath:               fs.Lookup("out").Value.String(),
 	}
 	if opts.filePath == "" {
 		return serverlessImportOptions{}, errors.New("file is required")
@@ -462,6 +498,13 @@ func parseServerlessImportFlags(fs *flag.FlagSet, args []string) (serverlessImpo
 	} else if opts.capabilitiesFormat != "" {
 		return serverlessImportOptions{}, errors.New("capabilities-format requires capabilities")
 	}
+	if opts.artifactSchemasPath != "" {
+		if err := validateWireFormat(opts.artifactSchemasFormat); err != nil {
+			return serverlessImportOptions{}, fmt.Errorf("artifact-schemas format: %w", err)
+		}
+	} else if opts.artifactSchemasFormat != "" {
+		return serverlessImportOptions{}, errors.New("artifact-schemas-format requires artifact-schemas")
+	}
 
 	return opts, nil
 }
@@ -477,7 +520,7 @@ func compilePlanWithValidator(opts compileOptions) (agentosplan.ExecutablePlan, 
 	if err != nil {
 		return agentosplan.ExecutablePlan{}, agentosplan.Validator{}, err
 	}
-	validator, err := newRunPlanValidator(opts.capabilitiesPath, opts.capabilitiesFormat)
+	validator, err := newRunPlanValidator(opts.capabilitiesPath, opts.capabilitiesFormat, opts.artifactSchemasPath, opts.artifactSchemasFormat)
 	if err != nil {
 		return agentosplan.ExecutablePlan{}, agentosplan.Validator{}, err
 	}
@@ -503,10 +546,12 @@ func compilePlanWithValidator(opts compileOptions) (agentosplan.ExecutablePlan, 
 
 func compilePlanDelta(opts deltaOptions) (agentosplan.ExecutablePlan, error) {
 	basePlan, err := compilePlan(compileOptions{
-		filePath:           opts.basePath,
-		format:             opts.baseFormat,
-		capabilitiesPath:   opts.capabilitiesPath,
-		capabilitiesFormat: opts.capabilitiesFormat,
+		filePath:              opts.basePath,
+		format:                opts.baseFormat,
+		capabilitiesPath:      opts.capabilitiesPath,
+		capabilitiesFormat:    opts.capabilitiesFormat,
+		artifactSchemasPath:   opts.artifactSchemasPath,
+		artifactSchemasFormat: opts.artifactSchemasFormat,
 	})
 	if err != nil {
 		return agentosplan.ExecutablePlan{}, fmt.Errorf("base plan: %w", err)
@@ -515,7 +560,7 @@ func compilePlanDelta(opts deltaOptions) (agentosplan.ExecutablePlan, error) {
 	if err != nil {
 		return agentosplan.ExecutablePlan{}, err
 	}
-	validator, err := newRunPlanValidator(opts.capabilitiesPath, opts.capabilitiesFormat)
+	validator, err := newRunPlanValidator(opts.capabilitiesPath, opts.capabilitiesFormat, opts.artifactSchemasPath, opts.artifactSchemasFormat)
 	if err != nil {
 		return agentosplan.ExecutablePlan{}, err
 	}
@@ -557,7 +602,7 @@ func importServerless(opts serverlessImportOptions) (agentosplan.ExecutablePlan,
 	if err != nil {
 		return agentosplan.ExecutablePlan{}, err
 	}
-	validator, err := newRunPlanValidator(opts.capabilitiesPath, opts.capabilitiesFormat)
+	validator, err := newRunPlanValidator(opts.capabilitiesPath, opts.capabilitiesFormat, opts.artifactSchemasPath, opts.artifactSchemasFormat)
 	if err != nil {
 		return agentosplan.ExecutablePlan{}, err
 	}
@@ -570,7 +615,7 @@ func importServerless(opts serverlessImportOptions) (agentosplan.ExecutablePlan,
 	return validator.Validate(context.Background(), spec)
 }
 
-func newRunPlanValidator(capabilitiesPath string, capabilitiesFormat string) (agentosplan.Validator, error) {
+func newRunPlanValidator(capabilitiesPath string, capabilitiesFormat string, artifactSchemasPath string, artifactSchemasFormat string) (agentosplan.Validator, error) {
 	compiler, err := agentosplan.NewCELCompiler()
 	if err != nil {
 		return agentosplan.Validator{}, err
@@ -579,10 +624,15 @@ func newRunPlanValidator(capabilitiesPath string, capabilitiesFormat string) (ag
 	if err != nil {
 		return agentosplan.Validator{}, err
 	}
+	artifactSchemas, err := loadArtifactSchemaCatalog(artifactSchemasPath, artifactSchemasFormat)
+	if err != nil {
+		return agentosplan.Validator{}, err
+	}
 
 	return agentosplan.Validator{
-		Expressions:  compiler,
-		Capabilities: catalog,
+		Expressions:     compiler,
+		Capabilities:    catalog,
+		ArtifactSchemas: artifactSchemas,
 	}, nil
 }
 
@@ -600,6 +650,22 @@ func loadCapabilityCatalog(path string, format string) (agentosplan.CapabilityCa
 	}
 
 	return agentosplan.NewStaticCapabilityCatalog(catalogFile.Capabilities)
+}
+
+func loadArtifactSchemaCatalog(path string, format string) (agentosplan.ArtifactSchemaCatalog, error) {
+	if path == "" {
+		return nil, nil
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil, err
+	}
+	var catalogFile artifactSchemaCatalogFile
+	if err := decodeWire(format, data, &catalogFile); err != nil {
+		return nil, err
+	}
+
+	return agentosplan.NewStaticArtifactSchemaCatalog(catalogFile.ArtifactSchemas)
 }
 
 func encodeServerlessWorkflow(format string, workflow serverlessworkflow.Workflow) ([]byte, error) {

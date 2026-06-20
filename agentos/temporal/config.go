@@ -149,6 +149,7 @@ type WorkerConfig struct {
 	HTTPBackends             []HTTPBackendConfig
 	GRPCBackends             []GRPCBackendConfig
 	Capabilities             []agentos.Capability
+	ArtifactSchemas          []agentos.ArtifactSchema
 
 	RegisterEnvTools      bool
 	EnsureDefaultTemplate bool

@@ -62,6 +62,7 @@ type (
 		ArtifactStoreS3SessionToken             string `env:"AGENTOS_ARTIFACT_STORE_S3_SESSION_TOKEN"`
 		ArtifactStoreS3ForcePathStyle           bool   `env:"AGENTOS_ARTIFACT_STORE_S3_FORCE_PATH_STYLE" envDefault:"false"`
 		CapabilitiesJSON                        string `env:"AGENTOS_CAPABILITIES_JSON" envDefault:"[]"`
+		ArtifactSchemasJSON                     string `env:"AGENTOS_ARTIFACT_SCHEMAS_JSON" envDefault:"[]"`
 		PlanCommandRecoveryEnabled              bool   `env:"AGENTOS_PLAN_COMMAND_RECOVERY_ENABLED" envDefault:"true"`
 		PlanCommandRecoveryIntervalSeconds      int    `env:"AGENTOS_PLAN_COMMAND_RECOVERY_INTERVAL_SECONDS" envDefault:"30"`
 		PlanCommandRecoveryLimit                int    `env:"AGENTOS_PLAN_COMMAND_RECOVERY_LIMIT" envDefault:"100"`
@@ -235,6 +236,16 @@ func (c AgentOS) Capabilities() ([]agentos.Capability, error) {
 	}
 
 	return capabilities, nil
+}
+
+// ArtifactSchemas parses configured AgentOS artifact schema declarations.
+func (c AgentOS) ArtifactSchemas() ([]agentos.ArtifactSchema, error) {
+	var schemas []agentos.ArtifactSchema
+	if err := json.Unmarshal([]byte(c.ArtifactSchemasJSON), &schemas); err != nil {
+		return nil, fmt.Errorf("parse AGENTOS_ARTIFACT_SCHEMAS_JSON: %w", err)
+	}
+
+	return schemas, nil
 }
 
 func (c AgentOS) ArtifactStoreConfig() ArtifactStoreConfig {

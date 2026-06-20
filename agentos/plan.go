@@ -89,6 +89,13 @@ type ArtifactSpec struct {
 	Required  bool         `json:"required,omitempty"`
 }
 
+// ArtifactSchema declares a JSON Schema document addressable by ArtifactSpec.SchemaRef.
+type ArtifactSchema struct {
+	Ref         string          `json:"ref"`
+	Description string          `json:"description,omitempty"`
+	Schema      json.RawMessage `json:"schema"`
+}
+
 // ArtifactKind identifies public artifact payload categories.
 type ArtifactKind string
 

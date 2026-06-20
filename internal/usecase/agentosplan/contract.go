@@ -52,6 +52,12 @@ type ArtifactSchemaCatalog interface {
 	GetArtifactSchema(ctx context.Context, schemaRef string) (json.RawMessage, bool, error)
 }
 
+// ArtifactSchemaRegistry persists schema declarations referenced by RunPlan
+// artifact contracts.
+type ArtifactSchemaRegistry interface {
+	RegisterArtifactSchema(ctx context.Context, schema agentos.ArtifactSchema, idempotencyKey string) (agentos.ArtifactSchema, bool, error)
+}
+
 // PlanIndex stores durable plan identity and the latest aggregate status.
 type PlanIndex interface {
 	CreatePlan(ctx context.Context, spec agentos.RunPlanSpec, status agentos.RunPlanStatus) (agentos.RunPlanStatus, bool, error)

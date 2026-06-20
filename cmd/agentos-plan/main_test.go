@@ -107,6 +107,40 @@ func TestCompileCommandEmitsValidatedPlanOrder(t *testing.T) {
 	}
 }
 
+func TestValidateCommandUsesArtifactSchemaCatalog(t *testing.T) {
+	dir := t.TempDir()
+	planPath := filepath.Join(dir, "plan.yaml")
+	schemasPath := filepath.Join(dir, "artifact-schemas.yaml")
+	if err := os.WriteFile(planPath, []byte(artifactSchemaPlanYAML), 0o644); err != nil {
+		t.Fatalf("WriteFile plan: %v", err)
+	}
+	if err := os.WriteFile(schemasPath, []byte(artifactSchemaCatalogYAML), 0o644); err != nil {
+		t.Fatalf("WriteFile artifact schemas: %v", err)
+	}
+
+	var stdout, stderr bytes.Buffer
+	code := run([]string{"validate", "--file", planPath, "--format", "yaml"}, &stdout, &stderr)
+	if code == 0 {
+		t.Fatalf("validate succeeded without artifact schema catalog; stdout=%s", stdout.String())
+	}
+	if !strings.Contains(stderr.String(), "artifact schema catalog") {
+		t.Fatalf("stderr = %s", stderr.String())
+	}
+
+	stdout.Reset()
+	stderr.Reset()
+	code = run([]string{
+		"validate",
+		"--file", planPath,
+		"--format", "yaml",
+		"--artifact-schemas", schemasPath,
+		"--artifact-schemas-format", "yaml",
+	}, &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("validate with artifact schemas code = %d stderr = %s", code, stderr.String())
+	}
+}
+
 func TestCompileDeltaCommandAppliesValidatedPlanDelta(t *testing.T) {
 	dir := t.TempDir()
 	basePath := filepath.Join(dir, "base.yaml")
@@ -324,4 +358,34 @@ capabilities:
           type: string
       required:
         - topic
+`
+
+const artifactSchemaPlanYAML = `
+plan_id: plan-schema-cli
+account_id: acct-cli
+project_id: proj-cli
+nodes:
+  - node_id: summarize
+    run:
+      run_id: run-summarize
+      backend:
+        kind: native
+        name: goagent-native
+    outputs:
+      - name: summary
+        kind: object
+        schema_ref: schema:summary
+`
+
+const artifactSchemaCatalogYAML = `
+artifact_schemas:
+  - ref: schema:summary
+    description: Summary artifact
+    schema:
+      type: object
+      properties:
+        summary:
+          type: string
+      required:
+        - summary
 `

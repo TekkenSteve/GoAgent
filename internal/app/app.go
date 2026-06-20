@@ -275,6 +275,7 @@ func initTemporalComponents(
 	}
 	artifactStore := temporalrepo.NewAgentOSArtifactRepo(pg, blobStore)
 	capabilityCatalog := temporalrepo.NewAgentOSCapabilityCatalogRepo(pg)
+	artifactSchemaCatalog := temporalrepo.NewAgentOSArtifactSchemaCatalogRepo(pg)
 	capabilities, err := cfg.AgentOS.Capabilities()
 	if err != nil {
 		l.Fatal(fmt.Errorf("app - Run - agentos capabilities: %w", err))
@@ -282,9 +283,17 @@ func initTemporalComponents(
 	if err := agentosplan.RegisterCapabilities(context.Background(), capabilityCatalog, agentostemporal.CapabilitiesWithDefaults(capabilities)); err != nil {
 		l.Fatal(fmt.Errorf("app - Run - register agentos capabilities: %w", err))
 	}
-	planActivities, err := agentostemporal.NewPlanActivitiesWithCatalog(
+	artifactSchemas, err := cfg.AgentOS.ArtifactSchemas()
+	if err != nil {
+		l.Fatal(fmt.Errorf("app - Run - agentos artifact schemas: %w", err))
+	}
+	if err := agentosplan.RegisterArtifactSchemas(context.Background(), artifactSchemaCatalog, artifactSchemas); err != nil {
+		l.Fatal(fmt.Errorf("app - Run - register agentos artifact schemas: %w", err))
+	}
+	planActivities, err := agentostemporal.NewPlanActivitiesWithCatalogAndSchemas(
 		agentOSRuntime,
 		capabilityCatalog,
+		artifactSchemaCatalog,
 		planStore,
 		planStore,
 		planEventStream,

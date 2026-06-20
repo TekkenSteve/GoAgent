@@ -232,12 +232,12 @@ func TestPlanActivitiesPublishArtifactsRetainsStoredPayload(t *testing.T) {
 func TestPlanActivitiesPublishArtifactsValidatesSchemaRefPayload(t *testing.T) {
 	ctx := context.Background()
 	activities := newTestPlanActivities(t, &fakePlanRuntime{})
-	schemas, err := agentosplan.NewStaticArtifactSchemaCatalog(map[string]json.RawMessage{
-		"schema:summary": json.RawMessage(`{
+	schemas, err := agentosplan.NewStaticArtifactSchemaCatalog([]agentos.ArtifactSchema{
+		{Ref: "schema:summary", Schema: json.RawMessage(`{
 			"type": "object",
 			"properties": {"score": {"type": "number"}},
 			"required": ["score"]
-		}`),
+		}`)},
 	})
 	if err != nil {
 		t.Fatalf("NewStaticArtifactSchemaCatalog: %v", err)

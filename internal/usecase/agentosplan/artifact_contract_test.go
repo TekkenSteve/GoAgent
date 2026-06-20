@@ -86,8 +86,8 @@ func TestValidateArtifactSchemaRefsRequiresCatalog(t *testing.T) {
 		t.Fatalf("missing catalog error = %v, want ErrInvalidArtifact", err)
 	}
 
-	catalog, err := NewStaticArtifactSchemaCatalog(map[string]json.RawMessage{
-		"schema:summary": json.RawMessage(`{"type":"object"}`),
+	catalog, err := NewStaticArtifactSchemaCatalog([]agentos.ArtifactSchema{
+		{Ref: "schema:summary", Schema: json.RawMessage(`{"type":"object"}`)},
 	})
 	if err != nil {
 		t.Fatalf("NewStaticArtifactSchemaCatalog: %v", err)
@@ -99,12 +99,12 @@ func TestValidateArtifactSchemaRefsRequiresCatalog(t *testing.T) {
 
 func TestValidateArtifactPayloadsAgainstSchemas(t *testing.T) {
 	ctx := context.Background()
-	catalog, err := NewStaticArtifactSchemaCatalog(map[string]json.RawMessage{
-		"schema:summary": json.RawMessage(`{
+	catalog, err := NewStaticArtifactSchemaCatalog([]agentos.ArtifactSchema{
+		{Ref: "schema:summary", Schema: json.RawMessage(`{
 			"type": "object",
 			"properties": {"score": {"type": "number"}},
 			"required": ["score"]
-		}`),
+		}`)},
 	})
 	if err != nil {
 		t.Fatalf("NewStaticArtifactSchemaCatalog: %v", err)
