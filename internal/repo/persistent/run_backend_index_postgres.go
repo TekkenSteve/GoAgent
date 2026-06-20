@@ -64,6 +64,15 @@ func (r *RunBackendIndexRepo) Get(ctx context.Context, runID string) (entity.Run
 	return record, exists, nil
 }
 
+func (r *RunBackendIndexRepo) GetRunBackend(ctx context.Context, runID string) (agentos.RunBackendOwnership, bool, error) {
+	record, exists, err := r.Get(ctx, runID)
+	if err != nil || !exists {
+		return agentos.RunBackendOwnership{}, exists, err
+	}
+
+	return agentosruntime.RunBackendOwnershipFromRecord(record), true, nil
+}
+
 func (r *RunBackendIndexRepo) runByIdempotencyKey(ctx context.Context, record entity.RunBackendIndexRecord) (entity.RunBackendIndexRecord, bool, error) {
 	idempotencyKey := record.IdempotencyKey
 	if idempotencyKey == "" {
@@ -101,7 +110,11 @@ func (r *RunBackendIndexRepo) upsert(ctx context.Context, record entity.RunBacke
 			return err
 		}
 		if exists {
-			return agentosruntime.ValidateRunBackendIndexIdempotency(existing, record)
+			if err := agentosruntime.ValidateRunBackendIndexIdempotency(existing, record); err != nil {
+				return err
+			}
+
+			return r.updateLifecycle(ctx, existing, record)
 		}
 	}
 
@@ -159,7 +172,32 @@ func (r *RunBackendIndexRepo) upsert(ctx context.Context, record entity.RunBacke
 			return fmt.Errorf("%w: run %q conflict did not leave an ownership record", agentos.ErrRunRouteNotFound, record.RunID)
 		}
 
-		return agentosruntime.ValidateRunBackendIndexIdempotency(existing, record)
+		if err := agentosruntime.ValidateRunBackendIndexIdempotency(existing, record); err != nil {
+			return err
+		}
+
+		return r.updateLifecycle(ctx, existing, record)
+	}
+
+	return nil
+}
+
+func (r *RunBackendIndexRepo) updateLifecycle(ctx context.Context, existing entity.RunBackendIndexRecord, requested entity.RunBackendIndexRecord) error {
+	lifecycle := requested.LifecycleState
+	if lifecycle == agentosruntime.RunBackendLifecycleClaiming && existing.LifecycleState != agentosruntime.RunBackendLifecycleClaiming {
+		return nil
+	}
+	if lifecycle == existing.LifecycleState {
+		return nil
+	}
+
+	_, err := r.Pool.Exec(ctx, `
+UPDATE run_backend_index
+SET lifecycle_state = $2,
+    updated_at = NOW()
+WHERE run_id = $1`, existing.RunID, lifecycle)
+	if err != nil {
+		return fmt.Errorf("RunBackendIndexRepo - updateLifecycle - exec: %w", err)
 	}
 
 	return nil

@@ -59,6 +59,21 @@ type RunStatus struct {
 	UpdatedAt      time.Time       `json:"updated_at,omitempty"`
 }
 
+// RunBackendOwnership is the durable routing record for a backend-owned run.
+type RunBackendOwnership struct {
+	RunID          string     `json:"run_id"`
+	PlanID         string     `json:"plan_id,omitempty"`
+	NodeID         string     `json:"node_id,omitempty"`
+	ThreadID       string     `json:"thread_id,omitempty"`
+	AccountID      string     `json:"account_id,omitempty"`
+	ProjectID      string     `json:"project_id,omitempty"`
+	Backend        BackendRef `json:"backend"`
+	IdempotencyKey string     `json:"idempotency_key,omitempty"`
+	LifecycleState string     `json:"lifecycle_state,omitempty"`
+	CreatedAt      time.Time  `json:"created_at,omitempty"`
+	UpdatedAt      time.Time  `json:"updated_at,omitempty"`
+}
+
 // RunProgress is a generic public progress view. Backend-specific details
 // should be emitted as events or artifacts.
 type RunProgress struct {

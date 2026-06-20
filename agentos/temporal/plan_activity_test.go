@@ -49,6 +49,26 @@ func TestPlanActivitiesStartStatusControl(t *testing.T) {
 	}
 }
 
+func TestPlanActivitiesStartPlanNodeRejectsBackendRunIDDrift(t *testing.T) {
+	runtime := &fakePlanRuntime{startStatus: agentos.RunStatus{RunID: "backend-run", LifecycleState: "running"}}
+	activities := newTestPlanActivities(t, runtime)
+	ref := agentos.BackendRef{Kind: agentos.BackendKindNative, Name: agentos.BackendNameGoAgentNative}
+
+	_, err := activities.StartPlanNodeActivity(context.Background(), startPlanNodeInput{
+		PlanID: "plan-1",
+		Node: agentos.PlanNodeSpec{
+			NodeID: "node-1",
+			Run: agentos.RunSpec{
+				RunID:   "run-1",
+				Backend: ref,
+			},
+		},
+	})
+	if !errors.Is(err, agentos.ErrInvalidRunSpec) {
+		t.Fatalf("StartPlanNodeActivity error = %v, want ErrInvalidRunSpec", err)
+	}
+}
+
 func TestPlanActivitiesConstructorRequiresTransitionStore(t *testing.T) {
 	store := agentosplan.NewMemoryPlanStore()
 
@@ -714,8 +734,9 @@ func createPlanForActivityTest(t *testing.T, activities *PlanActivities, spec ag
 }
 
 type fakePlanRuntime struct {
-	started agentos.RunSpec
-	control agentos.ControlOperation
+	started     agentos.RunSpec
+	startStatus agentos.RunStatus
+	control     agentos.ControlOperation
 }
 
 type fakePlanEventPublisher struct {
@@ -741,6 +762,9 @@ func (s failingPlanTransitionStore) PersistPlanTransition(context.Context, agent
 
 func (r *fakePlanRuntime) Start(_ context.Context, spec agentos.RunSpec) (agentos.RunStatus, error) {
 	r.started = spec
+	if r.startStatus.RunID != "" || r.startStatus.LifecycleState != "" {
+		return r.startStatus, nil
+	}
 
 	return agentos.RunStatus{RunID: spec.RunID, LifecycleState: "running", UpdatedAt: time.Now()}, nil
 }

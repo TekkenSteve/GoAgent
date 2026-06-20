@@ -16,6 +16,7 @@ import (
 	"github.com/TekkenSteve/GoAgent/internal/pkg/postgres"
 	artifactblob "github.com/TekkenSteve/GoAgent/internal/repo/artifact"
 	"github.com/TekkenSteve/GoAgent/internal/usecase/agentosplan"
+	"github.com/TekkenSteve/GoAgent/internal/usecase/agentosruntime"
 )
 
 func TestAgentOSPlanPostgresDurablePersistence(t *testing.T) {
@@ -254,6 +255,23 @@ func TestAgentOSPlanPostgresDurablePersistence(t *testing.T) {
 	}
 	if err := routeIndex.BindPlanNode(ctx, spec.PlanID, spec.Nodes[0].NodeID, runSpec, runStatus); err != nil {
 		t.Fatalf("BindPlanNode replay: %v", err)
+	}
+	assertPostgresRunBackendIndexRecord(t, pg, runSpec.RunID, postgresRunBackendIndexExpectation{
+		PlanID:         spec.PlanID,
+		NodeID:         spec.Nodes[0].NodeID,
+		ThreadID:       runSpec.ThreadID,
+		AccountID:      spec.AccountID,
+		ProjectID:      spec.ProjectID,
+		BackendKind:    string(runSpec.Backend.Kind),
+		BackendName:    runSpec.Backend.Name,
+		IdempotencyKey: runSpec.IdempotencyKey,
+		LifecycleState: runStatus.LifecycleState,
+	})
+	if err := routeIndex.BindPlanNode(ctx, spec.PlanID, spec.Nodes[0].NodeID, runSpec, agentos.RunStatus{
+		RunID:          runSpec.RunID,
+		LifecycleState: agentosruntime.RunBackendLifecycleClaiming,
+	}); err != nil {
+		t.Fatalf("BindPlanNode replay claim: %v", err)
 	}
 	assertPostgresRunBackendIndexRecord(t, pg, runSpec.RunID, postgresRunBackendIndexExpectation{
 		PlanID:         spec.PlanID,

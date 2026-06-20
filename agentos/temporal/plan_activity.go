@@ -232,6 +232,12 @@ func (a *PlanActivities) StartPlanNodeActivity(ctx context.Context, input startP
 	if err != nil {
 		return startPlanNodeOutput{}, err
 	}
+	if status.RunID == "" {
+		status.RunID = input.Node.Run.RunID
+	}
+	if status.RunID != input.Node.Run.RunID {
+		return startPlanNodeOutput{}, fmt.Errorf("%w: backend returned run id %q for requested run %q", agentos.ErrInvalidRunSpec, status.RunID, input.Node.Run.RunID)
+	}
 
 	return startPlanNodeOutput{Status: status}, nil
 }

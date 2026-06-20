@@ -356,11 +356,6 @@ func startPlanNode(activityCtx workflow.Context, workflowCtx workflow.Context, s
 	}).Get(activityCtx, &started); err != nil {
 		return applyNodeAttemptFailure(activityCtx, workflowCtx, *spec, state, node, attemptNode.Run.RunID, fmt.Sprintf("start attempt %d failed: %s", attempt, err))
 	}
-	if started.Status.RunID != "" && started.Status.RunID != attemptNode.Run.RunID {
-		if err := applyPlanStateEvent(activityCtx, workflowCtx, *spec, state, agentosplan.StateEvent{Kind: agentosplan.EventNodeStarted, NodeID: node.NodeID, RunID: started.Status.RunID, Attempt: attempt}); err != nil {
-			return err
-		}
-	}
 	if runTerminal(started.Status.LifecycleState) {
 		return applyNodeRunTerminal(activityCtx, workflowCtx, spec, state, validation, expansionCount, node, started.Status)
 	}

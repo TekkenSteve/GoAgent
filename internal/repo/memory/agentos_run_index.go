@@ -46,12 +46,21 @@ func (i *AgentOSRunIndex) bind(record entity.RunBackendIndexRecord, requireIdemp
 	if record.IdempotencyKey != "" {
 		if existingRunID, exists := i.keys[record.IdempotencyKey]; exists {
 			existing := i.records[existingRunID]
+			if err := agentosruntime.ValidateRunBackendIndexIdempotency(existing, record); err != nil {
+				return err
+			}
+			i.records[existingRunID] = mergeRunBackendIndexRecord(existing, record)
 
-			return agentosruntime.ValidateRunBackendIndexIdempotency(existing, record)
+			return nil
 		}
 	}
 	if existing, exists := i.records[record.RunID]; exists {
-		return agentosruntime.ValidateRunBackendIndexIdempotency(existing, record)
+		if err := agentosruntime.ValidateRunBackendIndexIdempotency(existing, record); err != nil {
+			return err
+		}
+		i.records[record.RunID] = mergeRunBackendIndexRecord(existing, record)
+
+		return nil
 	}
 	i.records[record.RunID] = record
 	if record.IdempotencyKey != "" {
@@ -59,6 +68,31 @@ func (i *AgentOSRunIndex) bind(record entity.RunBackendIndexRecord, requireIdemp
 	}
 
 	return nil
+}
+
+func mergeRunBackendIndexRecord(existing entity.RunBackendIndexRecord, requested entity.RunBackendIndexRecord) entity.RunBackendIndexRecord {
+	if requested.LifecycleState == agentosruntime.RunBackendLifecycleClaiming && existing.LifecycleState != agentosruntime.RunBackendLifecycleClaiming {
+		return existing
+	}
+	existing.LifecycleState = requested.LifecycleState
+
+	return existing
+}
+
+func (i *AgentOSRunIndex) GetRunBackend(_ context.Context, runID string) (agentos.RunBackendOwnership, bool, error) {
+	if runID == "" {
+		return agentos.RunBackendOwnership{}, false, fmt.Errorf("%w: run id is required", agentos.ErrInvalidRunSpec)
+	}
+
+	i.mu.RLock()
+	defer i.mu.RUnlock()
+
+	record, ok := i.records[runID]
+	if !ok {
+		return agentos.RunBackendOwnership{}, false, nil
+	}
+
+	return agentosruntime.RunBackendOwnershipFromRecord(record), true, nil
 }
 
 // Resolve returns the backend reference that owns a run.

@@ -119,6 +119,10 @@ func (fakeRunBackendIndex) BindPlanNode(context.Context, string, string, agentos
 	return nil
 }
 
+func (fakeRunBackendIndex) GetRunBackend(context.Context, string) (agentos.RunBackendOwnership, bool, error) {
+	return agentos.RunBackendOwnership{}, false, nil
+}
+
 func (fakeRunBackendIndex) Resolve(context.Context, string) (agentos.BackendRef, error) {
 	return agentos.BackendRef{}, nil
 }

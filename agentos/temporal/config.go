@@ -95,6 +95,7 @@ type S3ArtifactStoreConfig struct {
 type RunBackendIndex interface {
 	Bind(ctx context.Context, spec agentos.RunSpec) error
 	BindPlanNode(ctx context.Context, planID, nodeID string, spec agentos.RunSpec, status agentos.RunStatus) error
+	GetRunBackend(ctx context.Context, runID string) (agentos.RunBackendOwnership, bool, error)
 	Resolve(ctx context.Context, runID string) (agentos.BackendRef, error)
 }
 

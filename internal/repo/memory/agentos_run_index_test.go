@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/TekkenSteve/GoAgent/agentos"
+	"github.com/TekkenSteve/GoAgent/internal/usecase/agentosruntime"
 )
 
 func TestAgentOSRunIndexRejectsRunOwnershipOverwrite(t *testing.T) {
@@ -89,5 +90,47 @@ func TestAgentOSRunIndexRejectsPlanNodeOwnershipChange(t *testing.T) {
 
 	if err := index.BindPlanNode(t.Context(), "plan-1", "node-2", spec, status); !errors.Is(err, agentos.ErrInvalidRunPlan) {
 		t.Fatalf("BindPlanNode changed node error = %v, want ErrInvalidRunPlan", err)
+	}
+}
+
+func TestAgentOSRunIndexUpdatesPlanNodeLifecycleWithoutDowngrade(t *testing.T) {
+	index := NewAgentOSRunIndex()
+	spec := agentos.RunSpec{
+		RunID:          "run-1",
+		IdempotencyKey: "node-start-1",
+		Backend:        agentos.BackendRef{Kind: agentos.BackendKindNative, Name: agentos.BackendNameGoAgentNative},
+	}
+	if err := index.BindPlanNode(t.Context(), "plan-1", "node-1", spec, agentos.RunStatus{
+		RunID:          spec.RunID,
+		LifecycleState: agentosruntime.RunBackendLifecycleClaiming,
+	}); err != nil {
+		t.Fatalf("BindPlanNode claim: %v", err)
+	}
+	if err := index.BindPlanNode(t.Context(), "plan-1", "node-1", spec, agentos.RunStatus{
+		RunID:          spec.RunID,
+		LifecycleState: "running",
+	}); err != nil {
+		t.Fatalf("BindPlanNode running: %v", err)
+	}
+	ownership, exists, err := index.GetRunBackend(t.Context(), spec.RunID)
+	if err != nil || !exists {
+		t.Fatalf("GetRunBackend exists=%v err=%v", exists, err)
+	}
+	if ownership.LifecycleState != "running" {
+		t.Fatalf("lifecycle = %q, want running", ownership.LifecycleState)
+	}
+
+	if err := index.BindPlanNode(t.Context(), "plan-1", "node-1", spec, agentos.RunStatus{
+		RunID:          spec.RunID,
+		LifecycleState: agentosruntime.RunBackendLifecycleClaiming,
+	}); err != nil {
+		t.Fatalf("BindPlanNode replay claim: %v", err)
+	}
+	ownership, exists, err = index.GetRunBackend(t.Context(), spec.RunID)
+	if err != nil || !exists {
+		t.Fatalf("GetRunBackend replay exists=%v err=%v", exists, err)
+	}
+	if ownership.LifecycleState != "running" {
+		t.Fatalf("lifecycle after replay claim = %q, want running", ownership.LifecycleState)
 	}
 }

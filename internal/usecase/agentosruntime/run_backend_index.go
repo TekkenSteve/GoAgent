@@ -7,6 +7,8 @@ import (
 	"github.com/TekkenSteve/GoAgent/internal/entity"
 )
 
+const RunBackendLifecycleClaiming = "claiming"
+
 // RunBackendIndexRecordFromRunSpec builds the ownership record for a standalone
 // AgentOS run.
 func RunBackendIndexRecordFromRunSpec(spec agentos.RunSpec) entity.RunBackendIndexRecord {
@@ -46,6 +48,45 @@ func RunBackendIndexRecordFromPlanNode(planID, nodeID string, spec agentos.RunSp
 		IdempotencyKey: spec.IdempotencyKey,
 		LifecycleState: lifecycle,
 	})
+}
+
+// RunBackendIndexRecordFromOwnership maps the public durable ownership view
+// into the internal idempotency record.
+func RunBackendIndexRecordFromOwnership(ownership agentos.RunBackendOwnership) entity.RunBackendIndexRecord {
+	return NormalizeRunBackendIndexRecord(entity.RunBackendIndexRecord{
+		RunID:          ownership.RunID,
+		PlanID:         ownership.PlanID,
+		NodeID:         ownership.NodeID,
+		ThreadID:       ownership.ThreadID,
+		AccountID:      ownership.AccountID,
+		ProjectID:      ownership.ProjectID,
+		BackendKind:    string(ownership.Backend.Kind),
+		BackendName:    ownership.Backend.Name,
+		IdempotencyKey: ownership.IdempotencyKey,
+		LifecycleState: ownership.LifecycleState,
+		CreatedAt:      ownership.CreatedAt,
+		UpdatedAt:      ownership.UpdatedAt,
+	})
+}
+
+// RunBackendOwnershipFromRecord maps an internal ownership record to the
+// public AgentOS routing view.
+func RunBackendOwnershipFromRecord(record entity.RunBackendIndexRecord) agentos.RunBackendOwnership {
+	record = NormalizeRunBackendIndexRecord(record)
+
+	return agentos.RunBackendOwnership{
+		RunID:          record.RunID,
+		PlanID:         record.PlanID,
+		NodeID:         record.NodeID,
+		ThreadID:       record.ThreadID,
+		AccountID:      record.AccountID,
+		ProjectID:      record.ProjectID,
+		Backend:        agentos.BackendRef{Kind: agentos.BackendKind(record.BackendKind), Name: record.BackendName},
+		IdempotencyKey: record.IdempotencyKey,
+		LifecycleState: record.LifecycleState,
+		CreatedAt:      record.CreatedAt,
+		UpdatedAt:      record.UpdatedAt,
+	}
 }
 
 // NormalizeRunBackendIndexRecord applies durable route defaults before storage
