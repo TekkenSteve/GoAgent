@@ -1050,6 +1050,7 @@ func TestAgentOSArtifactPostgresRejectsDifferentIdempotencyReplay(t *testing.T) 
 	node.Inputs = []agentos.InputMapping{
 		{
 			Target:         "from_artifact.summary",
+			SourceNodeID:   spec.Nodes[0].NodeID,
 			SourceArtifact: "summary",
 			SourcePath:     "summary",
 			Required:       true,

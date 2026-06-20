@@ -88,6 +88,9 @@ func (v Validator) Validate(ctx context.Context, spec agentos.RunPlanSpec) (Exec
 	if err != nil {
 		return ExecutablePlan{}, err
 	}
+	if err := validateInputMappingContracts(spec, nodeByID, edgesByFrom); err != nil {
+		return ExecutablePlan{}, err
+	}
 	if int32(maxDepth(order, edgesByFrom)) > policy.MaxDepth {
 		return ExecutablePlan{}, fmt.Errorf("%w: plan depth exceeds max %d", agentos.ErrInvalidRunPlan, policy.MaxDepth)
 	}
@@ -122,10 +125,11 @@ func (v Validator) validateNode(ctx context.Context, spec agentos.RunPlanSpec, n
 		return fmt.Errorf("%w: node %q has invalid join strategy %q", agentos.ErrInvalidRunPlan, node.NodeID, node.Policy.Join)
 	}
 	for _, mapping := range node.Inputs {
-		if mapping.Target == "" {
-			return fmt.Errorf("%w: node %q input mapping target is required", agentos.ErrInvalidRunPlan, node.NodeID)
+		mode, err := validateInputMappingShape(fmt.Sprintf("node %q", node.NodeID), mapping)
+		if err != nil {
+			return err
 		}
-		if mapping.Expression != "" {
+		if mode == inputMappingSourceExpression {
 			if err := v.compileExpression(mapping.Expression); err != nil {
 				return fmt.Errorf("node %q input %q: %w", node.NodeID, mapping.Target, err)
 			}
@@ -180,15 +184,83 @@ func (v Validator) validateEdge(edge agentos.PlanEdgeSpec, nodeByID map[string]a
 		return fmt.Errorf("%w: edge %q has invalid trigger %q", agentos.ErrInvalidRunPlan, edge.EdgeID, edge.On)
 	}
 	for _, mapping := range edge.InputMapping {
-		if mapping.Target == "" {
-			return fmt.Errorf("%w: edge %q input mapping target is required", agentos.ErrInvalidRunPlan, edge.EdgeID)
+		mode, err := validateInputMappingShape(fmt.Sprintf("edge %q", edge.EdgeID), mapping)
+		if err != nil {
+			return err
 		}
-		if mapping.SourceNodeID != "" && mapping.SourceNodeID != edge.From {
+		if mode == inputMappingSourceArtifact && mapping.SourceNodeID != edge.From {
 			return fmt.Errorf("%w: edge %q mapping source must match edge source", agentos.ErrInvalidRunPlan, edge.EdgeID)
 		}
 	}
 
 	return nil
+}
+
+func validateInputMappingContracts(spec agentos.RunPlanSpec, nodeByID map[string]agentos.PlanNodeSpec, edgesByFrom map[string][]agentos.PlanEdgeSpec) error {
+	for _, node := range spec.Nodes {
+		for _, mapping := range node.Inputs {
+			if mapping.SourceArtifact == "" {
+				continue
+			}
+			source, ok := nodeByID[mapping.SourceNodeID]
+			if !ok {
+				return fmt.Errorf("%w: node %q input %q source node %q is unknown", agentos.ErrInvalidRunPlan, node.NodeID, mapping.Target, mapping.SourceNodeID)
+			}
+			if source.NodeID == node.NodeID {
+				return fmt.Errorf("%w: node %q input %q cannot map an artifact from the same node", agentos.ErrInvalidRunPlan, node.NodeID, mapping.Target)
+			}
+			if !nodeDeclaresArtifact(source, mapping.SourceArtifact) {
+				return artifactContractError(source.NodeID, "artifact %q is not declared for mapping into node %q", mapping.SourceArtifact, node.NodeID)
+			}
+			if !hasDependencyPath(edgesByFrom, source.NodeID, node.NodeID) {
+				return fmt.Errorf("%w: node %q input %q requires a dependency path from source node %q", agentos.ErrInvalidRunPlan, node.NodeID, mapping.Target, source.NodeID)
+			}
+		}
+	}
+	for _, edge := range spec.Edges {
+		for _, mapping := range edge.InputMapping {
+			if mapping.SourceArtifact == "" {
+				continue
+			}
+			source := nodeByID[edge.From]
+			if !nodeDeclaresArtifact(source, mapping.SourceArtifact) {
+				return artifactContractError(source.NodeID, "artifact %q is not declared for edge %q mapping into node %q", mapping.SourceArtifact, edge.EdgeID, edge.To)
+			}
+		}
+	}
+
+	return nil
+}
+
+func nodeDeclaresArtifact(node agentos.PlanNodeSpec, name string) bool {
+	for _, output := range node.Outputs {
+		if output.Name == name {
+			return true
+		}
+	}
+
+	return false
+}
+
+func hasDependencyPath(edgesByFrom map[string][]agentos.PlanEdgeSpec, from, to string) bool {
+	visited := map[string]struct{}{from: {}}
+	queue := []string{from}
+	for len(queue) > 0 {
+		current := queue[0]
+		queue = queue[1:]
+		for _, edge := range edgesByFrom[current] {
+			if edge.To == to {
+				return true
+			}
+			if _, ok := visited[edge.To]; ok {
+				continue
+			}
+			visited[edge.To] = struct{}{}
+			queue = append(queue, edge.To)
+		}
+	}
+
+	return false
 }
 
 func (v Validator) compileExpression(expression string) error {

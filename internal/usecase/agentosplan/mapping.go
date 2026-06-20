@@ -28,6 +28,9 @@ func ResolveRunInput(ctx context.Context, store ArtifactStore, expressions Value
 		return nil, fmt.Errorf("%w: encode node input: %s", agentos.ErrInvalidRunPlan, err)
 	}
 	for _, mapping := range mappings {
+		if _, err := validateInputMappingShape(fmt.Sprintf("node %q", node.NodeID), mapping); err != nil {
+			return nil, err
+		}
 		value, err := resolveMappingValue(ctx, store, expressions, spec, status, node, mapping)
 		if err != nil {
 			return nil, err

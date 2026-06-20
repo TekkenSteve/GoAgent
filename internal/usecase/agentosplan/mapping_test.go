@@ -118,6 +118,26 @@ func TestResolveRunInputFailsWhenRequiredArtifactIsMissing(t *testing.T) {
 	}
 }
 
+func TestResolveRunInputRejectsArtifactMappingWithoutSourceNode(t *testing.T) {
+	_, err := ResolveRunInput(
+		context.Background(),
+		NewMemoryArtifactStore(),
+		nil,
+		agentos.RunPlanSpec{PlanID: "plan-1", AccountID: "acct-1", ProjectID: "proj-1"},
+		agentos.RunPlanStatus{PlanID: "plan-1"},
+		agentos.PlanNodeSpec{
+			NodeID: "verify",
+			Inputs: []agentos.InputMapping{
+				{Target: "summary", SourceArtifact: "summary", Required: true},
+			},
+		},
+		nil,
+	)
+	if !errors.Is(err, agentos.ErrInvalidArtifact) {
+		t.Fatalf("error = %v, want ErrInvalidArtifact", err)
+	}
+}
+
 func TestResolveRunInputSkipsOptionalMissingArtifact(t *testing.T) {
 	resolved, err := ResolveRunInput(
 		context.Background(),

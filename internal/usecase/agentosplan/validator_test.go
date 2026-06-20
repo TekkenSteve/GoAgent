@@ -118,6 +118,59 @@ func TestValidatorAcceptsArtifactSchemaRefWithCatalog(t *testing.T) {
 	}
 }
 
+func TestValidatorAcceptsDeclaredArtifactMappingWithDependency(t *testing.T) {
+	ref := agentos.BackendRef{Kind: agentos.BackendKindNative, Name: agentos.BackendNameGoAgentNative}
+	spec := samplePlan(ref)
+	spec.Nodes[1].Inputs = []agentos.InputMapping{
+		{Target: "summary", SourceNodeID: "research", SourceArtifact: "summary", Required: true},
+	}
+
+	_, err := Validator{Capabilities: sampleCapabilityCatalog(t, ref)}.Validate(context.Background(), spec)
+	if err != nil {
+		t.Fatalf("Validate: %v", err)
+	}
+}
+
+func TestValidatorRejectsArtifactMappingWithoutSourceNode(t *testing.T) {
+	ref := agentos.BackendRef{Kind: agentos.BackendKindNative, Name: agentos.BackendNameGoAgentNative}
+	spec := samplePlan(ref)
+	spec.Edges[0].InputMapping = []agentos.InputMapping{
+		{Target: "summary", SourceArtifact: "summary", Required: true},
+	}
+
+	_, err := Validator{Capabilities: sampleCapabilityCatalog(t, ref)}.Validate(context.Background(), spec)
+	if !errors.Is(err, agentos.ErrInvalidArtifact) {
+		t.Fatalf("error = %v, want ErrInvalidArtifact", err)
+	}
+}
+
+func TestValidatorRejectsArtifactMappingForUndeclaredOutput(t *testing.T) {
+	ref := agentos.BackendRef{Kind: agentos.BackendKindNative, Name: agentos.BackendNameGoAgentNative}
+	spec := samplePlan(ref)
+	spec.Edges[0].InputMapping = []agentos.InputMapping{
+		{Target: "missing", SourceNodeID: "research", SourceArtifact: "missing", Required: true},
+	}
+
+	_, err := Validator{Capabilities: sampleCapabilityCatalog(t, ref)}.Validate(context.Background(), spec)
+	if !errors.Is(err, agentos.ErrInvalidArtifact) {
+		t.Fatalf("error = %v, want ErrInvalidArtifact", err)
+	}
+}
+
+func TestValidatorRejectsNodeArtifactMappingWithoutDependencyPath(t *testing.T) {
+	ref := agentos.BackendRef{Kind: agentos.BackendKindNative, Name: agentos.BackendNameGoAgentNative}
+	spec := samplePlan(ref)
+	spec.Edges = nil
+	spec.Nodes[1].Inputs = []agentos.InputMapping{
+		{Target: "summary", SourceNodeID: "research", SourceArtifact: "summary", Required: true},
+	}
+
+	_, err := Validator{Capabilities: sampleCapabilityCatalog(t, ref)}.Validate(context.Background(), spec)
+	if !errors.Is(err, agentos.ErrInvalidRunPlan) {
+		t.Fatalf("error = %v, want ErrInvalidRunPlan", err)
+	}
+}
+
 func TestValidatorRejectsContinuationThresholdAboveHistoryGuard(t *testing.T) {
 	ref := agentos.BackendRef{Kind: agentos.BackendKindNative, Name: agentos.BackendNameGoAgentNative}
 	spec := samplePlan(ref)

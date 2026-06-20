@@ -76,7 +76,13 @@ func TestPlanWorkflowFailsNodeWhenRequiredInputArtifactIsMissing(t *testing.T) {
 		PlanID:         "plan-missing-input-artifact",
 		IdempotencyKey: "plan-start-missing-input-artifact",
 		Nodes: []agentos.PlanNodeSpec{
-			{NodeID: "research", Run: agentos.RunSpec{RunID: "run-research", Backend: ref}},
+			{
+				NodeID: "research",
+				Run:    agentos.RunSpec{RunID: "run-research", Backend: ref},
+				Outputs: []agentos.ArtifactSpec{
+					{Name: "summary", Kind: agentos.ArtifactKindObject},
+				},
+			},
 			{NodeID: "verify", Run: agentos.RunSpec{RunID: "run-verify", Backend: ref}},
 		},
 		Edges: []agentos.PlanEdgeSpec{
