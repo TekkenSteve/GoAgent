@@ -622,6 +622,8 @@ definitions:
         type: string
       reason:
         type: string
+      started_at:
+        type: string
       updated_at:
         type: string
     type: object
@@ -715,227 +717,6 @@ definitions:
     - SignalHumanFeedback
     - SignalConfigPatch
     - SignalMemoryPatch
-  entity.AgentSpec:
-    properties:
-      config:
-        $ref: '#/definitions/entity.LLMConfig'
-      id:
-        type: string
-      model_ref:
-        type: string
-      name:
-        type: string
-      system_prompt:
-        type: string
-      tools:
-        items:
-          $ref: '#/definitions/entity.ToolBinding'
-        type: array
-      version:
-        type: string
-    type: object
-  entity.ContinuePolicy:
-    properties:
-      max_depth:
-        description: max step queue length
-        type: integer
-      max_rounds:
-        description: max workflow loop iterations
-        type: integer
-    type: object
-  entity.LLMConfig:
-    properties:
-      max_tokens:
-        type: integer
-      model:
-        type: string
-      provider:
-        description: target provider name; empty = use default
-        type: string
-      temperature:
-        type: number
-    type: object
-  entity.Step:
-    properties:
-      agent_id:
-        description: StepAgent
-        type: string
-      depends_on:
-        description: step IDs this depends on
-        items:
-          type: string
-        type: array
-      error:
-        description: failure reason
-        type: string
-      id:
-        type: string
-      input:
-        additionalProperties: {}
-        type: object
-      name:
-        type: string
-      on_result:
-        allOf:
-        - $ref: '#/definitions/entity.StepMutation'
-        description: dynamic queue mutation
-      result:
-        additionalProperties: {}
-        description: populated after execution
-        type: object
-      status:
-        $ref: '#/definitions/entity.StepStatus'
-      tool:
-        description: StepTool
-        type: string
-      type:
-        $ref: '#/definitions/entity.StepType'
-      wait_for:
-        allOf:
-        - $ref: '#/definitions/entity.WaitCondition'
-        description: StepWait config
-    type: object
-  entity.StepMutation:
-    properties:
-      append_after:
-        description: insert after this step ID
-        type: string
-      delete_steps:
-        description: delete these step IDs
-        items:
-          type: string
-        type: array
-      insert_steps:
-        description: steps to insert
-        items:
-          $ref: '#/definitions/entity.Step'
-        type: array
-      modify_step:
-        description: replace this step ID
-        type: string
-    type: object
-  entity.StepStatus:
-    enum:
-    - pending
-    - running
-    - completed
-    - failed
-    - waiting
-    - blocked
-    type: string
-    x-enum-comments:
-      StepBlocked: blocked on dependency
-      StepWaiting: blocked on signal/timer
-    x-enum-descriptions:
-    - ""
-    - ""
-    - ""
-    - ""
-    - blocked on signal/timer
-    - blocked on dependency
-    x-enum-varnames:
-    - StepPending
-    - StepRunning
-    - StepCompleted
-    - StepFailed
-    - StepWaiting
-    - StepBlocked
-  entity.StepTemplate:
-    properties:
-      agent_ref:
-        description: TeamSpec.Agents[i].ID
-        type: string
-      depends_on:
-        items:
-          type: string
-        type: array
-      id:
-        type: string
-      input:
-        additionalProperties: {}
-        type: object
-      on_result:
-        $ref: '#/definitions/entity.StepMutation'
-      tool:
-        type: string
-      type:
-        $ref: '#/definitions/entity.StepType'
-      wait_for:
-        $ref: '#/definitions/entity.WaitCondition'
-    type: object
-  entity.StepType:
-    enum:
-    - agent
-    - tool
-    - wait
-    - split
-    - join
-    - eval
-    type: string
-    x-enum-comments:
-      StepAgent: Start child AgentWorkflow and wait
-      StepEval: Conditional branch based on prior result
-      StepJoin: Fan-in from parallel sub-steps
-      StepSplit: Fan-out into parallel sub-steps
-      StepTool: Execute tool directly
-      StepWait: Wait for Temporal Signal or Timer
-    x-enum-descriptions:
-    - Start child AgentWorkflow and wait
-    - Execute tool directly
-    - Wait for Temporal Signal or Timer
-    - Fan-out into parallel sub-steps
-    - Fan-in from parallel sub-steps
-    - Conditional branch based on prior result
-    x-enum-varnames:
-    - StepAgent
-    - StepTool
-    - StepWait
-    - StepSplit
-    - StepJoin
-    - StepEval
-  entity.TeamSpec:
-    properties:
-      agents:
-        items:
-          $ref: '#/definitions/entity.AgentSpec'
-        type: array
-      id:
-        type: string
-      name:
-        type: string
-      steps:
-        items:
-          $ref: '#/definitions/entity.StepTemplate'
-        type: array
-      sub_teams:
-        items:
-          $ref: '#/definitions/entity.TeamSpec'
-        type: array
-    type: object
-  entity.ToolBinding:
-    properties:
-      description:
-        description: override default
-        type: string
-      name:
-        type: string
-      required:
-        description: fail if unavailable
-        type: boolean
-    type: object
-  entity.WaitCondition:
-    properties:
-      on_timeout:
-        description: '"timeout" | "skip" | "fail"'
-        type: string
-      signal_name:
-        description: Temporal Signal to wait for
-        type: string
-      timeout:
-        allOf:
-        - $ref: '#/definitions/time.Duration'
-        description: max wait duration
-    type: object
   request.AgentOSControl:
     properties:
       actor_id:
@@ -1086,7 +867,7 @@ definitions:
         example: acct-001
         type: string
       continue_policy:
-        $ref: '#/definitions/entity.ContinuePolicy'
+        type: object
       max_depth:
         type: integer
       message:
@@ -1096,12 +877,12 @@ definitions:
         type: string
       steps:
         items:
-          $ref: '#/definitions/entity.Step'
+          type: object
         type: array
       system_prompt:
         type: string
       team_spec:
-        $ref: '#/definitions/entity.TeamSpec'
+        type: object
     required:
     - account_id
     - run_id
@@ -1125,43 +906,6 @@ definitions:
       updated_at:
         type: integer
     type: object
-  time.Duration:
-    enum:
-    - -9223372036854775808
-    - 9223372036854775807
-    - 1
-    - 1000
-    - 1000000
-    - 1000000000
-    - 60000000000
-    - 3600000000000
-    - -9223372036854775808
-    - 9223372036854775807
-    - 1
-    - 1000
-    - 1000000
-    - 1000000000
-    - 60000000000
-    - 3600000000000
-    format: int64
-    type: integer
-    x-enum-varnames:
-    - minDuration
-    - maxDuration
-    - Nanosecond
-    - Microsecond
-    - Millisecond
-    - Second
-    - Minute
-    - Hour
-    - minDuration
-    - maxDuration
-    - Nanosecond
-    - Microsecond
-    - Millisecond
-    - Second
-    - Minute
-    - Hour
   v1.ingestAgentOSEventResponse:
     properties:
       duplicate:

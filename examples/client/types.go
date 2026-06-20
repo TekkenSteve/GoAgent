@@ -44,8 +44,8 @@ type AgentOSControlRequest struct {
 type OrchestrationRequest struct {
 	RunID     string `json:"run_id"`
 	AccountID string `json:"account_id"`
-	TeamSpec  any    `json:"team_spec,omitempty"` // map[string]any describing entity.TeamSpec
-	Steps     any    `json:"steps,omitempty"`     // []any describing []entity.Step
+	TeamSpec  any    `json:"team_spec,omitempty"` // native team spec JSON
+	Steps     any    `json:"steps,omitempty"`     // native step queue JSON
 }
 
 // ─── Response types ──────────────────────────────────────────────────────────────

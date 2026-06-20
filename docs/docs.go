@@ -2122,6 +2122,9 @@ const docTemplate = `{
                 "reason": {
                     "type": "string"
                 },
+                "started_at": {
+                    "type": "string"
+                },
                 "updated_at": {
                     "type": "string"
                 }
@@ -2250,320 +2253,6 @@ const docTemplate = `{
                 "SignalConfigPatch",
                 "SignalMemoryPatch"
             ]
-        },
-        "entity.AgentSpec": {
-            "type": "object",
-            "properties": {
-                "config": {
-                    "$ref": "#/definitions/entity.LLMConfig"
-                },
-                "id": {
-                    "type": "string"
-                },
-                "model_ref": {
-                    "type": "string"
-                },
-                "name": {
-                    "type": "string"
-                },
-                "system_prompt": {
-                    "type": "string"
-                },
-                "tools": {
-                    "type": "array",
-                    "items": {
-                        "$ref": "#/definitions/entity.ToolBinding"
-                    }
-                },
-                "version": {
-                    "type": "string"
-                }
-            }
-        },
-        "entity.ContinuePolicy": {
-            "type": "object",
-            "properties": {
-                "max_depth": {
-                    "description": "max step queue length",
-                    "type": "integer"
-                },
-                "max_rounds": {
-                    "description": "max workflow loop iterations",
-                    "type": "integer"
-                }
-            }
-        },
-        "entity.LLMConfig": {
-            "type": "object",
-            "properties": {
-                "max_tokens": {
-                    "type": "integer"
-                },
-                "model": {
-                    "type": "string"
-                },
-                "provider": {
-                    "description": "target provider name; empty = use default",
-                    "type": "string"
-                },
-                "temperature": {
-                    "type": "number"
-                }
-            }
-        },
-        "entity.Step": {
-            "type": "object",
-            "properties": {
-                "agent_id": {
-                    "description": "StepAgent",
-                    "type": "string"
-                },
-                "depends_on": {
-                    "description": "step IDs this depends on",
-                    "type": "array",
-                    "items": {
-                        "type": "string"
-                    }
-                },
-                "error": {
-                    "description": "failure reason",
-                    "type": "string"
-                },
-                "id": {
-                    "type": "string"
-                },
-                "input": {
-                    "type": "object",
-                    "additionalProperties": {}
-                },
-                "name": {
-                    "type": "string"
-                },
-                "on_result": {
-                    "description": "dynamic queue mutation",
-                    "allOf": [
-                        {
-                            "$ref": "#/definitions/entity.StepMutation"
-                        }
-                    ]
-                },
-                "result": {
-                    "description": "populated after execution",
-                    "type": "object",
-                    "additionalProperties": {}
-                },
-                "status": {
-                    "$ref": "#/definitions/entity.StepStatus"
-                },
-                "tool": {
-                    "description": "StepTool",
-                    "type": "string"
-                },
-                "type": {
-                    "$ref": "#/definitions/entity.StepType"
-                },
-                "wait_for": {
-                    "description": "StepWait config",
-                    "allOf": [
-                        {
-                            "$ref": "#/definitions/entity.WaitCondition"
-                        }
-                    ]
-                }
-            }
-        },
-        "entity.StepMutation": {
-            "type": "object",
-            "properties": {
-                "append_after": {
-                    "description": "insert after this step ID",
-                    "type": "string"
-                },
-                "delete_steps": {
-                    "description": "delete these step IDs",
-                    "type": "array",
-                    "items": {
-                        "type": "string"
-                    }
-                },
-                "insert_steps": {
-                    "description": "steps to insert",
-                    "type": "array",
-                    "items": {
-                        "$ref": "#/definitions/entity.Step"
-                    }
-                },
-                "modify_step": {
-                    "description": "replace this step ID",
-                    "type": "string"
-                }
-            }
-        },
-        "entity.StepStatus": {
-            "type": "string",
-            "enum": [
-                "pending",
-                "running",
-                "completed",
-                "failed",
-                "waiting",
-                "blocked"
-            ],
-            "x-enum-comments": {
-                "StepBlocked": "blocked on dependency",
-                "StepWaiting": "blocked on signal/timer"
-            },
-            "x-enum-descriptions": [
-                "",
-                "",
-                "",
-                "",
-                "blocked on signal/timer",
-                "blocked on dependency"
-            ],
-            "x-enum-varnames": [
-                "StepPending",
-                "StepRunning",
-                "StepCompleted",
-                "StepFailed",
-                "StepWaiting",
-                "StepBlocked"
-            ]
-        },
-        "entity.StepTemplate": {
-            "type": "object",
-            "properties": {
-                "agent_ref": {
-                    "description": "TeamSpec.Agents[i].ID",
-                    "type": "string"
-                },
-                "depends_on": {
-                    "type": "array",
-                    "items": {
-                        "type": "string"
-                    }
-                },
-                "id": {
-                    "type": "string"
-                },
-                "input": {
-                    "type": "object",
-                    "additionalProperties": {}
-                },
-                "on_result": {
-                    "$ref": "#/definitions/entity.StepMutation"
-                },
-                "tool": {
-                    "type": "string"
-                },
-                "type": {
-                    "$ref": "#/definitions/entity.StepType"
-                },
-                "wait_for": {
-                    "$ref": "#/definitions/entity.WaitCondition"
-                }
-            }
-        },
-        "entity.StepType": {
-            "type": "string",
-            "enum": [
-                "agent",
-                "tool",
-                "wait",
-                "split",
-                "join",
-                "eval"
-            ],
-            "x-enum-comments": {
-                "StepAgent": "Start child AgentWorkflow and wait",
-                "StepEval": "Conditional branch based on prior result",
-                "StepJoin": "Fan-in from parallel sub-steps",
-                "StepSplit": "Fan-out into parallel sub-steps",
-                "StepTool": "Execute tool directly",
-                "StepWait": "Wait for Temporal Signal or Timer"
-            },
-            "x-enum-descriptions": [
-                "Start child AgentWorkflow and wait",
-                "Execute tool directly",
-                "Wait for Temporal Signal or Timer",
-                "Fan-out into parallel sub-steps",
-                "Fan-in from parallel sub-steps",
-                "Conditional branch based on prior result"
-            ],
-            "x-enum-varnames": [
-                "StepAgent",
-                "StepTool",
-                "StepWait",
-                "StepSplit",
-                "StepJoin",
-                "StepEval"
-            ]
-        },
-        "entity.TeamSpec": {
-            "type": "object",
-            "properties": {
-                "agents": {
-                    "type": "array",
-                    "items": {
-                        "$ref": "#/definitions/entity.AgentSpec"
-                    }
-                },
-                "id": {
-                    "type": "string"
-                },
-                "name": {
-                    "type": "string"
-                },
-                "steps": {
-                    "type": "array",
-                    "items": {
-                        "$ref": "#/definitions/entity.StepTemplate"
-                    }
-                },
-                "sub_teams": {
-                    "type": "array",
-                    "items": {
-                        "$ref": "#/definitions/entity.TeamSpec"
-                    }
-                }
-            }
-        },
-        "entity.ToolBinding": {
-            "type": "object",
-            "properties": {
-                "description": {
-                    "description": "override default",
-                    "type": "string"
-                },
-                "name": {
-                    "type": "string"
-                },
-                "required": {
-                    "description": "fail if unavailable",
-                    "type": "boolean"
-                }
-            }
-        },
-        "entity.WaitCondition": {
-            "type": "object",
-            "properties": {
-                "on_timeout": {
-                    "description": "\"timeout\" | \"skip\" | \"fail\"",
-                    "type": "string"
-                },
-                "signal_name": {
-                    "description": "Temporal Signal to wait for",
-                    "type": "string"
-                },
-                "timeout": {
-                    "description": "max wait duration",
-                    "allOf": [
-                        {
-                            "$ref": "#/definitions/time.Duration"
-                        }
-                    ]
-                }
-            }
         },
         "request.AgentOSControl": {
             "type": "object",
@@ -2790,7 +2479,7 @@ const docTemplate = `{
                     "example": "acct-001"
                 },
                 "continue_policy": {
-                    "$ref": "#/definitions/entity.ContinuePolicy"
+                    "type": "object"
                 },
                 "max_depth": {
                     "type": "integer"
@@ -2805,14 +2494,14 @@ const docTemplate = `{
                 "steps": {
                     "type": "array",
                     "items": {
-                        "$ref": "#/definitions/entity.Step"
+                        "type": "object"
                     }
                 },
                 "system_prompt": {
                     "type": "string"
                 },
                 "team_spec": {
-                    "$ref": "#/definitions/entity.TeamSpec"
+                    "type": "object"
                 }
             }
         },
@@ -2844,46 +2533,6 @@ const docTemplate = `{
                     "type": "integer"
                 }
             }
-        },
-        "time.Duration": {
-            "type": "integer",
-            "format": "int64",
-            "enum": [
-                -9223372036854775808,
-                9223372036854775807,
-                1,
-                1000,
-                1000000,
-                1000000000,
-                60000000000,
-                3600000000000,
-                -9223372036854775808,
-                9223372036854775807,
-                1,
-                1000,
-                1000000,
-                1000000000,
-                60000000000,
-                3600000000000
-            ],
-            "x-enum-varnames": [
-                "minDuration",
-                "maxDuration",
-                "Nanosecond",
-                "Microsecond",
-                "Millisecond",
-                "Second",
-                "Minute",
-                "Hour",
-                "minDuration",
-                "maxDuration",
-                "Nanosecond",
-                "Microsecond",
-                "Millisecond",
-                "Second",
-                "Minute",
-                "Hour"
-            ]
         },
         "v1.ingestAgentOSEventResponse": {
             "type": "object",
