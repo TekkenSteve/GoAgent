@@ -55,7 +55,9 @@ func TestAgentOSPlanPostgresDurablePersistence(t *testing.T) {
 		"plans_status_json_matches_columns",
 		"plan_nodes_status_json_matches_columns",
 	)
+	assertPostgresUniqueConstraint(t, pg, "plans_tenant_plan_unique")
 	assertPostgresForeignKeyConstraint(t, pg, "run_backend_index_plan_node_fk")
+	assertPostgresForeignKeyConstraint(t, pg, "run_backend_index_plan_tenant_fk")
 	assertPostgresForeignKeyConstraint(t, pg, "artifacts_plan_fk")
 	assertPostgresForeignKeyConstraint(t, pg, "artifacts_plan_node_fk")
 	assertPostgresForeignKeyConstraint(t, pg, "artifacts_plan_node_run_fk")
@@ -459,6 +461,32 @@ INSERT INTO plan_commands (
 	}
 	if _, err := pg.Pool.Exec(ctx, `DELETE FROM run_backend_index WHERE run_id = $1`, runSpec.RunID); err == nil {
 		t.Fatal("direct run backend ownership delete succeeded, want immutable ownership trigger rejection")
+	}
+	if _, err := pg.Pool.Exec(ctx, `
+INSERT INTO run_backend_index (
+    run_id,
+    plan_id,
+    node_id,
+    thread_id,
+    account_id,
+    project_id,
+    backend_kind,
+    backend_name,
+    idempotency_key,
+    lifecycle_state
+) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)`,
+		"wrong-tenant-route-"+suffix,
+		spec.PlanID,
+		spec.Nodes[0].NodeID,
+		runSpec.ThreadID,
+		"wrong-"+spec.AccountID,
+		spec.ProjectID,
+		string(runSpec.Backend.Kind),
+		runSpec.Backend.Name,
+		"wrong-tenant-route-"+suffix,
+		runStatus.LifecycleState,
+	); err == nil {
+		t.Fatal("direct run backend ownership insert with mismatched tenant succeeded")
 	}
 	changedRun := runSpec
 	changedRun.RunID = runSpec.RunID + "-changed"
@@ -1506,6 +1534,7 @@ func applyAgentOSPlanMigrations(t *testing.T, pg *postgres.Postgres) {
 		"20260620000017_protect_plan_command_identity.up.sql",
 		"20260620000018_constrain_plan_event_json.up.sql",
 		"20260620000019_constrain_plan_state_json.up.sql",
+		"20260620000020_constrain_run_backend_plan_tenant.up.sql",
 	} {
 		path := filepath.Join("..", "..", "..", "migrations", migration)
 		data, err := os.ReadFile(path)
@@ -1731,6 +1760,24 @@ SELECT EXISTS (
 	}
 	if !exists {
 		t.Fatalf("missing foreign key constraint %s", name)
+	}
+}
+
+func assertPostgresUniqueConstraint(t *testing.T, pg *postgres.Postgres, name string) {
+	t.Helper()
+
+	var exists bool
+	if err := pg.Pool.QueryRow(t.Context(), `
+SELECT EXISTS (
+    SELECT 1
+    FROM pg_constraint
+    WHERE conname = $1
+      AND contype = 'u'
+)`, name).Scan(&exists); err != nil {
+		t.Fatalf("query unique constraint %s: %v", name, err)
+	}
+	if !exists {
+		t.Fatalf("missing unique constraint %s", name)
 	}
 }
 
