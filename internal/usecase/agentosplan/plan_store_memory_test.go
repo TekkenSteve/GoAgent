@@ -33,9 +33,8 @@ func TestMemoryPlanStoreSavePlanStateRejectsMissingPlan(t *testing.T) {
 	spec := testRunPlanSpec("missing-plan", "missing-plan-start-key")
 
 	err := store.SavePlanState(context.Background(), PlanStateSnapshot{
-		Spec:           spec,
-		Status:         agentos.RunPlanStatus{PlanID: spec.PlanID, LifecycleState: agentos.PlanLifecycleRunning},
-		IdempotencyKey: spec.IdempotencyKey,
+		Spec:   spec,
+		Status: agentos.RunPlanStatus{PlanID: spec.PlanID, LifecycleState: agentos.PlanLifecycleRunning},
 	})
 	if !errors.Is(err, agentos.ErrPlanRouteNotFound) {
 		t.Fatalf("SavePlanState missing plan error = %v, want ErrPlanRouteNotFound", err)
@@ -47,9 +46,8 @@ func TestMemoryPlanStorePersistPlanTransitionRejectsMissingPlan(t *testing.T) {
 	spec := testRunPlanSpec("missing-plan", "missing-plan-start-key")
 
 	_, err := store.PersistPlanTransition(context.Background(), PlanStateSnapshot{
-		Spec:           spec,
-		Status:         agentos.RunPlanStatus{PlanID: spec.PlanID, LifecycleState: agentos.PlanLifecycleRunning},
-		IdempotencyKey: spec.IdempotencyKey,
+		Spec:   spec,
+		Status: agentos.RunPlanStatus{PlanID: spec.PlanID, LifecycleState: agentos.PlanLifecycleRunning},
 	}, agentos.PlanEvent{
 		Event:  agentos.Event{EventType: agentos.EventPlanStarted},
 		PlanID: spec.PlanID,
@@ -93,12 +91,92 @@ func TestMemoryPlanStorePersistPlanTransitionIsAtomic(t *testing.T) {
 		PlanID: spec.PlanID,
 	}
 	_, err := store.PersistPlanTransition(ctx, PlanStateSnapshot{
-		Spec:           spec,
-		Status:         next,
-		IdempotencyKey: "transition-key",
+		Spec:   spec,
+		Status: next,
 	}, changedEvent, "transition-key")
 	if !errors.Is(err, agentos.ErrInvalidPlanEvent) {
 		t.Fatalf("PersistPlanTransition error = %v, want ErrInvalidPlanEvent", err)
+	}
+
+	snapshot, exists, err := store.LoadPlanState(ctx, spec.PlanID)
+	if err != nil || !exists {
+		t.Fatalf("LoadPlanState exists=%v err=%v", exists, err)
+	}
+	if snapshot.Status.LifecycleState != agentos.PlanLifecycleRunning || snapshot.Status.Reason != "" {
+		t.Fatalf("snapshot status = %#v, want original running state", snapshot.Status)
+	}
+}
+
+func TestMemoryPlanStorePersistPlanTransitionRejectsEventOnlyIdempotencyKey(t *testing.T) {
+	ctx := context.Background()
+	store := NewMemoryPlanStore()
+	spec := testRunPlanSpec("plan-1", "start-key")
+	initial := agentos.RunPlanStatus{
+		PlanID:         spec.PlanID,
+		LifecycleState: agentos.PlanLifecycleRunning,
+		UpdatedAt:      time.Date(2026, 6, 20, 12, 0, 0, 0, time.UTC),
+	}
+	if _, _, err := store.CreatePlan(ctx, spec, initial); err != nil {
+		t.Fatalf("CreatePlan: %v", err)
+	}
+	event := agentos.PlanEvent{
+		Event: agentos.Event{
+			EventType: agentos.EventPlanStarted,
+			Payload:   map[string]any{"state": "running"},
+		},
+		PlanID: spec.PlanID,
+	}
+	if _, err := store.AppendPlanEvent(ctx, event, "event-only-key"); err != nil {
+		t.Fatalf("AppendPlanEvent: %v", err)
+	}
+
+	_, err := store.PersistPlanTransition(ctx, PlanStateSnapshot{
+		Spec:   spec,
+		Status: initial,
+	}, event, "event-only-key")
+	if !errors.Is(err, agentos.ErrInvalidRunPlan) {
+		t.Fatalf("PersistPlanTransition event-only key error = %v, want ErrInvalidRunPlan", err)
+	}
+}
+
+func TestMemoryPlanStorePersistPlanTransitionRejectsSnapshotReplayMismatch(t *testing.T) {
+	ctx := context.Background()
+	store := NewMemoryPlanStore()
+	spec := testRunPlanSpec("plan-1", "start-key")
+	initial := agentos.RunPlanStatus{
+		PlanID:         spec.PlanID,
+		LifecycleState: agentos.PlanLifecyclePending,
+		UpdatedAt:      time.Date(2026, 6, 20, 12, 0, 0, 0, time.UTC),
+	}
+	if _, _, err := store.CreatePlan(ctx, spec, initial); err != nil {
+		t.Fatalf("CreatePlan: %v", err)
+	}
+
+	running := initial
+	running.LifecycleState = agentos.PlanLifecycleRunning
+	event := agentos.PlanEvent{
+		Event: agentos.Event{
+			EventType: agentos.EventPlanStarted,
+			Payload:   map[string]any{"state": "running"},
+		},
+		PlanID: spec.PlanID,
+	}
+	if _, err := store.PersistPlanTransition(ctx, PlanStateSnapshot{
+		Spec:   spec,
+		Status: running,
+	}, event, "transition-key"); err != nil {
+		t.Fatalf("PersistPlanTransition first: %v", err)
+	}
+
+	changed := running
+	changed.LifecycleState = agentos.PlanLifecycleFailed
+	changed.Reason = "same event different snapshot"
+	_, err := store.PersistPlanTransition(ctx, PlanStateSnapshot{
+		Spec:   spec,
+		Status: changed,
+	}, event, "transition-key")
+	if !errors.Is(err, agentos.ErrInvalidRunPlan) {
+		t.Fatalf("PersistPlanTransition replay mismatch error = %v, want ErrInvalidRunPlan", err)
 	}
 
 	snapshot, exists, err := store.LoadPlanState(ctx, spec.PlanID)

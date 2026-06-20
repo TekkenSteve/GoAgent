@@ -63,6 +63,64 @@ func ValidatePlanStateIdentity(existing agentos.RunPlanSpec, requested agentos.R
 	return nil
 }
 
+// PlanTransitionSnapshotIdentity is the immutable content-addressed identity
+// for the reducer snapshot claimed by one transition idempotency key.
+type PlanTransitionSnapshotIdentity struct {
+	Digest string
+	JSON   []byte
+}
+
+// NewPlanTransitionSnapshotIdentity returns the stable snapshot identity that
+// must be persisted with a state-transition event. Replays compare this digest
+// instead of the latest plan state because the latest state can advance after
+// the transition being retried.
+func NewPlanTransitionSnapshotIdentity(snapshot PlanStateSnapshot, idempotencyKey string) (PlanTransitionSnapshotIdentity, error) {
+	if idempotencyKey == "" {
+		return PlanTransitionSnapshotIdentity{}, fmt.Errorf("%w: transition idempotency key is required", agentos.ErrInvalidRunPlan)
+	}
+	identityJSON, err := json.Marshal(planTransitionIdempotencyIdentity(snapshot, idempotencyKey))
+	if err != nil {
+		return PlanTransitionSnapshotIdentity{}, fmt.Errorf("%w: marshal plan transition identity: %s", agentos.ErrInvalidRunPlan, err)
+	}
+	sum := sha256.Sum256(identityJSON)
+
+	return PlanTransitionSnapshotIdentity{
+		Digest: "sha256:" + hex.EncodeToString(sum[:]),
+		JSON:   identityJSON,
+	}, nil
+}
+
+// ValidatePlanTransitionIdempotency verifies that a replayed reducer
+// transition carries the same durable snapshot that originally claimed the
+// transition idempotency key.
+func ValidatePlanTransitionIdempotency(existingDigest string, requested PlanTransitionSnapshotIdentity) error {
+	if requested.Digest == "" {
+		return fmt.Errorf("%w: requested transition snapshot digest is required", agentos.ErrInvalidRunPlan)
+	}
+	if existingDigest == "" {
+		return fmt.Errorf("%w: transition idempotency key was not claimed by a reducer snapshot", agentos.ErrInvalidRunPlan)
+	}
+	if existingDigest != requested.Digest {
+		return fmt.Errorf("%w: transition idempotency key was reused with a different reducer snapshot", agentos.ErrInvalidRunPlan)
+	}
+
+	return nil
+}
+
+type planTransitionIdempotencyFields struct {
+	Spec           agentos.RunPlanSpec   `json:"spec"`
+	Status         agentos.RunPlanStatus `json:"status"`
+	IdempotencyKey string                `json:"idempotency_key"`
+}
+
+func planTransitionIdempotencyIdentity(snapshot PlanStateSnapshot, idempotencyKey string) planTransitionIdempotencyFields {
+	return planTransitionIdempotencyFields{
+		Spec:           snapshot.Spec,
+		Status:         snapshot.Status,
+		IdempotencyKey: idempotencyKey,
+	}
+}
+
 type planStateIdentityFields struct {
 	PlanID         string             `json:"plan_id"`
 	ThreadID       string             `json:"thread_id,omitempty"`

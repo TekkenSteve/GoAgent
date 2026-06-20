@@ -13,15 +13,16 @@ import (
 // MemoryPlanStore is an explicit in-process PlanIndex, PlanTransitionStore,
 // PlanStateStore, and PlanEventStore for unit tests and embedded demos.
 type MemoryPlanStore struct {
-	mu        sync.RWMutex
-	specs     map[string]agentos.RunPlanSpec
-	statuses  map[string]agentos.RunPlanStatus
-	planKeys  map[planStartKey]string
-	events    map[string][]agentos.PlanEvent
-	eventKeys map[planEventIdempotencyKey]agentos.PlanEvent
-	commands  map[PlanCommandRef]PlanCommandRecord
-	auditKeys map[AuditRef]AuditRecord
-	metrics   map[planMetricCheckpointKey]PlanMetricCheckpoint
+	mu                  sync.RWMutex
+	specs               map[string]agentos.RunPlanSpec
+	statuses            map[string]agentos.RunPlanStatus
+	planKeys            map[planStartKey]string
+	events              map[string][]agentos.PlanEvent
+	eventKeys           map[planEventIdempotencyKey]agentos.PlanEvent
+	transitionSnapshots map[planEventIdempotencyKey]string
+	commands            map[PlanCommandRef]PlanCommandRecord
+	auditKeys           map[AuditRef]AuditRecord
+	metrics             map[planMetricCheckpointKey]PlanMetricCheckpoint
 }
 
 type planEventIdempotencyKey struct {
@@ -54,14 +55,15 @@ func planMetricCheckpointKeyFromRef(exporterID string, ref agentos.PlanRef) plan
 // NewMemoryPlanStore creates an empty in-memory plan store.
 func NewMemoryPlanStore() *MemoryPlanStore {
 	return &MemoryPlanStore{
-		specs:     make(map[string]agentos.RunPlanSpec),
-		statuses:  make(map[string]agentos.RunPlanStatus),
-		planKeys:  make(map[planStartKey]string),
-		events:    make(map[string][]agentos.PlanEvent),
-		eventKeys: make(map[planEventIdempotencyKey]agentos.PlanEvent),
-		commands:  make(map[PlanCommandRef]PlanCommandRecord),
-		auditKeys: make(map[AuditRef]AuditRecord),
-		metrics:   make(map[planMetricCheckpointKey]PlanMetricCheckpoint),
+		specs:               make(map[string]agentos.RunPlanSpec),
+		statuses:            make(map[string]agentos.RunPlanStatus),
+		planKeys:            make(map[planStartKey]string),
+		events:              make(map[string][]agentos.PlanEvent),
+		eventKeys:           make(map[planEventIdempotencyKey]agentos.PlanEvent),
+		transitionSnapshots: make(map[planEventIdempotencyKey]string),
+		commands:            make(map[PlanCommandRef]PlanCommandRecord),
+		auditKeys:           make(map[AuditRef]AuditRecord),
+		metrics:             make(map[planMetricCheckpointKey]PlanMetricCheckpoint),
 	}
 }
 
@@ -99,11 +101,7 @@ func (s *MemoryPlanStore) CreatePlan(ctx context.Context, spec agentos.RunPlanSp
 		return existingStatus, false, nil
 	}
 
-	snapshot := PlanStateSnapshot{
-		Spec:           spec,
-		Status:         status,
-		IdempotencyKey: spec.IdempotencyKey,
-	}
+	snapshot := PlanStateSnapshot{Spec: spec, Status: status}
 	snapshot, err := normalizeMemoryPlanStateSnapshot(snapshot)
 	if err != nil {
 		return agentos.RunPlanStatus{}, false, err
@@ -285,6 +283,10 @@ func (s *MemoryPlanStore) PersistPlanTransition(_ context.Context, snapshot Plan
 	if idempotencyKey == "" {
 		return agentos.PlanEvent{}, fmt.Errorf("%w: plan event idempotency key is required", agentos.ErrInvalidPlanEvent)
 	}
+	transitionIdentity, err := NewPlanTransitionSnapshotIdentity(snapshot, idempotencyKey)
+	if err != nil {
+		return agentos.PlanEvent{}, err
+	}
 	requestedEvent := NormalizePlanEventAppendRequest(event)
 
 	s.mu.Lock()
@@ -299,6 +301,9 @@ func (s *MemoryPlanStore) PersistPlanTransition(_ context.Context, snapshot Plan
 		if err := ValidatePlanEventIdempotency(existing, requestedEvent); err != nil {
 			return agentos.PlanEvent{}, err
 		}
+		if err := ValidatePlanTransitionIdempotency(s.transitionSnapshots[key], transitionIdentity); err != nil {
+			return agentos.PlanEvent{}, err
+		}
 
 		return existing, nil
 	}
@@ -306,7 +311,13 @@ func (s *MemoryPlanStore) PersistPlanTransition(_ context.Context, snapshot Plan
 		return agentos.PlanEvent{}, err
 	}
 
-	return s.appendPlanEventLocked(requestedEvent, idempotencyKey)
+	stored, err := s.appendPlanEventLocked(requestedEvent, idempotencyKey)
+	if err != nil {
+		return agentos.PlanEvent{}, err
+	}
+	s.transitionSnapshots[key] = transitionIdentity.Digest
+
+	return stored, nil
 }
 
 func (s *MemoryPlanStore) LoadPlanState(_ context.Context, planID string) (PlanStateSnapshot, bool, error) {
@@ -319,9 +330,8 @@ func (s *MemoryPlanStore) LoadPlanState(_ context.Context, planID string) (PlanS
 	}
 
 	return PlanStateSnapshot{
-		Spec:           spec,
-		Status:         s.statuses[planID],
-		IdempotencyKey: spec.IdempotencyKey,
+		Spec:   spec,
+		Status: s.statuses[planID],
 	}, true, nil
 }
 

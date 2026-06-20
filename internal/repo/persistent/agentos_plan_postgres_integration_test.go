@@ -48,6 +48,7 @@ func TestAgentOSPlanPostgresDurablePersistence(t *testing.T) {
 		"run_backend_index_plan_node_pair",
 		"artifacts_node_run_pair",
 		"audit_logs_node_run_pair",
+		"plan_events_transition_snapshot_pair",
 	)
 	assertPostgresForeignKeyConstraint(t, pg, "run_backend_index_plan_node_fk")
 	assertPostgresForeignKeyConstraint(t, pg, "artifacts_plan_fk")
@@ -101,9 +102,8 @@ func TestAgentOSPlanPostgresDurablePersistence(t *testing.T) {
 	nodeStatus.Nodes[0].LifecycleState = agentos.PlanNodeSucceeded
 	nodeStatus.Nodes[0].Reason = "node table source"
 	if err := planRepo.SavePlanState(ctx, agentosplan.PlanStateSnapshot{
-		Spec:           spec,
-		Status:         nodeStatus,
-		IdempotencyKey: spec.IdempotencyKey,
+		Spec:   spec,
+		Status: nodeStatus,
 	}); err != nil {
 		t.Fatalf("SavePlanState node source: %v", err)
 	}
@@ -598,9 +598,8 @@ func TestAgentOSPlanPostgresSavePlanStateRejectsMissingPlan(t *testing.T) {
 	spec := postgresIntegrationPlanSpec("plan-state-missing-"+suffix, "plan-state-missing-start-"+suffix)
 
 	err := planRepo.SavePlanState(ctx, agentosplan.PlanStateSnapshot{
-		Spec:           spec,
-		Status:         agentosplan.NewState(spec, time.Now().UTC()).Status,
-		IdempotencyKey: spec.IdempotencyKey,
+		Spec:   spec,
+		Status: agentosplan.NewState(spec, time.Now().UTC()).Status,
 	})
 	if !errors.Is(err, agentos.ErrPlanRouteNotFound) {
 		t.Fatalf("SavePlanState missing plan error = %v, want ErrPlanRouteNotFound", err)
@@ -613,9 +612,8 @@ func TestAgentOSPlanPostgresPersistPlanTransitionRejectsMissingPlan(t *testing.T
 	spec := postgresIntegrationPlanSpec("plan-transition-missing-"+suffix, "plan-transition-missing-start-"+suffix)
 
 	_, err := planRepo.PersistPlanTransition(ctx, agentosplan.PlanStateSnapshot{
-		Spec:           spec,
-		Status:         agentosplan.NewState(spec, time.Now().UTC()).Status,
-		IdempotencyKey: spec.IdempotencyKey,
+		Spec:   spec,
+		Status: agentosplan.NewState(spec, time.Now().UTC()).Status,
 	}, agentos.PlanEvent{
 		Event:  agentos.Event{EventType: agentos.EventPlanStarted},
 		PlanID: spec.PlanID,
@@ -722,12 +720,78 @@ func TestAgentOSPlanPostgresPersistPlanTransitionIsAtomic(t *testing.T) {
 		PlanID: spec.PlanID,
 	}
 	_, err := planRepo.PersistPlanTransition(ctx, agentosplan.PlanStateSnapshot{
-		Spec:           spec,
-		Status:         next,
-		IdempotencyKey: "transition-key-" + suffix,
+		Spec:   spec,
+		Status: next,
 	}, changedEvent, "transition-key-"+suffix)
 	if !errors.Is(err, agentos.ErrInvalidPlanEvent) {
 		t.Fatalf("PersistPlanTransition error = %v, want ErrInvalidPlanEvent", err)
+	}
+
+	snapshot, exists, err := planRepo.LoadPlanState(ctx, spec.PlanID)
+	if err != nil || !exists {
+		t.Fatalf("LoadPlanState exists=%v err=%v", exists, err)
+	}
+	if snapshot.Status.LifecycleState != agentos.PlanLifecycleRunning || snapshot.Status.Reason != "" {
+		t.Fatalf("snapshot status = %#v, want original running state", snapshot.Status)
+	}
+	events, err := planRepo.ListPlanEvents(ctx, postgresIntegrationPlanStreamScope(spec), 0)
+	if err != nil {
+		t.Fatalf("ListPlanEvents: %v", err)
+	}
+	if len(events) != 1 || events[0].EventType != agentos.EventPlanStarted {
+		t.Fatalf("events = %#v, want only original event", events)
+	}
+}
+
+func TestAgentOSPlanPostgresPersistPlanTransitionRejectsSnapshotReplayMismatch(t *testing.T) {
+	ctx, pg, suffix := newAgentOSPlanPostgresIntegrationDB(t)
+	planRepo := NewAgentOSPlanRepo(pg)
+
+	spec := postgresIntegrationPlanSpec("plan-transition-replay-"+suffix, "plan-transition-replay-start-"+suffix)
+	initial := agentosplan.NewState(spec, time.Date(2026, 6, 20, 12, 0, 0, 0, time.UTC)).Status
+	if _, _, err := planRepo.CreatePlan(ctx, spec, initial); err != nil {
+		t.Fatalf("CreatePlan: %v", err)
+	}
+
+	running := initial
+	running.LifecycleState = agentos.PlanLifecycleRunning
+	event := agentos.PlanEvent{
+		Event: agentos.Event{
+			EventType: agentos.EventPlanStarted,
+			Payload:   map[string]any{"state": "running"},
+		},
+		PlanID: spec.PlanID,
+	}
+	if _, err := planRepo.PersistPlanTransition(ctx, agentosplan.PlanStateSnapshot{
+		Spec:   spec,
+		Status: running,
+	}, event, "transition-replay-key-"+suffix); err != nil {
+		t.Fatalf("PersistPlanTransition first: %v", err)
+	}
+	var transitionDigest string
+	var transitionJSON string
+	if err := pg.Pool.QueryRow(ctx, `
+SELECT transition_snapshot_digest, transition_snapshot_json::text
+FROM plan_events
+WHERE plan_id = $1 AND idempotency_key = $2`,
+		spec.PlanID,
+		"transition-replay-key-"+suffix,
+	).Scan(&transitionDigest, &transitionJSON); err != nil {
+		t.Fatalf("transition snapshot query: %v", err)
+	}
+	if transitionDigest == "" || transitionJSON == "" {
+		t.Fatalf("transition snapshot digest=%q json=%q, want durable transition identity", transitionDigest, transitionJSON)
+	}
+
+	changed := running
+	changed.LifecycleState = agentos.PlanLifecycleFailed
+	changed.Reason = "same event different snapshot"
+	_, err := planRepo.PersistPlanTransition(ctx, agentosplan.PlanStateSnapshot{
+		Spec:   spec,
+		Status: changed,
+	}, event, "transition-replay-key-"+suffix)
+	if !errors.Is(err, agentos.ErrInvalidRunPlan) {
+		t.Fatalf("PersistPlanTransition replay mismatch error = %v, want ErrInvalidRunPlan", err)
 	}
 
 	snapshot, exists, err := planRepo.LoadPlanState(ctx, spec.PlanID)

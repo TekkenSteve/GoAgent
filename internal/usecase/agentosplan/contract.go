@@ -82,9 +82,8 @@ type PlanRefStore interface {
 
 // PlanStateSnapshot is the durable replay/audit snapshot written by plan activities.
 type PlanStateSnapshot struct {
-	Spec           agentos.RunPlanSpec
-	Status         agentos.RunPlanStatus
-	IdempotencyKey string
+	Spec   agentos.RunPlanSpec
+	Status agentos.RunPlanStatus
 }
 
 // PlanStateStore persists the latest deterministic reducer snapshot.

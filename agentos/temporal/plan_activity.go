@@ -270,9 +270,8 @@ func (a *PlanActivities) PersistPlanStateActivity(ctx context.Context, input per
 		return persistPlanStateOutput{}, fmt.Errorf("%w: plan transition store is required", agentos.ErrInvalidRunPlan)
 	}
 	event, err := a.PlanTransitionStore.PersistPlanTransition(ctx, agentosplan.PlanStateSnapshot{
-		Spec:           input.Spec,
-		Status:         input.Status,
-		IdempotencyKey: input.IdempotencyKey,
+		Spec:   input.Spec,
+		Status: input.Status,
 	}, input.Event, input.IdempotencyKey)
 	if err != nil {
 		return persistPlanStateOutput{}, err

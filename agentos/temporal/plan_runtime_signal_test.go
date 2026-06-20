@@ -204,9 +204,8 @@ func TestPlanRuntimeStartPlanDoesNotOverwriteWorkflowOwnedState(t *testing.T) {
 	temporalClient := &fakePlanTemporalClient{
 		executeFunc: func(ctx context.Context, _ client.StartWorkflowOptions, _ interface{}, _ ...interface{}) error {
 			return store.SavePlanState(ctx, agentosplan.PlanStateSnapshot{
-				Spec:           spec,
-				Status:         workflowStatus,
-				IdempotencyKey: "workflow-started-1",
+				Spec:   spec,
+				Status: workflowStatus,
 			})
 		},
 	}

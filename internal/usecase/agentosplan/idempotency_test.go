@@ -1,6 +1,7 @@
 package agentosplan
 
 import (
+	"bytes"
 	"errors"
 	"testing"
 	"time"
@@ -69,6 +70,52 @@ func TestValidatePlanStateIdentityRejectsImmutableFieldChange(t *testing.T) {
 	requested.Inputs = map[string]any{"topic": "changed"}
 
 	err := ValidatePlanStateIdentity(existing, requested)
+	if !errors.Is(err, agentos.ErrInvalidRunPlan) {
+		t.Fatalf("error = %v, want ErrInvalidRunPlan", err)
+	}
+}
+
+func TestPlanTransitionSnapshotIdentityIsContentAddressed(t *testing.T) {
+	spec := agentos.RunPlanSpec{
+		PlanID:         "plan-1",
+		AccountID:      "account-1",
+		ProjectID:      "project-1",
+		IdempotencyKey: "start-key",
+	}
+	status := agentos.RunPlanStatus{
+		PlanID:         spec.PlanID,
+		LifecycleState: agentos.PlanLifecycleRunning,
+		UpdatedAt:      time.Date(2026, 6, 20, 12, 0, 0, 0, time.UTC),
+	}
+	first, err := NewPlanTransitionSnapshotIdentity(PlanStateSnapshot{Spec: spec, Status: status}, "transition-key")
+	if err != nil {
+		t.Fatalf("NewPlanTransitionSnapshotIdentity first: %v", err)
+	}
+	second, err := NewPlanTransitionSnapshotIdentity(PlanStateSnapshot{Spec: spec, Status: status}, "transition-key")
+	if err != nil {
+		t.Fatalf("NewPlanTransitionSnapshotIdentity second: %v", err)
+	}
+	if first.Digest == "" || len(first.JSON) == 0 {
+		t.Fatalf("identity = %#v, want digest and json", first)
+	}
+	if first.Digest != second.Digest || !bytes.Equal(first.JSON, second.JSON) {
+		t.Fatalf("identity replay = %#v, want %#v", second, first)
+	}
+
+	changed := status
+	changed.LifecycleState = agentos.PlanLifecycleFailed
+	changedIdentity, err := NewPlanTransitionSnapshotIdentity(PlanStateSnapshot{Spec: spec, Status: changed}, "transition-key")
+	if err != nil {
+		t.Fatalf("NewPlanTransitionSnapshotIdentity changed: %v", err)
+	}
+	if changedIdentity.Digest == first.Digest {
+		t.Fatalf("changed digest = %q, want different from %q", changedIdentity.Digest, first.Digest)
+	}
+}
+
+func TestValidatePlanTransitionIdempotencyRequiresTransitionSnapshot(t *testing.T) {
+	identity := PlanTransitionSnapshotIdentity{Digest: "sha256:abc"}
+	err := ValidatePlanTransitionIdempotency("", identity)
 	if !errors.Is(err, agentos.ErrInvalidRunPlan) {
 		t.Fatalf("error = %v, want ErrInvalidRunPlan", err)
 	}

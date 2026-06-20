@@ -58,9 +58,8 @@ func (r *AgentOSPlanRepo) CreatePlan(ctx context.Context, spec agentos.RunPlanSp
 		return existing, false, nil
 	}
 	createdStatus, err := r.createPlanState(ctx, agentosplan.PlanStateSnapshot{
-		Spec:           spec,
-		Status:         status,
-		IdempotencyKey: spec.IdempotencyKey,
+		Spec:   spec,
+		Status: status,
 	})
 	if err != nil {
 		if isPostgresUniqueViolation(err) {
@@ -431,7 +430,7 @@ func (r *AgentOSPlanRepo) LoadPlanState(ctx context.Context, planID string) (age
 
 func (r *AgentOSPlanRepo) loadPlanStateByWhere(ctx context.Context, where sq.Eq, op string) (agentosplan.PlanStateSnapshot, bool, error) {
 	sql, args, err := r.Builder.
-		Select("spec_json", "status_json", "idempotency_key").
+		Select("spec_json", "status_json").
 		From("plans").
 		Where(where).
 		ToSql()
@@ -441,8 +440,7 @@ func (r *AgentOSPlanRepo) loadPlanStateByWhere(ctx context.Context, where sq.Eq,
 
 	var specJSON []byte
 	var statusJSON []byte
-	var idempotencyKey string
-	err = r.Pool.QueryRow(ctx, sql, args...).Scan(&specJSON, &statusJSON, &idempotencyKey)
+	err = r.Pool.QueryRow(ctx, sql, args...).Scan(&specJSON, &statusJSON)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return agentosplan.PlanStateSnapshot{}, false, nil
@@ -471,9 +469,8 @@ func (r *AgentOSPlanRepo) loadPlanStateByWhere(ctx context.Context, where sq.Eq,
 	status = state.Status
 
 	return agentosplan.PlanStateSnapshot{
-		Spec:           spec,
-		Status:         status,
-		IdempotencyKey: idempotencyKey,
+		Spec:   spec,
+		Status: status,
 	}, true, nil
 }
 
@@ -587,6 +584,10 @@ func (r *AgentOSPlanRepo) PersistPlanTransition(ctx context.Context, snapshot ag
 	if event.PlanID != snapshot.Spec.PlanID {
 		return agentos.PlanEvent{}, fmt.Errorf("%w: event plan %q does not match snapshot plan %q", agentos.ErrInvalidPlanEvent, event.PlanID, snapshot.Spec.PlanID)
 	}
+	transitionIdentity, err := agentosplan.NewPlanTransitionSnapshotIdentity(snapshot, idempotencyKey)
+	if err != nil {
+		return agentos.PlanEvent{}, err
+	}
 	event, err = agentosplan.ScopePlanEventToSpec(event, snapshot.Spec)
 	if err != nil {
 		return agentos.PlanEvent{}, err
@@ -615,18 +616,21 @@ FOR UPDATE`, event.PlanID).Scan(&scope.AccountID, &scope.ProjectID)
 			return agentos.PlanEvent{}, err
 		}
 		if exists {
-			if err := agentosplan.ValidatePlanEventIdempotency(existing, event); err != nil {
+			if err := agentosplan.ValidatePlanEventIdempotency(existing.Event, event); err != nil {
+				return agentos.PlanEvent{}, err
+			}
+			if err := agentosplan.ValidatePlanTransitionIdempotency(existing.TransitionSnapshotDigest, transitionIdentity); err != nil {
 				return agentos.PlanEvent{}, err
 			}
 
-			return existing, nil
+			return existing.Event, nil
 		}
 	}
 
 	if err := r.savePlanStateWithTx(ctx, tx, snapshot, false); err != nil {
 		return agentos.PlanEvent{}, err
 	}
-	stored, err := r.appendPlanEventWithTx(ctx, tx, event, idempotencyKey)
+	stored, err := r.appendPlanEventWithTx(ctx, tx, event, idempotencyKey, transitionIdentity)
 	if err != nil {
 		return agentos.PlanEvent{}, err
 	}
@@ -651,7 +655,7 @@ func (r *AgentOSPlanRepo) AppendPlanEvent(ctx context.Context, event agentos.Pla
 		_ = tx.Rollback(ctx)
 	}()
 
-	stored, err := r.appendPlanEventWithTx(ctx, tx, event, idempotencyKey)
+	stored, err := r.appendPlanEventWithTx(ctx, tx, event, idempotencyKey, agentosplan.PlanTransitionSnapshotIdentity{})
 	if err != nil {
 		return agentos.PlanEvent{}, err
 	}
@@ -673,7 +677,7 @@ func normalizePlanEventAppendForPostgres(event agentos.PlanEvent, idempotencyKey
 	return agentosplan.NormalizePlanEventAppendRequest(event), nil
 }
 
-func (r *AgentOSPlanRepo) appendPlanEventWithTx(ctx context.Context, tx pgx.Tx, requestedEvent agentos.PlanEvent, idempotencyKey string) (agentos.PlanEvent, error) {
+func (r *AgentOSPlanRepo) appendPlanEventWithTx(ctx context.Context, tx pgx.Tx, requestedEvent agentos.PlanEvent, idempotencyKey string, transitionIdentity agentosplan.PlanTransitionSnapshotIdentity) (agentos.PlanEvent, error) {
 	event := requestedEvent
 	var currentSequence int64
 	var scope planTenantScope
@@ -704,11 +708,16 @@ FOR UPDATE`, event.PlanID).Scan(&currentSequence, &scope.AccountID, &scope.Proje
 		return agentos.PlanEvent{}, err
 	}
 	if exists {
-		if err := agentosplan.ValidatePlanEventIdempotency(existing, requestedEvent); err != nil {
+		if err := agentosplan.ValidatePlanEventIdempotency(existing.Event, requestedEvent); err != nil {
 			return agentos.PlanEvent{}, err
 		}
+		if transitionIdentity.Digest != "" {
+			if err := agentosplan.ValidatePlanTransitionIdempotency(existing.TransitionSnapshotDigest, transitionIdentity); err != nil {
+				return agentos.PlanEvent{}, err
+			}
+		}
 
-		return existing, nil
+		return existing.Event, nil
 	}
 
 	event.Sequence = currentSequence + 1
@@ -746,11 +755,18 @@ INSERT INTO plan_events (
     event_type,
     sequence,
     idempotency_key,
+    transition_snapshot_digest,
+    transition_snapshot_json,
     payload_json,
     event_json,
     timestamp
-) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)
+) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)
 RETURNING event_json`
+	transitionSnapshotDigest := transitionIdentity.Digest
+	var transitionSnapshotJSON any
+	if transitionIdentity.Digest != "" {
+		transitionSnapshotJSON = transitionIdentity.JSON
+	}
 
 	var storedJSON []byte
 	err = tx.QueryRow(ctx, insertSQL,
@@ -763,6 +779,8 @@ RETURNING event_json`
 		string(event.EventType),
 		event.Sequence,
 		idempotencyKey,
+		transitionSnapshotDigest,
+		transitionSnapshotJSON,
 		payloadJSON,
 		eventJSON,
 		event.Timestamp,
@@ -774,11 +792,16 @@ RETURNING event_json`
 				return agentos.PlanEvent{}, lookupErr
 			}
 			if exists {
-				if err := agentosplan.ValidatePlanEventIdempotency(existing, requestedEvent); err != nil {
+				if err := agentosplan.ValidatePlanEventIdempotency(existing.Event, requestedEvent); err != nil {
 					return agentos.PlanEvent{}, err
 				}
+				if transitionIdentity.Digest != "" {
+					if err := agentosplan.ValidatePlanTransitionIdempotency(existing.TransitionSnapshotDigest, transitionIdentity); err != nil {
+						return agentos.PlanEvent{}, err
+					}
+				}
 
-				return existing, nil
+				return existing.Event, nil
 			}
 		}
 
@@ -797,9 +820,14 @@ type planEventRowQuerier interface {
 	QueryRow(ctx context.Context, sql string, args ...any) pgx.Row
 }
 
-func (r *AgentOSPlanRepo) planEventByIdempotencyKeyWith(ctx context.Context, querier planEventRowQuerier, scope planTenantScope, planID, idempotencyKey string) (agentos.PlanEvent, bool, error) {
+type planEventIdempotencyRecord struct {
+	Event                    agentos.PlanEvent
+	TransitionSnapshotDigest string
+}
+
+func (r *AgentOSPlanRepo) planEventByIdempotencyKeyWith(ctx context.Context, querier planEventRowQuerier, scope planTenantScope, planID, idempotencyKey string) (planEventIdempotencyRecord, bool, error) {
 	sql, args, err := r.Builder.
-		Select("event_json").
+		Select("event_json", "transition_snapshot_digest").
 		From("plan_events").
 		Where(sq.Eq{
 			"account_id":      scope.AccountID,
@@ -809,25 +837,29 @@ func (r *AgentOSPlanRepo) planEventByIdempotencyKeyWith(ctx context.Context, que
 		}).
 		ToSql()
 	if err != nil {
-		return agentos.PlanEvent{}, false, fmt.Errorf("AgentOSPlanRepo - planEventByIdempotencyKey - builder: %w", err)
+		return planEventIdempotencyRecord{}, false, fmt.Errorf("AgentOSPlanRepo - planEventByIdempotencyKey - builder: %w", err)
 	}
 
 	var eventJSON []byte
-	err = querier.QueryRow(ctx, sql, args...).Scan(&eventJSON)
+	var transitionSnapshotDigest string
+	err = querier.QueryRow(ctx, sql, args...).Scan(&eventJSON, &transitionSnapshotDigest)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
-			return agentos.PlanEvent{}, false, nil
+			return planEventIdempotencyRecord{}, false, nil
 		}
 
-		return agentos.PlanEvent{}, false, fmt.Errorf("AgentOSPlanRepo - planEventByIdempotencyKey - query: %w", err)
+		return planEventIdempotencyRecord{}, false, fmt.Errorf("AgentOSPlanRepo - planEventByIdempotencyKey - query: %w", err)
 	}
 
 	event, err := agentos.UnmarshalPlanEvent(eventJSON)
 	if err != nil {
-		return agentos.PlanEvent{}, false, err
+		return planEventIdempotencyRecord{}, false, err
 	}
 
-	return event, true, nil
+	return planEventIdempotencyRecord{
+		Event:                    event,
+		TransitionSnapshotDigest: transitionSnapshotDigest,
+	}, true, nil
 }
 
 func (r *AgentOSPlanRepo) ListPlanEvents(ctx context.Context, scope agentos.PlanStreamScope, limit int) ([]agentos.PlanEvent, error) {
