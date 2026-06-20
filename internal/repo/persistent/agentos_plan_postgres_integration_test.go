@@ -47,11 +47,15 @@ func TestAgentOSPlanPostgresDurablePersistence(t *testing.T) {
 		"plan_metric_checkpoints_project_id_required",
 		"run_backend_index_plan_node_pair",
 		"artifacts_node_run_pair",
+		"audit_logs_node_run_pair",
 	)
 	assertPostgresForeignKeyConstraint(t, pg, "run_backend_index_plan_node_fk")
 	assertPostgresForeignKeyConstraint(t, pg, "artifacts_plan_fk")
 	assertPostgresForeignKeyConstraint(t, pg, "artifacts_plan_node_fk")
 	assertPostgresForeignKeyConstraint(t, pg, "artifacts_plan_node_run_fk")
+	assertPostgresForeignKeyConstraint(t, pg, "audit_logs_plan_fk")
+	assertPostgresForeignKeyConstraint(t, pg, "audit_logs_plan_node_fk")
+	assertPostgresForeignKeyConstraint(t, pg, "audit_logs_plan_node_run_fk")
 
 	ctx := t.Context()
 	planRepo := NewAgentOSPlanRepo(pg)
@@ -235,6 +239,9 @@ func TestAgentOSPlanPostgresDurablePersistence(t *testing.T) {
 	if deliveredCommand.Status != agentosplan.PlanCommandDelivered || deliveredCommand.FailureReason != "" {
 		t.Fatalf("delivered command = %#v", deliveredCommand)
 	}
+	if _, err := planRepo.MarkPlanCommandFailed(ctx, agentosplan.PlanCommandRefFromRecord(command), "late failure"); !errors.Is(err, agentos.ErrInvalidRunPlan) {
+		t.Fatalf("MarkPlanCommandFailed delivered command error = %v, want ErrInvalidRunPlan", err)
+	}
 	failedCommand, created, err := planRepo.RecordPlanCommand(ctx, agentosplan.PlanCommandRecord{
 		PlanID:         spec.PlanID,
 		ActorID:        "operator-1",
@@ -270,6 +277,35 @@ func TestAgentOSPlanPostgresDurablePersistence(t *testing.T) {
 		t.Fatalf("NodeStartIdempotencyKey: %v", err)
 	}
 	runStatus := agentos.RunStatus{RunID: runSpec.RunID, LifecycleState: "running"}
+	if _, _, err := planRepo.RecordAudit(ctx, agentosplan.AuditRecord{
+		PlanID:         spec.PlanID,
+		NodeID:         spec.Nodes[0].NodeID,
+		RunID:          runSpec.RunID,
+		Action:         agentosplan.AuditActionPlanSignal,
+		IdempotencyKey: "audit-missing-route-" + suffix,
+		Payload:        map[string]any{"type": string(agentos.SignalPlanApprove)},
+	}); !errors.Is(err, agentos.ErrRunRouteNotFound) {
+		t.Fatalf("RecordAudit missing run route error = %v, want ErrRunRouteNotFound", err)
+	}
+	if _, _, err := planRepo.RecordAudit(ctx, agentosplan.AuditRecord{
+		PlanID:         spec.PlanID,
+		NodeID:         spec.Nodes[0].NodeID,
+		Action:         agentosplan.AuditActionPlanSignal,
+		IdempotencyKey: "audit-unpaired-node-" + suffix,
+		Payload:        map[string]any{"type": string(agentos.SignalPlanApprove)},
+	}); !errors.Is(err, agentos.ErrInvalidRunPlan) {
+		t.Fatalf("RecordAudit unpaired node/run error = %v, want ErrInvalidRunPlan", err)
+	}
+	if _, _, err := planRepo.RecordAudit(ctx, agentosplan.AuditRecord{
+		PlanID:         spec.PlanID,
+		NodeID:         "missing-node",
+		RunID:          runSpec.RunID,
+		Action:         agentosplan.AuditActionPlanSignal,
+		IdempotencyKey: "audit-missing-node-" + suffix,
+		Payload:        map[string]any{"type": string(agentos.SignalPlanApprove)},
+	}); !errors.Is(err, agentos.ErrInvalidRunPlan) {
+		t.Fatalf("RecordAudit missing node error = %v, want ErrInvalidRunPlan", err)
+	}
 	if err := routeIndex.BindPlanNode(ctx, spec.PlanID, spec.Nodes[0].NodeID, runSpec, runStatus); err != nil {
 		t.Fatalf("BindPlanNode first: %v", err)
 	}
@@ -344,6 +380,30 @@ func TestAgentOSPlanPostgresDurablePersistence(t *testing.T) {
 	wrongTenantRun.AccountID = "account-other-" + suffix
 	if err := routeIndex.BindPlanNode(ctx, spec.PlanID, spec.Nodes[0].NodeID, wrongTenantRun, runStatus); !errors.Is(err, agentos.ErrPlanRouteNotFound) {
 		t.Fatalf("BindPlanNode tenant mismatch error = %v, want ErrPlanRouteNotFound", err)
+	}
+	nodeAudit, created, err := planRepo.RecordAudit(ctx, agentosplan.AuditRecord{
+		PlanID:         spec.PlanID,
+		NodeID:         spec.Nodes[0].NodeID,
+		RunID:          runSpec.RunID,
+		Action:         agentosplan.AuditActionPlanSignal,
+		IdempotencyKey: "audit-node-" + suffix,
+		Payload:        map[string]any{"type": string(agentos.SignalPlanApprove)},
+	})
+	if err != nil {
+		t.Fatalf("RecordAudit node/run: %v", err)
+	}
+	if !created || nodeAudit.NodeID != spec.Nodes[0].NodeID || nodeAudit.RunID != runSpec.RunID {
+		t.Fatalf("node audit = %#v created=%v", nodeAudit, created)
+	}
+	if _, _, err := planRepo.RecordAudit(ctx, agentosplan.AuditRecord{
+		PlanID:         spec.PlanID,
+		NodeID:         spec.Nodes[0].NodeID,
+		RunID:          "wrong-run-" + suffix,
+		Action:         agentosplan.AuditActionPlanSignal,
+		IdempotencyKey: "audit-wrong-run-" + suffix,
+		Payload:        map[string]any{"type": string(agentos.SignalPlanApprove)},
+	}); !errors.Is(err, agentos.ErrInvalidRunPlan) {
+		t.Fatalf("RecordAudit wrong run error = %v, want ErrInvalidRunPlan", err)
 	}
 	standaloneRun := agentos.RunSpec{
 		RunID:          "standalone-" + suffix,
@@ -1178,6 +1238,7 @@ func applyAgentOSPlanMigrations(t *testing.T, pg *postgres.Postgres) {
 		"20260620000003_require_agentos_control_plane_scope.up.sql",
 		"20260620000004_constrain_run_backend_plan_nodes.up.sql",
 		"20260620000005_constrain_artifact_plan_scope.up.sql",
+		"20260620000006_constrain_audit_log_plan_scope.up.sql",
 	} {
 		path := filepath.Join("..", "..", "..", "migrations", migration)
 		data, err := os.ReadFile(path)

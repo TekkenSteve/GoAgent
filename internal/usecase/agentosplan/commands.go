@@ -37,6 +37,52 @@ func RecoverablePlanCommandStatuses(scope PlanCommandScope) ([]PlanCommandStatus
 	return statuses, nil
 }
 
+// NormalizeNewPlanCommandStatus validates the lifecycle state assigned to a new
+// outbox command. Commands are written before delivery, so they always enter
+// the durable log as pending.
+func NormalizeNewPlanCommandStatus(status PlanCommandStatus) (PlanCommandStatus, error) {
+	if status == "" {
+		return PlanCommandPending, nil
+	}
+	if status != PlanCommandPending {
+		return "", fmt.Errorf("%w: new command status must be %q, got %q", agentos.ErrInvalidRunPlan, PlanCommandPending, status)
+	}
+
+	return status, nil
+}
+
+// ValidatePlanCommandStatusTransition enforces the durable outbox lifecycle.
+// Delivered is terminal; failed commands remain recoverable and may later be
+// delivered or have their failure reason refreshed.
+func ValidatePlanCommandStatusTransition(current, next PlanCommandStatus) error {
+	if err := validatePlanCommandStatus(current); err != nil {
+		return err
+	}
+	if err := validatePlanCommandStatus(next); err != nil {
+		return err
+	}
+	if current == next {
+		return nil
+	}
+	if current == PlanCommandDelivered {
+		return fmt.Errorf("%w: delivered command is terminal", agentos.ErrInvalidRunPlan)
+	}
+	if next == PlanCommandPending {
+		return fmt.Errorf("%w: command status cannot move back to %q", agentos.ErrInvalidRunPlan, PlanCommandPending)
+	}
+
+	return nil
+}
+
+func validatePlanCommandStatus(status PlanCommandStatus) error {
+	switch status {
+	case PlanCommandPending, PlanCommandDelivered, PlanCommandFailed:
+		return nil
+	default:
+		return fmt.Errorf("%w: command status %q is invalid", agentos.ErrInvalidRunPlan, status)
+	}
+}
+
 func ValidatePlanCommandRef(ref PlanCommandRef) error {
 	if err := ValidatePlanRef(agentos.PlanRef{PlanID: ref.PlanID, AccountID: ref.AccountID, ProjectID: ref.ProjectID}); err != nil {
 		return err

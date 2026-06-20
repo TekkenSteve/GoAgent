@@ -344,6 +344,43 @@ func TestMemoryPlanStoreAllowsAuditKeyReuseAcrossPlans(t *testing.T) {
 	}
 }
 
+func TestMemoryPlanStoreRecordAuditRejectsInvalidNodeRunOwnership(t *testing.T) {
+	store := NewMemoryPlanStore()
+	spec := createMemoryPlanForTest(t, context.Background(), store, "plan-1")
+
+	valid := AuditRecord{
+		PlanID:         spec.PlanID,
+		NodeID:         "node-1",
+		RunID:          "run-1",
+		Action:         AuditActionPlanSignal,
+		IdempotencyKey: "valid-node-audit",
+	}
+	if _, _, err := store.RecordAudit(context.Background(), valid); err != nil {
+		t.Fatalf("RecordAudit valid node/run: %v", err)
+	}
+
+	unpaired := valid
+	unpaired.IdempotencyKey = "unpaired-node-audit"
+	unpaired.RunID = ""
+	if _, _, err := store.RecordAudit(context.Background(), unpaired); !errors.Is(err, agentos.ErrInvalidRunPlan) {
+		t.Fatalf("RecordAudit unpaired node/run error = %v, want ErrInvalidRunPlan", err)
+	}
+
+	missingNode := valid
+	missingNode.IdempotencyKey = "missing-node-audit"
+	missingNode.NodeID = "missing-node"
+	if _, _, err := store.RecordAudit(context.Background(), missingNode); !errors.Is(err, agentos.ErrInvalidRunPlan) {
+		t.Fatalf("RecordAudit missing node error = %v, want ErrInvalidRunPlan", err)
+	}
+
+	wrongRun := valid
+	wrongRun.IdempotencyKey = "wrong-run-audit"
+	wrongRun.RunID = "run-other"
+	if _, _, err := store.RecordAudit(context.Background(), wrongRun); !errors.Is(err, agentos.ErrInvalidRunPlan) {
+		t.Fatalf("RecordAudit wrong run error = %v, want ErrInvalidRunPlan", err)
+	}
+}
+
 func TestMemoryPlanStorePlanCommandLifecycleIsIdempotent(t *testing.T) {
 	store := NewMemoryPlanStore()
 	spec := createMemoryPlanForTest(t, context.Background(), store, "plan-1")
@@ -378,6 +415,16 @@ func TestMemoryPlanStorePlanCommandLifecycleIsIdempotent(t *testing.T) {
 	}
 	if delivered.Status != PlanCommandDelivered || delivered.FailureReason != "" {
 		t.Fatalf("delivered command = %#v", delivered)
+	}
+	deliveredAgain, err := store.MarkPlanCommandDelivered(context.Background(), PlanCommandRefFromRecord(first))
+	if err != nil {
+		t.Fatalf("MarkPlanCommandDelivered replay: %v", err)
+	}
+	if deliveredAgain.Status != PlanCommandDelivered {
+		t.Fatalf("delivered replay command = %#v", deliveredAgain)
+	}
+	if _, err := store.MarkPlanCommandFailed(context.Background(), PlanCommandRefFromRecord(first), "late failure"); !errors.Is(err, agentos.ErrInvalidRunPlan) {
+		t.Fatalf("MarkPlanCommandFailed delivered command error = %v, want ErrInvalidRunPlan", err)
 	}
 }
 
@@ -549,8 +596,8 @@ func TestMemoryPlanStoreAllowsCommandKeyReuseAcrossPlans(t *testing.T) {
 func TestMemoryPlanStoreListAuditRecordsFiltersAndLimits(t *testing.T) {
 	ctx := context.Background()
 	store := NewMemoryPlanStore()
-	spec := agentos.RunPlanSpec{PlanID: "plan-1", AccountID: "acct-1", ProjectID: "proj-1", IdempotencyKey: "start-1"}
-	if _, _, err := store.CreatePlan(ctx, spec, agentos.RunPlanStatus{PlanID: spec.PlanID, LifecycleState: agentos.PlanLifecycleRunning}); err != nil {
+	spec := testRunPlanSpec("plan-1", "start-1")
+	if _, _, err := store.CreatePlan(ctx, spec, NewState(spec, time.Date(2026, 6, 19, 12, 0, 0, 0, time.UTC)).Status); err != nil {
 		t.Fatalf("CreatePlan: %v", err)
 	}
 	records := []AuditRecord{
@@ -558,6 +605,7 @@ func TestMemoryPlanStoreListAuditRecordsFiltersAndLimits(t *testing.T) {
 			AuditID:        "audit-2",
 			PlanID:         spec.PlanID,
 			NodeID:         "node-1",
+			RunID:          "run-1",
 			Action:         AuditActionPlanSignal,
 			IdempotencyKey: "signal-1",
 			CreatedAt:      time.Date(2026, 6, 19, 12, 1, 0, 0, time.UTC),
@@ -566,14 +614,14 @@ func TestMemoryPlanStoreListAuditRecordsFiltersAndLimits(t *testing.T) {
 			AuditID:        "audit-1",
 			PlanID:         spec.PlanID,
 			NodeID:         "node-1",
+			RunID:          "run-1",
 			Action:         AuditActionPlanControl,
 			IdempotencyKey: "control-1",
 			CreatedAt:      time.Date(2026, 6, 19, 12, 0, 0, 0, time.UTC),
 		},
 		{
-			AuditID:        "audit-other-node",
+			AuditID:        "audit-plan-level",
 			PlanID:         spec.PlanID,
-			NodeID:         "node-2",
 			Action:         AuditActionPlanControl,
 			IdempotencyKey: "control-2",
 			CreatedAt:      time.Date(2026, 6, 19, 12, 2, 0, 0, time.UTC),
@@ -633,6 +681,7 @@ func createMemoryPlanForTest(t *testing.T, ctx context.Context, store *MemoryPla
 	status := agentos.RunPlanStatus{
 		PlanID:         spec.PlanID,
 		LifecycleState: agentos.PlanLifecycleRunning,
+		Nodes:          NewState(spec, time.Now().UTC()).Status.Nodes,
 	}
 	if _, _, err := store.CreatePlan(ctx, spec, status); err != nil {
 		t.Fatalf("CreatePlan: %v", err)

@@ -2,6 +2,7 @@ package persistent
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -1106,6 +1107,9 @@ func (r *AgentOSPlanRepo) RecordAudit(ctx context.Context, record agentosplan.Au
 
 		return existing, false, nil
 	}
+	if err := r.validateAuditOwnership(ctx, record, scope); err != nil {
+		return agentosplan.AuditRecord{}, false, err
+	}
 	if record.AuditID == "" {
 		record.AuditID = agentosplan.AuditIDFromRef(ref)
 	}
@@ -1138,8 +1142,8 @@ INSERT INTO audit_logs (
 		record.PlanID,
 		record.AccountID,
 		record.ProjectID,
-		record.RunID,
-		record.NodeID,
+		nullableString(record.RunID),
+		nullableString(record.NodeID),
 		record.ActorID,
 		string(record.Action),
 		record.IdempotencyKey,
@@ -1173,7 +1177,7 @@ func (r *AgentOSPlanRepo) GetAuditRecord(ctx context.Context, ref agentosplan.Au
 	}
 
 	sql, args, err := r.Builder.
-		Select("audit_id", "plan_id", "account_id", "project_id", "run_id", "node_id", "actor_id", "action", "idempotency_key", "payload_json", "created_at").
+		Select("audit_id", "plan_id", "account_id", "project_id", "COALESCE(run_id, '') AS run_id", "COALESCE(node_id, '') AS node_id", "actor_id", "action", "idempotency_key", "payload_json", "created_at").
 		From("audit_logs").
 		Where(sq.Eq{
 			"plan_id":         ref.PlanID,
@@ -1235,7 +1239,7 @@ func (r *AgentOSPlanRepo) ListAuditRecords(ctx context.Context, scope agentos.Pl
 	}
 
 	builder := r.Builder.
-		Select("audit_id", "plan_id", "account_id", "project_id", "run_id", "node_id", "actor_id", "action", "idempotency_key", "payload_json", "created_at").
+		Select("audit_id", "plan_id", "account_id", "project_id", "COALESCE(run_id, '') AS run_id", "COALESCE(node_id, '') AS node_id", "actor_id", "action", "idempotency_key", "payload_json", "created_at").
 		From("audit_logs").
 		Where(sq.Eq{"plan_id": scope.PlanID}).
 		Where(sq.Eq{"account_id": scope.AccountID}).
@@ -1308,6 +1312,44 @@ func scanPlanAuditRecord(scanner interface{ Scan(dest ...any) error }) (agentos.
 	return record, nil
 }
 
+func (r *AgentOSPlanRepo) validateAuditOwnership(ctx context.Context, record agentosplan.AuditRecord, scope planTenantScope) error {
+	if err := agentosplan.ValidateAuditNodeRunPair(record); err != nil {
+		return err
+	}
+	if record.NodeID == "" {
+		return nil
+	}
+
+	var nodeRunID string
+	var ownedRunID sql.NullString
+	err := r.Pool.QueryRow(ctx, `
+SELECT n.run_id, r.run_id
+FROM plan_nodes n
+LEFT JOIN run_backend_index r
+    ON r.plan_id = n.plan_id
+   AND r.node_id = n.node_id
+   AND r.run_id = $3
+   AND r.account_id = $4
+   AND r.project_id = $5
+WHERE n.plan_id = $1
+  AND n.node_id = $2`, record.PlanID, record.NodeID, record.RunID, scope.AccountID, scope.ProjectID).Scan(&nodeRunID, &ownedRunID)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return fmt.Errorf("%w: audit node %q is not durable", agentos.ErrInvalidRunPlan, record.NodeID)
+		}
+
+		return fmt.Errorf("AgentOSPlanRepo - validateAuditOwnership - query: %w", err)
+	}
+	if nodeRunID != record.RunID {
+		return fmt.Errorf("%w: audit node %q has durable run id %q, got %q", agentos.ErrInvalidRunPlan, record.NodeID, nodeRunID, record.RunID)
+	}
+	if !ownedRunID.Valid || ownedRunID.String == "" {
+		return fmt.Errorf("%w: %s", agentos.ErrRunRouteNotFound, record.RunID)
+	}
+
+	return nil
+}
+
 func (r *AgentOSPlanRepo) RecordPlanCommand(ctx context.Context, command agentosplan.PlanCommandRecord) (agentosplan.PlanCommandRecord, bool, error) {
 	if command.PlanID == "" {
 		return agentosplan.PlanCommandRecord{}, false, fmt.Errorf("%w: plan id is required", agentos.ErrInvalidRunPlan)
@@ -1342,9 +1384,11 @@ func (r *AgentOSPlanRepo) RecordPlanCommand(ctx context.Context, command agentos
 	if command.CommandID == "" {
 		command.CommandID = agentosplan.PlanCommandIDFromRef(ref)
 	}
-	if command.Status == "" {
-		command.Status = agentosplan.PlanCommandPending
+	status, err := agentosplan.NormalizeNewPlanCommandStatus(command.Status)
+	if err != nil {
+		return agentosplan.PlanCommandRecord{}, false, err
 	}
+	command.Status = status
 	if command.CreatedAt.IsZero() {
 		command.CreatedAt = time.Now().UTC()
 	}
@@ -1514,6 +1558,9 @@ func (r *AgentOSPlanRepo) updatePlanCommandStatus(ctx context.Context, ref agent
 	}
 	if !exists {
 		return agentosplan.PlanCommandRecord{}, fmt.Errorf("%w: command %q", agentos.ErrInvalidRunPlan, ref.IdempotencyKey)
+	}
+	if err := agentosplan.ValidatePlanCommandStatusTransition(command.Status, status); err != nil {
+		return agentosplan.PlanCommandRecord{}, err
 	}
 	command.Status = status
 	command.FailureReason = reason

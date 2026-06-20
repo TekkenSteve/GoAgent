@@ -482,6 +482,9 @@ func (s *MemoryPlanStore) RecordAudit(_ context.Context, record AuditRecord) (Au
 
 		return existing, false, nil
 	}
+	if err := ValidateAuditNodeRunInPlan(record, spec, s.statuses[record.PlanID]); err != nil {
+		return AuditRecord{}, false, err
+	}
 	if record.AuditID == "" {
 		record.AuditID = AuditIDFromRef(ref)
 	}
@@ -525,9 +528,11 @@ func (s *MemoryPlanStore) RecordPlanCommand(_ context.Context, command PlanComma
 	if command.CommandID == "" {
 		command.CommandID = PlanCommandIDFromRef(ref)
 	}
-	if command.Status == "" {
-		command.Status = PlanCommandPending
+	status, err := NormalizeNewPlanCommandStatus(command.Status)
+	if err != nil {
+		return PlanCommandRecord{}, false, err
 	}
+	command.Status = status
 	if command.CreatedAt.IsZero() {
 		command.CreatedAt = time.Now().UTC()
 	}
@@ -617,6 +622,9 @@ func (s *MemoryPlanStore) updatePlanCommandStatus(ref PlanCommandRef, status Pla
 	command, ok := s.commands[ref]
 	if !ok {
 		return PlanCommandRecord{}, fmt.Errorf("%w: command %q", agentos.ErrInvalidRunPlan, ref.IdempotencyKey)
+	}
+	if err := ValidatePlanCommandStatusTransition(command.Status, status); err != nil {
+		return PlanCommandRecord{}, err
 	}
 	command.Status = status
 	command.FailureReason = reason
