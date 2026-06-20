@@ -49,6 +49,50 @@ func TestPlanActivitiesStartStatusControl(t *testing.T) {
 	}
 }
 
+func TestPlanActivitiesConstructorRequiresDurableStores(t *testing.T) {
+	store := agentosplan.NewMemoryPlanStore()
+	artifactStore := agentosplan.NewMemoryArtifactStore()
+
+	_, err := NewPlanActivitiesWithCatalogAndSchemas(
+		&fakePlanRuntime{},
+		nil,
+		nil,
+		nil,
+		store,
+		nil,
+		artifactStore,
+	)
+	if !errors.Is(err, agentos.ErrInvalidRunPlan) {
+		t.Fatalf("missing state store error = %v, want ErrInvalidRunPlan", err)
+	}
+
+	_, err = NewPlanActivitiesWithCatalogAndSchemas(
+		&fakePlanRuntime{},
+		nil,
+		nil,
+		store,
+		nil,
+		nil,
+		artifactStore,
+	)
+	if !errors.Is(err, agentos.ErrInvalidRunPlan) {
+		t.Fatalf("missing event store error = %v, want ErrInvalidRunPlan", err)
+	}
+
+	_, err = NewPlanActivitiesWithCatalogAndSchemas(
+		&fakePlanRuntime{},
+		nil,
+		nil,
+		store,
+		store,
+		nil,
+		nil,
+	)
+	if !errors.Is(err, agentos.ErrInvalidArtifact) {
+		t.Fatalf("missing artifact store error = %v, want ErrInvalidArtifact", err)
+	}
+}
+
 func TestPlanActivitiesResolvePlanNodeInputMapsInput(t *testing.T) {
 	runtime := &fakePlanRuntime{}
 	activities := newTestPlanActivities(t, runtime)

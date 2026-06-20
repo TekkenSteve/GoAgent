@@ -77,6 +77,15 @@ func NewPlanActivitiesWithCatalogAndSchemas(
 	if !ok {
 		return nil, fmt.Errorf("%w: plan activity runtime must support plan-node start", agentos.ErrInvalidRunPlan)
 	}
+	if stateStore == nil {
+		return nil, fmt.Errorf("%w: plan state store is required", agentos.ErrInvalidRunPlan)
+	}
+	if eventStore == nil {
+		return nil, fmt.Errorf("%w: plan event store is required", agentos.ErrInvalidRunPlan)
+	}
+	if artifactStore == nil {
+		return nil, fmt.Errorf("%w: artifact store is required", agentos.ErrInvalidArtifact)
+	}
 	compiler, err := agentosplan.NewCELCompiler()
 	if err != nil {
 		return nil, err
