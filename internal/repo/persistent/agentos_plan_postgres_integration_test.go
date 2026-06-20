@@ -59,8 +59,9 @@ func TestAgentOSPlanPostgresDurablePersistence(t *testing.T) {
 	assertPostgresForeignKeyConstraint(t, pg, "audit_logs_plan_node_run_fk")
 	assertPostgresTrigger(t, pg, "plan_commands_status_lifecycle")
 	assertPostgresTrigger(t, pg, "plan_commands_delivered_audit")
-	assertPostgresTrigger(t, pg, "audit_logs_delivered_command_audit")
 	assertPostgresTrigger(t, pg, "plan_events_append_only")
+	assertPostgresTrigger(t, pg, "audit_logs_append_only")
+	assertPostgresTriggerAbsent(t, pg, "audit_logs_delivered_command_audit")
 
 	ctx := t.Context()
 	planRepo := NewAgentOSPlanRepo(pg)
@@ -227,6 +228,12 @@ INSERT INTO plan_commands (
 	}
 	if len(audits) != 1 || audits[0].AuditID != audit.AuditID || audits[0].Action != agentos.PlanAuditActionControl {
 		t.Fatalf("ListAuditRecords = %#v", audits)
+	}
+	if _, err := pg.Pool.Exec(ctx, `UPDATE audit_logs SET payload_json = '{}'::jsonb WHERE audit_id = $1`, audit.AuditID); err == nil {
+		t.Fatal("direct audit log update succeeded, want append-only trigger rejection")
+	}
+	if _, err := pg.Pool.Exec(ctx, `DELETE FROM audit_logs WHERE audit_id = $1`, audit.AuditID); err == nil {
+		t.Fatal("direct audit log delete succeeded, want append-only trigger rejection")
 	}
 	if _, err := planRepo.ListAuditRecords(ctx, agentos.PlanAuditScope{PlanID: spec.PlanID, AccountID: "acct-other", ProjectID: spec.ProjectID}); !errors.Is(err, agentos.ErrPlanRouteNotFound) {
 		t.Fatalf("ListAuditRecords mismatch error = %v, want ErrPlanRouteNotFound", err)
@@ -1368,6 +1375,7 @@ func applyAgentOSPlanMigrations(t *testing.T, pg *postgres.Postgres) {
 		"20260620000009_require_delivered_command_audit.up.sql",
 		"20260620000010_protect_delivered_command_audits.up.sql",
 		"20260620000011_protect_plan_events_append_only.up.sql",
+		"20260620000012_protect_audit_logs_append_only.up.sql",
 	} {
 		path := filepath.Join("..", "..", "..", "migrations", migration)
 		data, err := os.ReadFile(path)
@@ -1420,6 +1428,22 @@ SELECT EXISTS (
 func assertPostgresTrigger(t *testing.T, pg *postgres.Postgres, name string) {
 	t.Helper()
 
+	if postgresTriggerCount(t, pg, name) == 0 {
+		t.Fatalf("trigger %s is missing", name)
+	}
+}
+
+func assertPostgresTriggerAbsent(t *testing.T, pg *postgres.Postgres, name string) {
+	t.Helper()
+
+	if count := postgresTriggerCount(t, pg, name); count != 0 {
+		t.Fatalf("trigger %s exists, want absent", name)
+	}
+}
+
+func postgresTriggerCount(t *testing.T, pg *postgres.Postgres, name string) int {
+	t.Helper()
+
 	var count int
 	err := pg.Pool.QueryRow(t.Context(), `
 SELECT COUNT(*)
@@ -1429,9 +1453,8 @@ WHERE tgname = $1
 	if err != nil {
 		t.Fatalf("query trigger %s: %v", name, err)
 	}
-	if count == 0 {
-		t.Fatalf("trigger %s is missing", name)
-	}
+
+	return count
 }
 
 func postgresIndexColumns(t *testing.T, pg *postgres.Postgres, indexName string) []string {
