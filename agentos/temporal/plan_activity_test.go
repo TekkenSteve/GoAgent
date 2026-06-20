@@ -396,6 +396,70 @@ func TestPlanActivitiesPersistPlanStatePublishesStoredEvent(t *testing.T) {
 	}
 }
 
+func TestPlanActivitiesPersistPlanStateDoesNotFailOnLivePublishError(t *testing.T) {
+	activities := newTestPlanActivities(t, &fakePlanRuntime{})
+	publisher := &fakePlanEventPublisher{err: errors.New("redis unavailable")}
+	activities.PlanEventPublisher = publisher
+
+	output, err := activities.PersistPlanStateActivity(context.Background(), persistPlanStateInput{
+		Spec: agentos.RunPlanSpec{
+			PlanID:         "plan-1",
+			IdempotencyKey: "plan-start-key",
+		},
+		Status: agentos.RunPlanStatus{
+			PlanID:         "plan-1",
+			LifecycleState: agentos.PlanLifecycleRunning,
+		},
+		Event: agentos.PlanEvent{
+			Event: agentos.Event{
+				EventType: agentos.EventPlanStarted,
+			},
+			PlanID: "plan-1",
+		},
+		IdempotencyKey: "event-key",
+	})
+	if err != nil {
+		t.Fatalf("PersistPlanStateActivity live publish failure: %v", err)
+	}
+	if output.Event.Sequence == 0 {
+		t.Fatalf("persisted event sequence = %d", output.Event.Sequence)
+	}
+	if !publisher.called {
+		t.Fatal("live publisher was not called")
+	}
+}
+
+func TestPlanActivitiesPersistPlanStateDoesNotPublishWhenDurableAppendFails(t *testing.T) {
+	activities := newTestPlanActivities(t, &fakePlanRuntime{})
+	publisher := &fakePlanEventPublisher{}
+	activities.PlanEventPublisher = publisher
+	activities.PlanEventStore = failingPlanEventStore{err: errors.New("postgres unavailable")}
+
+	_, err := activities.PersistPlanStateActivity(context.Background(), persistPlanStateInput{
+		Spec: agentos.RunPlanSpec{
+			PlanID:         "plan-1",
+			IdempotencyKey: "plan-start-key",
+		},
+		Status: agentos.RunPlanStatus{
+			PlanID:         "plan-1",
+			LifecycleState: agentos.PlanLifecycleRunning,
+		},
+		Event: agentos.PlanEvent{
+			Event: agentos.Event{
+				EventType: agentos.EventPlanStarted,
+			},
+			PlanID: "plan-1",
+		},
+		IdempotencyKey: "event-key",
+	})
+	if err == nil {
+		t.Fatal("PersistPlanStateActivity succeeded despite durable append failure")
+	}
+	if publisher.called {
+		t.Fatalf("live publisher was called with event %#v despite durable append failure", publisher.event)
+	}
+}
+
 func TestPlanActivitiesEvaluatePlanExpansionValidatesDelta(t *testing.T) {
 	ref := agentos.BackendRef{Kind: agentos.BackendKindNative, Name: agentos.BackendNameGoAgentNative}
 	artifactStore := agentosplan.NewMemoryArtifactStore()
@@ -612,13 +676,28 @@ type fakePlanRuntime struct {
 }
 
 type fakePlanEventPublisher struct {
-	event agentos.PlanEvent
+	event  agentos.PlanEvent
+	err    error
+	called bool
 }
 
 func (p *fakePlanEventPublisher) PublishPlanEvent(_ context.Context, event agentos.PlanEvent) error {
+	p.called = true
 	p.event = event
 
-	return nil
+	return p.err
+}
+
+type failingPlanEventStore struct {
+	err error
+}
+
+func (s failingPlanEventStore) AppendPlanEvent(context.Context, agentos.PlanEvent, string) (agentos.PlanEvent, error) {
+	return agentos.PlanEvent{}, s.err
+}
+
+func (s failingPlanEventStore) ListPlanEvents(context.Context, agentos.PlanStreamScope, int) ([]agentos.PlanEvent, error) {
+	return nil, s.err
 }
 
 func (r *fakePlanRuntime) Start(_ context.Context, spec agentos.RunSpec) (agentos.RunStatus, error) {

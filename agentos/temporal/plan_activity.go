@@ -267,9 +267,10 @@ func (a *PlanActivities) PersistPlanStateActivity(ctx context.Context, input per
 		return persistPlanStateOutput{}, err
 	}
 	if a.PlanEventPublisher != nil {
-		if err := a.PlanEventPublisher.PublishPlanEvent(ctx, event); err != nil {
-			return persistPlanStateOutput{}, err
-		}
+		// Redis is a live transport only. The durable event source is the
+		// PlanEventStore above, so live publish failures must not block
+		// workflow progress or make Redis part of replay correctness.
+		_ = a.PlanEventPublisher.PublishPlanEvent(ctx, event)
 	}
 
 	return persistPlanStateOutput{Event: event}, nil
