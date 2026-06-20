@@ -227,6 +227,31 @@ func TestAgentOSPlanRoutesUsePlanRuntime(t *testing.T) {
 	}
 }
 
+func TestAgentOSPlanRoutesDoNotMutateRunningTopology(t *testing.T) {
+	app := fiber.New()
+	NewRoutes(app.Group("/v1"), nil, nil, logger.New("error"), nil, nil, nil, nil, nil, nil, newFakePlanRuntime())
+
+	planRoutes := 0
+	for _, methodRoutes := range app.Stack() {
+		for _, route := range methodRoutes {
+			if !strings.HasPrefix(route.Path, "/v1/agentos/plans") {
+				continue
+			}
+			planRoutes++
+			switch route.Method {
+			case http.MethodGet, http.MethodHead, http.MethodPost:
+			case http.MethodPut, http.MethodPatch, http.MethodDelete:
+				t.Fatalf("RunPlan route %s %s would mutate running topology outside PlanRuntime signal/control", route.Method, route.Path)
+			default:
+				t.Fatalf("RunPlan route %s %s is not part of the public read/start/signal/control surface", route.Method, route.Path)
+			}
+		}
+	}
+	if planRoutes == 0 {
+		t.Fatal("no AgentOS RunPlan routes registered")
+	}
+}
+
 func TestAgentOSPlanRoutesRequireProjectScope(t *testing.T) {
 	app := fiber.New()
 	planRuntime := newFakePlanRuntime()
