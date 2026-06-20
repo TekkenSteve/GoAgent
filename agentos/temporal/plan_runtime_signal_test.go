@@ -838,6 +838,34 @@ func TestPlanRuntimeSignalPlanRejectsCommandKeyReuseWithDifferentSignal(t *testi
 	}
 }
 
+func TestPlanRuntimeSignalPlanRejectsCommandKeyReuseWithDifferentSentAt(t *testing.T) {
+	store, ref := newPlanRuntimeTestStore(t)
+	sentAt := time.Date(2026, 6, 20, 12, 0, 0, 0, time.UTC)
+	if _, _, err := store.RecordPlanCommand(t.Context(), planCommandFromAuditRecord(planSignalAuditRecord(ref, agentos.Signal{
+		Type:           agentos.SignalPlanApprove,
+		IdempotencyKey: "signal-1",
+		ActorID:        "operator-1",
+		SentAt:         sentAt,
+	}))); err != nil {
+		t.Fatalf("RecordPlanCommand: %v", err)
+	}
+	temporalClient := &fakePlanTemporalClient{signalErr: errors.New("should not signal")}
+	rt := &planRuntime{temporalClient: temporalClient, commandStore: store, auditStore: store, planIndex: store}
+
+	err := rt.SignalPlan(t.Context(), ref, agentos.Signal{
+		Type:           agentos.SignalPlanApprove,
+		IdempotencyKey: "signal-1",
+		ActorID:        "operator-1",
+		SentAt:         sentAt.Add(time.Second),
+	})
+	if !errors.Is(err, agentos.ErrInvalidRunPlan) {
+		t.Fatalf("SignalPlan error = %v, want ErrInvalidRunPlan", err)
+	}
+	if temporalClient.signalCount != 0 {
+		t.Fatalf("signal count = %d, want 0", temporalClient.signalCount)
+	}
+}
+
 func TestPlanRuntimeControlPlanAuditsAfterDelivery(t *testing.T) {
 	store, ref := newPlanRuntimeTestStore(t)
 	temporalClient := &fakePlanTemporalClient{}
@@ -890,6 +918,34 @@ func TestPlanRuntimeControlPlanRejectsCommandKeyReuseWithDifferentControl(t *tes
 	err := rt.ControlPlan(t.Context(), ref, agentos.ControlRequest{
 		Operation:      agentos.ControlPause,
 		IdempotencyKey: "control-1",
+		ActorID:        "operator-1",
+	})
+	if !errors.Is(err, agentos.ErrInvalidRunPlan) {
+		t.Fatalf("ControlPlan error = %v, want ErrInvalidRunPlan", err)
+	}
+	if temporalClient.signalCount != 0 {
+		t.Fatalf("signal count = %d, want 0", temporalClient.signalCount)
+	}
+}
+
+func TestPlanRuntimeControlPlanRejectsCommandKeyReuseWithDifferentRequestedAt(t *testing.T) {
+	store, ref := newPlanRuntimeTestStore(t)
+	requestedAt := time.Date(2026, 6, 20, 12, 0, 0, 0, time.UTC)
+	if _, _, err := store.RecordPlanCommand(t.Context(), planCommandFromAuditRecord(planControlAuditRecord(ref, agentos.ControlRequest{
+		Operation:      agentos.ControlCancel,
+		IdempotencyKey: "control-1",
+		RequestedAt:    requestedAt,
+		ActorID:        "operator-1",
+	}))); err != nil {
+		t.Fatalf("RecordPlanCommand: %v", err)
+	}
+	temporalClient := &fakePlanTemporalClient{signalErr: errors.New("should not signal")}
+	rt := &planRuntime{temporalClient: temporalClient, commandStore: store, auditStore: store, planIndex: store}
+
+	err := rt.ControlPlan(t.Context(), ref, agentos.ControlRequest{
+		Operation:      agentos.ControlCancel,
+		IdempotencyKey: "control-1",
+		RequestedAt:    requestedAt.Add(time.Second),
 		ActorID:        "operator-1",
 	})
 	if !errors.Is(err, agentos.ErrInvalidRunPlan) {

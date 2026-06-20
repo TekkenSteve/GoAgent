@@ -49,10 +49,12 @@ var (
 )
 
 const (
-	planCommandPayloadSignalType = "type"
-	planCommandPayloadPayload    = "payload"
-	planCommandPayloadOperation  = "operation"
-	planCommandPayloadMetadata   = "metadata"
+	planCommandPayloadSignalType  = "type"
+	planCommandPayloadPayload     = "payload"
+	planCommandPayloadSentAt      = "sent_at"
+	planCommandPayloadOperation   = "operation"
+	planCommandPayloadMetadata    = "metadata"
+	planCommandPayloadRequestedAt = "requested_at"
 )
 
 type planTemporalClient interface {
@@ -541,6 +543,14 @@ func planStartAuditRecord(spec agentos.RunPlanSpec) agentosplan.AuditRecord {
 }
 
 func planSignalAuditRecord(ref agentos.PlanRef, signal agentos.Signal) agentosplan.AuditRecord {
+	payload := map[string]any{
+		planCommandPayloadSignalType: signal.Type,
+		planCommandPayloadPayload:    signal.Payload,
+	}
+	if !signal.SentAt.IsZero() {
+		payload[planCommandPayloadSentAt] = signal.SentAt
+	}
+
 	return agentosplan.AuditRecord{
 		PlanID:         ref.PlanID,
 		AccountID:      ref.AccountID,
@@ -548,10 +558,7 @@ func planSignalAuditRecord(ref agentos.PlanRef, signal agentos.Signal) agentospl
 		ActorID:        signal.ActorID,
 		Action:         agentosplan.AuditActionPlanSignal,
 		IdempotencyKey: signal.IdempotencyKey,
-		Payload: map[string]any{
-			planCommandPayloadSignalType: signal.Type,
-			planCommandPayloadPayload:    signal.Payload,
-		},
+		Payload:        payload,
 	}
 }
 

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"time"
 
 	"github.com/TekkenSteve/GoAgent/agentos"
 	"github.com/TekkenSteve/GoAgent/internal/usecase/agentosplan"
@@ -163,12 +164,17 @@ func signalFromPlanCommand(command agentosplan.PlanCommandRecord) (agentos.Signa
 	if err != nil {
 		return agentos.Signal{}, err
 	}
+	sentAt, err := optionalTimePayload(command.Payload, planCommandPayloadSentAt)
+	if err != nil {
+		return agentos.Signal{}, err
+	}
 
 	signal := agentos.Signal{
 		Type:           signalType,
 		IdempotencyKey: command.IdempotencyKey,
 		ActorID:        command.ActorID,
 		Payload:        payload,
+		SentAt:         sentAt,
 	}
 	if err := agentosplan.ValidatePlanSignal(signal); err != nil {
 		return agentos.Signal{}, err
@@ -186,10 +192,15 @@ func controlFromPlanCommand(command agentosplan.PlanCommandRecord) (agentos.Cont
 	if err != nil {
 		return agentos.ControlRequest{}, err
 	}
+	requestedAt, err := optionalTimePayload(command.Payload, planCommandPayloadRequestedAt)
+	if err != nil {
+		return agentos.ControlRequest{}, err
+	}
 
 	control := agentos.ControlRequest{
 		Operation:      operation,
 		IdempotencyKey: command.IdempotencyKey,
+		RequestedAt:    requestedAt,
 		ActorID:        command.ActorID,
 		Metadata:       metadata,
 	}
@@ -277,6 +288,26 @@ func stringMapPayload(payload map[string]any, key string) (map[string]string, er
 	}
 }
 
+func optionalTimePayload(payload map[string]any, key string) (time.Time, error) {
+	value, exists := payload[key]
+	if !exists || value == nil {
+		return time.Time{}, nil
+	}
+	switch typed := value.(type) {
+	case time.Time:
+		return typed, nil
+	case string:
+		parsed, err := time.Parse(time.RFC3339Nano, typed)
+		if err != nil {
+			return time.Time{}, fmt.Errorf("%w: command payload.%s must be RFC3339 time", agentos.ErrInvalidRunPlan, key)
+		}
+
+		return parsed, nil
+	default:
+		return time.Time{}, fmt.Errorf("%w: command payload.%s must be RFC3339 time", agentos.ErrInvalidRunPlan, key)
+	}
+}
+
 func planRefFromCommand(command agentosplan.PlanCommandRecord) agentos.PlanRef {
 	return agentos.PlanRef{
 		PlanID:    command.PlanID,
@@ -286,6 +317,14 @@ func planRefFromCommand(command agentosplan.PlanCommandRecord) agentos.PlanRef {
 }
 
 func planControlAuditRecord(ref agentos.PlanRef, control agentos.ControlRequest) agentosplan.AuditRecord {
+	payload := map[string]any{
+		planCommandPayloadOperation: control.Operation,
+		planCommandPayloadMetadata:  control.Metadata,
+	}
+	if !control.RequestedAt.IsZero() {
+		payload[planCommandPayloadRequestedAt] = control.RequestedAt
+	}
+
 	return agentosplan.AuditRecord{
 		PlanID:         ref.PlanID,
 		AccountID:      ref.AccountID,
@@ -293,9 +332,6 @@ func planControlAuditRecord(ref agentos.PlanRef, control agentos.ControlRequest)
 		ActorID:        control.ActorID,
 		Action:         agentosplan.AuditActionPlanControl,
 		IdempotencyKey: control.IdempotencyKey,
-		Payload: map[string]any{
-			planCommandPayloadOperation: control.Operation,
-			planCommandPayloadMetadata:  control.Metadata,
-		},
+		Payload:        payload,
 	}
 }

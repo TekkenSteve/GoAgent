@@ -255,6 +255,43 @@ func TestPlanEventCodecRequiresStoredEventIdentity(t *testing.T) {
 	}
 }
 
+func TestSignalJSONUsesPublicWireFieldNames(t *testing.T) {
+	sentAt := time.Date(2026, 6, 20, 12, 30, 0, 0, time.UTC)
+	data, err := json.Marshal(Signal{
+		Type:           SignalPlanApprove,
+		IdempotencyKey: "approve-1",
+		ActorID:        "operator-1",
+		Payload:        map[string]any{"reason": "looks good"},
+		SentAt:         sentAt,
+	})
+	if err != nil {
+		t.Fatalf("Marshal signal: %v", err)
+	}
+	raw := string(data)
+	for _, want := range []string{`"idempotency_key"`, `"actor_id"`, `"sent_at"`} {
+		if !strings.Contains(raw, want) {
+			t.Fatalf("signal json = %s, missing %s", raw, want)
+		}
+	}
+	for _, forbidden := range []string{`"IdempotencyKey"`, `"ActorID"`, `"SentAt"`} {
+		if strings.Contains(raw, forbidden) {
+			t.Fatalf("signal json = %s, contains Go field name %s", raw, forbidden)
+		}
+	}
+
+	var got Signal
+	if err := json.Unmarshal(data, &got); err != nil {
+		t.Fatalf("Unmarshal signal: %v", err)
+	}
+	if got.Type != SignalPlanApprove ||
+		got.IdempotencyKey != "approve-1" ||
+		got.ActorID != "operator-1" ||
+		!got.SentAt.Equal(sentAt) ||
+		got.Payload["reason"] != "looks good" {
+		t.Fatalf("signal = %#v", got)
+	}
+}
+
 func assertNoInternalEntity(t *testing.T, typ reflect.Type, seen map[reflect.Type]bool) {
 	t.Helper()
 	for typ.Kind() == reflect.Pointer || typ.Kind() == reflect.Slice || typ.Kind() == reflect.Array {

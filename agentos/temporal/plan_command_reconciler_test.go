@@ -3,6 +3,7 @@ package temporal
 import (
 	"errors"
 	"testing"
+	"time"
 
 	"github.com/TekkenSteve/GoAgent/agentos"
 	"github.com/TekkenSteve/GoAgent/internal/usecase/agentosplan"
@@ -92,6 +93,49 @@ func TestPlanCommandReconcilerMarksInvalidPayloadFailed(t *testing.T) {
 	}
 	if command.Status != agentosplan.PlanCommandFailed || command.FailureReason == "" {
 		t.Fatalf("command = %#v, want failed with reason", command)
+	}
+}
+
+func TestCommandDeliveryPayloadPreservesCommandTimestamps(t *testing.T) {
+	ref := agentos.PlanRef{PlanID: "plan-1", AccountID: "acct-1", ProjectID: "proj-1"}
+	sentAt := time.Date(2026, 6, 20, 12, 0, 0, 0, time.UTC)
+	signal := agentos.Signal{
+		Type:           agentos.SignalPlanReject,
+		IdempotencyKey: "reject-1",
+		ActorID:        "operator-1",
+		Payload:        map[string]any{agentos.SignalPayloadReason: "not ready"},
+		SentAt:         sentAt,
+	}
+	signalName, payload, audit, err := commandDeliveryPayload(planCommandFromAuditRecord(planSignalAuditRecord(ref, signal)))
+	if err != nil {
+		t.Fatalf("commandDeliveryPayload signal: %v", err)
+	}
+	deliveredSignal, ok := payload.(agentos.Signal)
+	if !ok {
+		t.Fatalf("signal payload type = %T", payload)
+	}
+	if signalName != PlanSignalName || !deliveredSignal.SentAt.Equal(sentAt) || !audit.Payload[planCommandPayloadSentAt].(time.Time).Equal(sentAt) {
+		t.Fatalf("signal delivery name=%q payload=%#v audit=%#v", signalName, deliveredSignal, audit)
+	}
+
+	requestedAt := time.Date(2026, 6, 20, 12, 5, 0, 0, time.UTC)
+	control := agentos.ControlRequest{
+		Operation:      agentos.ControlPause,
+		IdempotencyKey: "pause-1",
+		RequestedAt:    requestedAt,
+		ActorID:        "operator-1",
+		Metadata:       map[string]string{"reason": "maintenance"},
+	}
+	signalName, payload, audit, err = commandDeliveryPayload(planCommandFromAuditRecord(planControlAuditRecord(ref, control)))
+	if err != nil {
+		t.Fatalf("commandDeliveryPayload control: %v", err)
+	}
+	deliveredControl, ok := payload.(agentos.ControlRequest)
+	if !ok {
+		t.Fatalf("control payload type = %T", payload)
+	}
+	if signalName != PlanControlSignalName || !deliveredControl.RequestedAt.Equal(requestedAt) || !audit.Payload[planCommandPayloadRequestedAt].(time.Time).Equal(requestedAt) {
+		t.Fatalf("control delivery name=%q payload=%#v audit=%#v", signalName, deliveredControl, audit)
 	}
 }
 

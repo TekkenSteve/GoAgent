@@ -4,11 +4,11 @@ import "time"
 
 // Signal carries business input to a running agent.
 type Signal struct {
-	Type           SignalType
-	IdempotencyKey string
-	ActorID        string
-	Payload        map[string]any
-	SentAt         time.Time
+	Type           SignalType     `json:"type"`
+	IdempotencyKey string         `json:"idempotency_key,omitempty"`
+	ActorID        string         `json:"actor_id,omitempty"`
+	Payload        map[string]any `json:"payload,omitempty"`
+	SentAt         time.Time      `json:"sent_at,omitempty"`
 }
 
 // SignalType identifies a cross-backend control-plane signal.
