@@ -153,6 +153,41 @@ func TestCompileCommandEmitsValidatedPlanOrder(t *testing.T) {
 	}
 }
 
+func TestCompileCommandAcceptsJSONWireFormat(t *testing.T) {
+	dir := t.TempDir()
+	planPath := filepath.Join(dir, "plan.json")
+	capabilitiesPath := filepath.Join(dir, "capabilities.json")
+	if err := os.WriteFile(planPath, []byte(capabilityPlanJSON), 0o644); err != nil {
+		t.Fatalf("WriteFile plan: %v", err)
+	}
+	if err := os.WriteFile(capabilitiesPath, []byte(capabilityCatalogJSON), 0o644); err != nil {
+		t.Fatalf("WriteFile capabilities: %v", err)
+	}
+
+	var stdout, stderr bytes.Buffer
+	code := run([]string{
+		"compile",
+		"--file", planPath,
+		"--format", "json",
+		"--capabilities", capabilitiesPath,
+		"--capabilities-format", "json",
+	}, &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("compile json code = %d stderr = %s", code, stderr.String())
+	}
+
+	var output compiledPlanOutput
+	if err := json.Unmarshal(stdout.Bytes(), &output); err != nil {
+		t.Fatalf("compiled json: %v\n%s", err, stdout.String())
+	}
+	if output.Spec.PlanID != "plan-cli-json" {
+		t.Fatalf("plan id = %q", output.Spec.PlanID)
+	}
+	if len(output.Order) != 1 || output.Order[0] != "research" {
+		t.Fatalf("order = %#v", output.Order)
+	}
+}
+
 func TestValidateCommandUsesArtifactSchemaCatalog(t *testing.T) {
 	dir := t.TempDir()
 	planPath := filepath.Join(dir, "plan.yaml")
@@ -411,6 +446,49 @@ capabilities:
       required:
         - topic
 `
+
+const capabilityPlanJSON = `{
+  "plan_id": "plan-cli-json",
+  "account_id": "acct-cli",
+  "project_id": "proj-cli",
+  "nodes": [
+    {
+      "node_id": "research",
+      "capability": "research",
+      "run": {
+        "run_id": "run-research",
+        "backend": {
+          "kind": "http",
+          "name": "research"
+        },
+        "input": {
+          "topic": "agent orchestration"
+        }
+      }
+    }
+  ]
+}`
+
+const capabilityCatalogJSON = `{
+  "capabilities": [
+    {
+      "backend": {
+        "kind": "http",
+        "name": "research"
+      },
+      "name": "research",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "topic": {
+            "type": "string"
+          }
+        },
+        "required": ["topic"]
+      }
+    }
+  ]
+}`
 
 const artifactSchemaPlanYAML = `
 plan_id: plan-schema-cli
