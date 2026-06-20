@@ -912,6 +912,55 @@ func TestPlanWorkflowContinuedInputRestoresSnapshotStatus(t *testing.T) {
 	require.Equal(t, []string{"run-running"}, state.Status.ActiveRunIDs)
 }
 
+func TestPlanWorkflowContinuationCarriesProcessedSignalAndControlKeys(t *testing.T) {
+	t.Parallel()
+
+	ref := agentos.BackendRef{Kind: agentos.BackendKindNative, Name: agentos.BackendNameGoAgentNative}
+	spec := agentos.RunPlanSpec{
+		PlanID:         "plan-continued-keys",
+		IdempotencyKey: "plan-start-continued-keys",
+		Nodes: []agentos.PlanNodeSpec{
+			{NodeID: "running", Run: agentos.RunSpec{RunID: "run-running", Backend: ref}},
+		},
+	}
+	status := agentos.RunPlanStatus{
+		PlanID:         "plan-continued-keys",
+		LifecycleState: agentos.PlanLifecycleRunning,
+		Nodes: []agentos.PlanNodeStatus{
+			{NodeID: "running", RunID: "run-running", Backend: ref, LifecycleState: agentos.PlanNodeRunning},
+		},
+	}
+	state, err := initialPlanWorkflowState(planWorkflowInput{
+		Spec:              spec,
+		Status:            status,
+		Continued:         true,
+		ContinuationCount: 2,
+	}, time.Date(2026, 6, 20, 12, 0, 0, 0, time.UTC))
+	require.NoError(t, err)
+
+	processedControls := processedPlanWorkflowKeys([]string{"control-2", "control-1"})
+	processedControls["control-3"] = true
+	processedSignals := processedPlanWorkflowKeys([]string{"signal-2", "signal-1"})
+	processedSignals["signal-3"] = true
+
+	next := continuedPlanWorkflowInput(
+		planWorkflowInput{Spec: spec, Status: status, Continued: true, ContinuationCount: 2},
+		spec,
+		state,
+		4,
+		9,
+		processedControls,
+		processedSignals,
+	)
+
+	require.True(t, next.Continued)
+	require.Equal(t, int32(3), next.ContinuationCount)
+	require.Equal(t, int32(4), next.ExpansionCount)
+	require.Equal(t, int32(9), next.IterationCount)
+	require.Equal(t, []string{"control-1", "control-2", "control-3"}, next.ProcessedControls)
+	require.Equal(t, []string{"signal-1", "signal-2", "signal-3"}, next.ProcessedSignals)
+}
+
 func TestPlanWorkflowContinuesAsNewWhenHistoryLimitReached(t *testing.T) {
 	t.Parallel()
 

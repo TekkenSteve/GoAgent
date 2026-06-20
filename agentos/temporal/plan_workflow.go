@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"sort"
 	"time"
 
 	"github.com/TekkenSteve/GoAgent/agentos"
@@ -36,6 +37,8 @@ type planWorkflowInput struct {
 	ContinuationCount int32                 `json:"continuation_count,omitempty"`
 	IterationCount    int32                 `json:"iteration_count,omitempty"`
 	ExpansionCount    int32                 `json:"expansion_count,omitempty"`
+	ProcessedControls []string              `json:"processed_controls,omitempty"`
+	ProcessedSignals  []string              `json:"processed_signals,omitempty"`
 }
 
 // PlanWorkflow executes a cross-backend RunPlan using deterministic plan state
@@ -85,8 +88,8 @@ func PlanWorkflow(ctx workflow.Context, input planWorkflowInput) (agentos.RunPla
 	expansionCount := input.ExpansionCount
 	iterationCount := input.IterationCount
 	paused := state.Status.LifecycleState == agentos.PlanLifecycleBlocked
-	processedControls := make(map[string]bool)
-	processedSignals := make(map[string]bool)
+	processedControls := processedPlanWorkflowKeys(input.ProcessedControls)
+	processedSignals := processedPlanWorkflowKeys(input.ProcessedSignals)
 
 	for {
 		iterationCount++
@@ -131,7 +134,7 @@ func PlanWorkflow(ctx workflow.Context, input planWorkflowInput) (agentos.RunPla
 			return state.Status, nil
 		}
 		if paused {
-			if err := continuePlanWorkflowIfNeeded(ctx, input, spec, state, expansionCount, iterationCount); err != nil {
+			if err := continuePlanWorkflowIfNeeded(ctx, input, spec, state, expansionCount, iterationCount, processedControls, processedSignals); err != nil {
 				return state.Status, err
 			}
 			if err := workflow.Sleep(ctx, planNodePollInterval); err != nil {
@@ -221,7 +224,7 @@ func PlanWorkflow(ctx workflow.Context, input planWorkflowInput) (agentos.RunPla
 
 			return state.Status, fmt.Errorf("%w: %s", agentos.ErrInvalidRunPlan, reason)
 		}
-		if err := continuePlanWorkflowIfNeeded(ctx, input, spec, state, expansionCount, iterationCount); err != nil {
+		if err := continuePlanWorkflowIfNeeded(ctx, input, spec, state, expansionCount, iterationCount, processedControls, processedSignals); err != nil {
 			return state.Status, err
 		}
 		if !progressed {
@@ -240,7 +243,7 @@ func initialPlanWorkflowState(input planWorkflowInput, now time.Time) (agentospl
 	return agentosplan.NewState(input.Spec, now), nil
 }
 
-func continuePlanWorkflowIfNeeded(ctx workflow.Context, input planWorkflowInput, spec agentos.RunPlanSpec, state agentosplan.State, expansionCount int32, iterationCount int32) error {
+func continuePlanWorkflowIfNeeded(ctx workflow.Context, input planWorkflowInput, spec agentos.RunPlanSpec, state agentosplan.State, expansionCount int32, iterationCount int32, processedControls map[string]bool, processedSignals map[string]bool) error {
 	if planTerminal(state.Status.LifecycleState) {
 		return nil
 	}
@@ -252,6 +255,12 @@ func continuePlanWorkflowIfNeeded(ctx workflow.Context, input planWorkflowInput,
 		return nil
 	}
 
+	nextInput := continuedPlanWorkflowInput(input, spec, state, expansionCount, iterationCount, processedControls, processedSignals)
+
+	return workflow.NewContinueAsNewError(ctx, PlanWorkflowName, nextInput)
+}
+
+func continuedPlanWorkflowInput(input planWorkflowInput, spec agentos.RunPlanSpec, state agentosplan.State, expansionCount int32, iterationCount int32, processedControls map[string]bool, processedSignals map[string]bool) planWorkflowInput {
 	nextInput := input
 	nextInput.Spec = spec
 	nextInput.Status = state.Status
@@ -259,8 +268,38 @@ func continuePlanWorkflowIfNeeded(ctx workflow.Context, input planWorkflowInput,
 	nextInput.ContinuationCount++
 	nextInput.IterationCount = iterationCount
 	nextInput.ExpansionCount = expansionCount
+	nextInput.ProcessedControls = sortedPlanWorkflowKeys(processedControls)
+	nextInput.ProcessedSignals = sortedPlanWorkflowKeys(processedSignals)
 
-	return workflow.NewContinueAsNewError(ctx, PlanWorkflowName, nextInput)
+	return nextInput
+}
+
+func processedPlanWorkflowKeys(keys []string) map[string]bool {
+	processed := make(map[string]bool, len(keys))
+	for _, key := range keys {
+		if key == "" {
+			continue
+		}
+		processed[key] = true
+	}
+
+	return processed
+}
+
+func sortedPlanWorkflowKeys(processed map[string]bool) []string {
+	if len(processed) == 0 {
+		return nil
+	}
+	keys := make([]string, 0, len(processed))
+	for key, ok := range processed {
+		if key == "" || !ok {
+			continue
+		}
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+
+	return keys
 }
 
 func applyPlanIterationGuard(activityCtx workflow.Context, workflowCtx workflow.Context, spec agentos.RunPlanSpec, state *agentosplan.State, iterationCount int32) error {
