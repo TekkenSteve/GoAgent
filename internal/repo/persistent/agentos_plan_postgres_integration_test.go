@@ -51,6 +51,9 @@ func TestAgentOSPlanPostgresDurablePersistence(t *testing.T) {
 		"plan_events_transition_snapshot_pair",
 		"plan_events_event_json_identity_matches_columns",
 		"plan_events_payload_json_matches_event",
+		"plans_spec_json_identity_matches_columns",
+		"plans_status_json_matches_columns",
+		"plan_nodes_status_json_matches_columns",
 	)
 	assertPostgresForeignKeyConstraint(t, pg, "run_backend_index_plan_node_fk")
 	assertPostgresForeignKeyConstraint(t, pg, "artifacts_plan_fk")
@@ -153,6 +156,19 @@ INSERT INTO plan_commands (
 	); err == nil {
 		t.Fatal("direct plan command insert with delivered status succeeded")
 	}
+	stateConstraintSpec := postgresIntegrationPlanSpec("plan-state-json-"+suffix, "plan-state-json-start-"+suffix)
+	stateConstraintStatus := agentosplan.NewState(stateConstraintSpec, time.Now().UTC()).Status
+	badSpecJSON := stateConstraintSpec
+	badSpecJSON.PlanID = "wrong-plan-json"
+	assertPostgresPlanInsertRejected(t, pg, stateConstraintSpec, badSpecJSON, stateConstraintStatus)
+	badStatusJSON := stateConstraintStatus
+	badStatusJSON.PlanID = "wrong-plan-json"
+	assertPostgresPlanInsertRejected(t, pg, stateConstraintSpec, stateConstraintSpec, badStatusJSON)
+
+	badNodeStatus := nodeStatus.Nodes[0]
+	badNodeStatus.NodeID = "wrong-node-json"
+	assertPostgresPlanNodeInsertRejected(t, pg, spec, "plan-node-json-"+suffix, nodeStatus.Nodes[0], badNodeStatus)
+
 	contradictoryStatus := nodeStatus
 	contradictoryStatus.Nodes = append([]agentos.PlanNodeStatus(nil), nodeStatus.Nodes...)
 	contradictoryStatus.Nodes[0].LifecycleState = agentos.PlanNodeFailed
@@ -1489,6 +1505,7 @@ func applyAgentOSPlanMigrations(t *testing.T, pg *postgres.Postgres) {
 		"20260620000016_protect_plan_identity.up.sql",
 		"20260620000017_protect_plan_command_identity.up.sql",
 		"20260620000018_constrain_plan_event_json.up.sql",
+		"20260620000019_constrain_plan_state_json.up.sql",
 	} {
 		path := filepath.Join("..", "..", "..", "migrations", migration)
 		data, err := os.ReadFile(path)
@@ -1498,6 +1515,95 @@ func applyAgentOSPlanMigrations(t *testing.T, pg *postgres.Postgres) {
 		if _, err := pg.Pool.Exec(t.Context(), string(data)); err != nil {
 			t.Fatalf("apply migration %s: %v", migration, err)
 		}
+	}
+}
+
+func assertPostgresPlanInsertRejected(
+	t *testing.T,
+	pg *postgres.Postgres,
+	rowSpec agentos.RunPlanSpec,
+	specJSONValue agentos.RunPlanSpec,
+	statusJSONValue agentos.RunPlanStatus,
+) {
+	t.Helper()
+
+	specJSON, err := json.Marshal(specJSONValue)
+	if err != nil {
+		t.Fatalf("marshal plan spec json: %v", err)
+	}
+	statusJSON, err := json.Marshal(statusJSONValue)
+	if err != nil {
+		t.Fatalf("marshal plan status json: %v", err)
+	}
+	_, err = pg.Pool.Exec(t.Context(), `
+INSERT INTO plans (
+    plan_id,
+    thread_id,
+    account_id,
+    project_id,
+    idempotency_key,
+    lifecycle_state,
+    reason,
+    spec_json,
+    status_json,
+    requested_at
+) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)`,
+		rowSpec.PlanID,
+		rowSpec.ThreadID,
+		rowSpec.AccountID,
+		rowSpec.ProjectID,
+		rowSpec.IdempotencyKey,
+		statusJSONValue.LifecycleState,
+		statusJSONValue.Reason,
+		specJSON,
+		statusJSON,
+		nullableTimeForIntegration(rowSpec.RequestedAt),
+	)
+	if err == nil {
+		t.Fatalf("direct plans insert %q succeeded, want constraint rejection", rowSpec.PlanID)
+	}
+}
+
+func assertPostgresPlanNodeInsertRejected(
+	t *testing.T,
+	pg *postgres.Postgres,
+	spec agentos.RunPlanSpec,
+	nodeID string,
+	rowStatus agentos.PlanNodeStatus,
+	statusJSONValue agentos.PlanNodeStatus,
+) {
+	t.Helper()
+
+	statusJSON, err := json.Marshal(statusJSONValue)
+	if err != nil {
+		t.Fatalf("marshal plan node status json: %v", err)
+	}
+	_, err = pg.Pool.Exec(t.Context(), `
+INSERT INTO plan_nodes (
+    plan_id,
+    node_id,
+    run_id,
+    backend_kind,
+    backend_name,
+    capability,
+    lifecycle_state,
+    attempts,
+    reason,
+    status_json
+) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)`,
+		spec.PlanID,
+		nodeID,
+		rowStatus.RunID,
+		string(rowStatus.Backend.Kind),
+		rowStatus.Backend.Name,
+		spec.Nodes[0].Capability,
+		rowStatus.LifecycleState,
+		rowStatus.Attempts,
+		rowStatus.Reason,
+		statusJSON,
+	)
+	if err == nil {
+		t.Fatalf("direct plan_nodes insert %q succeeded, want constraint rejection", nodeID)
 	}
 }
 
@@ -1581,6 +1687,14 @@ INSERT INTO plan_events (
 	if err == nil {
 		t.Fatalf("direct plan_events insert %q succeeded, want constraint rejection", eventID)
 	}
+}
+
+func nullableTimeForIntegration(value time.Time) any {
+	if value.IsZero() {
+		return nil
+	}
+
+	return value
 }
 
 func assertPostgresCheckConstraints(t *testing.T, pg *postgres.Postgres, names ...string) {
