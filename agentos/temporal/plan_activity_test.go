@@ -49,41 +49,25 @@ func TestPlanActivitiesStartStatusControl(t *testing.T) {
 	}
 }
 
-func TestPlanActivitiesConstructorRequiresDurableStores(t *testing.T) {
+func TestPlanActivitiesConstructorRequiresTransitionStore(t *testing.T) {
 	store := agentosplan.NewMemoryPlanStore()
-	artifactStore := agentosplan.NewMemoryArtifactStore()
 
 	_, err := NewPlanActivitiesWithCatalogAndSchemas(
 		&fakePlanRuntime{},
 		nil,
 		nil,
 		nil,
-		store,
 		nil,
-		artifactStore,
+		agentosplan.NewMemoryArtifactStore(),
 	)
 	if !errors.Is(err, agentos.ErrInvalidRunPlan) {
-		t.Fatalf("missing state store error = %v, want ErrInvalidRunPlan", err)
+		t.Fatalf("missing transition store error = %v, want ErrInvalidRunPlan", err)
 	}
 
 	_, err = NewPlanActivitiesWithCatalogAndSchemas(
 		&fakePlanRuntime{},
 		nil,
 		nil,
-		store,
-		nil,
-		nil,
-		artifactStore,
-	)
-	if !errors.Is(err, agentos.ErrInvalidRunPlan) {
-		t.Fatalf("missing event store error = %v, want ErrInvalidRunPlan", err)
-	}
-
-	_, err = NewPlanActivitiesWithCatalogAndSchemas(
-		&fakePlanRuntime{},
-		nil,
-		nil,
-		store,
 		store,
 		nil,
 		nil,
@@ -473,11 +457,11 @@ func TestPlanActivitiesPersistPlanStateDoesNotFailOnLivePublishError(t *testing.
 	}
 }
 
-func TestPlanActivitiesPersistPlanStateDoesNotPublishWhenDurableAppendFails(t *testing.T) {
+func TestPlanActivitiesPersistPlanStateDoesNotPublishWhenDurableTransitionFails(t *testing.T) {
 	activities := newTestPlanActivities(t, &fakePlanRuntime{})
 	publisher := &fakePlanEventPublisher{}
 	activities.PlanEventPublisher = publisher
-	activities.PlanEventStore = failingPlanEventStore{err: errors.New("postgres unavailable")}
+	activities.PlanTransitionStore = failingPlanTransitionStore{err: errors.New("postgres unavailable")}
 
 	_, err := activities.PersistPlanStateActivity(context.Background(), persistPlanStateInput{
 		Spec: agentos.RunPlanSpec{
@@ -497,7 +481,7 @@ func TestPlanActivitiesPersistPlanStateDoesNotPublishWhenDurableAppendFails(t *t
 		IdempotencyKey: "event-key",
 	})
 	if err == nil {
-		t.Fatal("PersistPlanStateActivity succeeded despite durable append failure")
+		t.Fatal("PersistPlanStateActivity succeeded despite durable transition failure")
 	}
 	if publisher.called {
 		t.Fatalf("live publisher was called with event %#v despite durable append failure", publisher.event)
@@ -528,7 +512,6 @@ func TestPlanActivitiesEvaluatePlanExpansionValidatesDelta(t *testing.T) {
 	activities, err := NewPlanActivitiesWithStores(
 		&fakePlanRuntime{},
 		nil,
-		agentosplan.NewMemoryPlanStore(),
 		agentosplan.NewMemoryPlanStore(),
 		nil,
 		artifactStore,
@@ -664,7 +647,6 @@ func TestPlanActivitiesValidatePlanUsesInjectedCapabilityCatalog(t *testing.T) {
 		&fakePlanRuntime{},
 		catalog,
 		store,
-		store,
 		nil,
 		agentosplan.NewMemoryArtifactStore(),
 	)
@@ -703,7 +685,6 @@ func newTestPlanActivities(t *testing.T, runtime agentos.Runtime, capabilities .
 		runtime,
 		capabilities,
 		store,
-		store,
 		nil,
 		agentosplan.NewMemoryArtifactStore(),
 	)
@@ -732,16 +713,12 @@ func (p *fakePlanEventPublisher) PublishPlanEvent(_ context.Context, event agent
 	return p.err
 }
 
-type failingPlanEventStore struct {
+type failingPlanTransitionStore struct {
 	err error
 }
 
-func (s failingPlanEventStore) AppendPlanEvent(context.Context, agentos.PlanEvent, string) (agentos.PlanEvent, error) {
+func (s failingPlanTransitionStore) PersistPlanTransition(context.Context, agentosplan.PlanStateSnapshot, agentos.PlanEvent, string) (agentos.PlanEvent, error) {
 	return agentos.PlanEvent{}, s.err
-}
-
-func (s failingPlanEventStore) ListPlanEvents(context.Context, agentos.PlanStreamScope, int) ([]agentos.PlanEvent, error) {
-	return nil, s.err
 }
 
 func (r *fakePlanRuntime) Start(_ context.Context, spec agentos.RunSpec) (agentos.RunStatus, error) {

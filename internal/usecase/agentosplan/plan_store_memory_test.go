@@ -28,6 +28,57 @@ func TestMemoryPlanStoreSavePlanStateRequiresIdempotencyKey(t *testing.T) {
 	}
 }
 
+func TestMemoryPlanStorePersistPlanTransitionIsAtomic(t *testing.T) {
+	ctx := context.Background()
+	store := NewMemoryPlanStore()
+	spec := testRunPlanSpec("plan-1", "start-key")
+	initial := agentos.RunPlanStatus{
+		PlanID:         spec.PlanID,
+		LifecycleState: agentos.PlanLifecycleRunning,
+		UpdatedAt:      time.Date(2026, 6, 20, 12, 0, 0, 0, time.UTC),
+	}
+	if _, _, err := store.CreatePlan(ctx, spec, initial); err != nil {
+		t.Fatalf("CreatePlan: %v", err)
+	}
+	firstEvent := agentos.PlanEvent{
+		Event: agentos.Event{
+			EventType: agentos.EventPlanStarted,
+			Payload:   map[string]any{"state": "running"},
+		},
+		PlanID: spec.PlanID,
+	}
+	if _, err := store.AppendPlanEvent(ctx, firstEvent, "transition-key"); err != nil {
+		t.Fatalf("AppendPlanEvent: %v", err)
+	}
+
+	next := initial
+	next.LifecycleState = agentos.PlanLifecycleFailed
+	next.Reason = "should not commit"
+	changedEvent := agentos.PlanEvent{
+		Event: agentos.Event{
+			EventType: agentos.EventPlanFailed,
+			Payload:   map[string]any{"state": "failed"},
+		},
+		PlanID: spec.PlanID,
+	}
+	_, err := store.PersistPlanTransition(ctx, PlanStateSnapshot{
+		Spec:           spec,
+		Status:         next,
+		IdempotencyKey: "transition-key",
+	}, changedEvent, "transition-key")
+	if !errors.Is(err, agentos.ErrInvalidPlanEvent) {
+		t.Fatalf("PersistPlanTransition error = %v, want ErrInvalidPlanEvent", err)
+	}
+
+	snapshot, exists, err := store.LoadPlanState(ctx, spec.PlanID)
+	if err != nil || !exists {
+		t.Fatalf("LoadPlanState exists=%v err=%v", exists, err)
+	}
+	if snapshot.Status.LifecycleState != agentos.PlanLifecycleRunning || snapshot.Status.Reason != "" {
+		t.Fatalf("snapshot status = %#v, want original running state", snapshot.Status)
+	}
+}
+
 func TestMemoryPlanStoreGetPlanByRefRequiresTenantScope(t *testing.T) {
 	ctx := context.Background()
 	store := NewMemoryPlanStore()

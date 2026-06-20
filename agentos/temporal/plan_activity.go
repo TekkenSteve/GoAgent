@@ -10,16 +10,15 @@ import (
 
 // PlanActivities bridge Temporal PlanWorkflow decisions to AgentOS runtime calls.
 type PlanActivities struct {
-	Runtime            agentos.Runtime
-	PlanNodeStarter    PlanNodeStarter
-	Validator          agentosplan.Validator
-	PlanStateStore     agentosplan.PlanStateStore
-	PlanEventStore     agentosplan.PlanEventStore
-	PlanEventPublisher agentosplan.PlanEventPublisher
-	ArtifactStore      agentosplan.ArtifactStore
-	ArtifactSchemas    agentosplan.ArtifactSchemaCatalog
-	PlanDeltaProvider  agentosplan.PlanDeltaProvider
-	Expressions        agentosplan.ValueExpressionCompiler
+	Runtime             agentos.Runtime
+	PlanNodeStarter     PlanNodeStarter
+	Validator           agentosplan.Validator
+	PlanTransitionStore agentosplan.PlanTransitionStore
+	PlanEventPublisher  agentosplan.PlanEventPublisher
+	ArtifactStore       agentosplan.ArtifactStore
+	ArtifactSchemas     agentosplan.ArtifactSchemaCatalog
+	PlanDeltaProvider   agentosplan.PlanDeltaProvider
+	Expressions         agentosplan.ValueExpressionCompiler
 }
 
 // PlanNodeStarter starts backend-owned child runs and records plan-node route
@@ -33,8 +32,7 @@ type PlanNodeStarter interface {
 func NewPlanActivitiesWithStores(
 	runtime agentos.Runtime,
 	capabilities []agentos.Capability,
-	stateStore agentosplan.PlanStateStore,
-	eventStore agentosplan.PlanEventStore,
+	transitionStore agentosplan.PlanTransitionStore,
 	eventPublisher agentosplan.PlanEventPublisher,
 	artifactStore agentosplan.ArtifactStore,
 ) (*PlanActivities, error) {
@@ -43,7 +41,7 @@ func NewPlanActivitiesWithStores(
 		return nil, err
 	}
 
-	return NewPlanActivitiesWithCatalog(runtime, catalog, stateStore, eventStore, eventPublisher, artifactStore)
+	return NewPlanActivitiesWithCatalog(runtime, catalog, transitionStore, eventPublisher, artifactStore)
 }
 
 // NewPlanActivitiesWithCatalog creates plan activities with an explicit
@@ -51,12 +49,11 @@ func NewPlanActivitiesWithStores(
 func NewPlanActivitiesWithCatalog(
 	runtime agentos.Runtime,
 	catalog agentosplan.CapabilityCatalog,
-	stateStore agentosplan.PlanStateStore,
-	eventStore agentosplan.PlanEventStore,
+	transitionStore agentosplan.PlanTransitionStore,
 	eventPublisher agentosplan.PlanEventPublisher,
 	artifactStore agentosplan.ArtifactStore,
 ) (*PlanActivities, error) {
-	return NewPlanActivitiesWithCatalogAndSchemas(runtime, catalog, nil, stateStore, eventStore, eventPublisher, artifactStore)
+	return NewPlanActivitiesWithCatalogAndSchemas(runtime, catalog, nil, transitionStore, eventPublisher, artifactStore)
 }
 
 // NewPlanActivitiesWithCatalogAndSchemas creates plan activities with explicit
@@ -65,8 +62,7 @@ func NewPlanActivitiesWithCatalogAndSchemas(
 	runtime agentos.Runtime,
 	catalog agentosplan.CapabilityCatalog,
 	artifactSchemas agentosplan.ArtifactSchemaCatalog,
-	stateStore agentosplan.PlanStateStore,
-	eventStore agentosplan.PlanEventStore,
+	transitionStore agentosplan.PlanTransitionStore,
 	eventPublisher agentosplan.PlanEventPublisher,
 	artifactStore agentosplan.ArtifactStore,
 ) (*PlanActivities, error) {
@@ -77,11 +73,8 @@ func NewPlanActivitiesWithCatalogAndSchemas(
 	if !ok {
 		return nil, fmt.Errorf("%w: plan activity runtime must support plan-node start", agentos.ErrInvalidRunPlan)
 	}
-	if stateStore == nil {
-		return nil, fmt.Errorf("%w: plan state store is required", agentos.ErrInvalidRunPlan)
-	}
-	if eventStore == nil {
-		return nil, fmt.Errorf("%w: plan event store is required", agentos.ErrInvalidRunPlan)
+	if transitionStore == nil {
+		return nil, fmt.Errorf("%w: plan transition store is required", agentos.ErrInvalidRunPlan)
 	}
 	if artifactStore == nil {
 		return nil, fmt.Errorf("%w: artifact store is required", agentos.ErrInvalidArtifact)
@@ -99,13 +92,12 @@ func NewPlanActivitiesWithCatalogAndSchemas(
 			Capabilities:    catalog,
 			ArtifactSchemas: artifactSchemas,
 		},
-		PlanStateStore:     stateStore,
-		PlanEventStore:     eventStore,
-		PlanEventPublisher: eventPublisher,
-		ArtifactStore:      artifactStore,
-		ArtifactSchemas:    artifactSchemas,
-		PlanDeltaProvider:  agentosplan.NewArtifactPlanDeltaProvider(artifactStore),
-		Expressions:        compiler,
+		PlanTransitionStore: transitionStore,
+		PlanEventPublisher:  eventPublisher,
+		ArtifactStore:       artifactStore,
+		ArtifactSchemas:     artifactSchemas,
+		PlanDeltaProvider:   agentosplan.NewArtifactPlanDeltaProvider(artifactStore),
+		Expressions:         compiler,
 	}, nil
 }
 
@@ -258,26 +250,20 @@ type persistPlanStateOutput struct {
 // PersistPlanStateActivity writes the latest reducer snapshot and appends the
 // corresponding public PlanEvent to the durable event source.
 func (a *PlanActivities) PersistPlanStateActivity(ctx context.Context, input persistPlanStateInput) (persistPlanStateOutput, error) {
-	if a.PlanStateStore == nil {
-		return persistPlanStateOutput{}, fmt.Errorf("%w: plan state store is required", agentos.ErrInvalidRunPlan)
+	if a.PlanTransitionStore == nil {
+		return persistPlanStateOutput{}, fmt.Errorf("%w: plan transition store is required", agentos.ErrInvalidRunPlan)
 	}
-	if a.PlanEventStore == nil {
-		return persistPlanStateOutput{}, fmt.Errorf("%w: plan event store is required", agentos.ErrInvalidRunPlan)
-	}
-	if err := a.PlanStateStore.SavePlanState(ctx, agentosplan.PlanStateSnapshot{
+	event, err := a.PlanTransitionStore.PersistPlanTransition(ctx, agentosplan.PlanStateSnapshot{
 		Spec:           input.Spec,
 		Status:         input.Status,
 		IdempotencyKey: input.IdempotencyKey,
-	}); err != nil {
-		return persistPlanStateOutput{}, err
-	}
-	event, err := a.PlanEventStore.AppendPlanEvent(ctx, input.Event, input.IdempotencyKey)
+	}, input.Event, input.IdempotencyKey)
 	if err != nil {
 		return persistPlanStateOutput{}, err
 	}
 	if a.PlanEventPublisher != nil {
 		// Redis is a live transport only. The durable event source is the
-		// PlanEventStore above, so live publish failures must not block
+		// PlanTransitionStore above, so live publish failures must not block
 		// workflow progress or make Redis part of replay correctness.
 		_ = a.PlanEventPublisher.PublishPlanEvent(ctx, event)
 	}

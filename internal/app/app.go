@@ -295,7 +295,6 @@ func initTemporalComponents(
 		capabilityCatalog,
 		artifactSchemaCatalog,
 		planStore,
-		planStore,
 		planEventStream,
 		artifactStore,
 	)

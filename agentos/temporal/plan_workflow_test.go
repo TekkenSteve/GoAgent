@@ -478,7 +478,6 @@ func TestPlanWorkflowOrchestratesMixedBackendsThroughRuntime(t *testing.T) {
 		runtime,
 		mixedBackendCapabilities(refs),
 		store,
-		store,
 		nil,
 		agentosplan.NewMemoryArtifactStore(),
 	)
@@ -826,19 +825,14 @@ func newPlanWorkflowTestEnvWithCapabilities(mocks *planWorkflowMocks, capabiliti
 	return newPlanWorkflowTestEnvWithStores(mocks, capabilities, agentosplan.NewMemoryPlanStore(), agentosplan.NewMemoryArtifactStore())
 }
 
-func newPlanWorkflowTestEnvWithStores(mocks *planWorkflowMocks, capabilities []agentos.Capability, store agentosplan.PlanStateStore, artifactStore agentosplan.ArtifactStore) *testsuite.TestWorkflowEnvironment {
+func newPlanWorkflowTestEnvWithStores(mocks *planWorkflowMocks, capabilities []agentos.Capability, store agentosplan.PlanTransitionStore, artifactStore agentosplan.ArtifactStore) *testsuite.TestWorkflowEnvironment {
 	env := (&testsuite.WorkflowTestSuite{}).NewTestWorkflowEnvironment()
 	env.RegisterWorkflowWithOptions(PlanWorkflow, workflow.RegisterOptions{Name: PlanWorkflowName})
 
-	eventStore, ok := store.(agentosplan.PlanEventStore)
-	if !ok {
-		panic("plan workflow test store must implement PlanEventStore")
-	}
 	activities, err := NewPlanActivitiesWithStores(
 		&fakePlanRuntime{},
 		capabilities,
 		store,
-		eventStore,
 		nil,
 		artifactStore,
 	)

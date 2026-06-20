@@ -10,8 +10,8 @@ import (
 	"github.com/TekkenSteve/GoAgent/agentos"
 )
 
-// MemoryPlanStore is an explicit in-process PlanIndex, PlanStateStore, and
-// PlanEventStore for unit tests and embedded demos.
+// MemoryPlanStore is an explicit in-process PlanIndex, PlanTransitionStore,
+// PlanStateStore, and PlanEventStore for unit tests and embedded demos.
 type MemoryPlanStore struct {
 	mu        sync.RWMutex
 	specs     map[string]agentos.RunPlanSpec
@@ -195,11 +195,23 @@ func (s *MemoryPlanStore) ListPlanRefs(_ context.Context, scope PlanRefScope) ([
 }
 
 func (s *MemoryPlanStore) SavePlanState(_ context.Context, snapshot PlanStateSnapshot) error {
+	snapshot, err := normalizeMemoryPlanStateSnapshot(snapshot)
+	if err != nil {
+		return err
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	return s.savePlanStateLocked(snapshot)
+}
+
+func normalizeMemoryPlanStateSnapshot(snapshot PlanStateSnapshot) (PlanStateSnapshot, error) {
 	if snapshot.Spec.PlanID == "" {
-		return fmt.Errorf("%w: plan id is required", agentos.ErrInvalidRunPlan)
+		return PlanStateSnapshot{}, fmt.Errorf("%w: plan id is required", agentos.ErrInvalidRunPlan)
 	}
 	if snapshot.Spec.IdempotencyKey == "" {
-		return fmt.Errorf("%w: plan idempotency key is required", agentos.ErrInvalidRunPlan)
+		return PlanStateSnapshot{}, fmt.Errorf("%w: plan idempotency key is required", agentos.ErrInvalidRunPlan)
 	}
 	if snapshot.Status.PlanID == "" {
 		snapshot.Status.PlanID = snapshot.Spec.PlanID
@@ -208,8 +220,10 @@ func (s *MemoryPlanStore) SavePlanState(_ context.Context, snapshot PlanStateSna
 		snapshot.Status.UpdatedAt = time.Now().UTC()
 	}
 
-	s.mu.Lock()
-	defer s.mu.Unlock()
+	return snapshot, nil
+}
+
+func (s *MemoryPlanStore) savePlanStateLocked(snapshot PlanStateSnapshot) error {
 	if existingSpec, ok := s.specs[snapshot.Spec.PlanID]; ok {
 		if err := ValidatePlanStateIdentity(existingSpec, snapshot.Spec); err != nil {
 			return err
@@ -228,6 +242,40 @@ func (s *MemoryPlanStore) SavePlanState(_ context.Context, snapshot PlanStateSna
 	s.planKeys[key] = snapshot.Spec.PlanID
 
 	return nil
+}
+
+func (s *MemoryPlanStore) PersistPlanTransition(_ context.Context, snapshot PlanStateSnapshot, event agentos.PlanEvent, idempotencyKey string) (agentos.PlanEvent, error) {
+	snapshot, err := normalizeMemoryPlanStateSnapshot(snapshot)
+	if err != nil {
+		return agentos.PlanEvent{}, err
+	}
+	if event.PlanID == "" {
+		return agentos.PlanEvent{}, fmt.Errorf("%w: plan id is required", agentos.ErrInvalidPlanEvent)
+	}
+	if event.PlanID != snapshot.Spec.PlanID {
+		return agentos.PlanEvent{}, fmt.Errorf("%w: event plan %q does not match snapshot plan %q", agentos.ErrInvalidPlanEvent, event.PlanID, snapshot.Spec.PlanID)
+	}
+	if idempotencyKey == "" {
+		return agentos.PlanEvent{}, fmt.Errorf("%w: plan event idempotency key is required", agentos.ErrInvalidPlanEvent)
+	}
+	requestedEvent := NormalizePlanEventAppendRequest(event)
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	key := planEventIdempotencyKey{PlanID: requestedEvent.PlanID, IdempotencyKey: idempotencyKey}
+	if existing, ok := s.eventKeys[key]; ok {
+		if err := ValidatePlanEventIdempotency(existing, requestedEvent); err != nil {
+			return agentos.PlanEvent{}, err
+		}
+
+		return existing, nil
+	}
+	if err := s.savePlanStateLocked(snapshot); err != nil {
+		return agentos.PlanEvent{}, err
+	}
+
+	return s.appendPlanEventLocked(requestedEvent, idempotencyKey)
 }
 
 func (s *MemoryPlanStore) LoadPlanState(_ context.Context, planID string) (PlanStateSnapshot, bool, error) {
@@ -258,12 +306,17 @@ func (s *MemoryPlanStore) AppendPlanEvent(_ context.Context, event agentos.PlanE
 
 	s.mu.Lock()
 	defer s.mu.Unlock()
+
+	return s.appendPlanEventLocked(event, idempotencyKey)
+}
+
+func (s *MemoryPlanStore) appendPlanEventLocked(event agentos.PlanEvent, idempotencyKey string) (agentos.PlanEvent, error) {
 	if _, ok := s.specs[event.PlanID]; !ok {
 		return agentos.PlanEvent{}, fmt.Errorf("%w: %s", agentos.ErrPlanRouteNotFound, event.PlanID)
 	}
 	key := planEventIdempotencyKey{PlanID: event.PlanID, IdempotencyKey: idempotencyKey}
 	if existing, ok := s.eventKeys[key]; ok {
-		if err := ValidatePlanEventIdempotency(existing, requestedEvent); err != nil {
+		if err := ValidatePlanEventIdempotency(existing, event); err != nil {
 			return agentos.PlanEvent{}, err
 		}
 
@@ -602,6 +655,7 @@ func (s *MemoryPlanStore) ListAuditRecords(_ context.Context, scope agentos.Plan
 var (
 	_ PlanIndex                 = (*MemoryPlanStore)(nil)
 	_ PlanRefStore              = (*MemoryPlanStore)(nil)
+	_ PlanTransitionStore       = (*MemoryPlanStore)(nil)
 	_ PlanStateStore            = (*MemoryPlanStore)(nil)
 	_ PlanEventStore            = (*MemoryPlanStore)(nil)
 	_ PlanMetricCheckpointStore = (*MemoryPlanStore)(nil)

@@ -109,7 +109,6 @@ func TestPlanWorkflowRunsThroughMixedBackendAdapters(t *testing.T) {
 			{Backend: grpcRef, Name: "run"},
 		},
 		planStore,
-		planStore,
 		nil,
 		artifactStore,
 	)

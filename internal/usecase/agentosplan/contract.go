@@ -93,6 +93,13 @@ type PlanStateStore interface {
 	LoadPlanState(ctx context.Context, planID string) (PlanStateSnapshot, bool, error)
 }
 
+// PlanTransitionStore atomically persists one reducer snapshot and its durable
+// public event. Implementations must not expose a newer state without the
+// corresponding event in the durable stream.
+type PlanTransitionStore interface {
+	PersistPlanTransition(ctx context.Context, snapshot PlanStateSnapshot, event agentos.PlanEvent, idempotencyKey string) (agentos.PlanEvent, error)
+}
+
 // PlanEventStore is the durable event source for RunPlan timelines. Reads must
 // carry the full account/project plan scope; PlanID alone is not a production
 // isolation boundary.
