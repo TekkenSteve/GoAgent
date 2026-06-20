@@ -193,12 +193,24 @@ func (r *AgentOSArtifactRepo) Get(ctx context.Context, scope agentos.PlanArtifac
 	if err != nil {
 		return agentos.ArtifactRef{}, nil, err
 	}
-	payload, err := agentosplan.DecodeArtifactPayload(data, ref.MediaType)
+	payload, err := decodeStoredArtifactPayload(ref, data)
 	if err != nil {
 		return agentos.ArtifactRef{}, nil, err
 	}
 
 	return ref, payload, nil
+}
+
+func decodeStoredArtifactPayload(ref agentos.ArtifactRef, data []byte) (any, error) {
+	if ref.SizeBytes != int64(len(data)) {
+		return nil, fmt.Errorf("%w: artifact %q blob size %d does not match metadata size %d", agentos.ErrInvalidArtifact, ref.ArtifactID, len(data), ref.SizeBytes)
+	}
+	digest := agentosplan.DigestArtifactPayload(data)
+	if ref.Digest != digest {
+		return nil, fmt.Errorf("%w: artifact %q blob digest %q does not match metadata digest %q", agentos.ErrInvalidArtifact, ref.ArtifactID, digest, ref.Digest)
+	}
+
+	return agentosplan.DecodeArtifactPayload(data, ref.MediaType)
 }
 
 func (r *AgentOSArtifactRepo) List(ctx context.Context, scope agentos.PlanArtifactScope) ([]agentos.ArtifactRef, error) {
