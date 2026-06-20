@@ -11,12 +11,13 @@ import (
 )
 
 const (
-	idempotencyOperationNodeStart       = "node_start"
-	idempotencyOperationNodeControl     = "node_control"
-	idempotencyOperationNodeTimeout     = "node_timeout"
-	idempotencyOperationPlanTimeout     = "plan_timeout"
-	idempotencyOperationArtifactPublish = "artifact_publish"
-	idempotencyOperationBudgetExceeded  = "budget_exceeded"
+	idempotencyOperationNodeStart        = "node_start"
+	idempotencyOperationNodeControl      = "node_control"
+	idempotencyOperationNodeTimeout      = "node_timeout"
+	idempotencyOperationPlanTimeout      = "plan_timeout"
+	idempotencyOperationPlanSignalCancel = "plan_signal_cancel"
+	idempotencyOperationArtifactPublish  = "artifact_publish"
+	idempotencyOperationBudgetExceeded   = "budget_exceeded"
 )
 
 const (
@@ -275,6 +276,39 @@ func BudgetExceededControlIdempotencyKey(planID string, usage agentos.PlanBudget
 	})
 	if err != nil {
 		return "", fmt.Errorf("%w: marshal budget exceeded key: %s", agentos.ErrInvalidPlanEvent, err)
+	}
+	sum := sha256.Sum256(data)
+
+	return planID + ":" + hex.EncodeToString(sum[:]), nil
+}
+
+// PlanSignalCancelControlIdempotencyKey creates the parent idempotency key for
+// cancellation propagated by a terminal plan signal such as operator reject.
+func PlanSignalCancelControlIdempotencyKey(planID string, signal agentos.Signal) (string, error) {
+	if planID == "" {
+		return "", fmt.Errorf("%w: plan id is required", agentos.ErrInvalidRunPlan)
+	}
+	if err := ValidatePlanSignal(signal); err != nil {
+		return "", err
+	}
+	if signal.Type != agentos.SignalPlanReject {
+		return "", fmt.Errorf("%w: signal %q does not cancel active plan nodes", agentos.ErrInvalidSignal, signal.Type)
+	}
+	data, err := json.Marshal(struct {
+		Operation      string             `json:"operation"`
+		PlanID         string             `json:"plan_id"`
+		SignalType     agentos.SignalType `json:"signal_type"`
+		IdempotencyKey string             `json:"idempotency_key"`
+		ActorID        string             `json:"actor_id"`
+	}{
+		Operation:      idempotencyOperationPlanSignalCancel,
+		PlanID:         planID,
+		SignalType:     signal.Type,
+		IdempotencyKey: signal.IdempotencyKey,
+		ActorID:        signal.ActorID,
+	})
+	if err != nil {
+		return "", fmt.Errorf("%w: marshal plan signal cancel key: %s", agentos.ErrInvalidPlanEvent, err)
 	}
 	sum := sha256.Sum256(data)
 

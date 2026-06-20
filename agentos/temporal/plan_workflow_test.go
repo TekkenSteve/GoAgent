@@ -520,7 +520,13 @@ func TestPlanWorkflowRetriesFailedNodeFromSignal(t *testing.T) {
 		PlanID:         "plan-manual-retry",
 		IdempotencyKey: "plan-start-manual-retry",
 		Nodes: []agentos.PlanNodeSpec{
-			{NodeID: "flaky", Run: agentos.RunSpec{RunID: "run-flaky", Backend: ref}},
+			{
+				NodeID: "flaky",
+				Run:    agentos.RunSpec{RunID: "run-flaky", Backend: ref},
+				Policy: agentos.NodePolicy{
+					MaxAttempts: 2,
+				},
+			},
 			{NodeID: "slow", Run: agentos.RunSpec{RunID: "run-slow", Backend: ref}},
 		},
 	}
@@ -561,6 +567,59 @@ func TestPlanWorkflowRetriesFailedNodeFromSignal(t *testing.T) {
 	require.Len(t, result.Nodes, 2)
 	require.Equal(t, int32(2), result.Nodes[0].Attempts)
 	require.Equal(t, "run-flaky-attempt-2", result.Nodes[0].RunID)
+}
+
+func TestPlanWorkflowRejectsManualRetryBeyondMaxAttempts(t *testing.T) {
+	t.Parallel()
+
+	ref := agentos.BackendRef{Kind: agentos.BackendKindNative, Name: agentos.BackendNameGoAgentNative}
+	spec := agentos.RunPlanSpec{
+		PlanID:         "plan-manual-retry-max",
+		IdempotencyKey: "plan-start-manual-retry-max",
+		Nodes: []agentos.PlanNodeSpec{
+			{NodeID: "flaky", Run: agentos.RunSpec{RunID: "run-flaky", Backend: ref}},
+			{NodeID: "slow", Run: agentos.RunSpec{RunID: "run-slow", Backend: ref}},
+		},
+	}
+	store := agentosplan.NewMemoryPlanStore()
+	mocks := &planWorkflowMocks{
+		statuses: map[string]agentos.RunStatus{
+			"run-flaky": {RunID: "run-flaky", LifecycleState: "failed", Reason: "needs manual retry"},
+		},
+		statusSequences: map[string][]agentos.RunStatus{
+			"run-slow": {
+				{RunID: "run-slow", LifecycleState: "running"},
+				{RunID: "run-slow", LifecycleState: "running"},
+			},
+		},
+	}
+	env := newPlanWorkflowTestEnvWithStores(mocks, nil, store, agentosplan.NewMemoryArtifactStore())
+	env.RegisterDelayedCallback(func() {
+		env.SignalWorkflow(PlanSignalName, agentos.Signal{
+			Type:           agentos.SignalPlanNodeRetry,
+			IdempotencyKey: "retry-flaky",
+			ActorID:        "operator-1",
+			Payload: map[string]any{
+				agentosplan.SignalPayloadNodeID: "flaky",
+			},
+		})
+	}, time.Second)
+
+	env.ExecuteWorkflow(PlanWorkflow, planWorkflowInput{Spec: spec})
+
+	require.True(t, env.IsWorkflowCompleted())
+	require.Error(t, env.GetWorkflowError())
+	require.Equal(t, []string{"run-flaky", "run-slow"}, mocks.started)
+
+	snapshot, ok, err := store.LoadPlanState(context.Background(), spec.PlanID)
+	require.NoError(t, err)
+	require.True(t, ok)
+	require.Equal(t, agentos.PlanLifecycleFailed, snapshot.Status.LifecycleState)
+	require.Contains(t, snapshot.Status.Reason, "exceeds max attempts")
+	require.Len(t, snapshot.Status.Nodes, 2)
+	flaky := findPlanNodeStatus(snapshot.Status.Nodes, "flaky")
+	require.NotNil(t, flaky)
+	require.Equal(t, int32(1), flaky.Attempts)
 }
 
 func TestPlanWorkflowRejectSignalFailsRunningPlan(t *testing.T) {
@@ -604,6 +663,15 @@ func TestPlanWorkflowRejectSignalFailsRunningPlan(t *testing.T) {
 	require.Equal(t, agentos.PlanLifecycleFailed, result.LifecycleState)
 	require.Equal(t, "operator rejected", result.Reason)
 	require.Equal(t, []string{"run-slow"}, mocks.started)
+	require.Empty(t, result.ActiveRunIDs)
+	slow := findPlanNodeStatus(result.Nodes, "slow")
+	require.NotNil(t, slow)
+	require.Equal(t, agentos.PlanNodeCanceled, slow.LifecycleState)
+	require.Equal(t, "run-slow", slow.RunID)
+	require.Len(t, mocks.controls, 1)
+	require.Equal(t, "run-slow", mocks.controls[0].RunID)
+	require.Equal(t, agentos.ControlCancel, mocks.controls[0].Control.Operation)
+	require.NotEmpty(t, mocks.controls[0].Control.IdempotencyKey)
 }
 
 func TestPlanWorkflowApproveSignalUnblocksPausedPlan(t *testing.T) {

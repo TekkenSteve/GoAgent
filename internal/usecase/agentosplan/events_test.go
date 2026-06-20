@@ -424,3 +424,29 @@ func TestPlanTimeoutControlIdempotencyKeyRequiresStartedAt(t *testing.T) {
 		t.Fatal("PlanTimeoutControlIdempotencyKey accepted empty timeout")
 	}
 }
+
+func TestPlanSignalCancelControlIdempotencyKeyOnlyAcceptsReject(t *testing.T) {
+	reject := agentos.Signal{
+		Type:           agentos.SignalPlanReject,
+		IdempotencyKey: "reject-1",
+		ActorID:        "operator-1",
+	}
+	first, err := PlanSignalCancelControlIdempotencyKey("plan-1", reject)
+	if err != nil {
+		t.Fatalf("PlanSignalCancelControlIdempotencyKey: %v", err)
+	}
+	second, err := PlanSignalCancelControlIdempotencyKey("plan-1", reject)
+	if err != nil {
+		t.Fatalf("PlanSignalCancelControlIdempotencyKey replay: %v", err)
+	}
+	if first == "" || first != second {
+		t.Fatalf("signal cancel keys = %q/%q, want stable non-empty key", first, second)
+	}
+	if _, err := PlanSignalCancelControlIdempotencyKey("plan-1", agentos.Signal{
+		Type:           agentos.SignalPlanApprove,
+		IdempotencyKey: "approve-1",
+		ActorID:        "operator-1",
+	}); !errors.Is(err, agentos.ErrInvalidSignal) {
+		t.Fatalf("approve signal key error = %v, want ErrInvalidSignal", err)
+	}
+}

@@ -104,7 +104,7 @@ func PlanWorkflow(ctx workflow.Context, input planWorkflowInput) (agentos.RunPla
 		if canceled {
 			return state.Status, nil
 		}
-		rejected, nextPaused, signalProgressed, err := drainPlanSignals(activityCtx, ctx, spec, signalCh, &state, paused, validation.Plan.NodeByID, processedSignals)
+		rejected, nextPaused, signalProgressed, err := drainPlanSignals(activityCtx, ctx, spec, signalCh, &state, paused, validation.Plan.NodeByID, validation.ControlsByNode, processedSignals)
 		paused = nextPaused
 		if err != nil {
 			persistErr := applyPlanStateEvent(activityCtx, ctx, spec, &state, agentosplan.StateEvent{Kind: agentosplan.EventPlanFailed, Reason: err.Error()})
@@ -607,13 +607,8 @@ func applyPlanBudgetGuard(activityCtx workflow.Context, workflowCtx workflow.Con
 		return false, err
 	}
 	reason := agentosplan.BudgetExceededReason(spec.Policy, state.Status.BudgetUsage)
-	for _, node := range state.Status.Nodes {
-		if node.LifecycleState != agentos.PlanNodeRunning {
-			continue
-		}
-		if err := applyPlanStateEvent(activityCtx, workflowCtx, spec, state, agentosplan.StateEvent{Kind: agentosplan.EventNodeCanceled, NodeID: node.NodeID, RunID: node.RunID, Reason: reason}); err != nil {
-			return false, err
-		}
+	if err := markActivePlanNodesCanceled(activityCtx, workflowCtx, spec, state, reason); err != nil {
+		return false, err
 	}
 	if err := applyPlanStateEvent(activityCtx, workflowCtx, spec, state, agentosplan.StateEvent{Kind: agentosplan.EventPlanFailed, Reason: reason}); err != nil {
 		return false, err
@@ -639,13 +634,8 @@ func applyPlanTimeoutGuard(activityCtx workflow.Context, workflowCtx workflow.Co
 		return false, err
 	}
 	reason := agentosplan.PlanTimeoutReason(spec.Policy)
-	for _, node := range state.Status.Nodes {
-		if node.LifecycleState != agentos.PlanNodeRunning {
-			continue
-		}
-		if err := applyPlanStateEvent(activityCtx, workflowCtx, spec, state, agentosplan.StateEvent{Kind: agentosplan.EventNodeCanceled, NodeID: node.NodeID, RunID: node.RunID, Reason: reason}); err != nil {
-			return false, err
-		}
+	if err := markActivePlanNodesCanceled(activityCtx, workflowCtx, spec, state, reason); err != nil {
+		return false, err
 	}
 	if err := applyPlanStateEvent(activityCtx, workflowCtx, spec, state, agentosplan.StateEvent{Kind: agentosplan.EventPlanFailed, Reason: reason}); err != nil {
 		return false, err
@@ -719,12 +709,8 @@ func drainPlanControl(activityCtx workflow.Context, workflowCtx workflow.Context
 			if err := controlActivePlanNodes(activityCtx, spec.PlanID, state.Status, control, controlsByNode); err != nil {
 				return false, paused, err
 			}
-			for _, node := range state.Status.Nodes {
-				if node.LifecycleState == agentos.PlanNodeRunning {
-					if err := applyPlanStateEvent(activityCtx, workflowCtx, spec, state, agentosplan.StateEvent{Kind: agentosplan.EventNodeCanceled, NodeID: node.NodeID, Reason: "cancel requested"}); err != nil {
-						return false, paused, err
-					}
-				}
+			if err := markActivePlanNodesCanceled(activityCtx, workflowCtx, spec, state, "cancel requested"); err != nil {
+				return false, paused, err
 			}
 			if err := applyPlanStateEvent(activityCtx, workflowCtx, spec, state, agentosplan.StateEvent{Kind: agentosplan.EventPlanCanceled, Reason: "cancel requested"}); err != nil {
 				return false, paused, err
@@ -761,6 +747,30 @@ func drainPlanControl(activityCtx workflow.Context, workflowCtx workflow.Context
 	return false, paused, nil
 }
 
+func markActivePlanNodesCanceled(activityCtx workflow.Context, workflowCtx workflow.Context, spec agentos.RunPlanSpec, state *agentosplan.State, reason string) error {
+	if reason == "" {
+		reason = "cancel requested"
+	}
+	running := make([]agentos.PlanNodeStatus, 0, len(state.Status.Nodes))
+	for _, node := range state.Status.Nodes {
+		if node.LifecycleState == agentos.PlanNodeRunning {
+			running = append(running, node)
+		}
+	}
+	for _, node := range running {
+		if err := applyPlanStateEvent(activityCtx, workflowCtx, spec, state, agentosplan.StateEvent{
+			Kind:   agentosplan.EventNodeCanceled,
+			NodeID: node.NodeID,
+			RunID:  node.RunID,
+			Reason: reason,
+		}); err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
 func controlActivePlanNodes(activityCtx workflow.Context, planID string, status agentos.RunPlanStatus, control agentos.ControlRequest, controlsByNode map[string][]agentos.ControlOperation) error {
 	for _, node := range status.Nodes {
 		if node.LifecycleState != agentos.PlanNodeRunning || node.RunID == "" {
@@ -793,7 +803,7 @@ func nodeSupportsControl(controlsByNode map[string][]agentos.ControlOperation, n
 	return false
 }
 
-func drainPlanSignals(activityCtx workflow.Context, workflowCtx workflow.Context, spec agentos.RunPlanSpec, ch workflow.ReceiveChannel, state *agentosplan.State, paused bool, nodes map[string]agentos.PlanNodeSpec, processed map[string]bool) (bool, bool, bool, error) {
+func drainPlanSignals(activityCtx workflow.Context, workflowCtx workflow.Context, spec agentos.RunPlanSpec, ch workflow.ReceiveChannel, state *agentosplan.State, paused bool, nodes map[string]agentos.PlanNodeSpec, controlsByNode map[string][]agentos.ControlOperation, processed map[string]bool) (bool, bool, bool, error) {
 	var signal agentos.Signal
 	progressed := false
 	for ch.ReceiveAsync(&signal) {
@@ -826,6 +836,20 @@ func drainPlanSignals(activityCtx workflow.Context, workflowCtx workflow.Context
 			if reason == "" {
 				reason = "plan rejected"
 			}
+			key, err := agentosplan.PlanSignalCancelControlIdempotencyKey(spec.PlanID, signal)
+			if err != nil {
+				return false, paused, progressed, err
+			}
+			control := agentos.ControlRequest{
+				Operation:      agentos.ControlCancel,
+				IdempotencyKey: key,
+			}
+			if err := controlActivePlanNodes(activityCtx, spec.PlanID, state.Status, control, controlsByNode); err != nil {
+				return false, paused, progressed, err
+			}
+			if err := markActivePlanNodesCanceled(activityCtx, workflowCtx, spec, state, reason); err != nil {
+				return false, paused, progressed, err
+			}
 			if err := applyPlanStateEvent(activityCtx, workflowCtx, spec, state, agentosplan.StateEvent{Kind: agentosplan.EventPlanRejected, Reason: reason}); err != nil {
 				return false, paused, progressed, err
 			}
@@ -857,14 +881,19 @@ func applyManualNodeRetry(activityCtx workflow.Context, workflowCtx workflow.Con
 	if reason == "" {
 		reason = "manual retry requested"
 	}
+	failedAttempts := current.Attempts
+	if failedAttempts <= 0 {
+		failedAttempts = 1
+	}
+	nextAttempt := failedAttempts + 1
+	maxAttempts := maxNodeAttempts(nodeSpec.Policy)
+	if nextAttempt > maxAttempts {
+		return fmt.Errorf("%w: node %q retry attempt %d exceeds max attempts %d", agentos.ErrInvalidSignal, nodeID, nextAttempt, maxAttempts)
+	}
 	if state.Status.LifecycleState == agentos.PlanLifecycleBlocked || state.Status.LifecycleState == agentos.PlanLifecycleFailed {
 		if err := applyPlanStateEvent(activityCtx, workflowCtx, spec, state, agentosplan.StateEvent{Kind: agentosplan.EventPlanApproved, Reason: reason}); err != nil {
 			return err
 		}
-	}
-	nextAttempt := current.Attempts + 1
-	if nextAttempt <= 0 {
-		nextAttempt = 1
 	}
 
 	return applyPlanStateEvent(activityCtx, workflowCtx, spec, state, agentosplan.StateEvent{
