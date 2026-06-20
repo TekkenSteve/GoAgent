@@ -59,6 +59,7 @@ func TestAgentOSPlanPostgresDurablePersistence(t *testing.T) {
 	assertPostgresForeignKeyConstraint(t, pg, "audit_logs_plan_node_run_fk")
 	assertPostgresTrigger(t, pg, "plan_commands_status_lifecycle")
 	assertPostgresTrigger(t, pg, "plan_commands_delivered_audit")
+	assertPostgresTrigger(t, pg, "audit_logs_delivered_command_audit")
 
 	ctx := t.Context()
 	planRepo := NewAgentOSPlanRepo(pg)
@@ -262,7 +263,8 @@ INSERT INTO plan_commands (
 	if _, err := pg.Pool.Exec(ctx, `UPDATE plan_commands SET status = 'delivered' WHERE command_id = $1`, command.CommandID); err == nil {
 		t.Fatal("direct plan command delivered update without audit succeeded")
 	}
-	if _, _, err := planRepo.RecordAudit(ctx, agentosplan.AuditRecordFromPlanCommand(command)); err != nil {
+	commandAudit, _, err := planRepo.RecordAudit(ctx, agentosplan.AuditRecordFromPlanCommand(command))
+	if err != nil {
 		t.Fatalf("RecordAudit for command: %v", err)
 	}
 	deliveredCommand, err := planRepo.MarkPlanCommandDelivered(ctx, agentosplan.PlanCommandRefFromRecord(command))
@@ -277,6 +279,12 @@ INSERT INTO plan_commands (
 	}
 	if _, err := pg.Pool.Exec(ctx, `UPDATE plan_commands SET status = 'failed' WHERE command_id = $1`, command.CommandID); err == nil {
 		t.Fatal("direct plan command delivered->failed update succeeded")
+	}
+	if _, err := pg.Pool.Exec(ctx, `UPDATE audit_logs SET payload_json = '{}'::jsonb WHERE audit_id = $1`, commandAudit.AuditID); err == nil {
+		t.Fatal("direct delivered command audit update succeeded")
+	}
+	if _, err := pg.Pool.Exec(ctx, `DELETE FROM audit_logs WHERE audit_id = $1`, commandAudit.AuditID); err == nil {
+		t.Fatal("direct delivered command audit delete succeeded")
 	}
 	failedCommand, created, err := planRepo.RecordPlanCommand(ctx, agentosplan.PlanCommandRecord{
 		PlanID:         spec.PlanID,
@@ -1351,6 +1359,7 @@ func applyAgentOSPlanMigrations(t *testing.T, pg *postgres.Postgres) {
 		"20260620000007_enforce_plan_command_lifecycle.up.sql",
 		"20260620000008_add_plan_event_transition_snapshots.up.sql",
 		"20260620000009_require_delivered_command_audit.up.sql",
+		"20260620000010_protect_delivered_command_audits.up.sql",
 	} {
 		path := filepath.Join("..", "..", "..", "migrations", migration)
 		data, err := os.ReadFile(path)
