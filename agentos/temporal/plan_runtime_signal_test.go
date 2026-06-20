@@ -477,6 +477,7 @@ func TestPlanRuntimeListPlanEventsEnforcesTenantScopeAndFilters(t *testing.T) {
 
 func TestPlanRuntimeListPlanDebugTracesProjectsDurableEvents(t *testing.T) {
 	store, ref := newPlanRuntimeTestStore(t)
+	at := time.Date(2026, 6, 19, 12, 0, 0, 0, time.UTC)
 	debugEvent, _, err := agentosplan.PlanEventFromStateEvent(
 		agentos.RunPlanSpec{PlanID: ref.PlanID, AccountID: ref.AccountID, ProjectID: ref.ProjectID},
 		agentos.RunPlanStatus{PlanID: ref.PlanID, LifecycleState: agentos.PlanLifecycleRunning},
@@ -494,6 +495,7 @@ func TestPlanRuntimeListPlanDebugTracesProjectsDurableEvents(t *testing.T) {
 			},
 			PreviousLifecycleState: agentos.PlanNodeReady,
 			NextLifecycleState:     agentos.PlanNodeRunning,
+			At:                     at,
 		},
 	)
 	if err != nil {

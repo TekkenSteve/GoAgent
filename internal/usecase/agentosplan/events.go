@@ -48,12 +48,8 @@ func PlanEventFromStateEvent(spec agentos.RunPlanSpec, status agentos.RunPlanSta
 		return agentos.PlanEvent{}, "", err
 	}
 
-	at := event.At
-	if at.IsZero() {
-		at = status.UpdatedAt
-	}
-	if at.IsZero() {
-		at = time.Now().UTC()
+	if event.At.IsZero() {
+		return agentos.PlanEvent{}, "", fmt.Errorf("%w: state event timestamp is required", agentos.ErrInvalidPlanEvent)
 	}
 
 	payload := map[string]any{
@@ -103,7 +99,7 @@ func PlanEventFromStateEvent(spec agentos.RunPlanSpec, status agentos.RunPlanSta
 			EventType: eventType,
 			RunID:     event.RunID,
 			ThreadID:  spec.ThreadID,
-			Timestamp: at,
+			Timestamp: event.At,
 			Source:    "agentos.plan",
 			Payload:   payload,
 		},

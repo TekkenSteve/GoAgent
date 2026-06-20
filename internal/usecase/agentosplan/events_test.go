@@ -42,6 +42,21 @@ func TestPlanEventFromStateEventMapsPublicEvent(t *testing.T) {
 	}
 }
 
+func TestPlanEventFromStateEventRequiresReducerTimestamp(t *testing.T) {
+	_, _, err := PlanEventFromStateEvent(
+		scopedEventTestPlanSpec("plan-1", ""),
+		agentos.RunPlanStatus{
+			PlanID:         "plan-1",
+			LifecycleState: agentos.PlanLifecycleRunning,
+			UpdatedAt:      time.Date(2026, 6, 19, 12, 0, 0, 0, time.UTC),
+		},
+		StateEvent{Kind: EventPlanStarted},
+	)
+	if !errors.Is(err, agentos.ErrInvalidPlanEvent) {
+		t.Fatalf("PlanEventFromStateEvent error = %v, want ErrInvalidPlanEvent", err)
+	}
+}
+
 func TestMemoryPlanStoreAppendPlanEventIsIdempotent(t *testing.T) {
 	ctx := context.Background()
 	store := NewMemoryPlanStore()
