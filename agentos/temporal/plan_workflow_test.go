@@ -737,6 +737,144 @@ func TestPlanWorkflowApproveSignalUnblocksPausedPlan(t *testing.T) {
 	require.Equal(t, agentos.ControlPause, mocks.controls[0].Control.Operation)
 }
 
+func TestPlanWorkflowPauseControlPreflightsUnsupportedRunningNodes(t *testing.T) {
+	t.Parallel()
+
+	ref := agentos.BackendRef{Kind: agentos.BackendKindNative, Name: agentos.BackendNameGoAgentNative}
+	spec := agentos.RunPlanSpec{
+		PlanID:         "plan-pause-preflight",
+		IdempotencyKey: "plan-start-pause-preflight",
+		Policy: agentos.PlanPolicy{
+			MaxParallelNodes: 2,
+		},
+		Nodes: []agentos.PlanNodeSpec{
+			{NodeID: "pausable", Capability: "pausable", Run: agentos.RunSpec{RunID: "run-pausable", Backend: ref}},
+			{NodeID: "plain", Capability: "plain", Run: agentos.RunSpec{RunID: "run-plain", Backend: ref}},
+		},
+	}
+	store := agentosplan.NewMemoryPlanStore()
+	mocks := &planWorkflowMocks{
+		statusSequences: map[string][]agentos.RunStatus{
+			"run-pausable": {
+				{RunID: "run-pausable", LifecycleState: "running"},
+				{RunID: "run-pausable", LifecycleState: "running"},
+			},
+			"run-plain": {
+				{RunID: "run-plain", LifecycleState: "running"},
+				{RunID: "run-plain", LifecycleState: "running"},
+			},
+		},
+	}
+	spec = planWorkflowTestSpec(spec)
+	env := newPlanWorkflowTestEnvWithStores(t, mocks, []agentos.Capability{
+		{Backend: ref, Name: "pausable", Controls: []agentos.ControlOperation{agentos.ControlPause}},
+		{Backend: ref, Name: "plain"},
+	}, store, agentosplan.NewMemoryArtifactStore(), spec)
+	env.RegisterDelayedCallback(func() {
+		env.SignalWorkflow(PlanControlSignalName, agentos.ControlRequest{
+			Operation:      agentos.ControlPause,
+			IdempotencyKey: "pause-plan",
+		})
+	}, time.Second)
+	env.RegisterDelayedCallback(func() {
+		env.SignalWorkflow(PlanSignalName, agentos.Signal{
+			Type:           agentos.SignalPlanReject,
+			IdempotencyKey: "reject-plan",
+			ActorID:        "operator-1",
+			Payload: map[string]any{
+				agentosplan.SignalPayloadReason: "end preflight test",
+			},
+		})
+	}, 2*time.Second)
+
+	env.ExecuteWorkflow(PlanWorkflow, planWorkflowInput{Spec: spec})
+
+	require.True(t, env.IsWorkflowCompleted())
+	require.NoError(t, env.GetWorkflowError())
+
+	var result agentos.RunPlanStatus
+	require.NoError(t, env.GetWorkflowResult(&result))
+	require.Equal(t, agentos.PlanLifecycleFailed, result.LifecycleState)
+	require.Equal(t, []string{"run-pausable", "run-plain"}, mocks.started)
+	for _, control := range mocks.controls {
+		require.NotEqual(t, agentos.ControlPause, control.Control.Operation)
+	}
+	require.Len(t, mocks.controls, 2)
+	require.Equal(t, agentos.ControlCancel, mocks.controls[0].Control.Operation)
+	require.Equal(t, agentos.ControlCancel, mocks.controls[1].Control.Operation)
+
+	events, err := store.ListPlanEvents(context.Background(), planWorkflowEventScope(spec), 0)
+	require.NoError(t, err)
+	blocked := findPlanEventByType(events, agentos.EventPlanBlocked)
+	require.NotNil(t, blocked)
+	reason, ok := blocked.Payload["reason"].(string)
+	require.True(t, ok)
+	require.Contains(t, reason, `node "plain" does not declare support for pause`)
+}
+
+func TestPlanWorkflowPauseControlPropagatesToAllSupportedRunningNodes(t *testing.T) {
+	t.Parallel()
+
+	ref := agentos.BackendRef{Kind: agentos.BackendKindNative, Name: agentos.BackendNameGoAgentNative}
+	spec := agentos.RunPlanSpec{
+		PlanID:         "plan-pause-all-supported",
+		IdempotencyKey: "plan-start-pause-all-supported",
+		Policy: agentos.PlanPolicy{
+			MaxParallelNodes: 2,
+		},
+		Nodes: []agentos.PlanNodeSpec{
+			{NodeID: "left", Capability: "pausable", Run: agentos.RunSpec{RunID: "run-left", Backend: ref}},
+			{NodeID: "right", Capability: "pausable", Run: agentos.RunSpec{RunID: "run-right", Backend: ref}},
+		},
+	}
+	mocks := &planWorkflowMocks{
+		statusSequences: map[string][]agentos.RunStatus{
+			"run-left": {
+				{RunID: "run-left", LifecycleState: "running"},
+				{RunID: "run-left", LifecycleState: "running"},
+				{RunID: "run-left", LifecycleState: "completed"},
+			},
+			"run-right": {
+				{RunID: "run-right", LifecycleState: "running"},
+				{RunID: "run-right", LifecycleState: "running"},
+				{RunID: "run-right", LifecycleState: "completed"},
+			},
+		},
+	}
+	spec = planWorkflowTestSpec(spec)
+	env := newPlanWorkflowTestEnvWithCapabilities(t, mocks, []agentos.Capability{
+		{Backend: ref, Name: "pausable", Controls: []agentos.ControlOperation{agentos.ControlPause}},
+	}, spec)
+	env.RegisterDelayedCallback(func() {
+		env.SignalWorkflow(PlanControlSignalName, agentos.ControlRequest{
+			Operation:      agentos.ControlPause,
+			IdempotencyKey: "pause-plan",
+		})
+	}, time.Second)
+	env.RegisterDelayedCallback(func() {
+		env.SignalWorkflow(PlanSignalName, agentos.Signal{
+			Type:           agentos.SignalPlanApprove,
+			IdempotencyKey: "approve-plan",
+			ActorID:        "operator-1",
+		})
+	}, 2*time.Second)
+
+	env.ExecuteWorkflow(PlanWorkflow, planWorkflowInput{Spec: spec})
+
+	require.True(t, env.IsWorkflowCompleted())
+	require.NoError(t, env.GetWorkflowError())
+
+	var result agentos.RunPlanStatus
+	require.NoError(t, env.GetWorkflowResult(&result))
+	require.Equal(t, agentos.PlanLifecycleSucceeded, result.LifecycleState)
+	require.Equal(t, []string{"run-left", "run-right"}, mocks.started)
+	require.Len(t, mocks.controls, 2)
+	require.Equal(t, "run-left", mocks.controls[0].RunID)
+	require.Equal(t, agentos.ControlPause, mocks.controls[0].Control.Operation)
+	require.Equal(t, "run-right", mocks.controls[1].RunID)
+	require.Equal(t, agentos.ControlPause, mocks.controls[1].Control.Operation)
+}
+
 func TestPlanWorkflowContinuedInputRestoresSnapshotStatus(t *testing.T) {
 	t.Parallel()
 

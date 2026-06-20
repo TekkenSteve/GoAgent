@@ -769,25 +769,38 @@ func markActivePlanNodesCanceled(activityCtx workflow.Context, workflowCtx workf
 }
 
 func controlActivePlanNodes(activityCtx workflow.Context, planID string, status agentos.RunPlanStatus, control agentos.ControlRequest, controlsByNode map[string][]agentos.ControlOperation) error {
-	for _, node := range status.Nodes {
-		if node.LifecycleState != agentos.PlanNodeRunning || node.RunID == "" {
-			continue
-		}
-		if control.Operation != agentos.ControlCancel && !nodeSupportsControl(controlsByNode, node.NodeID, control.Operation) {
-			return fmt.Errorf("%w: node %q does not declare support for %s", agentos.ErrInvalidControlOperation, node.NodeID, control.Operation)
-		}
-		childControl := control
-		key, err := agentosplan.NodeControlIdempotencyKey(planID, node.NodeID, control.Operation, control.IdempotencyKey)
-		if err != nil {
-			return err
-		}
-		childControl.IdempotencyKey = key
-		if err := workflow.ExecuteActivity(activityCtx, ControlPlanNodeActivityName, controlPlanNodeInput{RunID: node.RunID, Control: childControl}).Get(activityCtx, nil); err != nil {
+	inputs, err := activePlanNodeControlInputs(planID, status, control, controlsByNode)
+	if err != nil {
+		return err
+	}
+	for _, input := range inputs {
+		if err := workflow.ExecuteActivity(activityCtx, ControlPlanNodeActivityName, input).Get(activityCtx, nil); err != nil {
 			return err
 		}
 	}
 
 	return nil
+}
+
+func activePlanNodeControlInputs(planID string, status agentos.RunPlanStatus, control agentos.ControlRequest, controlsByNode map[string][]agentos.ControlOperation) ([]controlPlanNodeInput, error) {
+	inputs := make([]controlPlanNodeInput, 0, len(status.Nodes))
+	for _, node := range status.Nodes {
+		if node.LifecycleState != agentos.PlanNodeRunning || node.RunID == "" {
+			continue
+		}
+		if control.Operation != agentos.ControlCancel && !nodeSupportsControl(controlsByNode, node.NodeID, control.Operation) {
+			return nil, fmt.Errorf("%w: node %q does not declare support for %s", agentos.ErrInvalidControlOperation, node.NodeID, control.Operation)
+		}
+		childControl := control
+		key, err := agentosplan.NodeControlIdempotencyKey(planID, node.NodeID, control.Operation, control.IdempotencyKey)
+		if err != nil {
+			return nil, err
+		}
+		childControl.IdempotencyKey = key
+		inputs = append(inputs, controlPlanNodeInput{RunID: node.RunID, Control: childControl})
+	}
+
+	return inputs, nil
 }
 
 func nodeSupportsControl(controlsByNode map[string][]agentos.ControlOperation, nodeID string, op agentos.ControlOperation) bool {
