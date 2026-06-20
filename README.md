@@ -71,12 +71,16 @@ make compose-up-all
   - `POST /v1/agentos/runs/{run_id}/control` — Send pause, resume, or cancel
   - `POST /v1/agentos/runs/{run_id}/events` — Ingest backend events
   - `GET /v1/agentos/plans/schemas/{kind}` — Read RunPlan authoring JSON Schema
+  - `GET /v1/agentos/plans/author` — Render the RunPlanSpec authoring console
   - `POST /v1/agentos/plans` — Start a durable cross-backend RunPlan
   - `GET /v1/agentos/plans/{plan_id}/status` — Poll aggregate plan status
+  - `GET /v1/agentos/plans/{plan_id}/description` — Read public topology and status
+  - `GET /v1/agentos/plans/{plan_id}/console` — Render the RunPlan operator console
   - `POST /v1/agentos/plans/{plan_id}/signals` — Send plan signals such as retry, approve, or reject
   - `POST /v1/agentos/plans/{plan_id}/control` — Send pause, resume, or cancel to a RunPlan
   - `GET /v1/agentos/plans/{plan_id}/events` — Stream RunPlan events as SSE
   - `GET /v1/agentos/plans/{plan_id}/events/history` — Query durable RunPlan event history
+  - `GET /v1/agentos/plans/{plan_id}/debug/traces` — Query typed debug traces
   - `GET /v1/agentos/plans/{plan_id}/audits` — Query durable plan audit records
   - `GET /v1/agentos/plans/{plan_id}/artifacts` — Query plan artifact refs
   - `GET /v1/agentos/plans/{plan_id}/artifacts/{artifact_id}` — Read one plan artifact document

@@ -1510,6 +1510,25 @@ paths:
       summary: Get AgentOS plan status
       tags:
       - agentos
+  /agentos/plans/author:
+    get:
+      description: Render a RunPlanSpec authoring surface backed by the public AgentOS
+        schema.
+      operationId: agentos-plan-author
+      produces:
+      - text/html
+      responses:
+        "200":
+          description: HTML authoring surface
+          schema:
+            type: string
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/response.Error'
+      summary: AgentOS plan author
+      tags:
+      - agentos
   /agentos/plans/schemas/{kind}:
     get:
       consumes:

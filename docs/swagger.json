@@ -62,6 +62,33 @@
                 }
             }
         },
+        "/agentos/plans/author": {
+            "get": {
+                "description": "Render a RunPlanSpec authoring surface backed by the public AgentOS schema.",
+                "produces": [
+                    "text/html"
+                ],
+                "tags": [
+                    "agentos"
+                ],
+                "summary": "AgentOS plan author",
+                "operationId": "agentos-plan-author",
+                "responses": {
+                    "200": {
+                        "description": "HTML authoring surface",
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/response.Error"
+                        }
+                    }
+                }
+            }
+        },
         "/agentos/plans/schemas/{kind}": {
             "get": {
                 "description": "Return a public JSON Schema used to author AgentOS RunPlan wire contracts.",
