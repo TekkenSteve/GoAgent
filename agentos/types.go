@@ -37,6 +37,11 @@ const (
 	BackendNameGoAgentNative = "goagent-native"
 )
 
+const (
+	// CapabilityRun is the standard capability for starting one backend-owned run.
+	CapabilityRun = "run"
+)
+
 // BackendRef selects the backend that owns a run.
 type BackendRef struct {
 	Kind BackendKind `json:"kind"`

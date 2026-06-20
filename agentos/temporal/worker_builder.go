@@ -110,7 +110,7 @@ func newWorkerKit(ctx context.Context, cfg WorkerConfig) (*WorkerKit, error) {
 	}
 	artifactStore := temporalrepo.NewAgentOSArtifactRepo(pg, blobStore)
 	capabilityCatalog := temporalrepo.NewAgentOSCapabilityCatalogRepo(pg)
-	if err := agentosplan.RegisterCapabilities(ctx, capabilityCatalog, cfg.Capabilities); err != nil {
+	if err := agentosplan.RegisterCapabilities(ctx, capabilityCatalog, CapabilitiesWithDefaults(cfg.Capabilities)); err != nil {
 		temporalClient.Close()
 		_ = rdb.Close()
 		pg.Close()

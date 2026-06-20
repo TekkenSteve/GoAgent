@@ -279,7 +279,7 @@ func initTemporalComponents(
 	if err != nil {
 		l.Fatal(fmt.Errorf("app - Run - agentos capabilities: %w", err))
 	}
-	if err := agentosplan.RegisterCapabilities(context.Background(), capabilityCatalog, capabilities); err != nil {
+	if err := agentosplan.RegisterCapabilities(context.Background(), capabilityCatalog, agentostemporal.CapabilitiesWithDefaults(capabilities)); err != nil {
 		l.Fatal(fmt.Errorf("app - Run - register agentos capabilities: %w", err))
 	}
 	planActivities, err := agentostemporal.NewPlanActivitiesWithCatalog(
