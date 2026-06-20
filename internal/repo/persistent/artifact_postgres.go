@@ -179,8 +179,11 @@ func (r *AgentOSArtifactRepo) Get(ctx context.Context, scope agentos.PlanArtifac
 
 		return agentos.ArtifactRef{}, nil, err
 	}
-	if ref.URI == "" || r.blob == nil {
+	if ref.URI == "" {
 		return ref, nil, nil
+	}
+	if r.blob == nil {
+		return agentos.ArtifactRef{}, nil, fmt.Errorf("%w: blob store is required for artifact payload", agentos.ErrInvalidArtifact)
 	}
 	data, err := r.blob.Get(ctx, ref.URI)
 	if err != nil {

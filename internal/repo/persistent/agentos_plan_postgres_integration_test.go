@@ -668,12 +668,19 @@ func TestAgentOSArtifactPostgresRejectsDifferentIdempotencyReplay(t *testing.T) 
 		Name:      "summary",
 		Kind:      agentos.ArtifactKindObject,
 		MediaType: "application/json",
+		Metadata:  map[string]string{"class": "summary"},
 	}
-	first, err := artifactStore.Put(ctx, ref, map[string]any{"summary": "ok"}, "artifact-key-"+suffix)
+	first, err := artifactStore.Put(ctx, ref, map[string]any{
+		"summary":        "ok",
+		"payload_marker": "payload-" + suffix,
+	}, "artifact-key-"+suffix)
 	if err != nil {
 		t.Fatalf("Artifact Put first: %v", err)
 	}
-	replay, err := artifactStore.Put(ctx, ref, map[string]any{"summary": "ok"}, "artifact-key-"+suffix)
+	replay, err := artifactStore.Put(ctx, ref, map[string]any{
+		"summary":        "ok",
+		"payload_marker": "payload-" + suffix,
+	}, "artifact-key-"+suffix)
 	if err != nil {
 		t.Fatalf("Artifact Put replay: %v", err)
 	}
@@ -717,6 +724,7 @@ func TestAgentOSArtifactPostgresRejectsDifferentIdempotencyReplay(t *testing.T) 
 	if !ok || value != "ok" {
 		t.Fatalf("payload = %#v, want original payload", payload)
 	}
+	assertPostgresArtifactMetadataOnly(t, pg, first.ArtifactID, "class", "summary", "payload_marker")
 	assertPostgresArtifactScope(t, pg, first.ArtifactID, spec.AccountID, spec.ProjectID)
 	refs, err := artifactStore.List(ctx, agentos.PlanArtifactScope{
 		PlanID:    spec.PlanID,
@@ -731,6 +739,28 @@ func TestAgentOSArtifactPostgresRejectsDifferentIdempotencyReplay(t *testing.T) 
 	}
 	if len(refs) != 1 || refs[0].ArtifactID != first.ArtifactID {
 		t.Fatalf("Artifact List = %#v, want stored artifact", refs)
+	}
+	metadataOnlyStore := NewAgentOSArtifactRepo(pg, nil)
+	metadataRefs, err := metadataOnlyStore.List(ctx, agentos.PlanArtifactScope{
+		PlanID:    spec.PlanID,
+		AccountID: spec.AccountID,
+		ProjectID: spec.ProjectID,
+		NodeID:    ref.NodeID,
+		RunID:     ref.RunID,
+	})
+	if err != nil {
+		t.Fatalf("Artifact metadata-only List: %v", err)
+	}
+	if len(metadataRefs) != 1 || metadataRefs[0].ArtifactID != first.ArtifactID || metadataRefs[0].URI == "" {
+		t.Fatalf("Artifact metadata-only List = %#v, want stored ref with blob uri", metadataRefs)
+	}
+	if _, _, err := metadataOnlyStore.Get(ctx, agentos.PlanArtifactScope{
+		PlanID:     spec.PlanID,
+		AccountID:  spec.AccountID,
+		ProjectID:  spec.ProjectID,
+		ArtifactID: first.ArtifactID,
+	}); !errors.Is(err, agentos.ErrInvalidArtifact) {
+		t.Fatalf("Artifact metadata-only Get error = %v, want ErrInvalidArtifact", err)
 	}
 	if _, _, err := artifactStore.Get(ctx, agentos.PlanArtifactScope{
 		PlanID:     spec.PlanID,
@@ -840,6 +870,27 @@ WHERE artifact_id = $1`, artifactID).Scan(&storedAccountID, &storedProjectID)
 	}
 	if storedAccountID != accountID || storedProjectID != projectID {
 		t.Fatalf("artifact tenant scope = %s/%s, want %s/%s", storedAccountID, storedProjectID, accountID, projectID)
+	}
+}
+
+func assertPostgresArtifactMetadataOnly(t *testing.T, pg *postgres.Postgres, artifactID, metadataKey, metadataValue, payloadKey string) {
+	t.Helper()
+
+	var storedMetadataValue string
+	var hasPayloadKey bool
+	err := pg.Pool.QueryRow(t.Context(), `
+SELECT metadata_json ->> $2,
+       metadata_json ? $3
+FROM artifacts
+WHERE artifact_id = $1`, artifactID, metadataKey, payloadKey).Scan(&storedMetadataValue, &hasPayloadKey)
+	if err != nil {
+		t.Fatalf("read artifact metadata json: %v", err)
+	}
+	if storedMetadataValue != metadataValue {
+		t.Fatalf("artifact metadata %q = %q, want %q", metadataKey, storedMetadataValue, metadataValue)
+	}
+	if hasPayloadKey {
+		t.Fatalf("artifact metadata unexpectedly contains payload key %q", payloadKey)
 	}
 }
 
