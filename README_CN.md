@@ -199,7 +199,7 @@ status, _ := c.StartRun(ctx, client.AgentOSRunRequest{
 
 ### 方式二 — 库嵌入
 
-将稳定的 AgentOS 运行时边界导入你的 Go 应用。默认 Temporal/Redis 实现位于 `agentos/temporal`。
+将稳定的 AgentOS 运行时边界导入你的 Go 应用。默认 Temporal/Postgres/Redis 实现位于 `agentos/temporal`。
 
 ```go
 import (
@@ -211,13 +211,16 @@ rt, _ := agentostemporal.NewRuntime(ctx, agentostemporal.RuntimeConfig{
     TemporalAddress: "127.0.0.1:7233",
     TemporalNamespace: "default",
     TemporalTaskQueue: "agent-framework",
+    PostgresURL: "postgres://goagent:goagent@127.0.0.1:5432/goagent?sslmode=disable",
     RedisURL: "redis://127.0.0.1:6379/0",
 })
 status, _ := rt.Start(ctx, agentos.RunSpec{
     RunID: "run-1",
     AccountID: "acct-1",
+    ProjectID: "proj-1",
     ModelRef: "gpt-4.1-mini",
     UserMessage: "1+1 等于几？",
+    IdempotencyKey: "run-1-start",
 })
 ```
 

@@ -27,6 +27,24 @@ type runtime struct {
 	closers        []func() error
 }
 
+type runtimeRunBackendIndexFactory func(cfg RuntimeConfig) (RunBackendIndex, func() error, error)
+
+var newRuntimeRunBackendIndex = func(cfg RuntimeConfig) (RunBackendIndex, func() error, error) {
+	if cfg.PostgresURL == "" {
+		return nil, nil, nil
+	}
+	pg, err := newRuntimePostgres(cfg)
+	if err != nil {
+		return nil, nil, fmt.Errorf("agentos temporal runtime postgres: %w", err)
+	}
+
+	return temporalrepo.NewRunBackendIndexRepo(pg), func() error {
+		pg.Close()
+
+		return nil
+	}, nil
+}
+
 // NewRuntime creates the default Temporal/Redis implementation of agentos.Runtime.
 func NewRuntime(ctx context.Context, cfg RuntimeConfig, options ...RuntimeOption) (agentos.Runtime, error) {
 	fwTemporal := temporalConfig(cfg)
@@ -56,7 +74,13 @@ func NewRuntime(ctx context.Context, cfg RuntimeConfig, options ...RuntimeOption
 		subscriber = repostream.NewRedisSubscriber(rdb.Hub())
 	}
 
-	if err := r.configureRouter(c, cfg, buildRuntimeOptions(options), temporalrepo.NewExecutorTemporal(c, fwTemporal), subscriber); err != nil {
+	runtimeOpts, err := r.runtimeOptionsWithDefaultRunBackendIndex(cfg, buildRuntimeOptions(options), newRuntimeRunBackendIndex)
+	if err != nil {
+		_ = r.Close()
+
+		return nil, err
+	}
+	if err := r.configureRouter(c, cfg, runtimeOpts, temporalrepo.NewExecutorTemporal(c, fwTemporal), subscriber); err != nil {
 		_ = r.Close()
 
 		return nil, err
@@ -88,7 +112,13 @@ func NewRuntimeWithClient(ctx context.Context, cfg RuntimeConfig, c client.Clien
 		subscriber = repostream.NewRedisSubscriber(rdb.Hub())
 	}
 
-	if err := r.configureRouter(c, cfg, buildRuntimeOptions(options), temporalrepo.NewExecutorTemporal(c, fwTemporal), subscriber); err != nil {
+	runtimeOpts, err := r.runtimeOptionsWithDefaultRunBackendIndex(cfg, buildRuntimeOptions(options), newRuntimeRunBackendIndex)
+	if err != nil {
+		_ = r.Close()
+
+		return nil, err
+	}
+	if err := r.configureRouter(c, cfg, runtimeOpts, temporalrepo.NewExecutorTemporal(c, fwTemporal), subscriber); err != nil {
 		_ = r.Close()
 
 		return nil, err
@@ -179,6 +209,25 @@ func (r *runtime) configureRouter(temporalClient client.Client, cfg RuntimeConfi
 	r.router = router
 
 	return nil
+}
+
+func (r *runtime) runtimeOptionsWithDefaultRunBackendIndex(cfg RuntimeConfig, opts runtimeOptions, factory runtimeRunBackendIndexFactory) (runtimeOptions, error) {
+	if opts.runBackendIndex != nil {
+		return opts, nil
+	}
+	index, closeFn, err := factory(cfg)
+	if err != nil {
+		return runtimeOptions{}, err
+	}
+	if index == nil {
+		return opts, nil
+	}
+	opts.runBackendIndex = index
+	if closeFn != nil {
+		r.closers = append(r.closers, closeFn)
+	}
+
+	return opts, nil
 }
 
 func buildRuntimeOptions(options []RuntimeOption) runtimeOptions {

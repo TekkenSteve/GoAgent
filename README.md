@@ -240,7 +240,7 @@ status, _ := c.StartRun(ctx, client.AgentOSRunRequest{
 
 ### Mode 2 — Library Embedding
 
-Import the stable AgentOS runtime boundary into your Go application. Use `agentos/temporal` for the default Temporal/Redis implementation.
+Import the stable AgentOS runtime boundary into your Go application. Use `agentos/temporal` for the default Temporal/Postgres/Redis implementation.
 
 ```go
 import (
@@ -252,13 +252,16 @@ rt, _ := agentostemporal.NewRuntime(ctx, agentostemporal.RuntimeConfig{
     TemporalAddress: "127.0.0.1:7233",
     TemporalNamespace: "default",
     TemporalTaskQueue: "agent-framework",
+    PostgresURL: "postgres://goagent:goagent@127.0.0.1:5432/goagent?sslmode=disable",
     RedisURL: "redis://127.0.0.1:6379/0",
 })
 status, _ := rt.Start(ctx, agentos.RunSpec{
     RunID: "run-1",
     AccountID: "acct-1",
+    ProjectID: "proj-1",
     ModelRef: "gpt-4.1-mini",
     UserMessage: "What is 2+2?",
+    IdempotencyKey: "run-1-start",
 })
 ```
 

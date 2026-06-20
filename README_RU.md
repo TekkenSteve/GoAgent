@@ -199,7 +199,7 @@ status, _ := c.StartRun(ctx, client.AgentOSRunRequest{
 
 ### Режим 2 — Встраивание библиотеки
 
-Импортируйте стабильную границу AgentOS runtime в ваше Go-приложение. Реализация по умолчанию на Temporal/Redis находится в `agentos/temporal`.
+Импортируйте стабильную границу AgentOS runtime в ваше Go-приложение. Реализация по умолчанию на Temporal/Postgres/Redis находится в `agentos/temporal`.
 
 ```go
 import (
@@ -211,13 +211,16 @@ rt, _ := agentostemporal.NewRuntime(ctx, agentostemporal.RuntimeConfig{
     TemporalAddress: "127.0.0.1:7233",
     TemporalNamespace: "default",
     TemporalTaskQueue: "agent-framework",
+    PostgresURL: "postgres://goagent:goagent@127.0.0.1:5432/goagent?sslmode=disable",
     RedisURL: "redis://127.0.0.1:6379/0",
 })
 status, _ := rt.Start(ctx, agentos.RunSpec{
     RunID: "run-1",
     AccountID: "acct-1",
+    ProjectID: "proj-1",
     ModelRef: "gpt-4.1-mini",
     UserMessage: "Сколько будет 2+2?",
+    IdempotencyKey: "run-1-start",
 })
 ```
 
