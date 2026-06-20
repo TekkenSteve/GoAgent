@@ -90,6 +90,34 @@ func TestValidatorRejectsSchemaMismatch(t *testing.T) {
 	}
 }
 
+func TestValidatorRejectsArtifactSchemaRefWithoutCatalog(t *testing.T) {
+	ref := agentos.BackendRef{Kind: agentos.BackendKindNative, Name: agentos.BackendNameGoAgentNative}
+	spec := samplePlan(ref)
+	spec.Nodes[0].Outputs[0].SchemaRef = "schema:summary"
+
+	_, err := Validator{Capabilities: sampleCapabilityCatalog(t, ref)}.Validate(context.Background(), spec)
+	if !errors.Is(err, agentos.ErrInvalidArtifact) {
+		t.Fatalf("error = %v, want ErrInvalidArtifact", err)
+	}
+}
+
+func TestValidatorAcceptsArtifactSchemaRefWithCatalog(t *testing.T) {
+	ref := agentos.BackendRef{Kind: agentos.BackendKindNative, Name: agentos.BackendNameGoAgentNative}
+	spec := samplePlan(ref)
+	spec.Nodes[0].Outputs[0].SchemaRef = "schema:summary"
+	schemas, err := NewStaticArtifactSchemaCatalog(map[string]json.RawMessage{
+		"schema:summary": json.RawMessage(`{"type":"object"}`),
+	})
+	if err != nil {
+		t.Fatalf("NewStaticArtifactSchemaCatalog: %v", err)
+	}
+
+	_, err = Validator{Capabilities: sampleCapabilityCatalog(t, ref), ArtifactSchemas: schemas}.Validate(context.Background(), spec)
+	if err != nil {
+		t.Fatalf("Validate: %v", err)
+	}
+}
+
 func TestValidatorRejectsContinuationThresholdAboveHistoryGuard(t *testing.T) {
 	ref := agentos.BackendRef{Kind: agentos.BackendKindNative, Name: agentos.BackendNameGoAgentNative}
 	spec := samplePlan(ref)

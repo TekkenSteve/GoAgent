@@ -2,6 +2,7 @@ package agentosplan
 
 import (
 	"context"
+	"encoding/json"
 	"time"
 
 	"github.com/TekkenSteve/GoAgent/agentos"
@@ -44,6 +45,11 @@ type ArtifactStore interface {
 	Put(ctx context.Context, artifact agentos.ArtifactRef, payload any, idempotencyKey string) (agentos.ArtifactRef, error)
 	Get(ctx context.Context, scope agentos.PlanArtifactScope) (agentos.ArtifactRef, any, error)
 	List(ctx context.Context, scope agentos.PlanArtifactScope) ([]agentos.ArtifactRef, error)
+}
+
+// ArtifactSchemaCatalog resolves JSON Schemas referenced by ArtifactSpec.
+type ArtifactSchemaCatalog interface {
+	GetArtifactSchema(ctx context.Context, schemaRef string) (json.RawMessage, bool, error)
 }
 
 // PlanIndex stores durable plan identity and the latest aggregate status.

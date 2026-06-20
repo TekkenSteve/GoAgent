@@ -19,8 +19,9 @@ const (
 // Validator validates RunPlan specs against topology, policy, expressions,
 // capabilities, and artifact contracts.
 type Validator struct {
-	Expressions  ExpressionCompiler
-	Capabilities CapabilityCatalog
+	Expressions     ExpressionCompiler
+	Capabilities    CapabilityCatalog
+	ArtifactSchemas ArtifactSchemaCatalog
 }
 
 // ExecutablePlan is a validated, deterministic RunPlan view.
@@ -133,6 +134,9 @@ func (v Validator) validateNode(ctx context.Context, spec agentos.RunPlanSpec, n
 	if err := ValidateArtifactSpecs(node.NodeID, node.Outputs); err != nil {
 		return err
 	}
+	if err := ValidateArtifactSchemaRefs(ctx, v.ArtifactSchemas, node.NodeID, node.Outputs); err != nil {
+		return err
+	}
 	if node.Capability == "" {
 		return nil
 	}
@@ -211,16 +215,31 @@ func normalizePolicy(policy agentos.PlanPolicy) agentos.PlanPolicy {
 }
 
 func validateRawSchema(raw json.RawMessage, value any) error {
-	var schema jsonschema.Schema
-	if err := json.Unmarshal(raw, &schema); err != nil {
-		return err
-	}
-	resolved, err := schema.Resolve(nil)
+	resolved, err := resolveRawSchema(raw)
 	if err != nil {
 		return err
 	}
 
 	return resolved.Validate(value)
+}
+
+func validateRawSchemaSyntax(raw json.RawMessage) error {
+	_, err := resolveRawSchema(raw)
+
+	return err
+}
+
+func resolveRawSchema(raw json.RawMessage) (*jsonschema.Resolved, error) {
+	var schema jsonschema.Schema
+	if err := json.Unmarshal(raw, &schema); err != nil {
+		return nil, err
+	}
+	resolved, err := schema.Resolve(nil)
+	if err != nil {
+		return nil, err
+	}
+
+	return resolved, nil
 }
 
 func topoSort(nodeByID map[string]agentos.PlanNodeSpec, edges []agentos.PlanEdgeSpec) ([]string, error) {

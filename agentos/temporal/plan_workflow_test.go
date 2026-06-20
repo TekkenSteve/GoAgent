@@ -826,7 +826,7 @@ func (m *planWorkflowMocks) control(_ context.Context, input controlPlanNodeInpu
 }
 
 func (m *planWorkflowMocks) publishArtifacts(_ context.Context, input publishPlanArtifactsInput) (publishPlanArtifactsOutput, error) {
-	refs, err := normalizeRunArtifacts(input.PlanID, input.Node, input.Status)
+	refs, err := normalizeRunArtifacts(input.Spec.PlanID, input.Node, input.Status)
 	if err != nil {
 		return publishPlanArtifactsOutput{}, err
 	}

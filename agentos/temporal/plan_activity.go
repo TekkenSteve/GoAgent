@@ -17,6 +17,7 @@ type PlanActivities struct {
 	PlanEventStore     agentosplan.PlanEventStore
 	PlanEventPublisher agentosplan.PlanEventPublisher
 	ArtifactStore      agentosplan.ArtifactStore
+	ArtifactSchemas    agentosplan.ArtifactSchemaCatalog
 	PlanDeltaProvider  agentosplan.PlanDeltaProvider
 	Expressions        agentosplan.ValueExpressionCompiler
 }
@@ -55,6 +56,20 @@ func NewPlanActivitiesWithCatalog(
 	eventPublisher agentosplan.PlanEventPublisher,
 	artifactStore agentosplan.ArtifactStore,
 ) (*PlanActivities, error) {
+	return NewPlanActivitiesWithCatalogAndSchemas(runtime, catalog, nil, stateStore, eventStore, eventPublisher, artifactStore)
+}
+
+// NewPlanActivitiesWithCatalogAndSchemas creates plan activities with explicit
+// capability and artifact schema catalogs.
+func NewPlanActivitiesWithCatalogAndSchemas(
+	runtime agentos.Runtime,
+	catalog agentosplan.CapabilityCatalog,
+	artifactSchemas agentosplan.ArtifactSchemaCatalog,
+	stateStore agentosplan.PlanStateStore,
+	eventStore agentosplan.PlanEventStore,
+	eventPublisher agentosplan.PlanEventPublisher,
+	artifactStore agentosplan.ArtifactStore,
+) (*PlanActivities, error) {
 	if runtime == nil {
 		return nil, fmt.Errorf("%w: plan activity runtime is required", agentos.ErrInvalidRunPlan)
 	}
@@ -71,13 +86,15 @@ func NewPlanActivitiesWithCatalog(
 		Runtime:         runtime,
 		PlanNodeStarter: planNodeStarter,
 		Validator: agentosplan.Validator{
-			Expressions:  compiler,
-			Capabilities: catalog,
+			Expressions:     compiler,
+			Capabilities:    catalog,
+			ArtifactSchemas: artifactSchemas,
 		},
 		PlanStateStore:     stateStore,
 		PlanEventStore:     eventStore,
 		PlanEventPublisher: eventPublisher,
 		ArtifactStore:      artifactStore,
+		ArtifactSchemas:    artifactSchemas,
 		PlanDeltaProvider:  agentosplan.NewArtifactPlanDeltaProvider(artifactStore),
 		Expressions:        compiler,
 	}, nil
@@ -259,7 +276,7 @@ func (a *PlanActivities) PersistPlanStateActivity(ctx context.Context, input per
 }
 
 type publishPlanArtifactsInput struct {
-	PlanID string
+	Spec   agentos.RunPlanSpec
 	Node   agentos.PlanNodeSpec
 	Status agentos.RunStatus
 }
@@ -276,18 +293,18 @@ func (a *PlanActivities) PublishPlanArtifactsActivity(ctx context.Context, input
 	if a.ArtifactStore == nil {
 		return publishPlanArtifactsOutput{}, fmt.Errorf("%w: artifact store is required", agentos.ErrInvalidArtifact)
 	}
-	refs, err := normalizeRunArtifacts(input.PlanID, input.Node, input.Status)
+	refs, err := normalizeRunArtifacts(input.Spec.PlanID, input.Node, input.Status)
 	if err != nil {
 		return publishPlanArtifactsOutput{}, err
 	}
 	if runSucceeded(input.Status.LifecycleState) {
-		if err := a.validatePublishedArtifacts(ctx, input.Node, refs); err != nil {
+		if err := a.validatePublishedArtifacts(ctx, input.Spec, input.Node, refs); err != nil {
 			return publishPlanArtifactsOutput{}, err
 		}
 	}
 	stored := make([]agentos.ArtifactRef, 0, len(refs))
 	for _, ref := range refs {
-		key, err := agentosplan.ArtifactPublishIdempotencyKey(input.PlanID, input.Node.NodeID, input.Status.RunID, ref.Name)
+		key, err := agentosplan.ArtifactPublishIdempotencyKey(input.Spec.PlanID, input.Node.NodeID, input.Status.RunID, ref.Name)
 		if err != nil {
 			return publishPlanArtifactsOutput{}, err
 		}
@@ -301,8 +318,11 @@ func (a *PlanActivities) PublishPlanArtifactsActivity(ctx context.Context, input
 	return publishPlanArtifactsOutput{Artifacts: stored}, nil
 }
 
-func (a *PlanActivities) validatePublishedArtifacts(ctx context.Context, node agentos.PlanNodeSpec, refs []agentos.ArtifactRef) error {
+func (a *PlanActivities) validatePublishedArtifacts(ctx context.Context, spec agentos.RunPlanSpec, node agentos.PlanNodeSpec, refs []agentos.ArtifactRef) error {
 	if err := agentosplan.ValidateArtifactsAgainstSpecs(node.NodeID, node.Outputs, refs); err != nil {
+		return err
+	}
+	if err := agentosplan.ValidateArtifactPayloadsAgainstSchemas(ctx, a.ArtifactStore, a.ArtifactSchemas, spec, node, refs); err != nil {
 		return err
 	}
 	if node.Capability == "" || a.Validator.Capabilities == nil {

@@ -1,6 +1,7 @@
 package agentosplan
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 
@@ -79,6 +80,66 @@ func ValidateArtifactsAgainstSpecs(nodeID string, specs []agentos.ArtifactSpec, 
 	return nil
 }
 
+// ValidateArtifactSchemaRefs verifies that every declared schema_ref resolves
+// to a valid JSON Schema document.
+func ValidateArtifactSchemaRefs(ctx context.Context, catalog ArtifactSchemaCatalog, nodeID string, specs []agentos.ArtifactSpec) error {
+	for _, spec := range specs {
+		if spec.SchemaRef == "" {
+			continue
+		}
+		raw, err := artifactSchema(ctx, catalog, nodeID, spec)
+		if err != nil {
+			return err
+		}
+		if err := validateRawSchemaSyntax(raw); err != nil {
+			return artifactContractError(nodeID, "artifact %q schema_ref %q is invalid: %s", spec.Name, spec.SchemaRef, err)
+		}
+	}
+
+	return nil
+}
+
+// ValidateArtifactPayloadsAgainstSchemas validates stored artifact payloads
+// against their declared schema_ref contracts.
+func ValidateArtifactPayloadsAgainstSchemas(ctx context.Context, store ArtifactStore, catalog ArtifactSchemaCatalog, plan agentos.RunPlanSpec, node agentos.PlanNodeSpec, refs []agentos.ArtifactRef) error {
+	for _, spec := range node.Outputs {
+		if spec.SchemaRef == "" {
+			continue
+		}
+		ref, ok := findArtifact(refs, "", spec.Name)
+		if !ok {
+			continue
+		}
+		if ref.ArtifactID == "" {
+			return artifactContractError(node.NodeID, "artifact %q schema_ref %q requires an artifact id", spec.Name, spec.SchemaRef)
+		}
+		if store == nil {
+			return artifactContractError(node.NodeID, "artifact %q schema_ref %q requires an artifact store", spec.Name, spec.SchemaRef)
+		}
+		raw, err := artifactSchema(ctx, catalog, node.NodeID, spec)
+		if err != nil {
+			return err
+		}
+		_, payload, err := store.Get(ctx, agentos.PlanArtifactScope{
+			PlanID:     plan.PlanID,
+			AccountID:  plan.AccountID,
+			ProjectID:  plan.ProjectID,
+			ArtifactID: ref.ArtifactID,
+		})
+		if err != nil {
+			return err
+		}
+		if payload == nil {
+			return artifactContractError(node.NodeID, "artifact %q schema_ref %q requires stored payload", spec.Name, spec.SchemaRef)
+		}
+		if err := validateRawSchema(raw, payload); err != nil {
+			return artifactContractError(node.NodeID, "artifact %q payload does not match schema_ref %q: %s", spec.Name, spec.SchemaRef, err)
+		}
+	}
+
+	return nil
+}
+
 // ValidateCapabilityOutputArtifacts validates published artifact refs against a
 // capability output JSON Schema. The validated document shape is:
 //
@@ -116,4 +177,19 @@ func artifactContractError(nodeID, format string, args ...any) error {
 	}
 
 	return fmt.Errorf("%w: node %q %s", agentos.ErrInvalidArtifact, nodeID, message)
+}
+
+func artifactSchema(ctx context.Context, catalog ArtifactSchemaCatalog, nodeID string, spec agentos.ArtifactSpec) (json.RawMessage, error) {
+	if catalog == nil {
+		return nil, artifactContractError(nodeID, "artifact %q schema_ref %q requires an artifact schema catalog", spec.Name, spec.SchemaRef)
+	}
+	raw, ok, err := catalog.GetArtifactSchema(ctx, spec.SchemaRef)
+	if err != nil {
+		return nil, err
+	}
+	if !ok {
+		return nil, artifactContractError(nodeID, "artifact %q schema_ref %q was not found", spec.Name, spec.SchemaRef)
+	}
+
+	return raw, nil
 }

@@ -141,7 +141,11 @@ func TestPlanActivitiesResolvePlanNodeInputDereferencesArtifactPayload(t *testin
 func TestPlanActivitiesPublishArtifactsIsIdempotent(t *testing.T) {
 	activities := newTestPlanActivities(t, &fakePlanRuntime{})
 	input := publishPlanArtifactsInput{
-		PlanID: "plan-1",
+		Spec: agentos.RunPlanSpec{
+			PlanID:    "plan-1",
+			AccountID: "acct-1",
+			ProjectID: "proj-1",
+		},
 		Node: agentos.PlanNodeSpec{
 			NodeID: "node-1",
 		},
@@ -196,7 +200,11 @@ func TestPlanActivitiesPublishArtifactsRetainsStoredPayload(t *testing.T) {
 	status.Artifacts = []agentos.ArtifactRef{ref}
 
 	output, err := activities.PublishPlanArtifactsActivity(ctx, publishPlanArtifactsInput{
-		PlanID: "plan-1",
+		Spec: agentos.RunPlanSpec{
+			PlanID:    "plan-1",
+			AccountID: "acct-1",
+			ProjectID: "proj-1",
+		},
 		Node:   node,
 		Status: status,
 	})
@@ -218,6 +226,54 @@ func TestPlanActivitiesPublishArtifactsRetainsStoredPayload(t *testing.T) {
 	value, ok := payload.(map[string]any)["value"]
 	if !ok || value != "from backend" {
 		t.Fatalf("payload = %#v, want original payload", payload)
+	}
+}
+
+func TestPlanActivitiesPublishArtifactsValidatesSchemaRefPayload(t *testing.T) {
+	ctx := context.Background()
+	activities := newTestPlanActivities(t, &fakePlanRuntime{})
+	schemas, err := agentosplan.NewStaticArtifactSchemaCatalog(map[string]json.RawMessage{
+		"schema:summary": json.RawMessage(`{
+			"type": "object",
+			"properties": {"score": {"type": "number"}},
+			"required": ["score"]
+		}`),
+	})
+	if err != nil {
+		t.Fatalf("NewStaticArtifactSchemaCatalog: %v", err)
+	}
+	activities.ArtifactSchemas = schemas
+	node := agentos.PlanNodeSpec{
+		NodeID: "research",
+		Outputs: []agentos.ArtifactSpec{
+			{Name: "summary", Kind: agentos.ArtifactKindObject, SchemaRef: "schema:summary"},
+		},
+	}
+	status := agentos.RunStatus{RunID: "run-research", LifecycleState: "completed"}
+	ref, err := activities.ArtifactStore.Put(ctx, agentos.ArtifactRef{
+		ArtifactID: "artifact-summary",
+		PlanID:     "plan-1",
+		NodeID:     node.NodeID,
+		RunID:      status.RunID,
+		Name:       "summary",
+		Kind:       agentos.ArtifactKindObject,
+	}, map[string]any{"score": "high"}, "plan-1:artifact-summary")
+	if err != nil {
+		t.Fatalf("Put artifact payload: %v", err)
+	}
+	status.Artifacts = []agentos.ArtifactRef{ref}
+
+	_, err = activities.PublishPlanArtifactsActivity(ctx, publishPlanArtifactsInput{
+		Spec: agentos.RunPlanSpec{
+			PlanID:    "plan-1",
+			AccountID: "acct-1",
+			ProjectID: "proj-1",
+		},
+		Node:   node,
+		Status: status,
+	})
+	if !errors.Is(err, agentos.ErrInvalidArtifact) {
+		t.Fatalf("schema mismatch error = %v, want ErrInvalidArtifact", err)
 	}
 }
 
@@ -251,7 +307,11 @@ func TestPlanActivitiesPublishArtifactsValidatesSuccessfulOutputContract(t *test
 	})
 
 	_, err := activities.PublishPlanArtifactsActivity(context.Background(), publishPlanArtifactsInput{
-		PlanID: "plan-1",
+		Spec: agentos.RunPlanSpec{
+			PlanID:    "plan-1",
+			AccountID: "acct-1",
+			ProjectID: "proj-1",
+		},
 		Node: agentos.PlanNodeSpec{
 			NodeID:     "research",
 			Capability: "run",
@@ -282,7 +342,11 @@ func TestPlanActivitiesPublishArtifactsValidatesSuccessfulOutputContract(t *test
 func TestPlanActivitiesPublishArtifactsDoesNotRequireOutputsForFailedRun(t *testing.T) {
 	activities := newTestPlanActivities(t, &fakePlanRuntime{})
 	_, err := activities.PublishPlanArtifactsActivity(context.Background(), publishPlanArtifactsInput{
-		PlanID: "plan-1",
+		Spec: agentos.RunPlanSpec{
+			PlanID:    "plan-1",
+			AccountID: "acct-1",
+			ProjectID: "proj-1",
+		},
 		Node: agentos.PlanNodeSpec{
 			NodeID: "node-1",
 			Outputs: []agentos.ArtifactSpec{

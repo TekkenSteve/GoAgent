@@ -449,7 +449,7 @@ func applyNodeRunTerminal(activityCtx workflow.Context, workflowCtx workflow.Con
 
 	var published publishPlanArtifactsOutput
 	if err := workflow.ExecuteActivity(activityCtx, PublishPlanArtifactsActivityName, publishPlanArtifactsInput{
-		PlanID: spec.PlanID,
+		Spec:   *spec,
 		Node:   node,
 		Status: status,
 	}).Get(activityCtx, &published); err != nil {

@@ -1,6 +1,7 @@
 package agentosplan
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"testing"
@@ -75,5 +76,75 @@ func TestValidateCapabilityOutputArtifactsUsesStableDocumentShape(t *testing.T) 
 		{Name: "summary", Kind: agentos.ArtifactKindObject, Metadata: map[string]string{"quality": "approved"}},
 	}); err != nil {
 		t.Fatalf("schema match error = %v", err)
+	}
+}
+
+func TestValidateArtifactSchemaRefsRequiresCatalog(t *testing.T) {
+	specs := []agentos.ArtifactSpec{{Name: "summary", Kind: agentos.ArtifactKindObject, SchemaRef: "schema:summary"}}
+	err := ValidateArtifactSchemaRefs(context.Background(), nil, "node-1", specs)
+	if !errors.Is(err, agentos.ErrInvalidArtifact) {
+		t.Fatalf("missing catalog error = %v, want ErrInvalidArtifact", err)
+	}
+
+	catalog, err := NewStaticArtifactSchemaCatalog(map[string]json.RawMessage{
+		"schema:summary": json.RawMessage(`{"type":"object"}`),
+	})
+	if err != nil {
+		t.Fatalf("NewStaticArtifactSchemaCatalog: %v", err)
+	}
+	if err := ValidateArtifactSchemaRefs(context.Background(), catalog, "node-1", specs); err != nil {
+		t.Fatalf("ValidateArtifactSchemaRefs: %v", err)
+	}
+}
+
+func TestValidateArtifactPayloadsAgainstSchemas(t *testing.T) {
+	ctx := context.Background()
+	catalog, err := NewStaticArtifactSchemaCatalog(map[string]json.RawMessage{
+		"schema:summary": json.RawMessage(`{
+			"type": "object",
+			"properties": {"score": {"type": "number"}},
+			"required": ["score"]
+		}`),
+	})
+	if err != nil {
+		t.Fatalf("NewStaticArtifactSchemaCatalog: %v", err)
+	}
+	store := NewMemoryArtifactStore()
+	plan := agentos.RunPlanSpec{PlanID: "plan-1", AccountID: "acct-1", ProjectID: "proj-1"}
+	node := agentos.PlanNodeSpec{
+		NodeID: "node-1",
+		Outputs: []agentos.ArtifactSpec{
+			{Name: "summary", Kind: agentos.ArtifactKindObject, SchemaRef: "schema:summary"},
+		},
+	}
+	badRef, err := store.Put(ctx, agentos.ArtifactRef{
+		ArtifactID: "artifact-bad",
+		PlanID:     plan.PlanID,
+		NodeID:     node.NodeID,
+		RunID:      "run-1",
+		Name:       "summary",
+		Kind:       agentos.ArtifactKindObject,
+	}, map[string]any{"score": "high"}, "artifact-bad-key")
+	if err != nil {
+		t.Fatalf("Put bad artifact: %v", err)
+	}
+	err = ValidateArtifactPayloadsAgainstSchemas(ctx, store, catalog, plan, node, []agentos.ArtifactRef{badRef})
+	if !errors.Is(err, agentos.ErrInvalidArtifact) {
+		t.Fatalf("schema mismatch error = %v, want ErrInvalidArtifact", err)
+	}
+
+	goodRef, err := store.Put(ctx, agentos.ArtifactRef{
+		ArtifactID: "artifact-good",
+		PlanID:     plan.PlanID,
+		NodeID:     node.NodeID,
+		RunID:      "run-1",
+		Name:       "summary",
+		Kind:       agentos.ArtifactKindObject,
+	}, map[string]any{"score": 1.0}, "artifact-good-key")
+	if err != nil {
+		t.Fatalf("Put good artifact: %v", err)
+	}
+	if err := ValidateArtifactPayloadsAgainstSchemas(ctx, store, catalog, plan, node, []agentos.ArtifactRef{goodRef}); err != nil {
+		t.Fatalf("ValidateArtifactPayloadsAgainstSchemas: %v", err)
 	}
 }
