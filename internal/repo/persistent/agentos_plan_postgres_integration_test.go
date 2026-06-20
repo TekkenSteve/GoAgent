@@ -439,6 +439,39 @@ func TestAgentOSPlanPostgresSavePlanStateRequiresIdempotencyKey(t *testing.T) {
 	}
 }
 
+func TestAgentOSPlanPostgresSavePlanStateRejectsMissingPlan(t *testing.T) {
+	ctx, pg, suffix := newAgentOSPlanPostgresIntegrationDB(t)
+	planRepo := NewAgentOSPlanRepo(pg)
+	spec := postgresIntegrationPlanSpec("plan-state-missing-"+suffix, "plan-state-missing-start-"+suffix)
+
+	err := planRepo.SavePlanState(ctx, agentosplan.PlanStateSnapshot{
+		Spec:           spec,
+		Status:         agentosplan.NewState(spec, time.Now().UTC()).Status,
+		IdempotencyKey: spec.IdempotencyKey,
+	})
+	if !errors.Is(err, agentos.ErrPlanRouteNotFound) {
+		t.Fatalf("SavePlanState missing plan error = %v, want ErrPlanRouteNotFound", err)
+	}
+}
+
+func TestAgentOSPlanPostgresPersistPlanTransitionRejectsMissingPlan(t *testing.T) {
+	ctx, pg, suffix := newAgentOSPlanPostgresIntegrationDB(t)
+	planRepo := NewAgentOSPlanRepo(pg)
+	spec := postgresIntegrationPlanSpec("plan-transition-missing-"+suffix, "plan-transition-missing-start-"+suffix)
+
+	_, err := planRepo.PersistPlanTransition(ctx, agentosplan.PlanStateSnapshot{
+		Spec:           spec,
+		Status:         agentosplan.NewState(spec, time.Now().UTC()).Status,
+		IdempotencyKey: spec.IdempotencyKey,
+	}, agentos.PlanEvent{
+		Event:  agentos.Event{EventType: agentos.EventPlanStarted},
+		PlanID: spec.PlanID,
+	}, "plan-transition-missing-event-"+suffix)
+	if !errors.Is(err, agentos.ErrPlanRouteNotFound) {
+		t.Fatalf("PersistPlanTransition missing plan error = %v, want ErrPlanRouteNotFound", err)
+	}
+}
+
 func TestAgentOSPlanPostgresPlanEventIdempotencyDoesNotAdvanceSequence(t *testing.T) {
 	ctx, pg, suffix := newAgentOSPlanPostgresIntegrationDB(t)
 	planRepo := NewAgentOSPlanRepo(pg)

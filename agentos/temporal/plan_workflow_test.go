@@ -50,7 +50,7 @@ func TestPlanWorkflowExecutesSuccessEdgeAndPublishesArtifacts(t *testing.T) {
 			"run-verify": {RunID: "run-verify", LifecycleState: "completed"},
 		},
 	}
-	env := newPlanWorkflowTestEnv(mocks)
+	env := newPlanWorkflowTestEnv(t, mocks, spec)
 
 	env.ExecuteWorkflow(PlanWorkflow, planWorkflowInput{Spec: spec})
 
@@ -100,7 +100,7 @@ func TestPlanWorkflowFailsNodeWhenRequiredInputArtifactIsMissing(t *testing.T) {
 			"run-research": {RunID: "run-research", LifecycleState: "completed"},
 		},
 	}
-	env := newPlanWorkflowTestEnv(mocks)
+	env := newPlanWorkflowTestEnv(t, mocks, spec)
 
 	env.ExecuteWorkflow(PlanWorkflow, planWorkflowInput{Spec: spec})
 
@@ -152,9 +152,9 @@ func TestPlanWorkflowPublishesDebugTraceEvents(t *testing.T) {
 			"run-research": {RunID: "run-research", LifecycleState: "completed"},
 		},
 	}
-	env := newPlanWorkflowTestEnvWithStores(mocks, []agentos.Capability{
+	env := newPlanWorkflowTestEnvWithStores(t, mocks, []agentos.Capability{
 		{Backend: ref, Name: "run", Controls: []agentos.ControlOperation{agentos.ControlCancel}},
-	}, store, agentosplan.NewMemoryArtifactStore())
+	}, store, agentosplan.NewMemoryArtifactStore(), spec)
 
 	env.ExecuteWorkflow(PlanWorkflow, planWorkflowInput{Spec: spec})
 
@@ -199,7 +199,7 @@ func TestPlanWorkflowErrorEdgeRunsRecoveryButPlanRemainsFailed(t *testing.T) {
 			"run-recover": {RunID: "run-recover", LifecycleState: "completed"},
 		},
 	}
-	env := newPlanWorkflowTestEnv(mocks)
+	env := newPlanWorkflowTestEnv(t, mocks, spec)
 
 	env.ExecuteWorkflow(PlanWorkflow, planWorkflowInput{Spec: spec})
 
@@ -235,7 +235,7 @@ func TestPlanWorkflowRetriesFailedNodeAttempt(t *testing.T) {
 			"run-flaky-attempt-2": {RunID: "run-flaky-attempt-2", LifecycleState: "completed"},
 		},
 	}
-	env := newPlanWorkflowTestEnv(mocks)
+	env := newPlanWorkflowTestEnv(t, mocks, spec)
 
 	env.ExecuteWorkflow(PlanWorkflow, planWorkflowInput{Spec: spec})
 
@@ -297,7 +297,7 @@ func TestPlanWorkflowAppliesPlanDeltaArtifact(t *testing.T) {
 			"run-expanded": {RunID: "run-expanded", LifecycleState: "completed"},
 		},
 	}
-	env := newPlanWorkflowTestEnvWithStores(mocks, nil, store, artifactStore)
+	env := newPlanWorkflowTestEnvWithStores(t, mocks, nil, store, artifactStore, spec)
 
 	env.ExecuteWorkflow(PlanWorkflow, planWorkflowInput{Spec: spec})
 
@@ -343,7 +343,7 @@ func TestPlanWorkflowCancelsTimedOutNode(t *testing.T) {
 			"run-slow": {RunID: "run-slow", LifecycleState: "running"},
 		},
 	}
-	env := newPlanWorkflowTestEnv(mocks)
+	env := newPlanWorkflowTestEnv(t, mocks, spec)
 
 	env.ExecuteWorkflow(PlanWorkflow, planWorkflowInput{Spec: spec})
 
@@ -380,7 +380,7 @@ func TestPlanWorkflowCancelsActiveNodesWhenPlanTimesOut(t *testing.T) {
 			"run-slow": {RunID: "run-slow", LifecycleState: "running"},
 		},
 	}
-	env := newPlanWorkflowTestEnv(mocks)
+	env := newPlanWorkflowTestEnv(t, mocks, spec)
 
 	env.ExecuteWorkflow(PlanWorkflow, planWorkflowInput{Spec: spec})
 
@@ -425,7 +425,7 @@ func TestPlanWorkflowCancelsActiveNodesWhenBudgetExceeded(t *testing.T) {
 			"run-slow": {RunID: "run-slow", LifecycleState: "running"},
 		},
 	}
-	env := newPlanWorkflowTestEnv(mocks)
+	env := newPlanWorkflowTestEnv(t, mocks, spec)
 
 	env.ExecuteWorkflow(PlanWorkflow, planWorkflowInput{Spec: spec})
 
@@ -494,6 +494,7 @@ func TestPlanWorkflowOrchestratesMixedBackendsThroughRuntime(t *testing.T) {
 	env.RegisterActivityWithOptions(activities.PublishPlanArtifactsActivity, activity.RegisterOptions{Name: PublishPlanArtifactsActivityName})
 	env.RegisterActivityWithOptions(activities.EvaluatePlanExpansionActivity, activity.RegisterOptions{Name: EvaluatePlanExpansionActivityName})
 
+	createPlanForWorkflowTest(t, store, spec)
 	env.ExecuteWorkflow(PlanWorkflow, planWorkflowInput{Spec: spec})
 
 	require.True(t, env.IsWorkflowCompleted())
@@ -542,7 +543,7 @@ func TestPlanWorkflowRetriesFailedNodeFromSignal(t *testing.T) {
 			},
 		},
 	}
-	env := newPlanWorkflowTestEnv(mocks)
+	env := newPlanWorkflowTestEnv(t, mocks, spec)
 	env.RegisterDelayedCallback(func() {
 		env.SignalWorkflow(PlanSignalName, agentos.Signal{
 			Type:           agentos.SignalPlanNodeRetry,
@@ -592,7 +593,7 @@ func TestPlanWorkflowRejectsManualRetryBeyondMaxAttempts(t *testing.T) {
 			},
 		},
 	}
-	env := newPlanWorkflowTestEnvWithStores(mocks, nil, store, agentosplan.NewMemoryArtifactStore())
+	env := newPlanWorkflowTestEnvWithStores(t, mocks, nil, store, agentosplan.NewMemoryArtifactStore(), spec)
 	env.RegisterDelayedCallback(func() {
 		env.SignalWorkflow(PlanSignalName, agentos.Signal{
 			Type:           agentos.SignalPlanNodeRetry,
@@ -640,7 +641,7 @@ func TestPlanWorkflowRejectSignalFailsRunningPlan(t *testing.T) {
 			},
 		},
 	}
-	env := newPlanWorkflowTestEnv(mocks)
+	env := newPlanWorkflowTestEnv(t, mocks, spec)
 	env.RegisterDelayedCallback(func() {
 		env.SignalWorkflow(PlanSignalName, agentos.Signal{
 			Type:           agentos.SignalPlanReject,
@@ -693,9 +694,9 @@ func TestPlanWorkflowApproveSignalUnblocksPausedPlan(t *testing.T) {
 			},
 		},
 	}
-	env := newPlanWorkflowTestEnvWithCapabilities(mocks, []agentos.Capability{
+	env := newPlanWorkflowTestEnvWithCapabilities(t, mocks, []agentos.Capability{
 		{Backend: ref, Name: "pausable", Controls: []agentos.ControlOperation{agentos.ControlPause}},
-	})
+	}, spec)
 	env.RegisterDelayedCallback(func() {
 		env.SignalWorkflow(PlanControlSignalName, agentos.ControlRequest{
 			Operation:      agentos.ControlPause,
@@ -769,7 +770,7 @@ func TestPlanWorkflowContinuesAsNewWhenHistoryLimitReached(t *testing.T) {
 		},
 	}
 	mocks := &planWorkflowMocks{}
-	env := newPlanWorkflowTestEnv(mocks)
+	env := newPlanWorkflowTestEnv(t, mocks, spec)
 	env.SetCurrentHistoryLength(10)
 
 	env.ExecuteWorkflow(PlanWorkflow, planWorkflowInput{Spec: spec})
@@ -795,7 +796,7 @@ func TestPlanWorkflowFailsWhenMaxIterationsExceeded(t *testing.T) {
 	}
 	store := agentosplan.NewMemoryPlanStore()
 	mocks := &planWorkflowMocks{}
-	env := newPlanWorkflowTestEnvWithStores(mocks, nil, store, agentosplan.NewMemoryArtifactStore())
+	env := newPlanWorkflowTestEnvWithStores(t, mocks, nil, store, agentosplan.NewMemoryArtifactStore(), spec)
 
 	env.ExecuteWorkflow(PlanWorkflow, planWorkflowInput{Spec: spec})
 
@@ -817,15 +818,27 @@ type planWorkflowMocks struct {
 	controls        []controlPlanNodeInput
 }
 
-func newPlanWorkflowTestEnv(mocks *planWorkflowMocks) *testsuite.TestWorkflowEnvironment {
-	return newPlanWorkflowTestEnvWithCapabilities(mocks, nil)
+func newPlanWorkflowTestEnv(t *testing.T, mocks *planWorkflowMocks, spec agentos.RunPlanSpec) *testsuite.TestWorkflowEnvironment {
+	t.Helper()
+
+	return newPlanWorkflowTestEnvWithCapabilities(t, mocks, nil, spec)
 }
 
-func newPlanWorkflowTestEnvWithCapabilities(mocks *planWorkflowMocks, capabilities []agentos.Capability) *testsuite.TestWorkflowEnvironment {
-	return newPlanWorkflowTestEnvWithStores(mocks, capabilities, agentosplan.NewMemoryPlanStore(), agentosplan.NewMemoryArtifactStore())
+func newPlanWorkflowTestEnvWithCapabilities(t *testing.T, mocks *planWorkflowMocks, capabilities []agentos.Capability, spec agentos.RunPlanSpec) *testsuite.TestWorkflowEnvironment {
+	t.Helper()
+
+	return newPlanWorkflowTestEnvWithStores(t, mocks, capabilities, agentosplan.NewMemoryPlanStore(), agentosplan.NewMemoryArtifactStore(), spec)
 }
 
-func newPlanWorkflowTestEnvWithStores(mocks *planWorkflowMocks, capabilities []agentos.Capability, store agentosplan.PlanTransitionStore, artifactStore agentosplan.ArtifactStore) *testsuite.TestWorkflowEnvironment {
+func newPlanWorkflowTestEnvWithStores(t *testing.T, mocks *planWorkflowMocks, capabilities []agentos.Capability, store agentosplan.PlanTransitionStore, artifactStore agentosplan.ArtifactStore, spec agentos.RunPlanSpec) *testsuite.TestWorkflowEnvironment {
+	t.Helper()
+
+	planIndex, ok := store.(agentosplan.PlanIndex)
+	if !ok {
+		t.Fatalf("workflow test store %T does not implement PlanIndex", store)
+	}
+	createPlanForWorkflowTest(t, planIndex, spec)
+
 	env := (&testsuite.WorkflowTestSuite{}).NewTestWorkflowEnvironment()
 	env.RegisterWorkflowWithOptions(PlanWorkflow, workflow.RegisterOptions{Name: PlanWorkflowName})
 
@@ -849,6 +862,15 @@ func newPlanWorkflowTestEnvWithStores(mocks *planWorkflowMocks, capabilities []a
 	env.RegisterActivityWithOptions(activities.EvaluatePlanExpansionActivity, activity.RegisterOptions{Name: EvaluatePlanExpansionActivityName})
 
 	return env
+}
+
+func createPlanForWorkflowTest(t *testing.T, index agentosplan.PlanIndex, spec agentos.RunPlanSpec) {
+	t.Helper()
+
+	status := agentosplan.NewState(spec, time.Now().UTC()).Status
+	if _, _, err := index.CreatePlan(context.Background(), spec, status); err != nil {
+		t.Fatalf("CreatePlan: %v", err)
+	}
 }
 
 func (m *planWorkflowMocks) start(_ context.Context, input startPlanNodeInput) (startPlanNodeOutput, error) {

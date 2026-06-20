@@ -28,6 +28,37 @@ func TestMemoryPlanStoreSavePlanStateRequiresIdempotencyKey(t *testing.T) {
 	}
 }
 
+func TestMemoryPlanStoreSavePlanStateRejectsMissingPlan(t *testing.T) {
+	store := NewMemoryPlanStore()
+	spec := testRunPlanSpec("missing-plan", "missing-plan-start-key")
+
+	err := store.SavePlanState(context.Background(), PlanStateSnapshot{
+		Spec:           spec,
+		Status:         agentos.RunPlanStatus{PlanID: spec.PlanID, LifecycleState: agentos.PlanLifecycleRunning},
+		IdempotencyKey: spec.IdempotencyKey,
+	})
+	if !errors.Is(err, agentos.ErrPlanRouteNotFound) {
+		t.Fatalf("SavePlanState missing plan error = %v, want ErrPlanRouteNotFound", err)
+	}
+}
+
+func TestMemoryPlanStorePersistPlanTransitionRejectsMissingPlan(t *testing.T) {
+	store := NewMemoryPlanStore()
+	spec := testRunPlanSpec("missing-plan", "missing-plan-start-key")
+
+	_, err := store.PersistPlanTransition(context.Background(), PlanStateSnapshot{
+		Spec:           spec,
+		Status:         agentos.RunPlanStatus{PlanID: spec.PlanID, LifecycleState: agentos.PlanLifecycleRunning},
+		IdempotencyKey: spec.IdempotencyKey,
+	}, agentos.PlanEvent{
+		Event:  agentos.Event{EventType: agentos.EventPlanStarted},
+		PlanID: spec.PlanID,
+	}, "missing-plan-event")
+	if !errors.Is(err, agentos.ErrPlanRouteNotFound) {
+		t.Fatalf("PersistPlanTransition missing plan error = %v, want ErrPlanRouteNotFound", err)
+	}
+}
+
 func TestMemoryPlanStorePersistPlanTransitionIsAtomic(t *testing.T) {
 	ctx := context.Background()
 	store := NewMemoryPlanStore()

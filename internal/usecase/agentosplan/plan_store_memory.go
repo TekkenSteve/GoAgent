@@ -104,11 +104,36 @@ func (s *MemoryPlanStore) CreatePlan(ctx context.Context, spec agentos.RunPlanSp
 		Status:         status,
 		IdempotencyKey: spec.IdempotencyKey,
 	}
-	if err := s.SavePlanState(ctx, snapshot); err != nil {
+	snapshot, err := normalizeMemoryPlanStateSnapshot(snapshot)
+	if err != nil {
 		return agentos.RunPlanStatus{}, false, err
 	}
 
-	return status, true, nil
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if existingPlanID, exists := s.planKeys[key]; exists {
+		existingSpec := s.specs[existingPlanID]
+		existingStatus := s.statuses[existingPlanID]
+		if err := ValidatePlanStartIdempotency(existingSpec, spec); err != nil {
+			return agentos.RunPlanStatus{}, false, err
+		}
+
+		return existingStatus, false, nil
+	}
+	if existingSpec, exists := s.specs[spec.PlanID]; exists {
+		existingStatus := s.statuses[spec.PlanID]
+		if err := ValidatePlanStartIdempotency(existingSpec, spec); err != nil {
+			return agentos.RunPlanStatus{}, false, err
+		}
+
+		return existingStatus, false, nil
+	}
+	if err := s.savePlanStateLocked(snapshot, true); err != nil {
+		return agentos.RunPlanStatus{}, false, err
+	}
+
+	return snapshot.Status, true, nil
 }
 
 func (s *MemoryPlanStore) GetPlan(_ context.Context, planID string) (agentos.RunPlanSpec, agentos.RunPlanStatus, bool, error) {
@@ -203,7 +228,7 @@ func (s *MemoryPlanStore) SavePlanState(_ context.Context, snapshot PlanStateSna
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	return s.savePlanStateLocked(snapshot)
+	return s.savePlanStateLocked(snapshot, false)
 }
 
 func normalizeMemoryPlanStateSnapshot(snapshot PlanStateSnapshot) (PlanStateSnapshot, error) {
@@ -223,11 +248,13 @@ func normalizeMemoryPlanStateSnapshot(snapshot PlanStateSnapshot) (PlanStateSnap
 	return snapshot, nil
 }
 
-func (s *MemoryPlanStore) savePlanStateLocked(snapshot PlanStateSnapshot) error {
+func (s *MemoryPlanStore) savePlanStateLocked(snapshot PlanStateSnapshot, allowCreate bool) error {
 	if existingSpec, ok := s.specs[snapshot.Spec.PlanID]; ok {
 		if err := ValidatePlanStateIdentity(existingSpec, snapshot.Spec); err != nil {
 			return err
 		}
+	} else if !allowCreate {
+		return fmt.Errorf("%w: %s", agentos.ErrPlanRouteNotFound, snapshot.Spec.PlanID)
 	}
 	key := planStartKey{
 		AccountID:      snapshot.Spec.AccountID,
@@ -271,7 +298,7 @@ func (s *MemoryPlanStore) PersistPlanTransition(_ context.Context, snapshot Plan
 
 		return existing, nil
 	}
-	if err := s.savePlanStateLocked(snapshot); err != nil {
+	if err := s.savePlanStateLocked(snapshot, false); err != nil {
 		return agentos.PlanEvent{}, err
 	}
 

@@ -56,11 +56,12 @@ func (r *AgentOSPlanRepo) CreatePlan(ctx context.Context, spec agentos.RunPlanSp
 
 		return existing, false, nil
 	}
-	if err := r.SavePlanState(ctx, agentosplan.PlanStateSnapshot{
+	createdStatus, err := r.createPlanState(ctx, agentosplan.PlanStateSnapshot{
 		Spec:           spec,
 		Status:         status,
 		IdempotencyKey: spec.IdempotencyKey,
-	}); err != nil {
+	})
+	if err != nil {
 		if isPostgresUniqueViolation(err) {
 			existingSpec, existing, exists, lookupErr := r.planByIdempotencyKey(ctx, spec.AccountID, spec.ProjectID, spec.IdempotencyKey)
 			if lookupErr != nil {
@@ -78,7 +79,31 @@ func (r *AgentOSPlanRepo) CreatePlan(ctx context.Context, spec agentos.RunPlanSp
 		return agentos.RunPlanStatus{}, false, err
 	}
 
-	return status, true, nil
+	return createdStatus, true, nil
+}
+
+func (r *AgentOSPlanRepo) createPlanState(ctx context.Context, snapshot agentosplan.PlanStateSnapshot) (agentos.RunPlanStatus, error) {
+	snapshot, err := normalizePlanStateSnapshotForPostgres(snapshot)
+	if err != nil {
+		return agentos.RunPlanStatus{}, err
+	}
+
+	tx, err := r.Pool.Begin(ctx)
+	if err != nil {
+		return agentos.RunPlanStatus{}, fmt.Errorf("AgentOSPlanRepo - createPlanState - begin: %w", err)
+	}
+	defer func() {
+		_ = tx.Rollback(ctx)
+	}()
+
+	if err := r.savePlanStateWithTx(ctx, tx, snapshot, true); err != nil {
+		return agentos.RunPlanStatus{}, err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return agentos.RunPlanStatus{}, fmt.Errorf("AgentOSPlanRepo - createPlanState - commit: %w", err)
+	}
+
+	return snapshot.Status, nil
 }
 
 func (r *AgentOSPlanRepo) GetPlan(ctx context.Context, planID string) (agentos.RunPlanSpec, agentos.RunPlanStatus, bool, error) {
@@ -178,7 +203,7 @@ func (r *AgentOSPlanRepo) SavePlanState(ctx context.Context, snapshot agentospla
 		_ = tx.Rollback(ctx)
 	}()
 
-	if err := r.savePlanStateWithTx(ctx, tx, snapshot); err != nil {
+	if err := r.savePlanStateWithTx(ctx, tx, snapshot, false); err != nil {
 		return err
 	}
 
@@ -214,7 +239,7 @@ func normalizePlanStateSnapshotForPostgres(snapshot agentosplan.PlanStateSnapsho
 	return snapshot, nil
 }
 
-func (r *AgentOSPlanRepo) savePlanStateWithTx(ctx context.Context, tx pgx.Tx, snapshot agentosplan.PlanStateSnapshot) error {
+func (r *AgentOSPlanRepo) savePlanStateWithTx(ctx context.Context, tx pgx.Tx, snapshot agentosplan.PlanStateSnapshot, allowCreate bool) error {
 	specJSON, err := json.Marshal(snapshot.Spec)
 	if err != nil {
 		return fmt.Errorf("AgentOSPlanRepo - SavePlanState - marshal spec: %w", err)
@@ -232,6 +257,8 @@ func (r *AgentOSPlanRepo) savePlanStateWithTx(ctx context.Context, tx pgx.Tx, sn
 		if err := agentosplan.ValidatePlanStateIdentity(existingSpec, snapshot.Spec); err != nil {
 			return err
 		}
+	} else if !allowCreate {
+		return fmt.Errorf("%w: %s", agentos.ErrPlanRouteNotFound, snapshot.Spec.PlanID)
 	}
 
 	idempotencyKey := snapshot.Spec.IdempotencyKey
@@ -591,7 +618,7 @@ FOR UPDATE`, event.PlanID).Scan(&scope.AccountID, &scope.ProjectID)
 		}
 	}
 
-	if err := r.savePlanStateWithTx(ctx, tx, snapshot); err != nil {
+	if err := r.savePlanStateWithTx(ctx, tx, snapshot, false); err != nil {
 		return agentos.PlanEvent{}, err
 	}
 	stored, err := r.appendPlanEventWithTx(ctx, tx, event, idempotencyKey)

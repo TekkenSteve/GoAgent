@@ -395,16 +395,19 @@ func TestPlanActivitiesPersistPlanStatePublishesStoredEvent(t *testing.T) {
 	activities := newTestPlanActivities(t, &fakePlanRuntime{})
 	publisher := &fakePlanEventPublisher{}
 	activities.PlanEventPublisher = publisher
+	spec := agentos.RunPlanSpec{
+		PlanID:         "plan-1",
+		IdempotencyKey: "plan-start-key",
+	}
+	status := agentos.RunPlanStatus{
+		PlanID:         "plan-1",
+		LifecycleState: agentos.PlanLifecycleRunning,
+	}
+	createPlanForActivityTest(t, activities, spec, status)
 
 	output, err := activities.PersistPlanStateActivity(context.Background(), persistPlanStateInput{
-		Spec: agentos.RunPlanSpec{
-			PlanID:         "plan-1",
-			IdempotencyKey: "plan-start-key",
-		},
-		Status: agentos.RunPlanStatus{
-			PlanID:         "plan-1",
-			LifecycleState: agentos.PlanLifecycleRunning,
-		},
+		Spec:   spec,
+		Status: status,
 		Event: agentos.PlanEvent{
 			Event: agentos.Event{
 				EventType: agentos.EventPlanStarted,
@@ -428,16 +431,19 @@ func TestPlanActivitiesPersistPlanStateDoesNotFailOnLivePublishError(t *testing.
 	activities := newTestPlanActivities(t, &fakePlanRuntime{})
 	publisher := &fakePlanEventPublisher{err: errors.New("redis unavailable")}
 	activities.PlanEventPublisher = publisher
+	spec := agentos.RunPlanSpec{
+		PlanID:         "plan-1",
+		IdempotencyKey: "plan-start-key",
+	}
+	status := agentos.RunPlanStatus{
+		PlanID:         "plan-1",
+		LifecycleState: agentos.PlanLifecycleRunning,
+	}
+	createPlanForActivityTest(t, activities, spec, status)
 
 	output, err := activities.PersistPlanStateActivity(context.Background(), persistPlanStateInput{
-		Spec: agentos.RunPlanSpec{
-			PlanID:         "plan-1",
-			IdempotencyKey: "plan-start-key",
-		},
-		Status: agentos.RunPlanStatus{
-			PlanID:         "plan-1",
-			LifecycleState: agentos.PlanLifecycleRunning,
-		},
+		Spec:   spec,
+		Status: status,
 		Event: agentos.PlanEvent{
 			Event: agentos.Event{
 				EventType: agentos.EventPlanStarted,
@@ -693,6 +699,18 @@ func newTestPlanActivities(t *testing.T, runtime agentos.Runtime, capabilities .
 	}
 
 	return activities
+}
+
+func createPlanForActivityTest(t *testing.T, activities *PlanActivities, spec agentos.RunPlanSpec, status agentos.RunPlanStatus) {
+	t.Helper()
+
+	planIndex, ok := activities.PlanTransitionStore.(agentosplan.PlanIndex)
+	if !ok {
+		t.Fatalf("activity test store %T does not implement PlanIndex", activities.PlanTransitionStore)
+	}
+	if _, _, err := planIndex.CreatePlan(context.Background(), spec, status); err != nil {
+		t.Fatalf("CreatePlan: %v", err)
+	}
 }
 
 type fakePlanRuntime struct {
