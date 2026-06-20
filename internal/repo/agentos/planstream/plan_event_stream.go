@@ -1,4 +1,4 @@
-package stream
+package planstream
 
 import (
 	"bytes"
@@ -14,7 +14,11 @@ import (
 	goredis "github.com/redis/go-redis/v9"
 )
 
-const planEventSubscriberBufferSize = 256
+const (
+	planEventStreamMaxLen = 2000
+	planEventStreamTTL    = 2 * time.Hour
+	subscriberBufferSize  = 256
+)
 
 type planEventRedisClient interface {
 	StreamAddWithID(ctx context.Context, stream, id string, values map[string]any, maxLen int) (string, error)
@@ -72,7 +76,7 @@ func (s *RedisPlanEventStream) PublishPlanEvent(ctx context.Context, event agent
 		"data":       string(data),
 		"event_type": string(event.EventType),
 		"sequence":   event.Sequence,
-	}, DefaultEventStoreMaxLen)
+	}, planEventStreamMaxLen)
 	if err != nil {
 		existing, exists, lookupErr := s.planEventAt(ctx, streamKey, entryID)
 		if lookupErr != nil {
@@ -84,7 +88,7 @@ func (s *RedisPlanEventStream) PublishPlanEvent(ctx context.Context, event agent
 
 		return fmt.Errorf("plan_event_stream: publish: %w", err)
 	}
-	if _, err := s.rdb.Expire(ctx, streamKey, DefaultEventStoreTTL); err != nil {
+	if _, err := s.rdb.Expire(ctx, streamKey, planEventStreamTTL); err != nil {
 		return fmt.Errorf("plan_event_stream: expire: %w", err)
 	}
 
@@ -101,7 +105,7 @@ func (s *RedisPlanEventStream) SubscribePlanEvents(_ context.Context, scope agen
 	}
 
 	hubSub := s.hub.Subscribe(planEventStreamKey(planStreamRef(scope)), planEventEntryID(scope.AfterSequence))
-	out := make(chan agentos.Event, planEventSubscriberBufferSize)
+	out := make(chan agentos.Event, subscriberBufferSize)
 	go func() {
 		defer close(out)
 		for entry := range hubSub.C {

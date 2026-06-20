@@ -9,9 +9,9 @@ import (
 	"github.com/TekkenSteve/GoAgent/agentos"
 	"github.com/TekkenSteve/GoAgent/internal/pkg/postgres"
 	goredis "github.com/TekkenSteve/GoAgent/internal/pkg/redis"
+	"github.com/TekkenSteve/GoAgent/internal/repo/agentos/planstream"
 	artifactrepo "github.com/TekkenSteve/GoAgent/internal/repo/artifact"
 	temporalrepo "github.com/TekkenSteve/GoAgent/internal/repo/persistent"
-	repostream "github.com/TekkenSteve/GoAgent/internal/repo/stream"
 	"github.com/TekkenSteve/GoAgent/internal/usecase/agentosplan"
 	"go.temporal.io/sdk/client"
 	sdktemporal "go.temporal.io/sdk/temporal"
@@ -114,7 +114,7 @@ func newPlanRuntimeWithClient(ctx context.Context, cfg RuntimeConfig, c planTemp
 			return nil, fmt.Errorf("agentos temporal plan runtime redis: %w", err)
 		}
 		rt.redis = rdb
-		rt.planLiveEvents = repostream.NewRedisPlanEventStream(rdb)
+		rt.planLiveEvents = planstream.NewRedisPlanEventStream(rdb)
 	}
 	pg, err := newRuntimePostgres(cfg)
 	if err != nil {

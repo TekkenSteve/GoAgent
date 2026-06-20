@@ -23,6 +23,7 @@ import (
 	"github.com/TekkenSteve/GoAgent/internal/entity"
 	"github.com/TekkenSteve/GoAgent/internal/pkg/postgres"
 	goredis "github.com/TekkenSteve/GoAgent/internal/pkg/redis"
+	"github.com/TekkenSteve/GoAgent/internal/repo/agentos/planstream"
 	artifactrepo "github.com/TekkenSteve/GoAgent/internal/repo/artifact"
 	"github.com/TekkenSteve/GoAgent/internal/repo/cached"
 	"github.com/TekkenSteve/GoAgent/internal/repo/compressor"
@@ -268,7 +269,7 @@ func initTemporalComponents(
 	}
 
 	planStore := temporalrepo.NewAgentOSPlanRepo(pg)
-	planEventStream := repostream.NewRedisPlanEventStream(rdb)
+	planEventStream := planstream.NewRedisPlanEventStream(rdb)
 	blobStore, err := artifactrepo.NewBlobStore(context.Background(), appArtifactBlobConfig(cfg.AgentOS.ArtifactStoreConfig()))
 	if err != nil {
 		l.Fatal(fmt.Errorf("app - Run - artifact store: %w", err))

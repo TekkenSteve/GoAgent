@@ -11,6 +11,7 @@ import (
 	"github.com/TekkenSteve/GoAgent/internal/entity"
 	"github.com/TekkenSteve/GoAgent/internal/pkg/postgres"
 	goredis "github.com/TekkenSteve/GoAgent/internal/pkg/redis"
+	"github.com/TekkenSteve/GoAgent/internal/repo/agentos/planstream"
 	artifactrepo "github.com/TekkenSteve/GoAgent/internal/repo/artifact"
 	"github.com/TekkenSteve/GoAgent/internal/repo/cached"
 	"github.com/TekkenSteve/GoAgent/internal/repo/compressor"
@@ -125,7 +126,7 @@ func newWorkerKit(ctx context.Context, cfg WorkerConfig) (*WorkerKit, error) {
 
 		return nil, fmt.Errorf("agentos temporal worker - register artifact schemas: %w", err)
 	}
-	planEventStream := repostream.NewRedisPlanEventStream(rdb)
+	planEventStream := planstream.NewRedisPlanEventStream(rdb)
 	planRuntime, err := NewRuntimeWithClient(ctx, RuntimeConfig{
 		TemporalAddress:          cfg.TemporalAddress,
 		TemporalNamespace:        cfg.TemporalNamespace,
