@@ -49,6 +49,8 @@ func TestAgentOSPlanPostgresDurablePersistence(t *testing.T) {
 		"artifacts_node_run_pair",
 		"audit_logs_node_run_pair",
 		"plan_events_transition_snapshot_pair",
+		"plan_events_event_json_identity_matches_columns",
+		"plan_events_payload_json_matches_event",
 	)
 	assertPostgresForeignKeyConstraint(t, pg, "run_backend_index_plan_node_fk")
 	assertPostgresForeignKeyConstraint(t, pg, "artifacts_plan_fk")
@@ -752,6 +754,42 @@ func TestAgentOSPlanPostgresPlanEventIdempotencyDoesNotAdvanceSequence(t *testin
 	if _, err := pg.Pool.Exec(ctx, `DELETE FROM plan_events WHERE event_id = $1`, first.EventID); err == nil {
 		t.Fatal("direct plan_events delete succeeded, want append-only trigger rejection")
 	}
+	mismatchedIdentity := first
+	mismatchedIdentity.EventID = "plan-event-json-identity-" + suffix
+	mismatchedIdentity.PlanID = "wrong-plan"
+	mismatchedIdentity.Sequence = 100
+	assertPostgresPlanEventInsertRejected(t, pg, spec, "plan-event-json-identity-"+suffix, 100, first.Payload, mismatchedIdentity)
+
+	mismatchedPayload := first
+	mismatchedPayload.EventID = "plan-event-json-payload-" + suffix
+	mismatchedPayload.Sequence = 101
+	assertPostgresPlanEventInsertRejected(t, pg, spec, "plan-event-json-payload-"+suffix, 101, map[string]any{"state": "wrong"}, mismatchedPayload)
+
+	missingIdentityJSON, err := json.Marshal(map[string]any{
+		"event_type": string(first.EventType),
+		"plan_id":    spec.PlanID,
+		"account_id": spec.AccountID,
+		"project_id": spec.ProjectID,
+		"sequence":   102,
+		"timestamp":  first.Timestamp,
+		"payload":    first.Payload,
+	})
+	if err != nil {
+		t.Fatalf("marshal missing identity event json: %v", err)
+	}
+	assertPostgresPlanEventRawInsertRejected(
+		t,
+		pg,
+		spec,
+		"plan-event-json-missing-identity-"+suffix,
+		102,
+		first.NodeID,
+		first.RunID,
+		first.EventType,
+		first.Payload,
+		missingIdentityJSON,
+		first.Timestamp,
+	)
 
 	changed := event
 	changed.EventType = agentos.EventPlanFailed
@@ -1450,6 +1488,7 @@ func applyAgentOSPlanMigrations(t *testing.T, pg *postgres.Postgres) {
 		"20260620000015_protect_run_backend_ownership.up.sql",
 		"20260620000016_protect_plan_identity.up.sql",
 		"20260620000017_protect_plan_command_identity.up.sql",
+		"20260620000018_constrain_plan_event_json.up.sql",
 	} {
 		path := filepath.Join("..", "..", "..", "migrations", migration)
 		data, err := os.ReadFile(path)
@@ -1459,6 +1498,88 @@ func applyAgentOSPlanMigrations(t *testing.T, pg *postgres.Postgres) {
 		if _, err := pg.Pool.Exec(t.Context(), string(data)); err != nil {
 			t.Fatalf("apply migration %s: %v", migration, err)
 		}
+	}
+}
+
+func assertPostgresPlanEventInsertRejected(
+	t *testing.T,
+	pg *postgres.Postgres,
+	spec agentos.RunPlanSpec,
+	eventID string,
+	sequence int64,
+	payload map[string]any,
+	event agentos.PlanEvent,
+) {
+	t.Helper()
+
+	eventJSON, err := agentos.MarshalPlanEvent(event)
+	if err != nil {
+		t.Fatalf("marshal plan event: %v", err)
+	}
+	assertPostgresPlanEventRawInsertRejected(
+		t,
+		pg,
+		spec,
+		eventID,
+		sequence,
+		event.NodeID,
+		event.RunID,
+		event.EventType,
+		payload,
+		eventJSON,
+		event.Timestamp,
+	)
+}
+
+func assertPostgresPlanEventRawInsertRejected(
+	t *testing.T,
+	pg *postgres.Postgres,
+	spec agentos.RunPlanSpec,
+	eventID string,
+	sequence int64,
+	nodeID string,
+	runID string,
+	eventType agentos.EventType,
+	payload map[string]any,
+	eventJSON []byte,
+	timestamp time.Time,
+) {
+	t.Helper()
+
+	payloadJSON, err := json.Marshal(payload)
+	if err != nil {
+		t.Fatalf("marshal payload: %v", err)
+	}
+	_, err = pg.Pool.Exec(t.Context(), `
+INSERT INTO plan_events (
+    event_id,
+    plan_id,
+    account_id,
+    project_id,
+    node_id,
+    run_id,
+    event_type,
+    sequence,
+    idempotency_key,
+    payload_json,
+    event_json,
+    timestamp
+) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)`,
+		eventID,
+		spec.PlanID,
+		spec.AccountID,
+		spec.ProjectID,
+		nodeID,
+		runID,
+		string(eventType),
+		sequence,
+		eventID,
+		payloadJSON,
+		eventJSON,
+		timestamp,
+	)
+	if err == nil {
+		t.Fatalf("direct plan_events insert %q succeeded, want constraint rejection", eventID)
 	}
 }
 
