@@ -227,6 +227,100 @@ func TestAgentOSPlanRoutesUsePlanRuntime(t *testing.T) {
 	}
 }
 
+func TestAgentOSPlanControlAndSignalRoutesCoverConsoleActions(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		route     string
+		body      string
+		wantOp    agentos.ControlOperation
+		wantType  agentos.SignalType
+		wantKey   string
+		wantActor string
+	}{
+		{
+			name:      "pause",
+			route:     "/v1/agentos/plans/plan-1/control",
+			body:      `{"operation":"pause","account_id":"acct-1","project_id":"proj-1","idempotency_key":"pause-1","actor_id":"operator-1"}`,
+			wantOp:    agentos.ControlPause,
+			wantKey:   "pause-1",
+			wantActor: "operator-1",
+		},
+		{
+			name:      "resume",
+			route:     "/v1/agentos/plans/plan-1/control",
+			body:      `{"operation":"resume","account_id":"acct-1","project_id":"proj-1","idempotency_key":"resume-1","actor_id":"operator-1"}`,
+			wantOp:    agentos.ControlResume,
+			wantKey:   "resume-1",
+			wantActor: "operator-1",
+		},
+		{
+			name:      "cancel",
+			route:     "/v1/agentos/plans/plan-1/control",
+			body:      `{"operation":"cancel","account_id":"acct-1","project_id":"proj-1","idempotency_key":"cancel-1","actor_id":"operator-1"}`,
+			wantOp:    agentos.ControlCancel,
+			wantKey:   "cancel-1",
+			wantActor: "operator-1",
+		},
+		{
+			name:      "retry",
+			route:     "/v1/agentos/plans/plan-1/signals",
+			body:      `{"type":"plan.node.retry","account_id":"acct-1","project_id":"proj-1","idempotency_key":"retry-1","actor_id":"operator-1","payload":{"node_id":"research"}}`,
+			wantType:  agentos.SignalPlanNodeRetry,
+			wantKey:   "retry-1",
+			wantActor: "operator-1",
+		},
+		{
+			name:      "approve",
+			route:     "/v1/agentos/plans/plan-1/signals",
+			body:      `{"type":"plan.approve","account_id":"acct-1","project_id":"proj-1","idempotency_key":"approve-1","actor_id":"operator-1"}`,
+			wantType:  agentos.SignalPlanApprove,
+			wantKey:   "approve-1",
+			wantActor: "operator-1",
+		},
+		{
+			name:      "reject",
+			route:     "/v1/agentos/plans/plan-1/signals",
+			body:      `{"type":"plan.reject","account_id":"acct-1","project_id":"proj-1","idempotency_key":"reject-1","actor_id":"operator-1","payload":{"reason":"operator rejected"}}`,
+			wantType:  agentos.SignalPlanReject,
+			wantKey:   "reject-1",
+			wantActor: "operator-1",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			planRuntime := newFakePlanRuntime()
+			app := fiber.New()
+			NewRoutes(app.Group("/v1"), nil, nil, logger.New("error"), nil, nil, nil, nil, nil, nil, planRuntime)
+
+			resp := doAgentOSRouteRequest(t, app, http.MethodPost, tc.route, tc.body)
+			if resp.StatusCode != http.StatusAccepted {
+				t.Fatalf("%s status = %d", tc.name, resp.StatusCode)
+			}
+
+			if tc.wantOp != "" {
+				if planRuntime.controlRef.PlanID != "plan-1" ||
+					planRuntime.controlRef.AccountID != "acct-1" ||
+					planRuntime.controlRef.ProjectID != "proj-1" ||
+					planRuntime.control.Operation != tc.wantOp ||
+					planRuntime.control.IdempotencyKey != tc.wantKey ||
+					planRuntime.control.ActorID != tc.wantActor {
+					t.Fatalf("unexpected control: ref=%#v control=%#v", planRuntime.controlRef, planRuntime.control)
+				}
+
+				return
+			}
+
+			if planRuntime.signalRef.PlanID != "plan-1" ||
+				planRuntime.signalRef.AccountID != "acct-1" ||
+				planRuntime.signalRef.ProjectID != "proj-1" ||
+				planRuntime.signal.Type != tc.wantType ||
+				planRuntime.signal.IdempotencyKey != tc.wantKey ||
+				planRuntime.signal.ActorID != tc.wantActor {
+				t.Fatalf("unexpected signal: ref=%#v signal=%#v", planRuntime.signalRef, planRuntime.signal)
+			}
+		})
+	}
+}
+
 func TestAgentOSPlanSchemaRouteDoesNotRequirePlanRuntime(t *testing.T) {
 	app := fiber.New()
 	NewRoutes(app.Group("/v1"), nil, nil, logger.New("error"), nil, nil, nil, nil, nil, nil, nil)
@@ -520,6 +614,16 @@ func TestAgentOSPlanConsoleRendersRuntimeData(t *testing.T) {
 		`data-signal="plan.approve"`,
 		`data-signal="plan.reject"`,
 		`data-signal="plan.node.retry"`,
+		`data-node-id="research"`,
+		`id="actor-id"`,
+		`id="signal-reason"`,
+		`actor_id: actorID()`,
+		`payload.idempotency_key = commandKey("control", payload.operation, "")`,
+		`payload.idempotency_key = commandKey("signal", payload.type, button.dataset.nodeId || "")`,
+		`payload.payload[root.payloadNodeIdKey] = button.dataset.nodeId`,
+		`payload.payload[root.payloadReasonKey] = reason`,
+		`await postJSON(root.controlEndpoint, payload)`,
+		`await postJSON(root.signalEndpoint, payload)`,
 		`href="/v1/agentos/plans/author"`,
 	} {
 		if !strings.Contains(html, want) {

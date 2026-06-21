@@ -229,6 +229,61 @@ func TestPlanActivitiesPublishArtifactsIsIdempotent(t *testing.T) {
 	}
 }
 
+func TestPublishPlanArtifactsActivityHistoryInputContainsArtifactRefsOnly(t *testing.T) {
+	input := publishPlanArtifactsInput{
+		Spec: agentos.RunPlanSpec{
+			PlanID:    "plan-1",
+			AccountID: "acct-1",
+			ProjectID: "proj-1",
+		},
+		Node: agentos.PlanNodeSpec{NodeID: "node-1"},
+		Status: agentos.RunStatus{
+			RunID:          "run-1",
+			LifecycleState: "completed",
+			Artifacts: []agentos.ArtifactRef{
+				{
+					ArtifactID: "artifact-1",
+					PlanID:     "plan-1",
+					NodeID:     "node-1",
+					RunID:      "run-1",
+					Name:       "summary",
+					Kind:       agentos.ArtifactKindObject,
+					URI:        "s3://artifact-bucket/plan-1/artifact-1",
+					SizeBytes:  128,
+					Digest:     "sha256:digest",
+				},
+			},
+		},
+	}
+
+	data, err := json.Marshal(input)
+	if err != nil {
+		t.Fatalf("Marshal publish input: %v", err)
+	}
+	var encoded map[string]any
+	if err := json.Unmarshal(data, &encoded); err != nil {
+		t.Fatalf("Unmarshal publish input: %v", err)
+	}
+	status, ok := encoded["Status"].(map[string]any)
+	if !ok {
+		t.Fatalf("encoded status = %#v", encoded["Status"])
+	}
+	artifacts, ok := status["artifacts"].([]any)
+	if !ok || len(artifacts) != 1 {
+		t.Fatalf("encoded artifacts = %#v", status["artifacts"])
+	}
+	artifact, ok := artifacts[0].(map[string]any)
+	if !ok {
+		t.Fatalf("encoded artifact = %#v", artifacts[0])
+	}
+	if _, exists := artifact["payload"]; exists {
+		t.Fatalf("Temporal activity input embedded artifact payload: %#v", artifact)
+	}
+	if artifact["artifact_id"] != "artifact-1" || artifact["uri"] == "" || artifact["digest"] == "" {
+		t.Fatalf("encoded artifact ref = %#v", artifact)
+	}
+}
+
 func TestPlanActivitiesPublishArtifactsRetainsStoredPayload(t *testing.T) {
 	ctx := context.Background()
 	activities := newTestPlanActivities(t, &fakePlanRuntime{})
