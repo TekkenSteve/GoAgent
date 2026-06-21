@@ -54,14 +54,6 @@ swag-v1: ### swag init
 		-g router.go --output docs --parseInternal --parseDependency
 .PHONY: swag-v1
 
-proto-v1: ### generate source files from proto
-	protoc --go_out=. \
-		--go_opt=paths=source_relative \
-		--go-grpc_out=. \
-		--go-grpc_opt=paths=source_relative \
-		docs/proto/v1/*.proto
-.PHONY: proto-v1
-
 deps: ### deps tidy + verify
 	$(GO) mod tidy && $(GO) mod verify
 .PHONY: deps
@@ -80,7 +72,7 @@ format: ### Run code formatter
 	gci write . --skip-generated -s standard -s default
 .PHONY: format
 
-run: deps swag-v1 proto-v1 ### swag run for API v1
+run: deps swag-v1 ### swag run for API v1
 	$(GO) mod download && \
 	CGO_ENABLED=0 $(GO) run -tags migrate ./cmd/app
 .PHONY: run
@@ -160,5 +152,5 @@ bin-deps: ### install tools
 	$(GO) install -tags 'postgres' github.com/golang-migrate/migrate/v4/cmd/migrate
 .PHONY: bin-deps
 
-pre-commit: swag-v1 proto-v1 mock format linter-golangci test ### run pre-commit
+pre-commit: swag-v1 mock format linter-golangci test ### run pre-commit
 .PHONY: pre-commit
