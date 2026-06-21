@@ -12,7 +12,7 @@ import (
 	"github.com/goccy/go-json"
 )
 
-// runStatus is the JSON response from /v1/agent/status and /v1/agent/execute.
+// runStatus is the JSON response from /v1/agentos/runs endpoints.
 type runStatus struct {
 	RunID          string `json:"run_id"`
 	LifecycleState string `json:"lifecycle_state"`
@@ -23,23 +23,19 @@ type runStatus struct {
 func executeAgentRun(t *testing.T, runID, accountID string) runStatus {
 	t.Helper()
 
-	body := fmt.Sprintf(`{
-		"run_id": "%s",
-		"account_id": "%s",
-		"user_message": "Hello, this is a test message"
-	}`, runID, accountID)
+	body := agentOSStartBody(runID, accountID, "Hello, this is a test message")
 
 	ctx, cancel := context.WithTimeout(t.Context(), requestTimeout)
 	defer cancel()
 
-	resp, err := doWebRequestWithTimeout(ctx, http.MethodPost, basePathV1()+"/agent/execute", bytes.NewBufferString(body))
+	resp, err := doWebRequestWithTimeout(ctx, http.MethodPost, basePathV1()+"/agentos/runs", bytes.NewBufferString(body))
 	if err != nil {
 		t.Fatalf("executeAgentRun: request failed: %v", err)
 	}
 	defer resp.Body.Close()
 
-	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("executeAgentRun: expected 200, got %d", resp.StatusCode)
+	if resp.StatusCode != http.StatusAccepted {
+		t.Fatalf("executeAgentRun: expected 202, got %d", resp.StatusCode)
 	}
 
 	var status runStatus
@@ -54,7 +50,7 @@ func executeAgentRun(t *testing.T, runID, accountID string) runStatus {
 func waitForRunCompletion(t *testing.T, runID string) runStatus {
 	t.Helper()
 
-	url := basePathV1() + "/agent/status/" + runID
+	url := basePathV1() + "/agentos/runs/" + runID + "/status"
 
 	for range 30 {
 		ctx, cancel := context.WithTimeout(t.Context(), requestTimeout)
@@ -74,7 +70,8 @@ func waitForRunCompletion(t *testing.T, runID string) runStatus {
 
 		resp.Body.Close()
 
-		if status.LifecycleState == string(entity.LifecycleCompleted) ||
+		if status.LifecycleState == "waiting_input" ||
+			status.LifecycleState == string(entity.LifecycleCompleted) ||
 			status.LifecycleState == string(entity.LifecycleFailed) ||
 			status.LifecycleState == string(entity.LifecycleCancelled) {
 			return status
@@ -88,8 +85,8 @@ func waitForRunCompletion(t *testing.T, runID string) runStatus {
 	return runStatus{}
 }
 
-// HTTP POST: /v1/agent/execute.
-func TestHTTPAgentExecuteV1(t *testing.T) {
+// HTTP POST: /v1/agentos/runs.
+func TestHTTPAgentOSStartV1(t *testing.T) {
 	runID := fmt.Sprintf("e2e-exec-%d", time.Now().UnixNano())
 
 	tests := []struct {
@@ -104,14 +101,14 @@ func TestHTTPAgentExecuteV1(t *testing.T) {
 			runID:       runID,
 			accountID:   "e2e-test-account",
 			message:     "Hello, this is a test message",
-			expected:    http.StatusOK,
+			expected:    http.StatusAccepted,
 		},
 		{
 			description: "empty run_id",
 			runID:       "",
 			accountID:   "e2e-test-account",
 			message:     "Hello",
-			expected:    http.StatusBadRequest,
+			expected:    http.StatusAccepted,
 		},
 		{
 			description: "empty account_id",
@@ -136,21 +133,17 @@ func TestHTTPAgentExecuteV1(t *testing.T) {
 	}
 }
 
-// testExecuteAgentRequest sends an agent execute request and asserts the
+// testExecuteAgentRequest sends an AgentOS start request and asserts the
 // response status code and (for successful requests) the run status body.
 func testExecuteAgentRequest(t *testing.T, runID, accountID, message string, expectedStatus int) {
 	t.Helper()
 
-	body := fmt.Sprintf(`{
-		"run_id": "%s",
-		"account_id": "%s",
-		"user_message": "%s"
-	}`, runID, accountID, message)
+	body := agentOSStartBody(runID, accountID, message)
 
 	ctx, cancel := context.WithTimeout(t.Context(), requestTimeout)
 	defer cancel()
 
-	resp, err := doWebRequestWithTimeout(ctx, http.MethodPost, basePathV1()+"/agent/execute", bytes.NewBufferString(body))
+	resp, err := doWebRequestWithTimeout(ctx, http.MethodPost, basePathV1()+"/agentos/runs", bytes.NewBufferString(body))
 	if err != nil {
 		t.Fatalf("Failed to send request: %v", err)
 	}
@@ -160,7 +153,7 @@ func testExecuteAgentRequest(t *testing.T, runID, accountID, message string, exp
 		t.Errorf("Expected status %d, got %d", expectedStatus, resp.StatusCode)
 	}
 
-	if expectedStatus == http.StatusOK {
+	if expectedStatus == http.StatusAccepted {
 		var status runStatus
 		if err := json.NewDecoder(resp.Body).Decode(&status); err != nil {
 			t.Fatalf("Failed to decode response: %v", err)
@@ -172,8 +165,8 @@ func testExecuteAgentRequest(t *testing.T, runID, accountID, message string, exp
 	}
 }
 
-// HTTP GET: /v1/agent/status/{run_id}.
-func TestHTTPAgentStatusV1(t *testing.T) {
+// HTTP GET: /v1/agentos/runs/{run_id}/status.
+func TestHTTPAgentOSStatusV1(t *testing.T) {
 	runID := fmt.Sprintf("e2e-status-%d", time.Now().UnixNano())
 
 	status := executeAgentRun(t, runID, "e2e-test-account")
@@ -183,52 +176,70 @@ func TestHTTPAgentStatusV1(t *testing.T) {
 
 	status = waitForRunCompletion(t, runID)
 
-	if status.LifecycleState != "completed" {
-		t.Errorf("Expected lifecycle_state completed, got %q", status.LifecycleState)
+	if status.LifecycleState != "waiting_input" {
+		t.Errorf("Expected lifecycle_state waiting_input, got %q", status.LifecycleState)
 	}
 
 	if status.Step == 0 {
 		t.Error("Expected non-zero step count")
 	}
+
+	signalAgentOSUserMessage(t, runID, "continue")
+	controlAgentOSRun(t, runID, "cancel")
 }
 
-// HTTP GET: /v1/agent/{run_id}/messages.
-//
-// Note: the step-level workflow path (used by /v1/agent/execute) does not persist
-// individual messages to the WarmStateRepo — message persistence is tied to the
-// streaming workflow path. This test validates the endpoint exists, returns 200,
-// and has the correct response structure, even though Data will be empty.
-func TestHTTPAgentMessagesV1(t *testing.T) {
-	runID := fmt.Sprintf("e2e-msg-%d", time.Now().UnixNano())
+func agentOSStartBody(runID, accountID, message string) string {
+	return fmt.Sprintf(`{
+		"run_id": "%s",
+		"account_id": "%s",
+		"user_message": "%s",
+		"backend": {
+			"kind": "native",
+			"name": "goagent-native"
+		}
+	}`, runID, accountID, message)
+}
 
-	executeAgentRun(t, runID, "e2e-test-account")
-	waitForRunCompletion(t, runID)
+func signalAgentOSUserMessage(t *testing.T, runID, content string) {
+	t.Helper()
 
-	url := basePathV1() + "/agent/" + runID + "/messages"
+	body := fmt.Sprintf(`{
+		"type": "user.message",
+		"idempotency_key": "%s-message",
+		"payload": {
+			"content": "%s"
+		}
+	}`, runID, content)
 
 	ctx, cancel := context.WithTimeout(t.Context(), requestTimeout)
 	defer cancel()
 
-	resp, err := doWebRequestWithTimeout(ctx, http.MethodGet, url, nil)
+	resp, err := doWebRequestWithTimeout(ctx, http.MethodPost, basePathV1()+"/agentos/runs/"+runID+"/signals", bytes.NewBufferString(body))
 	if err != nil {
-		t.Fatalf("Failed to send request: %v", err)
+		t.Fatalf("signalAgentOSUserMessage: request failed: %v", err)
 	}
 	defer resp.Body.Close()
 
-	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("Expected status 200, got %d", resp.StatusCode)
+	if resp.StatusCode != http.StatusAccepted {
+		t.Fatalf("signalAgentOSUserMessage: expected 202, got %d", resp.StatusCode)
 	}
+}
 
-	var result struct {
-		Data   []json.RawMessage `json:"data"`
-		Limit  uint64            `json:"limit"`
-		Offset uint64            `json:"offset"`
-	}
-	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
-		t.Fatalf("Failed to decode response: %v", err)
-	}
+func controlAgentOSRun(t *testing.T, runID, operation string) {
+	t.Helper()
 
-	// Data may be empty for step-level executes — the endpoint contract is valid
-	// as long as the response parses correctly.
-	_ = result.Data
+	body := fmt.Sprintf(`{"operation": "%s"}`, operation)
+
+	ctx, cancel := context.WithTimeout(t.Context(), requestTimeout)
+	defer cancel()
+
+	resp, err := doWebRequestWithTimeout(ctx, http.MethodPost, basePathV1()+"/agentos/runs/"+runID+"/control", bytes.NewBufferString(body))
+	if err != nil {
+		t.Fatalf("controlAgentOSRun: request failed: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusAccepted {
+		t.Fatalf("controlAgentOSRun: expected 202, got %d", resp.StatusCode)
+	}
 }

@@ -33,6 +33,10 @@ func host() string {
 }
 
 func httpURL() string {
+	if u := os.Getenv("INTEGRATION_TEST_BASE_URL"); u != "" {
+		return u
+	}
+
 	return "http://" + host() + ":8080"
 }
 

@@ -1,0 +1,249 @@
+{
+  "type": "object",
+  "properties": {
+    "nodes": {
+      "type": [
+        "null",
+        "array"
+      ],
+      "items": {
+        "type": "object",
+        "properties": {
+          "node_id": {
+            "type": "string"
+          },
+          "capability": {
+            "type": "string"
+          },
+          "run": {
+            "type": "object",
+            "properties": {
+              "run_id": {
+                "type": "string"
+              },
+              "thread_id": {
+                "type": "string"
+              },
+              "account_id": {
+                "type": "string"
+              },
+              "project_id": {
+                "type": "string"
+              },
+              "agent_id": {
+                "type": "string"
+              },
+              "model_ref": {
+                "type": "string"
+              },
+              "system_prompt": {
+                "type": "string"
+              },
+              "user_message": {
+                "type": "string"
+              },
+              "idempotency_key": {
+                "type": "string"
+              },
+              "requested_at": {
+                "type": "string"
+              },
+              "metadata": {
+                "type": "object",
+                "additionalProperties": {
+                  "type": "string"
+                }
+              },
+              "backend": {
+                "type": "object",
+                "properties": {
+                  "kind": {
+                    "type": "string"
+                  },
+                  "name": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "kind",
+                  "name"
+                ],
+                "additionalProperties": false
+              },
+              "input": {
+                "type": "object",
+                "additionalProperties": true
+              }
+            },
+            "required": [
+              "run_id",
+              "backend"
+            ],
+            "additionalProperties": false
+          },
+          "inputs": {
+            "type": [
+              "null",
+              "array"
+            ],
+            "items": {
+              "type": "object",
+              "properties": {
+                "target": {
+                  "type": "string"
+                },
+                "source_node_id": {
+                  "type": "string"
+                },
+                "source_artifact": {
+                  "type": "string"
+                },
+                "source_path": {
+                  "type": "string"
+                },
+                "expression": {
+                  "type": "string"
+                },
+                "required": {
+                  "type": "boolean"
+                }
+              },
+              "required": [
+                "target"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "outputs": {
+            "type": [
+              "null",
+              "array"
+            ],
+            "items": {
+              "type": "object",
+              "properties": {
+                "name": {
+                  "type": "string"
+                },
+                "kind": {
+                  "type": "string"
+                },
+                "media_type": {
+                  "type": "string"
+                },
+                "schema_ref": {
+                  "type": "string"
+                },
+                "required": {
+                  "type": "boolean"
+                }
+              },
+              "required": [
+                "name",
+                "kind"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "conditions": {
+            "type": [
+              "null",
+              "array"
+            ],
+            "items": {
+              "type": "string"
+            }
+          },
+          "policy": {
+            "type": "object",
+            "properties": {
+              "max_attempts": {
+                "type": "integer",
+                "minimum": -2147483648,
+                "maximum": 2147483647
+              },
+              "timeout_seconds": {
+                "type": "integer"
+              },
+              "join": {
+                "type": "string"
+              }
+            },
+            "additionalProperties": false
+          }
+        },
+        "required": [
+          "node_id",
+          "run"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "edges": {
+      "type": [
+        "null",
+        "array"
+      ],
+      "items": {
+        "type": "object",
+        "properties": {
+          "edge_id": {
+            "type": "string"
+          },
+          "from": {
+            "type": "string"
+          },
+          "to": {
+            "type": "string"
+          },
+          "on": {
+            "type": "string"
+          },
+          "condition": {
+            "type": "string"
+          },
+          "input_mapping": {
+            "type": [
+              "null",
+              "array"
+            ],
+            "items": {
+              "type": "object",
+              "properties": {
+                "target": {
+                  "type": "string"
+                },
+                "source_node_id": {
+                  "type": "string"
+                },
+                "source_artifact": {
+                  "type": "string"
+                },
+                "source_path": {
+                  "type": "string"
+                },
+                "expression": {
+                  "type": "string"
+                },
+                "required": {
+                  "type": "boolean"
+                }
+              },
+              "required": [
+                "target"
+              ],
+              "additionalProperties": false
+            }
+          }
+        },
+        "required": [
+          "edge_id",
+          "from",
+          "to"
+        ],
+        "additionalProperties": false
+      }
+    }
+  },
+  "additionalProperties": false
+}

@@ -1,7 +1,6 @@
 package config
 
 import (
-	"strings"
 	"time"
 
 	appconfig "github.com/TekkenSteve/GoAgent/config"
@@ -12,23 +11,6 @@ func FromAppConfig(cfg *appconfig.Config) Config {
 	base := Default()
 
 	base.Enabled = cfg.AgentFW.Enabled
-	base.Rollout.Mode = strings.ToLower(strings.TrimSpace(cfg.AgentFW.RolloutMode))
-	base.Rollout.Percent = cfg.AgentFW.RolloutPercent
-	base.Rollout.RollbackForceLegacy = cfg.AgentFW.RollbackForceLegacy
-
-	base.Rollout.HashSalt = strings.TrimSpace(cfg.AgentFW.RolloutHashSalt)
-	if base.Rollout.HashSalt == "" {
-		base.Rollout.HashSalt = "agentfw-v1"
-	}
-
-	for accountID := range strings.SplitSeq(cfg.AgentFW.RolloutAllowlist, ",") {
-		accountID = strings.TrimSpace(accountID)
-		if accountID == "" {
-			continue
-		}
-
-		base.Rollout.AllowlistAccounts = append(base.Rollout.AllowlistAccounts, accountID)
-	}
 
 	base.Temporal.Address = cfg.AgentFW.TemporalAddress
 	base.Temporal.Namespace = cfg.AgentFW.TemporalNamespace

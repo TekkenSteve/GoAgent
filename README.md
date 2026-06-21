@@ -11,7 +11,6 @@ A Go microservices framework built on Clean Architecture principles, integrating
 - **Streaming** — Server-Sent Events (SSE) and WebSocket support for real-time agent output
 - **Account & Billing** — Credit-based usage tracking with plan assignment
 - **Clean Architecture** — Dependency inversion, interface-based isolation, testability
-- **Multiple Server Types** — REST API, gRPC, AMQP RPC, NATS RPC
 - **Observability** — Structured logging (zerolog), Prometheus metrics, OpenTelemetry tracing
 - **Database Migrations** — golang-migrate for PostgreSQL schema management
 
@@ -39,7 +38,7 @@ A Go microservices framework built on Clean Architecture principles, integrating
 ### Local Development
 
 ```sh
-# Start dependency services (Postgres, RabbitMQ, NATS, Temporal)
+# Start dependency services (Postgres, Redis, Temporal)
 make compose-up
 
 # Run the application (includes database migration)
@@ -65,16 +64,26 @@ make compose-up-all
   - `http://127.0.0.1:8080/healthz` — Health check
   - `http://127.0.0.1:8080/metrics` — Prometheus metrics
   - `http://127.0.0.1:8080/swagger` — API documentation
-- **Agent API** (v1):
-  - `POST /v1/agent/execute` — Execute a single agent run (ReAct loop)
-  - `GET /v1/agent/status/{run_id}` — Poll agent run status
-  - `GET /v1/agent/{run_id}/messages` — List conversation messages
-  - `GET /v1/agent/{run_id}/tools` — List tool execution results
-  - `GET /v1/agent/stream` — SSE stream of agent output
-  - `GET /v1/agent/ws` — WebSocket for real-time agent communication
-- **Orchestration API**:
-  - `POST /v1/orchestration/execute` — Start multi-step orchestration workflow
-  - `GET /v1/orchestration/status/{run_id}` — Poll orchestration status
+- **AgentOS API** (v1):
+  - `POST /v1/agentos/runs` — Start a run on a selected backend
+  - `GET /v1/agentos/runs/{run_id}/status` — Poll run status
+  - `POST /v1/agentos/runs/{run_id}/signals` — Send business input such as `user.message`
+  - `POST /v1/agentos/runs/{run_id}/control` — Send pause, resume, or cancel
+  - `POST /v1/agentos/runs/{run_id}/events` — Ingest backend events
+  - `GET /v1/agentos/plans/schemas/{kind}` — Read RunPlan authoring JSON Schema
+  - `GET /v1/agentos/plans/author` — Render the RunPlanSpec authoring console
+  - `POST /v1/agentos/plans` — Start a durable cross-backend RunPlan
+  - `GET /v1/agentos/plans/{plan_id}/status` — Poll aggregate plan status
+  - `GET /v1/agentos/plans/{plan_id}/description` — Read public topology and status
+  - `GET /v1/agentos/plans/{plan_id}/console` — Render the RunPlan operator console
+  - `POST /v1/agentos/plans/{plan_id}/signals` — Send plan signals such as retry, approve, or reject
+  - `POST /v1/agentos/plans/{plan_id}/control` — Send pause, resume, or cancel to a RunPlan
+  - `GET /v1/agentos/plans/{plan_id}/events` — Stream RunPlan events as SSE
+  - `GET /v1/agentos/plans/{plan_id}/events/history` — Query durable RunPlan event history
+  - `GET /v1/agentos/plans/{plan_id}/debug/traces` — Query typed debug traces
+  - `GET /v1/agentos/plans/{plan_id}/audits` — Query durable plan audit records
+  - `GET /v1/agentos/plans/{plan_id}/artifacts` — Query plan artifact refs
+  - `GET /v1/agentos/plans/{plan_id}/artifacts/{artifact_id}` — Read one plan artifact document
 - **Templates API**:
   - `POST /v1/templates/import` — Import workflow template from YAML
   - `GET /v1/templates/` — List templates
@@ -82,9 +91,6 @@ make compose-up-all
   - `DELETE /v1/templates/{template_id}` — Delete template
 - **Triggers API**:
   - `POST /v1/triggers/events` — Fire trigger event webhook
-- **gRPC**: `tcp://127.0.0.1:8081`
-- **AMQP RPC**: `amqp://guest:guest@127.0.0.1:5672/`
-- **NATS RPC**: `nats://guest:guest@127.0.0.1:4222/`
 - **PostgreSQL**: `postgres://user:myAwEsOm3pa55@w0rd@127.0.0.1:5432/db`
 
 ## Project Structure
@@ -95,8 +101,8 @@ GoAgent is structured around a small public **AgentOS SDK boundary** plus an app
 
 | Package | Layer | Description |
 |---------|-------|-------------|
-| `agentos/` | Public SDK | Stable runtime interface, run specs, statuses, events, messages, and tool definitions |
-| `agentos/temporal/` | Public implementation | Default Temporal/Redis runtime and worker registration kit |
+| `agentos/` | Public SDK | Stable runtime and plan interfaces, run specs, RunPlan specs, statuses, events, artifacts, capabilities, messages, and tool definitions |
+| `agentos/temporal/` | Public implementation | Default Temporal/Redis runtime, PlanRuntime, and worker registration kit |
 | `config/` | Outer | Application configuration (env-based) |
 | `pkg/` | Generic utilities | Infrastructure wrappers that are not GoAgent implementation contracts |
 
@@ -105,12 +111,12 @@ GoAgent is structured around a small public **AgentOS SDK boundary** plus an app
 - `internal/app/` — Dependency injection and application bootstrap
 - `internal/agentfw/` — Agent workflow/runtime implementation
 - `internal/entity/`, `internal/usecase/`, `internal/repo/`, `internal/state/` — Internal domain and infrastructure implementation
-- `internal/controller/` — Transport layer (REST, gRPC, AMQP RPC, NATS RPC)
+- `internal/controller/` — Transport layer (REST AgentOS control plane)
 - `cmd/app/` — Entry point
 
 ### Other Directories
 
-- `docs/` — Swagger docs and Proto files
+- `docs/` — Swagger docs
 - `examples/` — Runnable pattern examples
 - `integration-test/` — Integration tests (requires Docker)
 - `migrations/` — PostgreSQL migrations
@@ -126,43 +132,22 @@ Example configuration: [.env.example](.env.example)
 
 ### Architecture
 
-The agent framework consists of:
+The native GoAgent backend consists of:
 
 1. **Agent Runtime** — ReAct loop: `think → act → observe → repeat`, with LLM provider abstraction
 2. **Tool System** — Tool definitions with JSON Schema, executor abstraction, MCP server integration
-3. **Team System** — Hierarchical team composition with recursive expansion into flat step queues
-4. **Orchestration Engine** — Temporal workflow that executes steps with dependency resolution, parallel fan-out, dynamic mutation, and human-in-the-loop signals
+3. **Team System** — Hierarchical team composition inside the native backend
+4. **Temporal Worker Kit** — Workflow/activity registration for durable native execution
 
-### Step Types
+Native step queues, team expansion, and backend-internal graph logic are implementation details. External control-plane callers should model cross-framework orchestration with AgentOS `RunSpec` and `RunPlanSpec`, not native step payloads.
 
-| Type | Purpose |
-|------|---------|
-| `agent` | Execute an agent with a prompt |
-| `tool` | Execute a tool directly |
-| `wait` | Wait for a Temporal signal (HITL) or timeout |
-| `split` | Fan-out into parallel sub-steps |
-| `join` | Fan-in to gather parallel results |
-| `eval` | Conditional evaluation with dynamic step mutation |
+### REST Examples
 
-### Orchestration Patterns (Mode 1 — HTTP Client)
+The `examples/http/` directory contains AgentOS REST examples:
 
-The `examples/http/` directory contains runnable demonstrations using the HTTP client SDK:
-
-| Pattern | File | Key Concepts |
-|---------|------|-------------|
-| [ReAct](examples/http/react/) | Single agent + tool loop | `ExecuteRequest`, polling |
-| [Pipeline](examples/http/pipeline/) | Sequential processing stages | `depends_on` chain |
-| [DAG](examples/http/dag/) | Directed acyclic graph | Multi-dependency resolution |
-| [Research](examples/http/research/) | Parallel exploration + synthesis | `split`/`join`, `wait` (HITL) |
-| [Supervisor-Worker](examples/http/supervisor-worker/) | Decompose + parallel workers | `split`/`join`, supervisor agent |
-| [Router](examples/http/router/) | Conditional branching | `eval` + `OnResult` mutation |
-| [Reflexion](examples/http/reflexion/) | Self-critique quality loop | `eval` + dynamic refinement |
-| [Plan-and-Execute](examples/http/plan-and-execute/) | Plan → parallel execute → evaluate | `split`/`join` + `eval` mutation |
-| [Exploratory](examples/http/exploratory/) | Self-modifying step queue | `eval` + `append_after` mutation |
-| [ToT / LATS](examples/http/tot-lats/) | Multiple reasoning paths | Parallel exploration + best-path eval |
-| [Scientific](examples/http/scientific/) | Hypothesis → HITL → experiment | `wait` signal, timeout handling |
-| [Team](examples/http/team/) | Multi-agent hierarchy | `TeamSpec` + `SubTeams` |
-| [Hierarchical](examples/http/hierarchical/) | Executive → departments | Nested `TeamSpec` with expansion |
+| Example | File | What It Shows |
+|---------|------|---------------|
+| [RunPlan](examples/http/runplan/) | `examples/http/runplan/main.go` | Start a durable AgentOS RunPlan over REST using public `agentos` types |
 
 ### Library Embedding Examples (Mode 2 — AgentOS Runtime)
 
@@ -173,10 +158,49 @@ The `examples/embed/` directory shows how to embed GoAgent through the public Ag
 | [ReAct](examples/embed/react/) | `examples/embed/react/main.go` | Start a generic run with `agentos.Runtime` |
 | [Conversation](examples/embed/conversation/) | `examples/embed/conversation/main.go` | Start a conversational run through `agentos/temporal` |
 | [Tools](examples/embed/tools/) | `examples/embed/tools/main.go` | Start a tool-capable prompt through the runtime boundary |
+| [RunPlan](examples/embed/plan/) | `examples/embed/plan/main.go` | Start a durable cross-backend plan with `agentos.PlanRuntime` |
 
 ### Type-Only Usage (Mode 3)
 
 The `examples/types/` directory shows importing only `agentos/` for shared public type definitions.
+
+### Cross-Backend Plans (AgentOS RunPlan)
+
+AgentOS supports durable cross-backend orchestration through `agentos.PlanRuntime`.
+
+`RunPlan` is the public control-plane model for coordinating backend-owned child runs. A `PlanNodeSpec` is a full `agentos.RunSpec` plus backend, capability, input, output, condition, and policy contracts. It is not a native GoAgent step, not a Temporal activity, and not a LangGraph node.
+
+Native GoAgent `entity.Step` remains an internal detail of the GoAgent native backend. Backend-specific step, graph, loop, and tool execution details should be emitted through events or artifacts, not promoted into the public AgentOS API.
+
+Plan runtime query APIs are durable: status comes from the plan index, event history comes from the plan event store, audits come from the audit store, and artifact payloads come from the artifact store. SSE is only the live streaming transport layered on top of the durable event history.
+
+`agentos.PlanJSONSchema` and `GET /v1/agentos/plans/schemas/{kind}` expose the
+public authoring schemas for editors and CI. `cmd/agentos-plan` is the RunPlan
+DSL/compiler tool. It validates JSON/YAML
+`RunPlanSpec`, generates JSON Schema, validates bounded `PlanDelta` expansion,
+and imports/exports Serverless Workflow as an edge interoperability format. The
+typed `agentos.RunPlanSpec` remains the source of truth.
+
+```bash
+go run ./cmd/agentos-plan schema --kind run-plan --out docs/schemas/run_plan.schema.json
+go run ./cmd/agentos-plan schema --kind plan-delta --out docs/schemas/plan_delta.schema.json
+go run ./cmd/agentos-plan schema --kind capability-catalog --out docs/schemas/capability_catalog.schema.json
+go run ./cmd/agentos-plan schema --kind artifact-schema-catalog --out docs/schemas/artifact_schema_catalog.schema.json
+go run ./cmd/agentos-plan validate --file plan.yaml --format yaml --capabilities capabilities.yaml --capabilities-format yaml --artifact-schemas artifact-schemas.yaml --artifact-schemas-format yaml
+go run ./cmd/agentos-plan export-serverless --file plan.yaml --format yaml --capabilities capabilities.yaml --capabilities-format yaml --artifact-schemas artifact-schemas.yaml --artifact-schemas-format yaml --out-format yaml --out workflow.yaml
+go run ./cmd/agentos-plan import-serverless --file workflow.yaml --format yaml --capabilities capabilities.yaml --capabilities-format yaml --artifact-schemas artifact-schemas.yaml --artifact-schemas-format yaml --out-format json
+```
+
+External Go projects should import only:
+
+```go
+import (
+    "github.com/TekkenSteve/GoAgent/agentos"
+    agentostemporal "github.com/TekkenSteve/GoAgent/agentos/temporal"
+)
+```
+
+Do not import implementation packages such as `internal/entity`, `internal/repo`, `internal/usecase`, or old root-level implementation packages. Public examples and docs are guarded by tests to keep that boundary intact.
 
 ## Three Usage Modes
 
@@ -184,20 +208,37 @@ GoAgent can be consumed in three ways, from simple to deeply integrated:
 
 ### Mode 1 — Standalone Server (REST API)
 
-Run GoAgent as a standalone service. Your application talks to it via HTTP/gRPC.
+Run GoAgent as a standalone service. Your application talks to it through the AgentOS REST control plane.
 
 ```go
-import "github.com/TekkenSteve/GoAgent/examples/client"
+import (
+    "bytes"
+    "encoding/json"
+    "net/http"
 
-c := client.New("http://localhost:8080", "my-account")
-status, _ := c.ExecuteAgent(ctx, client.ExecuteRequest{
-    RunID: "run-1", UserMessage: "What is 2+2?",
+    "github.com/TekkenSteve/GoAgent/agentos"
+)
+
+body, _ := json.Marshal(agentos.RunSpec{
+    RunID: "run-1",
+    AccountID: "acct-1",
+    ProjectID: "proj-1",
+    UserMessage: "What is 2+2?",
+    IdempotencyKey: "run-1-start",
+    Backend: agentos.BackendRef{
+        Kind: agentos.BackendKindNative,
+        Name: agentos.BackendNameGoAgentNative,
+    },
 })
+req, _ := http.NewRequestWithContext(ctx, http.MethodPost, "http://localhost:8080/v1/agentos/runs", bytes.NewReader(body))
+req.Header.Set("Content-Type", "application/json")
+resp, _ := http.DefaultClient.Do(req)
+defer resp.Body.Close()
 ```
 
 ### Mode 2 — Library Embedding
 
-Import the stable AgentOS runtime boundary into your Go application. Use `agentos/temporal` for the default Temporal/Redis implementation.
+Import the stable AgentOS runtime boundary into your Go application. Use `agentos/temporal` for the default Temporal/Postgres/Redis implementation.
 
 ```go
 import (
@@ -209,13 +250,16 @@ rt, _ := agentostemporal.NewRuntime(ctx, agentostemporal.RuntimeConfig{
     TemporalAddress: "127.0.0.1:7233",
     TemporalNamespace: "default",
     TemporalTaskQueue: "agent-framework",
+    PostgresURL: "postgres://goagent:goagent@127.0.0.1:5432/goagent?sslmode=disable",
     RedisURL: "redis://127.0.0.1:6379/0",
 })
 status, _ := rt.Start(ctx, agentos.RunSpec{
     RunID: "run-1",
     AccountID: "acct-1",
+    ProjectID: "proj-1",
     ModelRef: "gpt-4.1-mini",
     UserMessage: "What is 2+2?",
+    IdempotencyKey: "run-1-start",
 })
 ```
 
@@ -287,8 +331,6 @@ func New(r Repository) *UseCase {
 Supports a simple versioning strategy, with versions distinguished by directory structure:
 
 - REST API: `internal/controller/restapi/v1`, `v2`...
-- gRPC: `internal/controller/grpc/v1`, `v2`...
-- RPC: `internal/controller/amqp_rpc/v1`, `v2`...
 
 ## Development Guide
 
@@ -307,9 +349,6 @@ make run
 ```sh
 # Generate Swagger documentation
 make swag-v1
-
-# Generate gRPC code
-make proto-v1
 
 # Generate Mocks
 make mock

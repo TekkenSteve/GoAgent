@@ -2,46 +2,57 @@ package client
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"net/http"
 )
 
-// ExecuteAgent starts a ReAct agent run.
-// POST /v1/agent/execute.
-func (c *Client) ExecuteAgent(ctx context.Context, req ExecuteRequest) (*RunStatus, error) {
+// StartRun starts an AgentOS run.
+// POST /v1/agentos/runs.
+func (c *Client) StartRun(ctx context.Context, req AgentOSRunRequest) (*RunStatus, error) {
 	if req.AccountID == "" {
 		req.AccountID = c.accountID
 	}
+	if req.Backend.Kind == "" && req.Backend.Name == "" {
+		req.Backend = BackendRef{Kind: "native", Name: "goagent-native"}
+	}
 
 	var status RunStatus
-	if err := c.Do(ctx, http.MethodPost, "/v1/agent/execute", &req, &status); err != nil {
-		return nil, fmt.Errorf("ExecuteAgent: %w", err)
+	if err := c.Do(ctx, http.MethodPost, "/v1/agentos/runs", &req, &status); err != nil {
+		return nil, fmt.Errorf("StartRun: %w", err)
 	}
 
 	return &status, nil
 }
 
-// GetStatus queries the current state of an agent run.
-// GET /v1/agent/status/{runID}.
+// GetStatus queries the current state of an AgentOS run.
+// GET /v1/agentos/runs/{runID}/status.
 func (c *Client) GetStatus(ctx context.Context, runID string) (*RunStatus, error) {
 	var status RunStatus
-	if err := c.Do(ctx, http.MethodGet, "/v1/agent/status/"+runID, nil, &status); err != nil {
+	if err := c.Do(ctx, http.MethodGet, "/v1/agentos/runs/"+runID+"/status", nil, &status); err != nil {
 		return nil, fmt.Errorf("GetStatus: %w", err)
 	}
 
 	return &status, nil
 }
 
-// ListMessages fetches conversation messages for a completed run.
-// GET /v1/agent/{runID}/messages.
-func (c *Client) ListMessages(ctx context.Context, runID string) ([]json.RawMessage, error) {
-	var resp MessagesResponse
-	if err := c.Do(ctx, http.MethodGet, "/v1/agent/"+runID+"/messages", nil, &resp); err != nil {
-		return nil, fmt.Errorf("ListMessages: %w", err)
+// SignalRun sends a business signal to an AgentOS run.
+// POST /v1/agentos/runs/{runID}/signals.
+func (c *Client) SignalRun(ctx context.Context, runID string, req AgentOSSignalRequest) error {
+	if err := c.Do(ctx, http.MethodPost, "/v1/agentos/runs/"+runID+"/signals", &req, nil); err != nil {
+		return fmt.Errorf("SignalRun: %w", err)
 	}
 
-	return resp.Data, nil
+	return nil
+}
+
+// ControlRun sends a lifecycle operation to an AgentOS run.
+// POST /v1/agentos/runs/{runID}/control.
+func (c *Client) ControlRun(ctx context.Context, runID string, req AgentOSControlRequest) error {
+	if err := c.Do(ctx, http.MethodPost, "/v1/agentos/runs/"+runID+"/control", &req, nil); err != nil {
+		return fmt.Errorf("ControlRun: %w", err)
+	}
+
+	return nil
 }
 
 // ExecuteOrchestration starts an orchestration workflow from a TeamSpec or step queue.

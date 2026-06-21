@@ -4,6 +4,18 @@ import "errors"
 
 var (
 	ErrInvalidRunSpec          = errors.New("agentos: invalid run spec")
+	ErrInvalidBackendRef       = errors.New("agentos: invalid backend ref")
+	ErrBackendNotFound         = errors.New("agentos: backend not found")
+	ErrRunRouteNotFound        = errors.New("agentos: run route not found")
+	ErrInvalidSignal           = errors.New("agentos: invalid signal")
 	ErrInvalidControlOperation = errors.New("agentos: invalid control operation")
 	ErrInvalidStreamScope      = errors.New("agentos: invalid stream scope")
+	ErrInvalidRunPlan          = errors.New("agentos: invalid run plan")
+	ErrInvalidPlanScope        = errors.New("agentos: invalid plan scope")
+	ErrPlanRouteNotFound       = errors.New("agentos: plan route not found")
+	ErrCapabilityNotFound      = errors.New("agentos: capability not found")
+	ErrArtifactNotFound        = errors.New("agentos: artifact not found")
+	ErrInvalidArtifact         = errors.New("agentos: invalid artifact")
+	ErrInvalidExpression       = errors.New("agentos: invalid expression")
+	ErrInvalidPlanEvent        = errors.New("agentos: invalid plan event")
 )

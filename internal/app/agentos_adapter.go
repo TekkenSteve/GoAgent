@@ -29,6 +29,7 @@ func (e *agentOSExecutor) Execute(ctx context.Context, req *entity.ExecuteReques
 		UserMessage:    req.UserMessage,
 		IdempotencyKey: req.IdempotencyKey,
 		RequestedAt:    req.RequestedAt,
+		Backend:        agentos.BackendRef{Kind: agentos.BackendKindNative, Name: agentos.BackendNameGoAgentNative},
 	})
 	if err != nil {
 		return entity.RunStatus{}, fmt.Errorf("agentos executor - execute: %w", err)
@@ -52,7 +53,7 @@ func (e *agentOSExecutor) Control(ctx context.Context, runID string, op entity.C
 		return err
 	}
 
-	if err := e.runtime.Control(ctx, runID, agentOSOp); err != nil {
+	if err := e.runtime.Control(ctx, runID, agentos.ControlRequest{Operation: agentOSOp}); err != nil {
 		return fmt.Errorf("agentos executor - control: %w", err)
 	}
 
@@ -60,10 +61,15 @@ func (e *agentOSExecutor) Control(ctx context.Context, runID string, op entity.C
 }
 
 func runStatusToEntity(status agentos.RunStatus) entity.RunStatus {
+	var step int32
+	if status.Progress != nil {
+		step = status.Progress.Current
+	}
+
 	return entity.RunStatus{
 		RunID:          status.RunID,
 		LifecycleState: status.LifecycleState,
-		Step:           status.Step,
+		Step:           step,
 		Reason:         status.Reason,
 		UpdatedAt:      status.UpdatedAt,
 	}

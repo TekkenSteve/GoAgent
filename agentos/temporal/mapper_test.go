@@ -1,6 +1,7 @@
 package temporal
 
 import (
+	"reflect"
 	"testing"
 	"time"
 
@@ -22,6 +23,7 @@ func TestExecutionRequestFromRunSpec(t *testing.T) {
 		UserMessage:    "hello",
 		IdempotencyKey: "idem-1",
 		RequestedAt:    requestedAt,
+		Backend:        agentos.BackendRef{Kind: agentos.BackendKindNative, Name: agentos.BackendNameGoAgentNative},
 	})
 	if err != nil {
 		t.Fatalf("executionRequestFromRunSpec: %v", err)
@@ -55,11 +57,11 @@ func TestRunStatusFromEntity(t *testing.T) {
 	want := agentos.RunStatus{
 		RunID:          "run-1",
 		LifecycleState: "running",
-		Step:           3,
+		Progress:       &agentos.RunProgress{Current: 3},
 		Reason:         "waiting",
 		UpdatedAt:      updatedAt,
 	}
-	if got != want {
+	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("status mismatch: got %#v want %#v", got, want)
 	}
 }
@@ -79,5 +81,61 @@ func TestControlOperationToEntity(t *testing.T) {
 		if got != want {
 			t.Fatalf("controlOperationToEntity(%q) = %q, want %q", input, got, want)
 		}
+	}
+}
+
+func TestTemporalExternalConfig(t *testing.T) {
+	got := temporalExternalConfig(ExternalBackendConfig{
+		Name:         "langgraph-main",
+		TaskQueue:    "langgraph-queue",
+		WorkflowType: "langgraph.agent.v1",
+		QueryType:    "agentos_status",
+		Signals: ExternalSignalNames{
+			Pause:  "pause",
+			Resume: "resume",
+			Cancel: "cancel",
+			Defaults: map[agentos.SignalType]string{
+				agentos.SignalUserMessage: "user_input",
+			},
+		},
+	})
+
+	if got.Name != "langgraph-main" ||
+		got.TaskQueue != "langgraph-queue" ||
+		got.WorkflowType != "langgraph.agent.v1" ||
+		got.QueryType != "agentos_status" ||
+		got.Signals.Pause != "pause" ||
+		got.Signals.Resume != "resume" ||
+		got.Signals.Cancel != "cancel" ||
+		got.Signals.Defaults[agentos.SignalUserMessage] != "user_input" {
+		t.Fatalf("unexpected temporal external config: %#v", got)
+	}
+}
+
+func TestGRPCBackendConfig(t *testing.T) {
+	got := grpcBackendConfig(GRPCBackendConfig{
+		Name:      "opencode",
+		Target:    "opencode-runtime:9090",
+		Authority: "agentos.example",
+		Insecure:  true,
+		Service:   "agentos.v1.AgentBackend",
+		Methods: GRPCMethodNames{
+			Start:   "StartRun",
+			Signal:  "SignalRun",
+			Control: "ControlRun",
+			Status:  "StatusRun",
+		},
+	})
+
+	if got.Name != "opencode" ||
+		got.Target != "opencode-runtime:9090" ||
+		got.Authority != "agentos.example" ||
+		!got.Insecure ||
+		got.Service != "agentos.v1.AgentBackend" ||
+		got.Methods.Start != "StartRun" ||
+		got.Methods.Signal != "SignalRun" ||
+		got.Methods.Control != "ControlRun" ||
+		got.Methods.Status != "StatusRun" {
+		t.Fatalf("unexpected grpc backend config: %#v", got)
 	}
 }

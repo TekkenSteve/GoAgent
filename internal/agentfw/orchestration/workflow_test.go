@@ -95,7 +95,6 @@ func TestAgentWorkflowV2_TextOnly(t *testing.T) {
 	t.Parallel()
 
 	env := newWorkflowTestEnv()
-
 	env.ExecuteWorkflow(AgentWorkflow, &AgentWorkflowInput{
 		RunID:   "run-v2-text",
 		Message: "Hello",
@@ -109,6 +108,56 @@ func TestAgentWorkflowV2_TextOnly(t *testing.T) {
 	require.Equal(t, "run-v2-text", result.RunID)
 	require.Equal(t, "completed", result.LifecycleState)
 	require.Equal(t, int32(1), result.Step)
+}
+
+func TestAgentWorkflowV2_UserMessageSignalContinuesRun(t *testing.T) {
+	t.Parallel()
+
+	var callCount int
+	env := newWorkflowTestEnv()
+	env.RegisterActivityWithOptions(func(_ context.Context, input *LLMStepInput) (*LLMStepOutput, error) {
+		callCount++
+		if callCount == 1 {
+			require.Equal(t, []entity.Message{
+				{Role: entity.RoleUser, Content: "Hello"},
+			}, input.Messages)
+		}
+		if callCount == 2 {
+			require.Equal(t, []entity.Message{
+				{Role: entity.RoleUser, Content: "Hello"},
+				{Role: entity.RoleAssistant, Content: "response"},
+				{Role: entity.RoleUser, Content: "continue"},
+			}, input.Messages)
+		}
+
+		return &LLMStepOutput{
+			Content:      "response",
+			Usage:        entity.Usage{PromptTokens: 10, CompletionTokens: 5, TotalTokens: 15},
+			FinishReason: "stop",
+		}, nil
+	}, activity.RegisterOptions{Name: LLMStepActivityName})
+
+	env.RegisterDelayedCallback(func() {
+		env.SignalWorkflow(AgentMessageSignal, UserMessageSignal{Content: "continue"})
+	}, time.Second)
+	env.RegisterDelayedCallback(func() {
+		env.SignalWorkflow(AgentCommandSignal, "cancel")
+	}, 2*time.Second)
+
+	env.ExecuteWorkflow(AgentWorkflow, &AgentWorkflowInput{
+		RunID:          "run-v2-user-message",
+		Message:        "Hello",
+		AwaitUserInput: true,
+	})
+
+	require.True(t, env.IsWorkflowCompleted())
+	require.NoError(t, env.GetWorkflowError())
+	require.Equal(t, 2, callCount)
+
+	var result WorkflowResult
+	require.NoError(t, env.GetWorkflowResult(&result))
+	require.Equal(t, "canceled", result.LifecycleState)
+	require.Equal(t, int32(2), result.Step)
 }
 
 func TestAgentWorkflowV2_ToolRound(t *testing.T) {

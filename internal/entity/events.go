@@ -1,5 +1,66 @@
 package entity
 
+type AgentOSEventType string
+
+const (
+	AgentOSEventRunStarted            AgentOSEventType = "run.started"
+	AgentOSEventRunCompleted          AgentOSEventType = "run.completed"
+	AgentOSEventRunFailed             AgentOSEventType = "run.failed"
+	AgentOSEventRunCancelled          AgentOSEventType = "run.cancelled"
+	AgentOSEventRunPaused             AgentOSEventType = "run.paused"
+	AgentOSEventRunResumed            AgentOSEventType = "run.resumed"
+	AgentOSEventAgentStepStarted      AgentOSEventType = "agent.step.started"
+	AgentOSEventAgentStepCompleted    AgentOSEventType = "agent.step.completed"
+	AgentOSEventAgentStepFailed       AgentOSEventType = "agent.step.failed"
+	AgentOSEventAgentMessageDelta     AgentOSEventType = "agent.message.delta"
+	AgentOSEventAgentMessageCompleted AgentOSEventType = "agent.message.completed"
+	AgentOSEventToolCallStarted       AgentOSEventType = "tool.call.started"
+	AgentOSEventToolCallDelta         AgentOSEventType = "tool.call.delta"
+	AgentOSEventToolCallCompleted     AgentOSEventType = "tool.call.completed"
+	AgentOSEventToolCallFailed        AgentOSEventType = "tool.call.failed"
+	AgentOSEventApprovalRequested     AgentOSEventType = "approval.requested"
+	AgentOSEventApprovalResolved      AgentOSEventType = "approval.resolved"
+	AgentOSEventUsageReported         AgentOSEventType = "usage.reported"
+	AgentOSEventCheckpointCreated     AgentOSEventType = "checkpoint.created"
+)
+
+var agentOSStandardEventTypes = map[AgentOSEventType]struct{}{ //nolint:gochecknoglobals // immutable standard event registry
+	AgentOSEventRunStarted:            {},
+	AgentOSEventRunCompleted:          {},
+	AgentOSEventRunFailed:             {},
+	AgentOSEventRunCancelled:          {},
+	AgentOSEventRunPaused:             {},
+	AgentOSEventRunResumed:            {},
+	AgentOSEventAgentStepStarted:      {},
+	AgentOSEventAgentStepCompleted:    {},
+	AgentOSEventAgentStepFailed:       {},
+	AgentOSEventAgentMessageDelta:     {},
+	AgentOSEventAgentMessageCompleted: {},
+	AgentOSEventToolCallStarted:       {},
+	AgentOSEventToolCallDelta:         {},
+	AgentOSEventToolCallCompleted:     {},
+	AgentOSEventToolCallFailed:        {},
+	AgentOSEventApprovalRequested:     {},
+	AgentOSEventApprovalResolved:      {},
+	AgentOSEventUsageReported:         {},
+	AgentOSEventCheckpointCreated:     {},
+}
+
+func IsAgentOSStandardEventType(eventType string) bool {
+	_, ok := agentOSStandardEventTypes[AgentOSEventType(eventType)]
+
+	return ok
+}
+
+func AgentOSStandardEventTypes() []AgentOSEventType {
+	types := make([]AgentOSEventType, 0, len(agentOSStandardEventTypes))
+	for eventType := range agentOSStandardEventTypes {
+		types = append(types, eventType)
+	}
+
+	return types
+}
+
 // ——— LLM Event ———
 
 type TextDeltaEvent struct {
@@ -190,3 +251,12 @@ type UserFeedbackEvent struct {
 
 func (e UserFeedbackEvent) Base() BaseEvent   { return e.BaseEvent }     //nolint:gocritic // gocritic complains about struct-embedding pattern
 func (e UserFeedbackEvent) EventType() string { return "user.feedback" } //nolint:gocritic // gocritic complains about struct-embedding pattern
+
+// AgentOSEvent is the canonical event envelope accepted from external AgentOS backends.
+type AgentOSEvent struct {
+	BaseEvent
+	Payload map[string]any `json:"payload,omitempty"`
+}
+
+func (e AgentOSEvent) Base() BaseEvent   { return e.BaseEvent }           //nolint:gocritic // gocritic complains about struct-embedding pattern
+func (e AgentOSEvent) EventType() string { return e.BaseEvent.EventType } //nolint:gocritic // gocritic complains about struct-embedding pattern
