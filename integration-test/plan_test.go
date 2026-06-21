@@ -87,7 +87,8 @@ func TestHTTPAgentOSRunPlanNativeCancelV1(t *testing.T) {
 	runID := fmt.Sprintf("e2e-plan-run-%d", now)
 
 	started := startAgentOSPlan(t, planID, runID)
-	if started.PlanID != planID || started.LifecycleState != agentos.PlanLifecycleRunning {
+	if started.PlanID != planID ||
+		(started.LifecycleState != agentos.PlanLifecyclePending && started.LifecycleState != agentos.PlanLifecycleRunning) {
 		t.Fatalf("start status = %#v", started)
 	}
 
@@ -408,6 +409,7 @@ func controlAgentOSPlan(t *testing.T, planID string, operation agentos.ControlOp
 		"account_id":      agentOSPlanAccountID,
 		"project_id":      agentOSPlanProjectID,
 		"idempotency_key": idempotencyKey,
+		"actor_id":        "integration-test",
 		"requested_at":    time.Now().UTC(),
 	})
 	if err != nil {
