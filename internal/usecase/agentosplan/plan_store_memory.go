@@ -236,6 +236,7 @@ func normalizeMemoryPlanStateSnapshot(snapshot PlanStateSnapshot) (PlanStateSnap
 	if snapshot.Spec.IdempotencyKey == "" {
 		return PlanStateSnapshot{}, fmt.Errorf("%w: plan idempotency key is required", agentos.ErrInvalidRunPlan)
 	}
+	snapshot.Spec.RequestedAt = NormalizeDurableTimestamp(snapshot.Spec.RequestedAt)
 	if snapshot.Status.PlanID == "" {
 		snapshot.Status.PlanID = snapshot.Spec.PlanID
 	}
@@ -373,6 +374,7 @@ func (s *MemoryPlanStore) appendPlanEventLocked(event agentos.PlanEvent, idempot
 	if event.Timestamp.IsZero() {
 		event.Timestamp = time.Now().UTC()
 	}
+	event.Timestamp = NormalizeDurableTimestamp(event.Timestamp)
 	s.events[event.PlanID] = append(s.events[event.PlanID], event)
 	s.eventKeys[key] = event
 

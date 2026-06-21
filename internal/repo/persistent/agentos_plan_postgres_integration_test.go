@@ -6,9 +6,12 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
+	"net/url"
 	"os"
 	"path/filepath"
 	"slices"
+	"strings"
 	"testing"
 	"time"
 
@@ -17,21 +20,22 @@ import (
 	artifactblob "github.com/TekkenSteve/GoAgent/internal/repo/artifact"
 	"github.com/TekkenSteve/GoAgent/internal/usecase/agentosplan"
 	"github.com/TekkenSteve/GoAgent/internal/usecase/agentosruntime"
+	"github.com/jackc/pgx/v5"
 )
 
 func TestAgentOSPlanPostgresDurablePersistence(t *testing.T) {
-	pgURL := os.Getenv("GOAGENT_POSTGRES_TEST_URL")
-	if pgURL == "" {
-		t.Fatal("GOAGENT_POSTGRES_TEST_URL is required for postgres_integration tests")
-	}
-
-	pg, err := postgres.New(pgURL, postgres.MaxPoolSize(1), postgres.ConnAttempts(1), postgres.ConnTimeout(100*time.Millisecond))
-	if err != nil {
-		t.Fatalf("postgres.New: %v", err)
-	}
-	defer pg.Close()
-	waitForPostgres(t, pg)
-	applyAgentOSPlanMigrations(t, pg)
+	ctx, pg, suffix := newAgentOSPlanPostgresIntegrationDB(t)
+	assertPostgresTables(t, pg,
+		"plans",
+		"plan_nodes",
+		"plan_events",
+		"run_backend_index",
+		"artifacts",
+		"audit_logs",
+		"plan_commands",
+		"agentos_capabilities",
+		"agentos_artifact_schemas",
+	)
 	assertPostgresCheckConstraints(t, pg,
 		"plans_account_id_required",
 		"plans_project_id_required",
@@ -82,7 +86,6 @@ func TestAgentOSPlanPostgresDurablePersistence(t *testing.T) {
 	assertPostgresTrigger(t, pg, "plan_node_identity_immutable")
 	assertPostgresTriggerAbsent(t, pg, "audit_logs_delivered_command_audit")
 
-	ctx := t.Context()
 	planRepo := NewAgentOSPlanRepo(pg)
 	routeIndex := NewRunBackendIndexRepo(pg)
 	blobStore, err := artifactblob.NewLocalBlobStore(t.TempDir())
@@ -93,7 +96,6 @@ func TestAgentOSPlanPostgresDurablePersistence(t *testing.T) {
 	capabilityCatalog := NewAgentOSCapabilityCatalogRepo(pg)
 	artifactSchemaCatalog := NewAgentOSArtifactSchemaCatalogRepo(pg)
 
-	suffix := time.Now().UTC().Format("20060102150405.000000000")
 	spec := postgresIntegrationPlanSpec("plan-"+suffix, "plan-start-"+suffix)
 	status := agentosplan.NewState(spec, time.Now().UTC()).Status
 
@@ -113,6 +115,7 @@ func TestAgentOSPlanPostgresDurablePersistence(t *testing.T) {
 	}
 
 	changedSpec := spec
+	changedSpec.Nodes = slices.Clone(spec.Nodes)
 	changedSpec.Nodes[0].NodeID = "changed"
 	if _, _, err := planRepo.CreatePlan(ctx, changedSpec, status); !errors.Is(err, agentos.ErrInvalidRunPlan) {
 		t.Fatalf("CreatePlan changed spec error = %v, want ErrInvalidRunPlan", err)
@@ -1514,8 +1517,11 @@ func newAgentOSPlanPostgresIntegrationDB(t *testing.T) (context.Context, *postgr
 	if pgURL == "" {
 		t.Fatal("GOAGENT_POSTGRES_TEST_URL is required for postgres_integration tests")
 	}
+	suffix := postgresIntegrationSuffix(t)
+	isolatedURL, cleanup := createPostgresIntegrationDatabase(t, pgURL, "goagent_plan_"+suffix)
+	t.Cleanup(cleanup)
 
-	pg, err := postgres.New(pgURL, postgres.MaxPoolSize(1), postgres.ConnAttempts(1), postgres.ConnTimeout(100*time.Millisecond))
+	pg, err := postgres.New(isolatedURL, postgres.MaxPoolSize(1), postgres.ConnAttempts(1), postgres.ConnTimeout(100*time.Millisecond))
 	if err != nil {
 		t.Fatalf("postgres.New: %v", err)
 	}
@@ -1523,7 +1529,7 @@ func newAgentOSPlanPostgresIntegrationDB(t *testing.T) (context.Context, *postgr
 	waitForPostgres(t, pg)
 	applyAgentOSPlanMigrations(t, pg)
 
-	return t.Context(), pg, time.Now().UTC().Format("20060102150405.000000000")
+	return t.Context(), pg, suffix
 }
 
 func waitForPostgres(t *testing.T, pg *postgres.Postgres) {
@@ -1539,6 +1545,53 @@ func waitForPostgres(t *testing.T, pg *postgres.Postgres) {
 	}
 
 	t.Fatal("postgres did not become ready")
+}
+
+func createPostgresIntegrationDatabase(t *testing.T, pgURL, dbName string) (string, func()) {
+	t.Helper()
+
+	admin, err := postgres.New(pgURL, postgres.MaxPoolSize(1), postgres.ConnAttempts(30), postgres.ConnTimeout(250*time.Millisecond))
+	if err != nil {
+		t.Fatalf("postgres admin.New: %v", err)
+	}
+
+	ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
+	defer cancel()
+	if _, err := admin.Pool.Exec(ctx, "CREATE DATABASE "+pgx.Identifier{dbName}.Sanitize()); err != nil {
+		admin.Close()
+		t.Fatalf("create integration database %q: %v", dbName, err)
+	}
+
+	parsed, err := url.Parse(pgURL)
+	if err != nil {
+		admin.Close()
+		t.Fatalf("parse postgres test url: %v", err)
+	}
+	parsed.Path = "/" + dbName
+
+	cleanup := func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		_, _ = admin.Pool.Exec(ctx, `
+SELECT pg_terminate_backend(pid)
+FROM pg_stat_activity
+WHERE datname = $1 AND pid <> pg_backend_pid()`, dbName)
+		_, _ = admin.Pool.Exec(ctx, "DROP DATABASE IF EXISTS "+pgx.Identifier{dbName}.Sanitize())
+		admin.Close()
+	}
+
+	return parsed.String(), cleanup
+}
+
+func postgresIntegrationSuffix(t *testing.T) string {
+	t.Helper()
+
+	replacer := strings.NewReplacer("/", "_", "-", "_", ".", "_")
+	name := strings.ToLower(replacer.Replace(t.Name()))
+	if len(name) > 36 {
+		name = name[:36]
+	}
+	return fmt.Sprintf("%s_%d", name, time.Now().UTC().UnixNano())
 }
 
 func applyAgentOSPlanMigrations(t *testing.T, pg *postgres.Postgres) {
@@ -1764,6 +1817,26 @@ func nullableTimeForIntegration(value time.Time) any {
 	}
 
 	return value
+}
+
+func assertPostgresTables(t *testing.T, pg *postgres.Postgres, names ...string) {
+	t.Helper()
+	for _, name := range names {
+		var exists bool
+		err := pg.Pool.QueryRow(t.Context(), `
+SELECT EXISTS (
+    SELECT 1
+    FROM information_schema.tables
+    WHERE table_schema = 'public'
+      AND table_name = $1
+)`, name).Scan(&exists)
+		if err != nil {
+			t.Fatalf("read table %s: %v", name, err)
+		}
+		if !exists {
+			t.Fatalf("table %s does not exist", name)
+		}
+	}
 }
 
 func assertPostgresCheckConstraints(t *testing.T, pg *postgres.Postgres, names ...string) {

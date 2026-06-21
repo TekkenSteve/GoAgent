@@ -221,6 +221,7 @@ func normalizePlanStateSnapshotForPostgres(snapshot agentosplan.PlanStateSnapsho
 	if snapshot.Spec.IdempotencyKey == "" {
 		return agentosplan.PlanStateSnapshot{}, fmt.Errorf("%w: plan idempotency key is required", agentos.ErrInvalidRunPlan)
 	}
+	snapshot.Spec.RequestedAt = agentosplan.NormalizeDurableTimestamp(snapshot.Spec.RequestedAt)
 	if snapshot.Status.PlanID == "" {
 		snapshot.Status.PlanID = snapshot.Spec.PlanID
 	}
@@ -731,6 +732,7 @@ WHERE plan_id = $1`, event.PlanID, event.Sequence); err != nil {
 	if event.Timestamp.IsZero() {
 		event.Timestamp = time.Now().UTC()
 	}
+	event.Timestamp = agentosplan.NormalizeDurableTimestamp(event.Timestamp)
 	if event.Payload == nil {
 		event.Payload = map[string]any{}
 	}

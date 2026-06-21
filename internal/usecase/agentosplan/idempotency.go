@@ -399,8 +399,20 @@ func normalizeEventPayload(payload map[string]any) map[string]any {
 func NormalizePlanEventAppendRequest(event agentos.PlanEvent) agentos.PlanEvent {
 	event.EventID = ""
 	event.Sequence = 0
+	event.Timestamp = NormalizeDurableTimestamp(event.Timestamp)
 
 	return event
+}
+
+// NormalizeDurableTimestamp returns the canonical timestamp precision used by
+// durable stores. Postgres timestamptz stores microseconds, and JSON snapshots
+// constrained against timestamp columns must match that precision exactly.
+func NormalizeDurableTimestamp(timestamp time.Time) time.Time {
+	if timestamp.IsZero() {
+		return timestamp
+	}
+
+	return timestamp.Round(time.Microsecond)
 }
 
 // ValidateArtifactPublishIdempotency verifies that a repeated artifact publish

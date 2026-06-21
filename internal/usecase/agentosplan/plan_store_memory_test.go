@@ -17,6 +17,27 @@ func TestMemoryPlanStoreCreatePlanRequiresIdempotencyKey(t *testing.T) {
 	}
 }
 
+func TestMemoryPlanStoreCreatePlanCanonicalizesRequestedAtPrecision(t *testing.T) {
+	ctx := context.Background()
+	store := NewMemoryPlanStore()
+	spec := testRunPlanSpec("plan-requested-at", "start-key")
+	spec.RequestedAt = time.Date(2026, 6, 20, 12, 0, 0, 123456789, time.UTC)
+
+	if _, _, err := store.CreatePlan(ctx, spec, agentos.RunPlanStatus{PlanID: spec.PlanID}); err != nil {
+		t.Fatalf("CreatePlan: %v", err)
+	}
+	snapshot, exists, err := store.LoadPlanState(ctx, spec.PlanID)
+	if err != nil {
+		t.Fatalf("LoadPlanState: %v", err)
+	}
+	if !exists {
+		t.Fatal("LoadPlanState did not find plan")
+	}
+	if snapshot.Spec.RequestedAt.Nanosecond() != 123457000 {
+		t.Fatalf("requested_at = %s, want microsecond precision", snapshot.Spec.RequestedAt.Format(time.RFC3339Nano))
+	}
+}
+
 func TestMemoryPlanStoreSavePlanStateRequiresIdempotencyKey(t *testing.T) {
 	store := NewMemoryPlanStore()
 	err := store.SavePlanState(context.Background(), PlanStateSnapshot{

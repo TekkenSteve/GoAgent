@@ -303,6 +303,28 @@ func TestValidatePlanEventIdempotencyRejectsDifferentTimestamp(t *testing.T) {
 	}
 }
 
+func TestNormalizePlanEventAppendRequestCanonicalizesTimestampPrecision(t *testing.T) {
+	requested := agentos.PlanEvent{
+		Event: agentos.Event{
+			EventID:   "plan-1:9",
+			EventType: agentos.EventPlanStarted,
+			Sequence:  9,
+			Timestamp: time.Date(2026, 6, 20, 12, 0, 0, 123456789, time.UTC),
+		},
+		PlanID:    "plan-1",
+		AccountID: "acct-1",
+		ProjectID: "proj-1",
+	}
+
+	normalized := NormalizePlanEventAppendRequest(requested)
+	if normalized.EventID != "" || normalized.Sequence != 0 {
+		t.Fatalf("store-owned identity was not cleared: %#v", normalized.Event)
+	}
+	if normalized.Timestamp.Nanosecond() != 123457000 {
+		t.Fatalf("timestamp = %s, want microsecond precision", normalized.Timestamp.Format(time.RFC3339Nano))
+	}
+}
+
 func TestValidateArtifactPublishIdempotencyRejectsDifferentDigest(t *testing.T) {
 	existing := agentos.ArtifactRef{
 		ArtifactID: "artifact-1",
