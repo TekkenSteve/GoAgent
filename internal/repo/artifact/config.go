@@ -28,12 +28,12 @@ type LocalConfig struct {
 	Root string
 }
 
-func NewBlobStore(ctx context.Context, cfg Config) (BlobStore, error) {
+func NewBlobStore(ctx context.Context, cfg *Config) (BlobStore, error) {
 	switch cfg.Backend {
 	case BackendLocal:
 		return NewLocalBlobStore(cfg.Local.Root)
 	case BackendS3:
-		return NewS3BlobStore(ctx, cfg.S3)
+		return NewS3BlobStore(ctx, &cfg.S3)
 	case "":
 		return nil, ErrBackendRequired
 	default:

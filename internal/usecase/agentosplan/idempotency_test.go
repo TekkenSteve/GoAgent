@@ -10,16 +10,20 @@ import (
 )
 
 func TestValidatePlanStartIdempotencyRejectsDifferentPlanID(t *testing.T) {
-	err := ValidatePlanStartIdempotency(
-		agentos.RunPlanSpec{PlanID: "plan-1", IdempotencyKey: "start-key"},
-		agentos.RunPlanSpec{PlanID: "plan-2", IdempotencyKey: "start-key"},
-	)
+	t.Parallel()
+
+	existing := agentos.RunPlanSpec{PlanID: "plan-1", IdempotencyKey: "start-key"}
+	requested := agentos.RunPlanSpec{PlanID: "plan-2", IdempotencyKey: "start-key"}
+
+	err := ValidatePlanStartIdempotency(&existing, &requested)
 	if !errors.Is(err, agentos.ErrInvalidRunPlan) {
 		t.Fatalf("error = %v, want ErrInvalidRunPlan", err)
 	}
 }
 
 func TestValidatePlanStartIdempotencyRejectsDifferentRequest(t *testing.T) {
+	t.Parallel()
+
 	ref := agentos.BackendRef{Kind: agentos.BackendKindNative, Name: agentos.BackendNameGoAgentNative}
 	existing := agentos.RunPlanSpec{
 		PlanID:         "plan-1",
@@ -33,13 +37,15 @@ func TestValidatePlanStartIdempotencyRejectsDifferentRequest(t *testing.T) {
 		{NodeID: "node-2", Run: agentos.RunSpec{RunID: "run-2", Backend: ref}},
 	}
 
-	err := ValidatePlanStartIdempotency(existing, requested)
+	err := ValidatePlanStartIdempotency(&existing, &requested)
 	if !errors.Is(err, agentos.ErrInvalidRunPlan) {
 		t.Fatalf("error = %v, want ErrInvalidRunPlan", err)
 	}
 }
 
 func TestValidatePlanStateIdentityAllowsWorkflowOwnedTopologyExpansion(t *testing.T) {
+	t.Parallel()
+
 	ref := agentos.BackendRef{Kind: agentos.BackendKindNative, Name: agentos.BackendNameGoAgentNative}
 	existing := agentos.RunPlanSpec{
 		PlanID:         "plan-1",
@@ -54,12 +60,14 @@ func TestValidatePlanStateIdentityAllowsWorkflowOwnedTopologyExpansion(t *testin
 	expanded.Nodes = append(expanded.Nodes, agentos.PlanNodeSpec{NodeID: "expanded", Run: agentos.RunSpec{RunID: "run-expanded", Backend: ref}})
 	expanded.Edges = []agentos.PlanEdgeSpec{{EdgeID: "seed-expanded", From: "seed", To: "expanded", On: agentos.EdgeOnSuccess}}
 
-	if err := ValidatePlanStateIdentity(existing, expanded); err != nil {
+	if err := ValidatePlanStateIdentity(&existing, &expanded); err != nil {
 		t.Fatalf("ValidatePlanStateIdentity: %v", err)
 	}
 }
 
 func TestValidatePlanStateIdentityRejectsTopologyShrink(t *testing.T) {
+	t.Parallel()
+
 	ref := agentos.BackendRef{Kind: agentos.BackendKindNative, Name: agentos.BackendNameGoAgentNative}
 	existing := agentos.RunPlanSpec{
 		PlanID:         "plan-1",
@@ -75,13 +83,15 @@ func TestValidatePlanStateIdentityRejectsTopologyShrink(t *testing.T) {
 	requested := existing
 	requested.Nodes = requested.Nodes[:1]
 
-	err := ValidatePlanStateIdentity(existing, requested)
+	err := ValidatePlanStateIdentity(&existing, &requested)
 	if !errors.Is(err, agentos.ErrInvalidRunPlan) {
 		t.Fatalf("error = %v, want ErrInvalidRunPlan", err)
 	}
 }
 
 func TestValidatePlanStateIdentityRejectsExistingNodeMutation(t *testing.T) {
+	t.Parallel()
+
 	ref := agentos.BackendRef{Kind: agentos.BackendKindNative, Name: agentos.BackendNameGoAgentNative}
 	existing := agentos.RunPlanSpec{
 		PlanID:         "plan-1",
@@ -96,13 +106,15 @@ func TestValidatePlanStateIdentityRejectsExistingNodeMutation(t *testing.T) {
 	requested.Nodes = append([]agentos.PlanNodeSpec(nil), existing.Nodes...)
 	requested.Nodes[0].Run.Backend = agentos.BackendRef{Kind: agentos.BackendKindHTTP, Name: "other"}
 
-	err := ValidatePlanStateIdentity(existing, requested)
+	err := ValidatePlanStateIdentity(&existing, &requested)
 	if !errors.Is(err, agentos.ErrInvalidRunPlan) {
 		t.Fatalf("error = %v, want ErrInvalidRunPlan", err)
 	}
 }
 
 func TestValidatePlanStateIdentityRejectsImmutableFieldChange(t *testing.T) {
+	t.Parallel()
+
 	existing := agentos.RunPlanSpec{
 		PlanID:         "plan-1",
 		AccountID:      "account-1",
@@ -112,13 +124,15 @@ func TestValidatePlanStateIdentityRejectsImmutableFieldChange(t *testing.T) {
 	requested := existing
 	requested.Inputs = map[string]any{"topic": "changed"}
 
-	err := ValidatePlanStateIdentity(existing, requested)
+	err := ValidatePlanStateIdentity(&existing, &requested)
 	if !errors.Is(err, agentos.ErrInvalidRunPlan) {
 		t.Fatalf("error = %v, want ErrInvalidRunPlan", err)
 	}
 }
 
 func TestPlanTransitionSnapshotIdentityIsContentAddressed(t *testing.T) {
+	t.Parallel()
+
 	spec := agentos.RunPlanSpec{
 		PlanID:         "plan-1",
 		AccountID:      "account-1",
@@ -130,34 +144,50 @@ func TestPlanTransitionSnapshotIdentityIsContentAddressed(t *testing.T) {
 		LifecycleState: agentos.PlanLifecycleRunning,
 		UpdatedAt:      time.Date(2026, 6, 20, 12, 0, 0, 0, time.UTC),
 	}
-	first, err := NewPlanTransitionSnapshotIdentity(PlanStateSnapshot{Spec: spec, Status: status}, "transition-key")
-	if err != nil {
-		t.Fatalf("NewPlanTransitionSnapshotIdentity first: %v", err)
-	}
-	second, err := NewPlanTransitionSnapshotIdentity(PlanStateSnapshot{Spec: spec, Status: status}, "transition-key")
-	if err != nil {
-		t.Fatalf("NewPlanTransitionSnapshotIdentity second: %v", err)
-	}
+
+	snapshot := PlanStateSnapshot{Spec: spec, Status: status}
+	first := newPlanTransitionSnapshotIdentityForTest(t, &snapshot, "transition-key")
+	second := newPlanTransitionSnapshotIdentityForTest(t, &snapshot, "transition-key")
+
 	if first.Digest == "" || len(first.JSON) == 0 {
 		t.Fatalf("identity = %#v, want digest and json", first)
 	}
+
 	if first.Digest != second.Digest || !bytes.Equal(first.JSON, second.JSON) {
 		t.Fatalf("identity replay = %#v, want %#v", second, first)
 	}
 
 	changed := status
 	changed.LifecycleState = agentos.PlanLifecycleFailed
-	changedIdentity, err := NewPlanTransitionSnapshotIdentity(PlanStateSnapshot{Spec: spec, Status: changed}, "transition-key")
-	if err != nil {
-		t.Fatalf("NewPlanTransitionSnapshotIdentity changed: %v", err)
-	}
+
+	changedSnapshot := PlanStateSnapshot{Spec: spec, Status: changed}
+	changedIdentity := newPlanTransitionSnapshotIdentityForTest(t, &changedSnapshot, "transition-key")
+
 	if changedIdentity.Digest == first.Digest {
 		t.Fatalf("changed digest = %q, want different from %q", changedIdentity.Digest, first.Digest)
 	}
 }
 
+func newPlanTransitionSnapshotIdentityForTest(
+	t *testing.T,
+	snapshot *PlanStateSnapshot,
+	key string,
+) PlanTransitionSnapshotIdentity {
+	t.Helper()
+
+	identity, err := NewPlanTransitionSnapshotIdentity(snapshot, key)
+	if err != nil {
+		t.Fatalf("NewPlanTransitionSnapshotIdentity: %v", err)
+	}
+
+	return identity
+}
+
 func TestValidatePlanTransitionIdempotencyRequiresTransitionSnapshot(t *testing.T) {
+	t.Parallel()
+
 	identity := PlanTransitionSnapshotIdentity{Digest: "sha256:abc"}
+
 	err := ValidatePlanTransitionIdempotency("", identity)
 	if !errors.Is(err, agentos.ErrInvalidRunPlan) {
 		t.Fatalf("error = %v, want ErrInvalidRunPlan", err)
@@ -165,6 +195,8 @@ func TestValidatePlanTransitionIdempotencyRequiresTransitionSnapshot(t *testing.
 }
 
 func TestValidateAuditIdempotencyRejectsDifferentPayload(t *testing.T) {
+	t.Parallel()
+
 	existing := AuditRecord{
 		PlanID:         "plan-1",
 		Action:         AuditActionPlanSignal,
@@ -174,13 +206,15 @@ func TestValidateAuditIdempotencyRejectsDifferentPayload(t *testing.T) {
 	requested := existing
 	requested.Payload = map[string]any{"type": string(agentos.SignalPlanReject)}
 
-	err := ValidateAuditIdempotency(existing, requested)
+	err := ValidateAuditIdempotency(&existing, &requested)
 	if !errors.Is(err, agentos.ErrInvalidRunPlan) {
 		t.Fatalf("error = %v, want ErrInvalidRunPlan", err)
 	}
 }
 
 func TestValidateAuditIdempotencyRejectsDifferentTenantScope(t *testing.T) {
+	t.Parallel()
+
 	existing := AuditRecord{
 		PlanID:         "plan-1",
 		AccountID:      "account-1",
@@ -192,13 +226,15 @@ func TestValidateAuditIdempotencyRejectsDifferentTenantScope(t *testing.T) {
 	requested := existing
 	requested.AccountID = "account-2"
 
-	err := ValidateAuditIdempotency(existing, requested)
+	err := ValidateAuditIdempotency(&existing, &requested)
 	if !errors.Is(err, agentos.ErrInvalidRunPlan) {
 		t.Fatalf("error = %v, want ErrInvalidRunPlan", err)
 	}
 }
 
 func TestValidatePlanCommandIdempotencyRejectsDifferentPayload(t *testing.T) {
+	t.Parallel()
+
 	existing := PlanCommandRecord{
 		PlanID:         "plan-1",
 		Action:         AuditActionPlanControl,
@@ -208,13 +244,15 @@ func TestValidatePlanCommandIdempotencyRejectsDifferentPayload(t *testing.T) {
 	requested := existing
 	requested.Payload = map[string]any{"operation": string(agentos.ControlPause)}
 
-	err := ValidatePlanCommandIdempotency(existing, requested)
+	err := ValidatePlanCommandIdempotency(&existing, &requested)
 	if !errors.Is(err, agentos.ErrInvalidRunPlan) {
 		t.Fatalf("error = %v, want ErrInvalidRunPlan", err)
 	}
 }
 
 func TestValidatePlanCommandIdempotencyRejectsDifferentTenantScope(t *testing.T) {
+	t.Parallel()
+
 	existing := PlanCommandRecord{
 		PlanID:         "plan-1",
 		AccountID:      "account-1",
@@ -226,14 +264,16 @@ func TestValidatePlanCommandIdempotencyRejectsDifferentTenantScope(t *testing.T)
 	requested := existing
 	requested.ProjectID = "project-2"
 
-	err := ValidatePlanCommandIdempotency(existing, requested)
+	err := ValidatePlanCommandIdempotency(&existing, &requested)
 	if !errors.Is(err, agentos.ErrInvalidRunPlan) {
 		t.Fatalf("error = %v, want ErrInvalidRunPlan", err)
 	}
 }
 
 func TestPlanAuditRecordFromAuditRecordUsesPublicAction(t *testing.T) {
-	record := PlanAuditRecordFromAuditRecord(AuditRecord{
+	t.Parallel()
+
+	record := PlanAuditRecordFromAuditRecord(&AuditRecord{
 		AuditID:        "audit-1",
 		PlanID:         "plan-1",
 		AccountID:      "account-1",
@@ -252,6 +292,8 @@ func TestPlanAuditRecordFromAuditRecordUsesPublicAction(t *testing.T) {
 }
 
 func TestValidatePlanEventIdempotencyRejectsDifferentPayload(t *testing.T) {
+	t.Parallel()
+
 	existing := agentos.PlanEvent{
 		Event: agentos.Event{
 			EventID:   "plan-1:1",
@@ -269,13 +311,15 @@ func TestValidatePlanEventIdempotencyRejectsDifferentPayload(t *testing.T) {
 		PlanID: "plan-1",
 	}
 
-	err := ValidatePlanEventIdempotency(existing, requested)
+	err := ValidatePlanEventIdempotency(&existing, &requested)
 	if !errors.Is(err, agentos.ErrInvalidPlanEvent) {
 		t.Fatalf("error = %v, want ErrInvalidPlanEvent", err)
 	}
 }
 
 func TestValidatePlanEventIdempotencyRejectsDifferentTimestamp(t *testing.T) {
+	t.Parallel()
+
 	existing := agentos.PlanEvent{
 		Event: agentos.Event{
 			EventID:   "plan-1:1",
@@ -297,13 +341,15 @@ func TestValidatePlanEventIdempotencyRejectsDifferentTimestamp(t *testing.T) {
 		ProjectID: "proj-1",
 	}
 
-	err := ValidatePlanEventIdempotency(existing, requested)
+	err := ValidatePlanEventIdempotency(&existing, &requested)
 	if !errors.Is(err, agentos.ErrInvalidPlanEvent) {
 		t.Fatalf("error = %v, want ErrInvalidPlanEvent", err)
 	}
 }
 
 func TestNormalizePlanEventAppendRequestCanonicalizesTimestampPrecision(t *testing.T) {
+	t.Parallel()
+
 	requested := agentos.PlanEvent{
 		Event: agentos.Event{
 			EventID:   "plan-1:9",
@@ -316,16 +362,19 @@ func TestNormalizePlanEventAppendRequestCanonicalizesTimestampPrecision(t *testi
 		ProjectID: "proj-1",
 	}
 
-	normalized := NormalizePlanEventAppendRequest(requested)
+	normalized := NormalizePlanEventAppendRequest(&requested)
 	if normalized.EventID != "" || normalized.Sequence != 0 {
 		t.Fatalf("store-owned identity was not cleared: %#v", normalized.Event)
 	}
+
 	if normalized.Timestamp.Nanosecond() != 123457000 {
 		t.Fatalf("timestamp = %s, want microsecond precision", normalized.Timestamp.Format(time.RFC3339Nano))
 	}
 }
 
 func TestValidateArtifactPublishIdempotencyRejectsDifferentDigest(t *testing.T) {
+	t.Parallel()
+
 	existing := agentos.ArtifactRef{
 		ArtifactID: "artifact-1",
 		PlanID:     "plan-1",
@@ -338,7 +387,7 @@ func TestValidateArtifactPublishIdempotencyRejectsDifferentDigest(t *testing.T) 
 	requested := existing
 	requested.Digest = "sha256:second"
 
-	err := ValidateArtifactPublishIdempotency(existing, requested)
+	err := ValidateArtifactPublishIdempotency(&existing, &requested)
 	if !errors.Is(err, agentos.ErrInvalidArtifact) {
 		t.Fatalf("error = %v, want ErrInvalidArtifact", err)
 	}

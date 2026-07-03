@@ -9,12 +9,20 @@ import (
 	"testing"
 )
 
-func TestSchemaCommandWritesRunPlanSchema(t *testing.T) {
+func testSchemaCommand(t *testing.T, kind, outName string) {
+	t.Helper()
+
 	dir := t.TempDir()
-	out := filepath.Join(dir, "run_plan.schema.json")
+	out := filepath.Join(dir, outName)
+
+	args := []string{"schema", "--out", out}
+	if kind != "" {
+		args = append(args, "--kind", kind)
+	}
+
 	var stdout, stderr bytes.Buffer
 
-	code := run([]string{"schema", "--out", out}, &stdout, &stderr)
+	code := run(args, &stdout, &stderr)
 	if code != 0 {
 		t.Fatalf("run schema code = %d stderr = %s", code, stderr.String())
 	}
@@ -23,113 +31,74 @@ func TestSchemaCommandWritesRunPlanSchema(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ReadFile: %v", err)
 	}
+
 	var schema map[string]any
 	if err := json.Unmarshal(data, &schema); err != nil {
 		t.Fatalf("schema json: %v", err)
 	}
+
 	if len(schema) == 0 {
 		t.Fatal("schema is empty")
 	}
+}
+
+func TestSchemaCommandWritesRunPlanSchema(t *testing.T) {
+	t.Parallel()
+	testSchemaCommand(t, "", "run_plan.schema.json")
 }
 
 func TestSchemaCommandWritesPlanDeltaSchema(t *testing.T) {
-	dir := t.TempDir()
-	out := filepath.Join(dir, "plan_delta.schema.json")
-	var stdout, stderr bytes.Buffer
-
-	code := run([]string{"schema", "--kind", "plan-delta", "--out", out}, &stdout, &stderr)
-	if code != 0 {
-		t.Fatalf("run schema code = %d stderr = %s", code, stderr.String())
-	}
-
-	data, err := os.ReadFile(out)
-	if err != nil {
-		t.Fatalf("ReadFile: %v", err)
-	}
-	var schema map[string]any
-	if err := json.Unmarshal(data, &schema); err != nil {
-		t.Fatalf("schema json: %v", err)
-	}
-	if len(schema) == 0 {
-		t.Fatal("schema is empty")
-	}
+	t.Parallel()
+	testSchemaCommand(t, "plan-delta", "plan_delta.schema.json")
 }
 
 func TestSchemaCommandWritesCapabilityCatalogSchema(t *testing.T) {
-	dir := t.TempDir()
-	out := filepath.Join(dir, "capability_catalog.schema.json")
-	var stdout, stderr bytes.Buffer
-
-	code := run([]string{"schema", "--kind", "capability-catalog", "--out", out}, &stdout, &stderr)
-	if code != 0 {
-		t.Fatalf("run schema code = %d stderr = %s", code, stderr.String())
-	}
-
-	data, err := os.ReadFile(out)
-	if err != nil {
-		t.Fatalf("ReadFile: %v", err)
-	}
-	var schema map[string]any
-	if err := json.Unmarshal(data, &schema); err != nil {
-		t.Fatalf("schema json: %v", err)
-	}
-	if len(schema) == 0 {
-		t.Fatal("schema is empty")
-	}
+	t.Parallel()
+	testSchemaCommand(t, "capability-catalog", "capability_catalog.schema.json")
 }
 
 func TestSchemaCommandWritesArtifactSchemaCatalogSchema(t *testing.T) {
-	dir := t.TempDir()
-	out := filepath.Join(dir, "artifact_schema_catalog.schema.json")
-	var stdout, stderr bytes.Buffer
-
-	code := run([]string{"schema", "--kind", "artifact-schema-catalog", "--out", out}, &stdout, &stderr)
-	if code != 0 {
-		t.Fatalf("run schema code = %d stderr = %s", code, stderr.String())
-	}
-
-	data, err := os.ReadFile(out)
-	if err != nil {
-		t.Fatalf("ReadFile: %v", err)
-	}
-	var schema map[string]any
-	if err := json.Unmarshal(data, &schema); err != nil {
-		t.Fatalf("schema json: %v", err)
-	}
-	if len(schema) == 0 {
-		t.Fatal("schema is empty")
-	}
+	t.Parallel()
+	testSchemaCommand(t, "artifact-schema-catalog", "artifact_schema_catalog.schema.json")
 }
 
 func TestValidateCommandRequiresCapabilityCatalogForCapabilityPlan(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
+
 	planPath := filepath.Join(dir, "plan.yaml")
-	if err := os.WriteFile(planPath, []byte(capabilityPlanYAML), 0o644); err != nil {
+	if err := os.WriteFile(planPath, []byte(capabilityPlanYAML), 0o600); err != nil {
 		t.Fatalf("WriteFile plan: %v", err)
 	}
 
 	var stdout, stderr bytes.Buffer
+
 	code := run([]string{"validate", "--file", planPath, "--format", "yaml"}, &stdout, &stderr)
 	if code == 0 {
 		t.Fatalf("validate succeeded without capability catalog; stdout=%s", stdout.String())
 	}
+
 	if !strings.Contains(stderr.String(), "capability catalog is required") {
 		t.Fatalf("stderr = %s", stderr.String())
 	}
 }
 
 func TestCompileCommandEmitsValidatedPlanOrder(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	planPath := filepath.Join(dir, "plan.yaml")
 	capabilitiesPath := filepath.Join(dir, "capabilities.yaml")
-	if err := os.WriteFile(planPath, []byte(capabilityPlanYAML), 0o644); err != nil {
+
+	if err := os.WriteFile(planPath, []byte(capabilityPlanYAML), 0o600); err != nil {
 		t.Fatalf("WriteFile plan: %v", err)
 	}
-	if err := os.WriteFile(capabilitiesPath, []byte(capabilityCatalogYAML), 0o644); err != nil {
+
+	if err := os.WriteFile(capabilitiesPath, []byte(capabilityCatalogYAML), 0o600); err != nil {
 		t.Fatalf("WriteFile capabilities: %v", err)
 	}
 
 	var stdout, stderr bytes.Buffer
+
 	code := run([]string{
 		"compile",
 		"--file", planPath,
@@ -145,26 +114,32 @@ func TestCompileCommandEmitsValidatedPlanOrder(t *testing.T) {
 	if err := json.Unmarshal(stdout.Bytes(), &output); err != nil {
 		t.Fatalf("compiled json: %v\n%s", err, stdout.String())
 	}
-	if output.Spec.PlanID != "plan-cli" {
+
+	if output.Spec.PlanID != planCLI {
 		t.Fatalf("plan id = %q", output.Spec.PlanID)
 	}
-	if len(output.Order) != 1 || output.Order[0] != "research" {
+
+	if len(output.Order) != 1 || output.Order[0] != RESEARCH {
 		t.Fatalf("order = %#v", output.Order)
 	}
 }
 
 func TestCompileCommandAcceptsJSONWireFormat(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	planPath := filepath.Join(dir, "plan.json")
 	capabilitiesPath := filepath.Join(dir, "capabilities.json")
-	if err := os.WriteFile(planPath, []byte(capabilityPlanJSON), 0o644); err != nil {
+
+	if err := os.WriteFile(planPath, []byte(capabilityPlanJSON), 0o600); err != nil {
 		t.Fatalf("WriteFile plan: %v", err)
 	}
-	if err := os.WriteFile(capabilitiesPath, []byte(capabilityCatalogJSON), 0o644); err != nil {
+
+	if err := os.WriteFile(capabilitiesPath, []byte(capabilityCatalogJSON), 0o600); err != nil {
 		t.Fatalf("WriteFile capabilities: %v", err)
 	}
 
 	var stdout, stderr bytes.Buffer
+
 	code := run([]string{
 		"compile",
 		"--file", planPath,
@@ -180,70 +155,65 @@ func TestCompileCommandAcceptsJSONWireFormat(t *testing.T) {
 	if err := json.Unmarshal(stdout.Bytes(), &output); err != nil {
 		t.Fatalf("compiled json: %v\n%s", err, stdout.String())
 	}
+
 	if output.Spec.PlanID != "plan-cli-json" {
 		t.Fatalf("plan id = %q", output.Spec.PlanID)
 	}
-	if len(output.Order) != 1 || output.Order[0] != "research" {
+
+	if len(output.Order) != 1 || output.Order[0] != RESEARCH {
 		t.Fatalf("order = %#v", output.Order)
 	}
 }
 
 func TestCompileCommandRejectsUnknownCapabilityCatalogField(t *testing.T) {
-	dir := t.TempDir()
-	planPath := filepath.Join(dir, "plan.yaml")
-	capabilitiesPath := filepath.Join(dir, "capabilities.yaml")
-	if err := os.WriteFile(planPath, []byte(capabilityPlanYAML), 0o644); err != nil {
-		t.Fatalf("WriteFile plan: %v", err)
-	}
-	if err := os.WriteFile(capabilitiesPath, []byte(`
+	t.Parallel()
+
+	assertRejectsUnknownCatalogField(t, &unknownCatalogFieldCase{
+		command:         "compile",
+		planYAML:        capabilityPlanYAML,
+		catalogFileName: "capabilities.yaml",
+		catalogYAML: `
 capabilities:
   - backend:
       kind: http
       name: research
     name: research
     capabilty: typo
-`), 0o644); err != nil {
-		t.Fatalf("WriteFile capabilities: %v", err)
-	}
-
-	var stdout, stderr bytes.Buffer
-	code := run([]string{
-		"compile",
-		"--file", planPath,
-		"--format", "yaml",
-		"--capabilities", capabilitiesPath,
-		"--capabilities-format", "yaml",
-	}, &stdout, &stderr)
-	if code == 0 {
-		t.Fatalf("compile succeeded with unknown capability field; stdout=%s", stdout.String())
-	}
-	if !strings.Contains(stderr.String(), `unknown field "capabilty"`) {
-		t.Fatalf("stderr = %s", stderr.String())
-	}
+`,
+		catalogFlag:       "--capabilities",
+		catalogFormatFlag: "--capabilities-format",
+		unknownField:      "capabilty",
+	})
 }
 
 func TestValidateCommandUsesArtifactSchemaCatalog(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	planPath := filepath.Join(dir, "plan.yaml")
 	schemasPath := filepath.Join(dir, "artifact-schemas.yaml")
-	if err := os.WriteFile(planPath, []byte(artifactSchemaPlanYAML), 0o644); err != nil {
+
+	if err := os.WriteFile(planPath, []byte(artifactSchemaPlanYAML), 0o600); err != nil {
 		t.Fatalf("WriteFile plan: %v", err)
 	}
-	if err := os.WriteFile(schemasPath, []byte(artifactSchemaCatalogYAML), 0o644); err != nil {
+
+	if err := os.WriteFile(schemasPath, []byte(artifactSchemaCatalogYAML), 0o600); err != nil {
 		t.Fatalf("WriteFile artifact schemas: %v", err)
 	}
 
 	var stdout, stderr bytes.Buffer
+
 	code := run([]string{"validate", "--file", planPath, "--format", "yaml"}, &stdout, &stderr)
 	if code == 0 {
 		t.Fatalf("validate succeeded without artifact schema catalog; stdout=%s", stdout.String())
 	}
+
 	if !strings.Contains(stderr.String(), "artifact schema catalog") {
 		t.Fatalf("stderr = %s", stderr.String())
 	}
 
 	stdout.Reset()
 	stderr.Reset()
+
 	code = run([]string{
 		"validate",
 		"--file", planPath,
@@ -257,51 +227,85 @@ func TestValidateCommandUsesArtifactSchemaCatalog(t *testing.T) {
 }
 
 func TestValidateCommandRejectsUnknownArtifactSchemaCatalogField(t *testing.T) {
-	dir := t.TempDir()
-	planPath := filepath.Join(dir, "plan.yaml")
-	schemasPath := filepath.Join(dir, "artifact-schemas.yaml")
-	if err := os.WriteFile(planPath, []byte(artifactSchemaPlanYAML), 0o644); err != nil {
-		t.Fatalf("WriteFile plan: %v", err)
-	}
-	if err := os.WriteFile(schemasPath, []byte(`
+	t.Parallel()
+
+	assertRejectsUnknownCatalogField(t, &unknownCatalogFieldCase{
+		command:         "validate",
+		planYAML:        artifactSchemaPlanYAML,
+		catalogFileName: "artifact-schemas.yaml",
+		catalogYAML: `
 artifact_schemas:
   - ref: schema:summary
     description: Summary artifact
     schema:
       type: object
     scheam: typo
-`), 0o644); err != nil {
-		t.Fatalf("WriteFile artifact schemas: %v", err)
+`,
+		catalogFlag:       "--artifact-schemas",
+		catalogFormatFlag: "--artifact-schemas-format",
+		unknownField:      "scheam",
+	})
+}
+
+type unknownCatalogFieldCase struct {
+	command           string
+	planYAML          string
+	catalogFileName   string
+	catalogYAML       string
+	catalogFlag       string
+	catalogFormatFlag string
+	unknownField      string
+}
+
+func assertRejectsUnknownCatalogField(t *testing.T, tc *unknownCatalogFieldCase) {
+	t.Helper()
+
+	dir := t.TempDir()
+	planPath := filepath.Join(dir, "plan.yaml")
+	catalogPath := filepath.Join(dir, tc.catalogFileName)
+
+	if err := os.WriteFile(planPath, []byte(tc.planYAML), 0o600); err != nil {
+		t.Fatalf("WriteFile plan: %v", err)
+	}
+
+	if err := os.WriteFile(catalogPath, []byte(tc.catalogYAML), 0o600); err != nil {
+		t.Fatalf("WriteFile catalog: %v", err)
 	}
 
 	var stdout, stderr bytes.Buffer
+
 	code := run([]string{
-		"validate",
+		tc.command,
 		"--file", planPath,
 		"--format", "yaml",
-		"--artifact-schemas", schemasPath,
-		"--artifact-schemas-format", "yaml",
+		tc.catalogFlag, catalogPath,
+		tc.catalogFormatFlag, "yaml",
 	}, &stdout, &stderr)
 	if code == 0 {
-		t.Fatalf("validate succeeded with unknown artifact schema field; stdout=%s", stdout.String())
+		t.Fatalf("%s succeeded with unknown catalog field; stdout=%s", tc.command, stdout.String())
 	}
-	if !strings.Contains(stderr.String(), `unknown field "scheam"`) {
+
+	if !strings.Contains(stderr.String(), `unknown field "`+tc.unknownField+`"`) {
 		t.Fatalf("stderr = %s", stderr.String())
 	}
 }
 
 func TestCompileDeltaCommandAppliesValidatedPlanDelta(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	basePath := filepath.Join(dir, "base.yaml")
 	deltaPath := filepath.Join(dir, "delta.yaml")
-	if err := os.WriteFile(basePath, []byte(deltaBasePlanYAML), 0o644); err != nil {
+
+	if err := os.WriteFile(basePath, []byte(deltaBasePlanYAML), 0o600); err != nil {
 		t.Fatalf("WriteFile base: %v", err)
 	}
-	if err := os.WriteFile(deltaPath, []byte(planDeltaYAML), 0o644); err != nil {
+
+	if err := os.WriteFile(deltaPath, []byte(planDeltaYAML), 0o600); err != nil {
 		t.Fatalf("WriteFile delta: %v", err)
 	}
 
 	var stdout, stderr bytes.Buffer
+
 	code := run([]string{
 		"compile-delta",
 		"--base", basePath,
@@ -317,26 +321,32 @@ func TestCompileDeltaCommandAppliesValidatedPlanDelta(t *testing.T) {
 	if err := json.Unmarshal(stdout.Bytes(), &output); err != nil {
 		t.Fatalf("compiled delta json: %v\n%s", err, stdout.String())
 	}
+
 	if len(output.Spec.Nodes) != 2 {
 		t.Fatalf("node count = %d", len(output.Spec.Nodes))
 	}
+
 	if len(output.Order) != 2 || output.Order[0] != "seed" || output.Order[1] != "expanded" {
 		t.Fatalf("order = %#v", output.Order)
 	}
 }
 
 func TestValidateDeltaCommandRejectsPolicyViolation(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	basePath := filepath.Join(dir, "base.yaml")
 	deltaPath := filepath.Join(dir, "delta.yaml")
-	if err := os.WriteFile(basePath, []byte(deltaBasePlanMaxOneYAML), 0o644); err != nil {
+
+	if err := os.WriteFile(basePath, []byte(deltaBasePlanMaxOneYAML), 0o600); err != nil {
 		t.Fatalf("WriteFile base: %v", err)
 	}
-	if err := os.WriteFile(deltaPath, []byte(planDeltaYAML), 0o644); err != nil {
+
+	if err := os.WriteFile(deltaPath, []byte(planDeltaYAML), 0o600); err != nil {
 		t.Fatalf("WriteFile delta: %v", err)
 	}
 
 	var stdout, stderr bytes.Buffer
+
 	code := run([]string{
 		"validate-delta",
 		"--base", basePath,
@@ -347,24 +357,46 @@ func TestValidateDeltaCommandRejectsPolicyViolation(t *testing.T) {
 	if code == 0 {
 		t.Fatalf("validate-delta succeeded; stdout=%s", stdout.String())
 	}
+
 	if !strings.Contains(stderr.String(), "delta exceeds max nodes") {
 		t.Fatalf("stderr = %s", stderr.String())
 	}
 }
 
 func TestServerlessWorkflowCommandsRoundTrip(t *testing.T) {
+	t.Parallel()
+
 	dir := t.TempDir()
 	planPath := filepath.Join(dir, "plan.yaml")
 	capabilitiesPath := filepath.Join(dir, "capabilities.yaml")
 	workflowPath := filepath.Join(dir, "workflow.yaml")
-	if err := os.WriteFile(planPath, []byte(capabilityPlanYAML), 0o644); err != nil {
+
+	if err := os.WriteFile(planPath, []byte(capabilityPlanYAML), 0o600); err != nil {
 		t.Fatalf("WriteFile plan: %v", err)
 	}
-	if err := os.WriteFile(capabilitiesPath, []byte(capabilityCatalogYAML), 0o644); err != nil {
+
+	if err := os.WriteFile(capabilitiesPath, []byte(capabilityCatalogYAML), 0o600); err != nil {
 		t.Fatalf("WriteFile capabilities: %v", err)
 	}
 
+	exportServerlessWorkflow(t, planPath, capabilitiesPath, workflowPath)
+	assertWorkflowContainsAgentOSExtension(t, workflowPath)
+	output := importServerlessWorkflow(t, workflowPath, capabilitiesPath)
+
+	if output.Spec.PlanID != planCLI {
+		t.Fatalf("plan id = %q", output.Spec.PlanID)
+	}
+
+	if len(output.Order) != 1 || output.Order[0] != RESEARCH {
+		t.Fatalf("order = %#v", output.Order)
+	}
+}
+
+func exportServerlessWorkflow(t *testing.T, planPath, capabilitiesPath, workflowPath string) {
+	t.Helper()
+
 	var stdout, stderr bytes.Buffer
+
 	code := run([]string{
 		"export-serverless",
 		"--file", planPath,
@@ -377,18 +409,27 @@ func TestServerlessWorkflowCommandsRoundTrip(t *testing.T) {
 	if code != 0 {
 		t.Fatalf("export-serverless code = %d stderr = %s", code, stderr.String())
 	}
+}
+
+func assertWorkflowContainsAgentOSExtension(t *testing.T, workflowPath string) {
+	t.Helper()
 
 	workflowData, err := os.ReadFile(workflowPath)
 	if err != nil {
 		t.Fatalf("ReadFile workflow: %v", err)
 	}
+
 	if !strings.Contains(string(workflowData), "agentos.io/run_plan") {
 		t.Fatalf("workflow yaml missing AgentOS extension:\n%s", string(workflowData))
 	}
+}
 
-	stdout.Reset()
-	stderr.Reset()
-	code = run([]string{
+func importServerlessWorkflow(t *testing.T, workflowPath, capabilitiesPath string) compiledPlanOutput {
+	t.Helper()
+
+	var stdout, stderr bytes.Buffer
+
+	code := run([]string{
 		"import-serverless",
 		"--file", workflowPath,
 		"--format", "yaml",
@@ -404,27 +445,26 @@ func TestServerlessWorkflowCommandsRoundTrip(t *testing.T) {
 	if err := json.Unmarshal(stdout.Bytes(), &output); err != nil {
 		t.Fatalf("imported json: %v\n%s", err, stdout.String())
 	}
-	if output.Spec.PlanID != "plan-cli" {
-		t.Fatalf("plan id = %q", output.Spec.PlanID)
-	}
-	if len(output.Order) != 1 || output.Order[0] != "research" {
-		t.Fatalf("order = %#v", output.Order)
-	}
+
+	return output
 }
 
 func TestImportServerlessCommandRejectsMissingAgentOSExtension(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
+
 	workflowPath := filepath.Join(dir, "workflow.yaml")
 	if err := os.WriteFile(workflowPath, []byte(`
 document:
   dsl: 1.0.3
   name: missing-agentos-extension
 do: []
-`), 0o644); err != nil {
+`), 0o600); err != nil {
 		t.Fatalf("WriteFile workflow: %v", err)
 	}
 
 	var stdout, stderr bytes.Buffer
+
 	code := run([]string{
 		"import-serverless",
 		"--file", workflowPath,
@@ -434,6 +474,7 @@ do: []
 	if code == 0 {
 		t.Fatalf("import-serverless succeeded; stdout=%s", stdout.String())
 	}
+
 	if !strings.Contains(stderr.String(), "missing agentos.io/run_plan extension") {
 		t.Fatalf("stderr = %s", stderr.String())
 	}
@@ -574,6 +615,11 @@ nodes:
         kind: object
         schema_ref: schema:summary
 `
+
+const (
+	planCLI  = "plan-cli"
+	RESEARCH = "research"
+)
 
 const artifactSchemaCatalogYAML = `
 artifact_schemas:

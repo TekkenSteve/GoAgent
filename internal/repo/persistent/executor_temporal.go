@@ -160,7 +160,7 @@ func (r *ExecutorTemporal) Cancel(ctx context.Context, runID string) error {
 	return nil
 }
 
-func (r *ExecutorTemporal) SignalUserMessage(ctx context.Context, runID string, message orchestration.UserMessageSignal) error {
+func (r *ExecutorTemporal) SignalUserMessage(ctx context.Context, runID string, message *orchestration.UserMessageSignal) error {
 	workflowID := r.opts.workflowIDPrefix + runID
 
 	if err := r.client.SignalWorkflow(ctx, workflowID, "", orchestration.AgentMessageSignal, message); err != nil {

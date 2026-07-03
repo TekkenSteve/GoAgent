@@ -32,6 +32,7 @@ import (
 )
 
 var (
+	ErrWorkerConfigRequired                   = errors.New("agentos temporal worker: config is required")
 	ErrWorkerPostgresURLRequired              = errors.New("agentos temporal worker: postgres url is required")
 	ErrWorkerRedisURLRequired                 = errors.New("agentos temporal worker: redis url is required")
 	ErrWorkerArtifactStoreBackendRequired     = errors.New("agentos temporal worker: artifact store backend is required")
@@ -43,14 +44,53 @@ var (
 	ErrWorkerArtifactStoreS3SecretKeyRequired = errors.New("agentos temporal worker: artifact s3 secret access key is required")
 )
 
-func newWorkerKit(ctx context.Context, cfg WorkerConfig) (*WorkerKit, error) {
+func newWorkerKit(ctx context.Context, cfg *WorkerConfig) (*WorkerKit, error) {
+	resources, err := openWorkerResources(ctx, cfg)
+	if err != nil {
+		return nil, err
+	}
+
+	kit, batchWriter, err := buildWorkerKit(ctx, resources.dependencies())
+	if err != nil {
+		resources.close()
+
+		return nil, err
+	}
+
+	infra, err := initWorkerPlanRuntime(ctx, cfg, resources.postgres, resources.redis, resources.temporalClient)
+	if err != nil {
+		resources.close()
+
+		return nil, err
+	}
+
+	configureWorkerPlanRuntime(kit, cfg, resources, batchWriter, infra)
+
+	return kit, nil
+}
+
+type workerResources struct {
+	cfg            *WorkerConfig
+	logger         *logger.Logger
+	postgres       *postgres.Postgres
+	redis          *goredis.Redis
+	temporalClient client.Client
+}
+
+func openWorkerResources(ctx context.Context, cfg *WorkerConfig) (*workerResources, error) {
+	if cfg == nil {
+		return nil, ErrWorkerConfigRequired
+	}
+
 	if cfg.PostgresURL == "" {
 		return nil, ErrWorkerPostgresURLRequired
 	}
+
 	if cfg.RedisURL == "" {
 		return nil, ErrWorkerRedisURLRequired
 	}
-	if err := validateWorkerArtifactStore(cfg.ArtifactStore); err != nil {
+
+	if err := validateWorkerArtifactStore(&cfg.ArtifactStore); err != nil {
 		return nil, err
 	}
 
@@ -68,11 +108,12 @@ func newWorkerKit(ctx context.Context, cfg WorkerConfig) (*WorkerKit, error) {
 		return nil, fmt.Errorf("agentos temporal worker - redis: %w", err)
 	}
 
-	fwTemporal := temporalConfig(RuntimeConfig{
+	fwTemporal := temporalConfig(&RuntimeConfig{
 		TemporalAddress:   cfg.TemporalAddress,
 		TemporalNamespace: cfg.TemporalNamespace,
 		TemporalTaskQueue: cfg.TemporalTaskQueue,
 	})
+
 	temporalClient, err := client.Dial(client.Options{
 		HostPort:  fwTemporal.Address,
 		Namespace: fwTemporal.Namespace,
@@ -84,50 +125,93 @@ func newWorkerKit(ctx context.Context, cfg WorkerConfig) (*WorkerKit, error) {
 		return nil, fmt.Errorf("agentos temporal worker - temporal client: %w", err)
 	}
 
-	kit, batchWriter, err := buildWorkerKit(ctx, workerDependencies{
+	return &workerResources{
 		cfg:            cfg,
 		logger:         l,
 		postgres:       pg,
 		redis:          rdb,
 		temporalClient: temporalClient,
-	})
-	if err != nil {
-		temporalClient.Close()
-		_ = rdb.Close()
-		pg.Close()
+	}, nil
+}
 
-		return nil, err
+func (r *workerResources) dependencies() *workerDependencies {
+	return &workerDependencies{
+		cfg:            r.cfg,
+		logger:         r.logger,
+		postgres:       r.postgres,
+		redis:          r.redis,
+		temporalClient: r.temporalClient,
 	}
+}
 
+func (r *workerResources) close() {
+	r.temporalClient.Close()
+	_ = r.redis.Close()
+	r.postgres.Close()
+}
+
+func configureWorkerPlanRuntime(kit *WorkerKit, cfg *WorkerConfig, resources *workerResources, batchWriter *pipelinepkg.BatchWriter, infra *workerPlanRuntime) {
+	kit.planActivities = infra.planActivities
+	kit.planCommandReconciler = newPlanCommandReconciler(newPlanTemporalClient(resources.temporalClient), cfg.TemporalTaskQueue, infra.planStore, infra.planStore, infra.planStore)
+	kit.closeFns = append(
+		kit.closeFns,
+		func() error {
+			if batchWriter != nil {
+				batchWriter.Stop()
+			}
+
+			return nil
+		},
+		func() error {
+			resources.temporalClient.Close()
+
+			return nil
+		},
+		infra.planClose,
+		func() error {
+			resources.redis.Close()
+
+			return nil
+		},
+		func() error {
+			resources.postgres.Close()
+
+			return nil
+		},
+	)
+}
+
+type workerPlanRuntime struct {
+	planActivities *PlanActivities
+	planClose      func() error
+	planStore      *temporalrepo.AgentOSPlanRepo
+}
+
+func initWorkerPlanRuntime(ctx context.Context, cfg *WorkerConfig, pg *postgres.Postgres, rdb *goredis.Redis, temporalClient client.Client) (*workerPlanRuntime, error) {
 	runBackendIndex := temporalrepo.NewRunBackendIndexRepo(pg)
 	planStore := temporalrepo.NewAgentOSPlanRepo(pg)
-	blobStore, err := artifactrepo.NewBlobStore(ctx, artifactBlobConfig(cfg.ArtifactStore))
-	if err != nil {
-		temporalClient.Close()
-		_ = rdb.Close()
-		pg.Close()
+	blobCfg := artifactBlobConfig(&cfg.ArtifactStore)
 
+	blobStore, err := artifactrepo.NewBlobStore(ctx, &blobCfg)
+	if err != nil {
 		return nil, fmt.Errorf("agentos temporal worker - artifact blob store: %w", err)
 	}
+
 	artifactStore := temporalrepo.NewAgentOSArtifactRepo(pg, blobStore)
 	capabilityCatalog := temporalrepo.NewAgentOSCapabilityCatalogRepo(pg)
 	artifactSchemaCatalog := temporalrepo.NewAgentOSArtifactSchemaCatalogRepo(pg)
-	if err := agentosplan.RegisterCapabilities(ctx, capabilityCatalog, CapabilitiesWithDefaults(cfg.Capabilities)); err != nil {
-		temporalClient.Close()
-		_ = rdb.Close()
-		pg.Close()
 
+	if err := agentosplan.RegisterCapabilities(ctx, capabilityCatalog, CapabilitiesWithDefaults(cfg.Capabilities)); err != nil {
 		return nil, fmt.Errorf("agentos temporal worker - register capabilities: %w", err)
 	}
-	if err := agentosplan.RegisterArtifactSchemas(ctx, artifactSchemaCatalog, cfg.ArtifactSchemas); err != nil {
-		temporalClient.Close()
-		_ = rdb.Close()
-		pg.Close()
 
+	if err := agentosplan.RegisterArtifactSchemas(ctx, artifactSchemaCatalog, cfg.ArtifactSchemas); err != nil {
 		return nil, fmt.Errorf("agentos temporal worker - register artifact schemas: %w", err)
 	}
+
 	planEventStream := planstream.NewRedisPlanEventStream(rdb)
-	planRuntime, err := NewRuntimeWithClient(ctx, RuntimeConfig{
+
+	planRuntime, err := NewRuntimeWithClient(ctx, &RuntimeConfig{
 		TemporalAddress:          cfg.TemporalAddress,
 		TemporalNamespace:        cfg.TemporalNamespace,
 		TemporalTaskQueue:        cfg.TemporalTaskQueue,
@@ -137,50 +221,25 @@ func newWorkerKit(ctx context.Context, cfg WorkerConfig) (*WorkerKit, error) {
 		ArtifactStore:            cfg.ArtifactStore,
 	}, temporalClient, WithRunBackendIndex(runBackendIndex))
 	if err != nil {
-		temporalClient.Close()
-		_ = rdb.Close()
-		pg.Close()
-
 		return nil, fmt.Errorf("agentos temporal worker - plan runtime: %w", err)
 	}
+
 	planActivities, err := NewPlanActivitiesWithCatalogAndSchemas(planRuntime, capabilityCatalog, artifactSchemaCatalog, planStore, planEventStream, artifactStore)
 	if err != nil {
-		temporalClient.Close()
-		_ = rdb.Close()
-		pg.Close()
+		planRuntime.Close()
 
 		return nil, fmt.Errorf("agentos temporal worker - plan activities: %w", err)
 	}
-	kit.planActivities = planActivities
-	kit.planCommandReconciler = newPlanCommandReconciler(temporalClient, cfg.TemporalTaskQueue, planStore, planStore, planStore)
 
-	kit.closeFns = append(kit.closeFns,
-		func() error {
-			if batchWriter != nil {
-				batchWriter.Stop()
-			}
-
-			return nil
-		},
-		func() error {
-			temporalClient.Close()
-
-			return nil
-		},
-		planRuntime.Close,
-		rdb.Close,
-		func() error {
-			pg.Close()
-
-			return nil
-		},
-	)
-
-	return kit, nil
+	return &workerPlanRuntime{
+		planActivities: planActivities,
+		planClose:      planRuntime.Close,
+		planStore:      planStore,
+	}, nil
 }
 
-func validateWorkerArtifactStore(cfg ArtifactStoreConfig) error {
-	return validateArtifactStoreConfig(cfg, artifactStoreValidationErrors{
+func validateWorkerArtifactStore(cfg *ArtifactStoreConfig) error {
+	return validateArtifactStoreConfig(cfg, &artifactStoreValidationErrors{
 		backendRequired:   ErrWorkerArtifactStoreBackendRequired,
 		backendUnknown:    ErrWorkerArtifactStoreBackendUnknown,
 		localRootRequired: ErrWorkerArtifactStoreLocalRootRequired,
@@ -191,7 +250,7 @@ func validateWorkerArtifactStore(cfg ArtifactStoreConfig) error {
 	})
 }
 
-func artifactBlobConfig(cfg ArtifactStoreConfig) artifactrepo.Config {
+func artifactBlobConfig(cfg *ArtifactStoreConfig) artifactrepo.Config {
 	return artifactrepo.Config{
 		Backend: artifactrepo.Backend(cfg.Backend),
 		Local: artifactrepo.LocalConfig{
@@ -209,7 +268,7 @@ func artifactBlobConfig(cfg ArtifactStoreConfig) artifactrepo.Config {
 	}
 }
 
-func newPostgres(cfg WorkerConfig) (*postgres.Postgres, error) {
+func newPostgres(cfg *WorkerConfig) (*postgres.Postgres, error) {
 	if cfg.PostgresPoolMax > 0 {
 		return postgres.New(cfg.PostgresURL, postgres.MaxPoolSize(cfg.PostgresPoolMax))
 	}
@@ -218,14 +277,14 @@ func newPostgres(cfg WorkerConfig) (*postgres.Postgres, error) {
 }
 
 type workerDependencies struct {
-	cfg            WorkerConfig
+	cfg            *WorkerConfig
 	logger         *logger.Logger
 	postgres       *postgres.Postgres
 	redis          *goredis.Redis
 	temporalClient client.Client
 }
 
-func buildWorkerKit(ctx context.Context, deps workerDependencies) (*WorkerKit, *pipelinepkg.BatchWriter, error) {
+func buildWorkerKit(ctx context.Context, deps *workerDependencies) (*WorkerKit, *pipelinepkg.BatchWriter, error) {
 	messageRepo := temporalrepo.NewMessageRepo(deps.postgres)
 	persistentAgentRepo := temporalrepo.NewAgentRepo(deps.postgres)
 	agentRepo := cached.NewAgentRepo(persistentAgentRepo)
@@ -245,6 +304,7 @@ func buildWorkerKit(ctx context.Context, deps workerDependencies) (*WorkerKit, *
 
 	billingRepo := temporalrepo.NewBillingRepo(deps.postgres)
 	billingUC := billingpkg.New(billingRepo, nil, billingRepo)
+
 	toolRegistry := toolkit.NewRegistry()
 	if deps.cfg.RegisterEnvTools {
 		registerEnvTools(deps.logger, toolRegistry)
@@ -260,20 +320,15 @@ func buildWorkerKit(ctx context.Context, deps workerDependencies) (*WorkerKit, *
 
 	agentUC := agent.New(llmProvider, toolExecutor, wal, agentCompressor, toolRegistry, agentRepo)
 	agentUC.SetLogger(deps.logger)
-
-	fwTemporal := temporalConfig(RuntimeConfig{
+	fwTemporal := temporalConfig(&RuntimeConfig{
 		TemporalAddress:   deps.cfg.TemporalAddress,
 		TemporalNamespace: deps.cfg.TemporalNamespace,
 		TemporalTaskQueue: deps.cfg.TemporalTaskQueue,
 	})
 	triggerScheduler := temporalrepo.NewTemporalTriggerScheduler(deps.temporalClient, fwTemporal.TaskQueue)
 	triggerUC := triggerpkg.New(triggerRepo, triggerScheduler, templateRepo)
-
 	mcpManager := mcpRepo.NewManager()
 	mcpManager.SetRegistry(toolRegistry)
-	if deps.logger != nil {
-		deps.logger.Info("agentos temporal worker - mcp manager created for per-agent JIT tool registration")
-	}
 
 	eventSequencer := repostream.NewRedisSequencer(deps.redis)
 	eventStore := repostream.NewRedisEventStore(deps.redis, eventSequencer)
@@ -282,7 +337,6 @@ func buildWorkerKit(ctx context.Context, deps workerDependencies) (*WorkerKit, *
 		WithTriggerUC(triggerUC).
 		WithMCPManager(mcpManager).
 		WithBilling(billingUC)
-
 	registerToolsOnRegistry(deps.logger, toolRegistry, triggerUC, triggerScheduler)
 
 	if deps.cfg.EnsureDefaultTemplate {
@@ -295,13 +349,21 @@ func buildWorkerKit(ctx context.Context, deps workerDependencies) (*WorkerKit, *
 }
 
 func registerToolsOnRegistry(l *logger.Logger, toolRegistry *toolkit.ToolRegistry, triggerUC *triggerpkg.UseCase, triggerScheduler *temporalrepo.TemporalTriggerScheduler) {
+	registerAgentCreationTool(l, toolRegistry)
+	registerTriggerCreationTool(l, toolRegistry, triggerUC, triggerScheduler)
+	registerTriggerManagementTools(l, toolRegistry, triggerUC)
+}
+
+func registerAgentCreationTool(l *logger.Logger, toolRegistry *toolkit.ToolRegistry) {
 	agentCreator := func(_ context.Context, _, _, _, _ string, _ []string) error {
 		return nil
 	}
 	if err := toolRegistry.Register(toolkit.NewAgentCreationTool(agentCreator)); err != nil && l != nil {
 		l.Warn("agentos temporal worker - register agent_creation_tool: %v", err)
 	}
+}
 
+func registerTriggerCreationTool(l *logger.Logger, toolRegistry *toolkit.ToolRegistry, triggerUC *triggerpkg.UseCase, triggerScheduler *temporalrepo.TemporalTriggerScheduler) {
 	triggerCreator := func(ctx context.Context, templateID, name, cronExpression, agentPrompt string, templateVars []string, templateVarsVals map[string]string) (string, error) {
 		t, err := triggerUC.Create(ctx, &entity.CreateTriggerRequest{
 			TemplateID:       templateID,
@@ -330,7 +392,9 @@ func registerToolsOnRegistry(l *logger.Logger, toolRegistry *toolkit.ToolRegistr
 	if err := toolRegistry.Register(toolkit.NewTriggerTool(triggerCreator, triggerScheduleFn)); err != nil && l != nil {
 		l.Warn("agentos temporal worker - register create_trigger: %v", err)
 	}
+}
 
+func registerTriggerManagementTools(l *logger.Logger, toolRegistry *toolkit.ToolRegistry, triggerUC *triggerpkg.UseCase) {
 	triggerLister := func(ctx context.Context, templateID string) ([]entity.TriggerSpec, error) {
 		return triggerUC.ListByTemplate(ctx, templateID)
 	}
@@ -391,20 +455,32 @@ func newBifrostProvider(llmConfigPath string, llmResult *webapi.LLMProvidersResu
 		return nil, fmt.Errorf("agentos temporal worker - new bifrost: %w", err)
 	}
 
-	if llmConfigPath != "" {
-		if err := webapi.WatchLLMConfig(llmConfigPath, func(updated *webapi.LLMConfigFile) {
-			llmProvider.ReloadConfig(updated)
-			if l != nil {
-				l.Info("agentos temporal worker - LLM config reloaded from %s", llmConfigPath)
-			}
-		}); err != nil {
-			if l != nil {
-				l.Warn("agentos temporal worker - LLM config watcher: %v", err)
-			}
-		} else if l != nil {
-			l.Info("agentos temporal worker - LLM config watcher started for %s", llmConfigPath)
-		}
-	}
+	startLLMConfigWatcher(llmConfigPath, llmProvider, l)
 
 	return llmProvider, nil
+}
+
+func startLLMConfigWatcher(llmConfigPath string, llmProvider *webapi.BifrostProvider, l *logger.Logger) {
+	if llmConfigPath == "" {
+		return
+	}
+
+	err := webapi.WatchLLMConfig(llmConfigPath, func(updated *webapi.LLMConfigFile) {
+		llmProvider.ReloadConfig(updated)
+
+		if l != nil {
+			l.Info("agentos temporal worker - LLM config reloaded from %s", llmConfigPath)
+		}
+	})
+	if err != nil {
+		if l != nil {
+			l.Warn("agentos temporal worker - LLM config watcher: %v", err)
+		}
+
+		return
+	}
+
+	if l != nil {
+		l.Info("agentos temporal worker - LLM config watcher started for %s", llmConfigPath)
+	}
 }

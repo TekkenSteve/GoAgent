@@ -9,6 +9,8 @@ import (
 )
 
 func TestCELCompilerRejectsNonDeterministicAndExternalCapabilities(t *testing.T) {
+	t.Parallel()
+
 	compiler, err := NewCELCompiler()
 	if err != nil {
 		t.Fatalf("NewCELCompiler: %v", err)
@@ -23,6 +25,8 @@ func TestCELCompilerRejectsNonDeterministicAndExternalCapabilities(t *testing.T)
 		`read_file("/tmp/input")`,
 	} {
 		t.Run(expression, func(t *testing.T) {
+			t.Parallel()
+
 			_, err := compiler.CompileValue(expression)
 			if !errors.Is(err, agentos.ErrInvalidExpression) {
 				t.Fatalf("CompileValue error = %v, want ErrInvalidExpression", err)
@@ -32,10 +36,13 @@ func TestCELCompilerRejectsNonDeterministicAndExternalCapabilities(t *testing.T)
 }
 
 func TestCELCompilerAllowsDeterministicPlanExpressions(t *testing.T) {
+	t.Parallel()
+
 	compiler, err := NewCELCompiler()
 	if err != nil {
 		t.Fatalf("NewCELCompiler: %v", err)
 	}
+
 	expression, err := compiler.Compile(`inputs.enabled && metadata.route == "fast" && size(artifacts) == 0`)
 	if err != nil {
 		t.Fatalf("Compile: %v", err)
@@ -49,6 +56,7 @@ func TestCELCompilerAllowsDeterministicPlanExpressions(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Evaluate: %v", err)
 	}
+
 	if !ok {
 		t.Fatal("expression evaluated false")
 	}

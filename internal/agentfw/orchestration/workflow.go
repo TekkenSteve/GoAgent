@@ -10,6 +10,8 @@ import (
 	"go.temporal.io/sdk/workflow"
 )
 
+const waitingInput = "waiting_input"
+
 // ErrPrepChecksFailed is returned when agent workflow prep checks fail.
 var ErrPrepChecksFailed = errors.New("agent workflow - prep checks failed")
 
@@ -58,6 +60,7 @@ func AgentWorkflow(ctx workflow.Context, input *AgentWorkflowInput) (WorkflowRes
 	for round := range maxToolRounds {
 		done, updatedMessages, err := agentWorkflowRound(ctx, signalCh, userMessageCh, input, &status, messages, allTools, domainTools, baseRequestedAt, round)
 		messages = updatedMessages
+
 		if err != nil {
 			return makeWorkflowResult(ctx, &status), err
 		}
@@ -249,30 +252,14 @@ func agentWorkflowRound(
 	messages = entity.RepairToolCallPairing(messages)
 
 	// Single sync LLM call
-	var llmResult LLMStepOutput
-	if err := workflow.ExecuteActivity(ctx, LLMStepActivityName, LLMStepInput{
-		AccountID: input.AccountID,
-		RunID:     input.RunID,
-		Messages:  messages,
-		Tools:     allTools,
-		Config:    input.Config,
-	}).Get(ctx, &llmResult); err != nil {
+	llmResult, assistantMsg, err := callLLMAndTrackMessage(ctx, input, messages, allTools, round)
+	if err != nil {
 		status.LifecycleState = string(entity.LifecycleFailed)
 
-		return true, messages, fmt.Errorf("agent workflow - llm round %d: %w", round, err)
-	}
-
-	// Track assistant message
-	assistantMsg := entity.Message{
-		Role:    entity.RoleAssistant,
-		Content: llmResult.Content,
-	}
-	if len(llmResult.ToolCalls) > 0 {
-		assistantMsg.ToolCalls = llmResult.ToolCalls
+		return true, messages, err
 	}
 
 	messages = append(messages, assistantMsg)
-
 	status.Step++
 	status.UpdatedAt = workflow.Now(ctx)
 
@@ -307,6 +294,29 @@ func agentWorkflowRound(
 	return false, messages, nil
 }
 
+func callLLMAndTrackMessage(ctx workflow.Context, input *AgentWorkflowInput, messages []entity.Message, allTools []entity.ToolDef, round int) (LLMStepOutput, entity.Message, error) {
+	var llmResult LLMStepOutput
+	if err := workflow.ExecuteActivity(ctx, LLMStepActivityName, LLMStepInput{
+		AccountID: input.AccountID,
+		RunID:     input.RunID,
+		Messages:  messages,
+		Tools:     allTools,
+		Config:    input.Config,
+	}).Get(ctx, &llmResult); err != nil {
+		return llmResult, entity.Message{}, fmt.Errorf("agent workflow - llm round %d: %w", round, err)
+	}
+
+	assistantMsg := entity.Message{
+		Role:    entity.RoleAssistant,
+		Content: llmResult.Content,
+	}
+	if len(llmResult.ToolCalls) > 0 {
+		assistantMsg.ToolCalls = llmResult.ToolCalls
+	}
+
+	return llmResult, assistantMsg, nil
+}
+
 func waitForUserMessage(
 	ctx workflow.Context,
 	signalCh workflow.ReceiveChannel,
@@ -314,18 +324,23 @@ func waitForUserMessage(
 	status *RunStatus,
 	messages []entity.Message,
 ) ([]entity.Message, bool) {
-	status.LifecycleState = "waiting_input"
+	status.LifecycleState = waitingInput
 	status.UpdatedAt = workflow.Now(ctx)
 
 	selector := workflow.NewSelector(ctx)
-	var nextMessages []entity.Message
-	var canceled bool
-	var received bool
+
+	var (
+		nextMessages []entity.Message
+		canceled     bool
+		received     bool
+	)
 
 	selector.AddReceive(userMessageCh, func(c workflow.ReceiveChannel, _ bool) {
 		var signal UserMessageSignal
 		c.Receive(ctx, &signal)
-		nextMessages = append(messages, entity.Message{
+
+		nextMessages = append([]entity.Message{}, messages...)
+		nextMessages = append(nextMessages, entity.Message{
 			Role:    entity.RoleUser,
 			Content: signal.Content,
 		})
@@ -343,6 +358,7 @@ func waitForUserMessage(
 	for !received {
 		selector.Select(ctx)
 	}
+
 	if nextMessages == nil {
 		nextMessages = messages
 	}
@@ -360,14 +376,17 @@ func handleNativeWaitControlSignal(signalCh workflow.ReceiveChannel, ctx workflo
 	case AgentCmdPause:
 		status.LifecycleState = string(entity.LifecyclePaused)
 		status.UpdatedAt = workflow.Now(ctx)
+
 		canceled, err := waitForResume(signalCh, ctx)
 		if err != nil {
 			return false
 		}
+
 		if canceled {
 			return true
 		}
-		status.LifecycleState = "waiting_input"
+
+		status.LifecycleState = waitingInput
 		status.UpdatedAt = workflow.Now(ctx)
 	}
 

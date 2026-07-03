@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"log/slog"
+	"net"
 	"net/http"
 	"os"
 	"time"
@@ -47,14 +49,15 @@ func main() {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/v1/chat/completions", handleChat)
 
-	addr := os.Getenv("HTTP_ADDR")
-	if addr == "" {
-		addr = ":8080"
+	addr, err := listenAddressFromEnv()
+	if err != nil {
+		log.Fatalf("listen address: %v", err)
 	}
-	log.Printf("mock-llm listening on %s", addr)
+
+	slog.Info("mock-llm listening", "addr", addr.value)
 
 	srv := &http.Server{
-		Addr:              addr,
+		Addr:              addr.value,
 		Handler:           mux,
 		ReadHeaderTimeout: readHeaderTimeout,
 		WriteTimeout:      writeTimeout,
@@ -71,11 +74,7 @@ func handleChat(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Log request for debugging
-	bodyLen := r.ContentLength
-
-	msg := fmt.Sprintf("received chat request: model=%s content-length=%d", r.URL.Query().Get("model"), bodyLen)
-	log.Print(msg) //nolint:gosec // mock server, controlled input
+	slog.Info("received chat request")
 
 	w.Header().Set("Content-Type", "application/json")
 
@@ -105,4 +104,21 @@ func handleChat(w http.ResponseWriter, r *http.Request) {
 		log.Printf("error encoding response: %v", err)
 		http.Error(w, "internal error", http.StatusInternalServerError)
 	}
+}
+
+type listenAddress struct {
+	value string
+}
+
+func listenAddressFromEnv() (listenAddress, error) {
+	addr := os.Getenv("HTTP_ADDR")
+	if addr == "" {
+		return listenAddress{value: ":8080"}, nil
+	}
+
+	if _, _, err := net.SplitHostPort(addr); err != nil {
+		return listenAddress{}, err
+	}
+
+	return listenAddress{value: addr}, nil
 }

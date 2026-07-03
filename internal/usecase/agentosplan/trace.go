@@ -55,7 +55,7 @@ type ConditionEvaluationTrace struct {
 
 // NewCapabilitySelectionTrace creates the event-safe trace projection for a
 // capability selected during plan validation.
-func NewCapabilitySelectionTrace(capability agentos.Capability) CapabilitySelectionTrace {
+func NewCapabilitySelectionTrace(capability *agentos.Capability) CapabilitySelectionTrace {
 	return CapabilitySelectionTrace{
 		Backend:         capability.Backend,
 		Capability:      capability.Name,
@@ -69,6 +69,7 @@ func NewCapabilitySelectionTrace(capability agentos.Capability) CapabilitySelect
 // NewInputResolutionTrace creates a redacted trace for resolved input mapping.
 func NewInputResolutionTrace(resolved map[string]any, nodeMappings []agentos.InputMapping, edges []agentos.PlanEdgeSpec) InputResolutionTrace {
 	mappings := make([]agentos.InputMapping, 0, len(nodeMappings))
+
 	mappings = append(mappings, nodeMappings...)
 	for _, edge := range edges {
 		mappings = append(mappings, edge.InputMapping...)
@@ -76,6 +77,7 @@ func NewInputResolutionTrace(resolved map[string]any, nodeMappings []agentos.Inp
 
 	data, err := json.Marshal(resolved)
 	digest := ""
+
 	if err == nil {
 		sum := sha256.Sum256(data)
 		digest = hex.EncodeToString(sum[:])
@@ -85,6 +87,7 @@ func NewInputResolutionTrace(resolved map[string]any, nodeMappings []agentos.Inp
 	for key := range resolved {
 		keys = append(keys, key)
 	}
+
 	sort.Strings(keys)
 
 	traceMappings := make([]InputMappingTrace, 0, len(mappings))

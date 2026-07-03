@@ -39,10 +39,84 @@ const (
 
 // PlanEventFromStateEvent maps a deterministic reducer transition to the public
 // PlanEvent envelope used by durable event stores and UI timelines.
-func PlanEventFromStateEvent(spec agentos.RunPlanSpec, status agentos.RunPlanStatus, event StateEvent) (agentos.PlanEvent, string, error) {
+func buildPlanEventPayload(spec *agentos.RunPlanSpec, status *agentos.RunPlanStatus, event *StateEvent) map[string]any {
+	payload := map[string]any{
+		planEventPayloadLifecycleState: status.LifecycleState,
+		planEventPayloadPlanID:         spec.PlanID,
+	}
+
+	addPlanEventIdentityPayload(payload, event)
+	addPlanEventExpansionPayload(payload, event)
+	addPlanEventArtifactPayload(payload, event)
+	addPlanEventBudgetPayload(payload, status, event)
+	addPlanEventTracePayload(payload, event)
+
+	return payload
+}
+
+func addPlanEventIdentityPayload(payload map[string]any, event *StateEvent) {
+	if event.NodeID != "" {
+		payload[planEventPayloadNodeID] = event.NodeID
+	}
+
+	if event.RunID != "" {
+		payload[planEventPayloadRunID] = event.RunID
+	}
+
+	if event.Reason != "" {
+		payload[planEventPayloadReason] = event.Reason
+	}
+
+	if event.Attempt > 0 {
+		payload[planEventPayloadAttempt] = event.Attempt
+	}
+}
+
+func addPlanEventExpansionPayload(payload map[string]any, event *StateEvent) {
+	if len(event.Expansion.Nodes) > 0 || len(event.Expansion.Edges) > 0 {
+		payload[planEventPayloadExpansion] = planExpansionPayload(event.Expansion)
+	}
+}
+
+func addPlanEventArtifactPayload(payload map[string]any, event *StateEvent) {
+	if len(event.Artifacts) > 0 {
+		payload[planEventPayloadArtifacts] = event.Artifacts
+	}
+}
+
+func addPlanEventBudgetPayload(payload map[string]any, status *agentos.RunPlanStatus, event *StateEvent) {
+	if event.BudgetDelta.SpentCents != 0 {
+		payload[planEventPayloadBudgetDelta] = event.BudgetDelta
+		payload[planEventPayloadBudgetUsage] = status.BudgetUsage
+	}
+
+	if event.PreviousLifecycleState != "" || event.NextLifecycleState != "" {
+		payload[planEventPayloadTransition] = map[string]any{
+			"previous_lifecycle_state": event.PreviousLifecycleState,
+			"next_lifecycle_state":     event.NextLifecycleState,
+		}
+	}
+}
+
+func addPlanEventTracePayload(payload map[string]any, event *StateEvent) {
+	if event.InputTrace.InputDigest != "" || event.InputTrace.MappingCount > 0 {
+		payload[planEventPayloadInputResolution] = event.InputTrace
+	}
+
+	if event.Capability.Capability != "" {
+		payload[planEventPayloadCapability] = event.Capability
+	}
+
+	if len(event.ConditionTraces) > 0 {
+		payload[planEventPayloadConditions] = event.ConditionTraces
+	}
+}
+
+func PlanEventFromStateEvent(spec *agentos.RunPlanSpec, status *agentos.RunPlanStatus, event *StateEvent) (agentos.PlanEvent, string, error) {
 	if err := ValidateRunPlanScope(spec); err != nil {
 		return agentos.PlanEvent{}, "", err
 	}
+
 	eventType, err := planEventType(event.Kind)
 	if err != nil {
 		return agentos.PlanEvent{}, "", err
@@ -52,47 +126,7 @@ func PlanEventFromStateEvent(spec agentos.RunPlanSpec, status agentos.RunPlanSta
 		return agentos.PlanEvent{}, "", fmt.Errorf("%w: state event timestamp is required", agentos.ErrInvalidPlanEvent)
 	}
 
-	payload := map[string]any{
-		planEventPayloadLifecycleState: status.LifecycleState,
-		planEventPayloadPlanID:         spec.PlanID,
-	}
-	if event.NodeID != "" {
-		payload[planEventPayloadNodeID] = event.NodeID
-	}
-	if event.RunID != "" {
-		payload[planEventPayloadRunID] = event.RunID
-	}
-	if event.Reason != "" {
-		payload[planEventPayloadReason] = event.Reason
-	}
-	if event.Attempt > 0 {
-		payload[planEventPayloadAttempt] = event.Attempt
-	}
-	if len(event.Expansion.Nodes) > 0 || len(event.Expansion.Edges) > 0 {
-		payload[planEventPayloadExpansion] = planExpansionPayload(event.Expansion)
-	}
-	if len(event.Artifacts) > 0 {
-		payload[planEventPayloadArtifacts] = event.Artifacts
-	}
-	if event.BudgetDelta.SpentCents != 0 {
-		payload[planEventPayloadBudgetDelta] = event.BudgetDelta
-		payload[planEventPayloadBudgetUsage] = status.BudgetUsage
-	}
-	if event.PreviousLifecycleState != "" || event.NextLifecycleState != "" {
-		payload[planEventPayloadTransition] = map[string]any{
-			"previous_lifecycle_state": event.PreviousLifecycleState,
-			"next_lifecycle_state":     event.NextLifecycleState,
-		}
-	}
-	if event.InputTrace.InputDigest != "" || event.InputTrace.MappingCount > 0 {
-		payload[planEventPayloadInputResolution] = event.InputTrace
-	}
-	if event.Capability.Capability != "" {
-		payload[planEventPayloadCapability] = event.Capability
-	}
-	if len(event.ConditionTraces) > 0 {
-		payload[planEventPayloadConditions] = event.ConditionTraces
-	}
+	payload := buildPlanEventPayload(spec, status, event)
 
 	planEvent := agentos.PlanEvent{
 		Event: agentos.Event{
@@ -117,19 +151,101 @@ func PlanEventFromStateEvent(spec agentos.RunPlanSpec, status agentos.RunPlanSta
 	return planEvent, key, nil
 }
 
-// StateEventIdempotencyKey creates a stable key for activity retries and
-// workflow replays that attempt to persist the same reducer transition.
-func StateEventIdempotencyKey(planID string, event StateEvent) (string, error) {
-	if planID == "" {
-		return "", fmt.Errorf("%w: plan id is required", agentos.ErrInvalidRunPlan)
-	}
-	data, err := json.Marshal(event)
+func idempotencyHash(planID string, payload any) (string, error) {
+	data, err := json.Marshal(payload)
 	if err != nil {
-		return "", fmt.Errorf("%w: marshal state event: %s", agentos.ErrInvalidPlanEvent, err)
+		return "", fmt.Errorf("%w: marshal idempotency key: %w", agentos.ErrInvalidPlanEvent, err)
 	}
+
 	sum := sha256.Sum256(data)
 
 	return planID + ":" + hex.EncodeToString(sum[:]), nil
+}
+
+// StateEventIdempotencyKey creates a stable key for activity retries and
+// workflow replays that attempt to persist the same reducer transition.
+func StateEventIdempotencyKey(planID string, event *StateEvent) (string, error) {
+	if planID == "" {
+		return "", fmt.Errorf("%w: plan id is required", agentos.ErrInvalidRunPlan)
+	}
+
+	return idempotencyHash(planID, stateEventIdempotencyIdentity(event))
+}
+
+type stateEventIdempotencyFields struct {
+	Kind                   EventKind                  `json:"kind"`
+	NodeID                 string                     `json:"node_id,omitempty"`
+	RunID                  string                     `json:"run_id,omitempty"`
+	Reason                 string                     `json:"reason,omitempty"`
+	Attempt                int32                      `json:"attempt,omitempty"`
+	Expansion              *PlanDelta                 `json:"expansion,omitempty"`
+	Artifacts              []agentos.ArtifactRef      `json:"artifacts,omitempty"`
+	BudgetDelta            *agentos.PlanBudgetUsage   `json:"budget_delta,omitempty"`
+	InputTrace             *InputResolutionTrace      `json:"input_trace,omitempty"`
+	Capability             *CapabilitySelectionTrace  `json:"capability,omitempty"`
+	ConditionTraces        []ConditionEvaluationTrace `json:"condition_traces,omitempty"`
+	PreviousLifecycleState string                     `json:"previous_lifecycle_state,omitempty"`
+	NextLifecycleState     string                     `json:"next_lifecycle_state,omitempty"`
+	At                     *time.Time                 `json:"at,omitempty"`
+}
+
+func stateEventIdempotencyIdentity(event *StateEvent) stateEventIdempotencyFields {
+	return stateEventIdempotencyFields{
+		Kind:                   event.Kind,
+		NodeID:                 event.NodeID,
+		RunID:                  event.RunID,
+		Reason:                 event.Reason,
+		Attempt:                event.Attempt,
+		Expansion:              idempotencyExpansion(event.Expansion),
+		Artifacts:              event.Artifacts,
+		BudgetDelta:            idempotencyBudgetDelta(event.BudgetDelta),
+		InputTrace:             idempotencyInputTrace(event.InputTrace),
+		Capability:             idempotencyCapability(&event.Capability),
+		ConditionTraces:        event.ConditionTraces,
+		PreviousLifecycleState: event.PreviousLifecycleState,
+		NextLifecycleState:     event.NextLifecycleState,
+		At:                     idempotencyTime(event.At),
+	}
+}
+
+func idempotencyExpansion(expansion PlanDelta) *PlanDelta {
+	if len(expansion.Nodes) == 0 && len(expansion.Edges) == 0 {
+		return nil
+	}
+
+	return &expansion
+}
+
+func idempotencyBudgetDelta(delta agentos.PlanBudgetUsage) *agentos.PlanBudgetUsage {
+	if delta.SpentCents == 0 {
+		return nil
+	}
+
+	return &delta
+}
+
+func idempotencyInputTrace(trace InputResolutionTrace) *InputResolutionTrace {
+	if trace.InputDigest == "" && len(trace.InputKeys) == 0 && trace.MappingCount == 0 && len(trace.Mappings) == 0 {
+		return nil
+	}
+
+	return &trace
+}
+
+func idempotencyCapability(trace *CapabilitySelectionTrace) *CapabilitySelectionTrace {
+	if trace.Capability == "" && trace.Backend.Kind == "" && trace.Backend.Name == "" && len(trace.Signals) == 0 && len(trace.Controls) == 0 && !trace.HasInputSchema && !trace.HasOutputSchema {
+		return nil
+	}
+
+	return trace
+}
+
+func idempotencyTime(at time.Time) *time.Time {
+	if at.IsZero() {
+		return nil
+	}
+
+	return &at
 }
 
 // NodeStartIdempotencyKey creates the stable idempotency key for starting one
@@ -138,13 +254,16 @@ func NodeStartIdempotencyKey(planID, nodeID string, attempt int32) (string, erro
 	if planID == "" {
 		return "", fmt.Errorf("%w: plan id is required", agentos.ErrInvalidRunPlan)
 	}
+
 	if nodeID == "" {
 		return "", fmt.Errorf("%w: node id is required", agentos.ErrInvalidRunPlan)
 	}
+
 	if attempt <= 0 {
 		return "", fmt.Errorf("%w: node start attempt must be positive", agentos.ErrInvalidRunPlan)
 	}
-	data, err := json.Marshal(struct {
+
+	return idempotencyHash(planID, struct {
 		Operation string `json:"operation"`
 		PlanID    string `json:"plan_id"`
 		NodeID    string `json:"node_id"`
@@ -155,12 +274,6 @@ func NodeStartIdempotencyKey(planID, nodeID string, attempt int32) (string, erro
 		NodeID:    nodeID,
 		Attempt:   attempt,
 	})
-	if err != nil {
-		return "", fmt.Errorf("%w: marshal node start key: %s", agentos.ErrInvalidPlanEvent, err)
-	}
-	sum := sha256.Sum256(data)
-
-	return planID + ":" + hex.EncodeToString(sum[:]), nil
 }
 
 // NodeTimeoutControlIdempotencyKey creates the stable idempotency key for
@@ -169,13 +282,16 @@ func NodeTimeoutControlIdempotencyKey(planID, nodeID, runID string) (string, err
 	if planID == "" {
 		return "", fmt.Errorf("%w: plan id is required", agentos.ErrInvalidRunPlan)
 	}
+
 	if nodeID == "" {
 		return "", fmt.Errorf("%w: node id is required", agentos.ErrInvalidRunPlan)
 	}
+
 	if runID == "" {
 		return "", fmt.Errorf("%w: run id is required", agentos.ErrInvalidRunSpec)
 	}
-	data, err := json.Marshal(struct {
+
+	return idempotencyHash(planID, struct {
 		Operation string `json:"operation"`
 		PlanID    string `json:"plan_id"`
 		NodeID    string `json:"node_id"`
@@ -186,12 +302,6 @@ func NodeTimeoutControlIdempotencyKey(planID, nodeID, runID string) (string, err
 		NodeID:    nodeID,
 		RunID:     runID,
 	})
-	if err != nil {
-		return "", fmt.Errorf("%w: marshal node timeout key: %s", agentos.ErrInvalidPlanEvent, err)
-	}
-	sum := sha256.Sum256(data)
-
-	return planID + ":" + hex.EncodeToString(sum[:]), nil
 }
 
 // PlanTimeoutControlIdempotencyKey creates the parent idempotency key for
@@ -200,13 +310,16 @@ func PlanTimeoutControlIdempotencyKey(planID string, startedAt time.Time, timeou
 	if planID == "" {
 		return "", fmt.Errorf("%w: plan id is required", agentos.ErrInvalidRunPlan)
 	}
+
 	if startedAt.IsZero() {
 		return "", fmt.Errorf("%w: plan started_at is required", agentos.ErrInvalidRunPlan)
 	}
+
 	if timeoutSeconds <= 0 {
 		return "", fmt.Errorf("%w: plan timeout seconds must be positive", agentos.ErrInvalidRunPlan)
 	}
-	data, err := json.Marshal(struct {
+
+	return idempotencyHash(planID, struct {
 		Operation      string    `json:"operation"`
 		PlanID         string    `json:"plan_id"`
 		StartedAt      time.Time `json:"started_at"`
@@ -217,12 +330,6 @@ func PlanTimeoutControlIdempotencyKey(planID string, startedAt time.Time, timeou
 		StartedAt:      startedAt,
 		TimeoutSeconds: timeoutSeconds,
 	})
-	if err != nil {
-		return "", fmt.Errorf("%w: marshal plan timeout key: %s", agentos.ErrInvalidPlanEvent, err)
-	}
-	sum := sha256.Sum256(data)
-
-	return planID + ":" + hex.EncodeToString(sum[:]), nil
 }
 
 // ArtifactPublishIdempotencyKey creates the stable idempotency key for publishing
@@ -231,13 +338,16 @@ func ArtifactPublishIdempotencyKey(planID, nodeID, runID, artifactName string) (
 	if planID == "" {
 		return "", fmt.Errorf("%w: plan id is required", agentos.ErrInvalidRunPlan)
 	}
+
 	if nodeID == "" {
 		return "", fmt.Errorf("%w: node id is required", agentos.ErrInvalidRunPlan)
 	}
+
 	if artifactName == "" {
 		return "", fmt.Errorf("%w: artifact name is required", agentos.ErrInvalidArtifact)
 	}
-	data, err := json.Marshal(struct {
+
+	return idempotencyHash(planID, struct {
 		Operation    string `json:"operation"`
 		PlanID       string `json:"plan_id"`
 		NodeID       string `json:"node_id"`
@@ -250,12 +360,6 @@ func ArtifactPublishIdempotencyKey(planID, nodeID, runID, artifactName string) (
 		RunID:        runID,
 		ArtifactName: artifactName,
 	})
-	if err != nil {
-		return "", fmt.Errorf("%w: marshal artifact publish key: %s", agentos.ErrInvalidPlanEvent, err)
-	}
-	sum := sha256.Sum256(data)
-
-	return planID + ":" + hex.EncodeToString(sum[:]), nil
 }
 
 // BudgetExceededControlIdempotencyKey creates the parent idempotency key for
@@ -264,7 +368,8 @@ func BudgetExceededControlIdempotencyKey(planID string, usage agentos.PlanBudget
 	if planID == "" {
 		return "", fmt.Errorf("%w: plan id is required", agentos.ErrInvalidRunPlan)
 	}
-	data, err := json.Marshal(struct {
+
+	return idempotencyHash(planID, struct {
 		Operation   string `json:"operation"`
 		PlanID      string `json:"plan_id"`
 		SpentCents  int64  `json:"spent_cents"`
@@ -275,27 +380,24 @@ func BudgetExceededControlIdempotencyKey(planID string, usage agentos.PlanBudget
 		SpentCents:  usage.SpentCents,
 		BudgetCents: budgetCents,
 	})
-	if err != nil {
-		return "", fmt.Errorf("%w: marshal budget exceeded key: %s", agentos.ErrInvalidPlanEvent, err)
-	}
-	sum := sha256.Sum256(data)
-
-	return planID + ":" + hex.EncodeToString(sum[:]), nil
 }
 
 // PlanSignalCancelControlIdempotencyKey creates the parent idempotency key for
 // cancellation propagated by a terminal plan signal such as operator reject.
-func PlanSignalCancelControlIdempotencyKey(planID string, signal agentos.Signal) (string, error) {
+func PlanSignalCancelControlIdempotencyKey(planID string, signal *agentos.Signal) (string, error) {
 	if planID == "" {
 		return "", fmt.Errorf("%w: plan id is required", agentos.ErrInvalidRunPlan)
 	}
+
 	if err := ValidatePlanSignal(signal); err != nil {
 		return "", err
 	}
+
 	if signal.Type != agentos.SignalPlanReject {
 		return "", fmt.Errorf("%w: signal %q does not cancel active plan nodes", agentos.ErrInvalidSignal, signal.Type)
 	}
-	data, err := json.Marshal(struct {
+
+	return idempotencyHash(planID, struct {
 		Operation      string             `json:"operation"`
 		PlanID         string             `json:"plan_id"`
 		SignalType     agentos.SignalType `json:"signal_type"`
@@ -308,12 +410,6 @@ func PlanSignalCancelControlIdempotencyKey(planID string, signal agentos.Signal)
 		IdempotencyKey: signal.IdempotencyKey,
 		ActorID:        signal.ActorID,
 	})
-	if err != nil {
-		return "", fmt.Errorf("%w: marshal plan signal cancel key: %s", agentos.ErrInvalidPlanEvent, err)
-	}
-	sum := sha256.Sum256(data)
-
-	return planID + ":" + hex.EncodeToString(sum[:]), nil
 }
 
 // NodeControlIdempotencyKey creates the stable idempotency key for propagating
@@ -322,13 +418,16 @@ func NodeControlIdempotencyKey(planID, nodeID string, operation agentos.ControlO
 	if planID == "" {
 		return "", fmt.Errorf("%w: plan id is required", agentos.ErrInvalidRunPlan)
 	}
+
 	if nodeID == "" {
 		return "", fmt.Errorf("%w: node id is required", agentos.ErrInvalidRunPlan)
 	}
-	if err := agentos.ValidateControlRequest(agentos.ControlRequest{Operation: operation}); err != nil {
+
+	if err := agentos.ValidateControlRequest(&agentos.ControlRequest{Operation: operation}); err != nil {
 		return "", err
 	}
-	data, err := json.Marshal(struct {
+
+	return idempotencyHash(planID, struct {
 		Operation string                   `json:"operation"`
 		PlanID    string                   `json:"plan_id"`
 		NodeID    string                   `json:"node_id"`
@@ -341,66 +440,47 @@ func NodeControlIdempotencyKey(planID, nodeID string, operation agentos.ControlO
 		Control:   operation,
 		ParentKey: parentKey,
 	})
-	if err != nil {
-		return "", fmt.Errorf("%w: marshal node control key: %s", agentos.ErrInvalidPlanEvent, err)
-	}
-	sum := sha256.Sum256(data)
-
-	return planID + ":" + hex.EncodeToString(sum[:]), nil
 }
 
 func planEventType(kind EventKind) (agentos.EventType, error) {
-	switch kind {
-	case EventPlanStarted:
-		return agentos.EventPlanStarted, nil
-	case EventPlanBlocked:
-		return agentos.EventPlanBlocked, nil
-	case EventPlanExpanded:
-		return agentos.EventPlanExpanded, nil
-	case EventPlanApproved:
-		return agentos.EventPlanApproved, nil
-	case EventPlanRejected:
-		return agentos.EventPlanRejected, nil
-	case EventPlanSucceeded:
-		return agentos.EventPlanSucceeded, nil
-	case EventPlanFailed:
-		return agentos.EventPlanFailed, nil
-	case EventPlanCanceled:
-		return agentos.EventPlanCanceled, nil
-	case EventNodeReady:
-		return agentos.EventPlanNodeReady, nil
-	case EventNodeStarted:
-		return agentos.EventPlanNodeStarted, nil
-	case EventNodeSucceeded:
-		return agentos.EventPlanNodeSucceeded, nil
-	case EventNodeFailed:
-		return agentos.EventPlanNodeFailed, nil
-	case EventNodeRetryScheduled:
-		return agentos.EventPlanNodeRetryScheduled, nil
-	case EventNodeSkipped:
-		return agentos.EventPlanNodeSkipped, nil
-	case EventNodeCanceled:
-		return agentos.EventPlanNodeCanceled, nil
-	case EventNodeInputResolved:
-		return agentos.EventNodeInputResolved, nil
-	case EventCapabilitySelected:
-		return agentos.EventCapabilitySelected, nil
-	case EventConditionsEvaluated:
-		return agentos.EventConditionEvaluated, nil
-	case EventArtifactsPublished:
-		return agentos.EventNodeOutputPublished, nil
-	case EventBudgetReported:
-		return agentos.EventUsageReported, nil
-	default:
+	eventTypes := map[EventKind]agentos.EventType{
+		EventPlanStarted:         agentos.EventPlanStarted,
+		EventPlanBlocked:         agentos.EventPlanBlocked,
+		EventPlanExpanded:        agentos.EventPlanExpanded,
+		EventPlanApproved:        agentos.EventPlanApproved,
+		EventPlanRejected:        agentos.EventPlanRejected,
+		EventPlanSucceeded:       agentos.EventPlanSucceeded,
+		EventPlanFailed:          agentos.EventPlanFailed,
+		EventPlanCanceled:        agentos.EventPlanCanceled,
+		EventNodeReady:           agentos.EventPlanNodeReady,
+		EventNodeStarted:         agentos.EventPlanNodeStarted,
+		EventNodeSucceeded:       agentos.EventPlanNodeSucceeded,
+		EventNodeFailed:          agentos.EventPlanNodeFailed,
+		EventNodeRetryScheduled:  agentos.EventPlanNodeRetryScheduled,
+		EventNodeSkipped:         agentos.EventPlanNodeSkipped,
+		EventNodeCanceled:        agentos.EventPlanNodeCanceled,
+		EventNodeInputResolved:   agentos.EventNodeInputResolved,
+		EventCapabilitySelected:  agentos.EventCapabilitySelected,
+		EventConditionsEvaluated: agentos.EventConditionEvaluated,
+		EventArtifactsPublished:  agentos.EventNodeOutputPublished,
+		EventBudgetReported:      agentos.EventUsageReported,
+	}
+
+	eventType, ok := eventTypes[kind]
+	if !ok {
 		return "", fmt.Errorf("%w: unknown plan event kind %q", agentos.ErrInvalidPlanEvent, kind)
 	}
+
+	return eventType, nil
 }
 
 func planExpansionPayload(delta PlanDelta) map[string]any {
 	nodeIDs := make([]string, 0, len(delta.Nodes))
-	for _, node := range delta.Nodes {
+	for i := range delta.Nodes {
+		node := &delta.Nodes[i]
 		nodeIDs = append(nodeIDs, node.NodeID)
 	}
+
 	edges := make([]map[string]any, 0, len(delta.Edges))
 	for _, edge := range delta.Edges {
 		item := map[string]any{
@@ -410,9 +490,11 @@ func planExpansionPayload(delta PlanDelta) map[string]any {
 		if edge.EdgeID != "" {
 			item["edge_id"] = edge.EdgeID
 		}
+
 		if edge.On != "" {
 			item["on"] = edge.On
 		}
+
 		edges = append(edges, item)
 	}
 

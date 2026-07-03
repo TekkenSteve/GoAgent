@@ -3,6 +3,7 @@ package agentosplan
 import (
 	"context"
 	"fmt"
+	"math"
 
 	"github.com/TekkenSteve/GoAgent/agentos"
 )
@@ -12,20 +13,26 @@ import (
 type PlanDelta = agentos.PlanDeltaSpec
 
 // ApplyDelta validates and appends nodes/edges under the plan policy limits.
-func ApplyDelta(ctx context.Context, validator Validator, current agentos.RunPlanSpec, delta PlanDelta, expansionCount int32) (agentos.RunPlanSpec, ExecutablePlan, error) {
+func ApplyDelta(ctx context.Context, validator Validator, current *agentos.RunPlanSpec, delta PlanDelta, expansionCount int32) (agentos.RunPlanSpec, ExecutablePlan, error) {
 	policy := normalizePolicy(current.Policy)
 	if expansionCount >= policy.MaxExpansions {
 		return agentos.RunPlanSpec{}, ExecutablePlan{}, fmt.Errorf("%w: expansion count exceeds max %d", agentos.ErrInvalidRunPlan, policy.MaxExpansions)
 	}
-	if int32(len(current.Nodes)+len(delta.Nodes)) > policy.MaxNodes {
+
+	totalNodes := len(current.Nodes) + len(delta.Nodes)
+	if totalNodes > math.MaxInt32 {
+		return agentos.RunPlanSpec{}, ExecutablePlan{}, fmt.Errorf("%w: too many nodes", agentos.ErrInvalidRunPlan)
+	}
+
+	if int32(totalNodes) > policy.MaxNodes {
 		return agentos.RunPlanSpec{}, ExecutablePlan{}, fmt.Errorf("%w: delta exceeds max nodes %d", agentos.ErrInvalidRunPlan, policy.MaxNodes)
 	}
 
-	next := current
+	next := *current
 	next.Nodes = append(append([]agentos.PlanNodeSpec{}, current.Nodes...), delta.Nodes...)
 	next.Edges = append(append([]agentos.PlanEdgeSpec{}, current.Edges...), delta.Edges...)
 
-	plan, err := validator.Validate(ctx, next)
+	plan, err := validator.Validate(ctx, &next)
 	if err != nil {
 		return agentos.RunPlanSpec{}, ExecutablePlan{}, err
 	}

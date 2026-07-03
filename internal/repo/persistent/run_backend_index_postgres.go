@@ -19,22 +19,26 @@ type RunBackendIndexRepo struct {
 	*postgres.Postgres
 }
 
+var errRunBackendIndexRecordRequired = errors.New("run backend index record is required")
+
 // NewRunBackendIndexRepo creates a Postgres-backed run backend index.
 func NewRunBackendIndexRepo(pg *postgres.Postgres) *RunBackendIndexRepo {
 	return &RunBackendIndexRepo{pg}
 }
 
-func (r *RunBackendIndexRepo) Bind(ctx context.Context, spec agentos.RunSpec, status agentos.RunStatus) error {
-	return r.upsert(ctx, agentosruntime.RunBackendIndexRecordFromRunSpec(spec, status), true)
+func (r *RunBackendIndexRepo) Bind(ctx context.Context, spec *agentos.RunSpec, status *agentos.RunStatus) error {
+	record := agentosruntime.RunBackendIndexRecordFromRunSpec(spec, status)
+
+	return r.upsert(ctx, &record, true)
 }
 
-func (r *RunBackendIndexRepo) BindPlanNode(ctx context.Context, planID, nodeID string, spec agentos.RunSpec, status agentos.RunStatus) error {
+func (r *RunBackendIndexRepo) BindPlanNode(ctx context.Context, planID, nodeID string, spec *agentos.RunSpec, status *agentos.RunStatus) error {
 	record := agentosruntime.RunBackendIndexRecordFromPlanNode(planID, nodeID, spec, status)
-	if err := r.validatePlanNodeOwnership(ctx, record); err != nil {
+	if err := r.validatePlanNodeOwnership(ctx, &record); err != nil {
 		return err
 	}
 
-	return r.upsert(ctx, record, true)
+	return r.upsert(ctx, &record, true)
 }
 
 func (r *RunBackendIndexRepo) Resolve(ctx context.Context, runID string) (agentos.BackendRef, error) {
@@ -42,6 +46,7 @@ func (r *RunBackendIndexRepo) Resolve(ctx context.Context, runID string) (agento
 	if err != nil {
 		return agentos.BackendRef{}, err
 	}
+
 	if !exists {
 		return agentos.BackendRef{}, fmt.Errorf("%w: %s", agentos.ErrRunRouteNotFound, runID)
 	}
@@ -53,7 +58,7 @@ func (r *RunBackendIndexRepo) Resolve(ctx context.Context, runID string) (agento
 }
 
 func (r *RunBackendIndexRepo) Get(ctx context.Context, runID string) (entity.RunBackendIndexRecord, bool, error) {
-	sql, args, err := r.Builder.
+	query, args, err := r.Builder.
 		Select(runBackendIndexColumns()...).
 		From("run_backend_index").
 		Where(sq.Eq{"run_id": runID}).
@@ -62,7 +67,7 @@ func (r *RunBackendIndexRepo) Get(ctx context.Context, runID string) (entity.Run
 		return entity.RunBackendIndexRecord{}, false, fmt.Errorf("RunBackendIndexRepo - Get - builder: %w", err)
 	}
 
-	record, exists, err := scanRunBackendIndexRecord(r.Pool.QueryRow(ctx, sql, args...))
+	record, exists, err := scanRunBackendIndexRecord(r.Pool.QueryRow(ctx, query, args...))
 	if err != nil {
 		return entity.RunBackendIndexRecord{}, false, fmt.Errorf("RunBackendIndexRepo - Get - query: %w", err)
 	}
@@ -76,15 +81,16 @@ func (r *RunBackendIndexRepo) GetRunBackend(ctx context.Context, runID string) (
 		return agentos.RunBackendOwnership{}, exists, err
 	}
 
-	return agentosruntime.RunBackendOwnershipFromRecord(record), true, nil
+	return agentosruntime.RunBackendOwnershipFromRecord(&record), true, nil
 }
 
-func (r *RunBackendIndexRepo) runByIdempotencyKey(ctx context.Context, record entity.RunBackendIndexRecord) (entity.RunBackendIndexRecord, bool, error) {
+func (r *RunBackendIndexRepo) runByIdempotencyKey(ctx context.Context, record *entity.RunBackendIndexRecord) (entity.RunBackendIndexRecord, bool, error) {
 	idempotencyKey := record.IdempotencyKey
 	if idempotencyKey == "" {
 		return entity.RunBackendIndexRecord{}, false, fmt.Errorf("%w: run backend idempotency key is required", agentos.ErrInvalidRunSpec)
 	}
-	sql, args, err := r.Builder.
+
+	query, args, err := r.Builder.
 		Select(runBackendIndexColumns()...).
 		From("run_backend_index").
 		Where(sq.Eq{
@@ -97,34 +103,70 @@ func (r *RunBackendIndexRepo) runByIdempotencyKey(ctx context.Context, record en
 		return entity.RunBackendIndexRecord{}, false, fmt.Errorf("RunBackendIndexRepo - runByIdempotencyKey - builder: %w", err)
 	}
 
-	record, exists, err := scanRunBackendIndexRecord(r.Pool.QueryRow(ctx, sql, args...))
+	found, exists, err := scanRunBackendIndexRecord(r.Pool.QueryRow(ctx, query, args...))
 	if err != nil {
 		return entity.RunBackendIndexRecord{}, false, fmt.Errorf("RunBackendIndexRepo - runByIdempotencyKey - query: %w", err)
 	}
 
-	return record, exists, nil
+	return found, exists, nil
 }
 
-func (r *RunBackendIndexRepo) upsert(ctx context.Context, record entity.RunBackendIndexRecord, requireIdempotencyKey bool) error {
-	record = agentosruntime.NormalizeRunBackendIndexRecord(record)
+func (r *RunBackendIndexRepo) upsert(ctx context.Context, record *entity.RunBackendIndexRecord, requireIdempotencyKey bool) error {
+	if record == nil {
+		return errRunBackendIndexRecordRequired
+	}
+
+	normalized := agentosruntime.NormalizeRunBackendIndexRecord(record)
+	record = &normalized
+
 	if err := agentosruntime.ValidateRunBackendIndexRecord(record, requireIdempotencyKey); err != nil {
 		return err
 	}
-	if record.IdempotencyKey != "" {
-		existing, exists, err := r.runByIdempotencyKey(ctx, record)
-		if err != nil {
-			return err
-		}
-		if exists {
-			if err := agentosruntime.ValidateRunBackendIndexIdempotency(existing, record); err != nil {
-				return err
-			}
 
-			return r.updateLifecycle(ctx, existing, record)
-		}
+	if err := r.upsertByIdempotencyKey(ctx, record); err != nil {
+		return err
 	}
 
-	sql, args, err := r.Builder.
+	query, args, err := buildRunBackendIndexUpsertSQL(r.Builder, record)
+	if err != nil {
+		return fmt.Errorf("RunBackendIndexRepo - upsert - builder: %w", err)
+	}
+
+	tag, execErr := r.Pool.Exec(ctx, query, args...)
+	if execErr != nil {
+		return r.handleUpsertExecError(ctx, execErr, record)
+	}
+
+	if tag.RowsAffected() == 0 {
+		return r.handleUpsertConflict(ctx, record)
+	}
+
+	return nil
+}
+
+func (r *RunBackendIndexRepo) upsertByIdempotencyKey(ctx context.Context, record *entity.RunBackendIndexRecord) error {
+	if record.IdempotencyKey == "" {
+		return nil
+	}
+
+	existing, exists, err := r.runByIdempotencyKey(ctx, record)
+	if err != nil {
+		return err
+	}
+
+	if !exists {
+		return nil
+	}
+
+	if err := agentosruntime.ValidateRunBackendIndexIdempotency(&existing, record); err != nil {
+		return err
+	}
+
+	return r.updateLifecycle(ctx, &existing, record)
+}
+
+func buildRunBackendIndexUpsertSQL(builder sq.StatementBuilderType, record *entity.RunBackendIndexRecord) (query string, args []any, err error) {
+	return builder.
 		Insert("run_backend_index").
 		Columns(
 			"run_id",
@@ -152,90 +194,124 @@ func (r *RunBackendIndexRepo) upsert(ctx context.Context, record entity.RunBacke
 		).
 		Suffix("ON CONFLICT (run_id) DO NOTHING").
 		ToSql()
-	if err != nil {
-		return fmt.Errorf("RunBackendIndexRepo - upsert - builder: %w", err)
+}
+
+func (r *RunBackendIndexRepo) handleUpsertExecError(ctx context.Context, execErr error, record *entity.RunBackendIndexRecord) error {
+	if !isPostgresUniqueViolation(execErr) || record.IdempotencyKey == "" {
+		return fmt.Errorf("RunBackendIndexRepo - upsert - exec: %w", execErr)
 	}
-	tag, err := r.Pool.Exec(ctx, sql, args...)
-	if err != nil {
-		if isPostgresUniqueViolation(err) && record.IdempotencyKey != "" {
-			existing, exists, lookupErr := r.runByIdempotencyKey(ctx, record)
-			if lookupErr != nil {
-				return lookupErr
-			}
-			if exists {
-				return agentosruntime.ValidateRunBackendIndexIdempotency(existing, record)
-			}
-		}
 
-		return fmt.Errorf("RunBackendIndexRepo - upsert - exec: %w", err)
+	existing, exists, lookupErr := r.runByIdempotencyKey(ctx, record)
+	if lookupErr != nil {
+		return lookupErr
 	}
-	if tag.RowsAffected() == 0 {
-		existing, exists, err := r.Get(ctx, record.RunID)
-		if err != nil {
-			return err
-		}
-		if !exists {
-			return fmt.Errorf("%w: run %q conflict did not leave an ownership record", agentos.ErrRunRouteNotFound, record.RunID)
-		}
 
-		if err := agentosruntime.ValidateRunBackendIndexIdempotency(existing, record); err != nil {
-			return err
-		}
+	if exists {
+		return agentosruntime.ValidateRunBackendIndexIdempotency(&existing, record)
+	}
 
-		return r.updateLifecycle(ctx, existing, record)
+	return fmt.Errorf("RunBackendIndexRepo - upsert - exec: %w", execErr)
+}
+
+func (r *RunBackendIndexRepo) handleUpsertConflict(ctx context.Context, record *entity.RunBackendIndexRecord) error {
+	existing, exists, err := r.Get(ctx, record.RunID)
+	if err != nil {
+		return err
+	}
+
+	if !exists {
+		return fmt.Errorf("%w: run %q conflict did not leave an ownership record", agentos.ErrRunRouteNotFound, record.RunID)
+	}
+
+	if err := agentosruntime.ValidateRunBackendIndexIdempotency(&existing, record); err != nil {
+		return err
+	}
+
+	return r.updateLifecycle(ctx, &existing, record)
+}
+
+func (r *RunBackendIndexRepo) validatePlanNodeOwnership(ctx context.Context, record *entity.RunBackendIndexRecord) error {
+	normalized := agentosruntime.NormalizeRunBackendIndexRecord(record)
+	record = &normalized
+
+	if err := validatePlanNodeOwnershipRecord(record); err != nil {
+		return err
+	}
+
+	owner, err := r.planNodeOwner(ctx, record.PlanID, record.NodeID)
+	if err != nil {
+		return err
+	}
+
+	return owner.validate(record)
+}
+
+func validatePlanNodeOwnershipRecord(record *entity.RunBackendIndexRecord) error {
+	if err := agentosruntime.ValidateRunBackendIndexRecord(record, true); err != nil {
+		return err
+	}
+
+	if record.PlanID == "" {
+		return fmt.Errorf("%w: plan id is required", agentos.ErrInvalidRunPlan)
+	}
+
+	if record.NodeID == "" {
+		return fmt.Errorf("%w: node id is required", agentos.ErrInvalidRunPlan)
 	}
 
 	return nil
 }
 
-func (r *RunBackendIndexRepo) validatePlanNodeOwnership(ctx context.Context, record entity.RunBackendIndexRecord) error {
-	record = agentosruntime.NormalizeRunBackendIndexRecord(record)
-	if err := agentosruntime.ValidateRunBackendIndexRecord(record, true); err != nil {
-		return err
-	}
-	if record.PlanID == "" {
-		return fmt.Errorf("%w: plan id is required", agentos.ErrInvalidRunPlan)
-	}
-	if record.NodeID == "" {
-		return fmt.Errorf("%w: node id is required", agentos.ErrInvalidRunPlan)
-	}
+type planNodeOwner struct {
+	accountID string
+	projectID string
+	nodeID    sql.NullString
+	runID     sql.NullString
+}
 
-	var accountID string
-	var projectID string
-	var storedNodeID sql.NullString
-	var storedRunID sql.NullString
+func (r *RunBackendIndexRepo) planNodeOwner(ctx context.Context, planID, nodeID string) (planNodeOwner, error) {
+	var owner planNodeOwner
+
 	err := r.Pool.QueryRow(ctx, `
 SELECT p.account_id, p.project_id, n.node_id, n.run_id
 FROM plans p
 LEFT JOIN plan_nodes n
     ON n.plan_id = p.plan_id
    AND n.node_id = $2
-WHERE p.plan_id = $1`, record.PlanID, record.NodeID).Scan(&accountID, &projectID, &storedNodeID, &storedRunID)
+WHERE p.plan_id = $1`, planID, nodeID).Scan(&owner.accountID, &owner.projectID, &owner.nodeID, &owner.runID)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
-			return fmt.Errorf("%w: %s", agentos.ErrPlanRouteNotFound, record.PlanID)
+			return planNodeOwner{}, fmt.Errorf("%w: %s", agentos.ErrPlanRouteNotFound, planID)
 		}
 
-		return fmt.Errorf("RunBackendIndexRepo - validatePlanNodeOwnership - query: %w", err)
+		return planNodeOwner{}, fmt.Errorf("RunBackendIndexRepo - validatePlanNodeOwnership - query: %w", err)
 	}
-	if accountID != record.AccountID || projectID != record.ProjectID {
+
+	return owner, nil
+}
+
+func (o *planNodeOwner) validate(record *entity.RunBackendIndexRecord) error {
+	if o.accountID != record.AccountID || o.projectID != record.ProjectID {
 		return fmt.Errorf("%w: %s", agentos.ErrPlanRouteNotFound, record.PlanID)
 	}
-	if !storedNodeID.Valid || storedNodeID.String == "" {
+
+	if !o.nodeID.Valid || o.nodeID.String == "" {
 		return fmt.Errorf("%w: plan node %q is not durable", agentos.ErrInvalidRunPlan, record.NodeID)
 	}
-	if storedRunID.Valid && storedRunID.String != "" && storedRunID.String != record.RunID {
-		return fmt.Errorf("%w: plan node %q has durable run id %q, got %q", agentos.ErrInvalidRunSpec, record.NodeID, storedRunID.String, record.RunID)
+
+	if o.runID.Valid && o.runID.String != "" && o.runID.String != record.RunID {
+		return fmt.Errorf("%w: plan node %q has durable run id %q, got %q", agentos.ErrInvalidRunSpec, record.NodeID, o.runID.String, record.RunID)
 	}
 
 	return nil
 }
 
-func (r *RunBackendIndexRepo) updateLifecycle(ctx context.Context, existing entity.RunBackendIndexRecord, requested entity.RunBackendIndexRecord) error {
+func (r *RunBackendIndexRepo) updateLifecycle(ctx context.Context, existing, requested *entity.RunBackendIndexRecord) error {
 	lifecycle := requested.LifecycleState
 	if lifecycle == agentosruntime.RunBackendLifecycleClaiming && existing.LifecycleState != agentosruntime.RunBackendLifecycleClaiming {
 		return nil
 	}
+
 	if lifecycle == existing.LifecycleState {
 		return nil
 	}
@@ -275,6 +351,7 @@ type runBackendIndexScanner interface {
 
 func scanRunBackendIndexRecord(scanner runBackendIndexScanner) (entity.RunBackendIndexRecord, bool, error) {
 	var record entity.RunBackendIndexRecord
+
 	err := scanner.Scan(
 		&record.RunID,
 		&record.PlanID,

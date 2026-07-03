@@ -4,6 +4,7 @@ import (
 	"context"
 
 	"github.com/TekkenSteve/GoAgent/agentos"
+	agentosruntime "github.com/TekkenSteve/GoAgent/internal/usecase/agentosruntime"
 )
 
 // RuntimeConfig configures the default Temporal/Redis runtime implementation.
@@ -92,21 +93,17 @@ type S3ArtifactStoreConfig struct {
 }
 
 // RunBackendIndex persists run ownership for Signal/Control/Status routing.
-type RunBackendIndex interface {
-	Bind(ctx context.Context, spec agentos.RunSpec, status agentos.RunStatus) error
-	BindPlanNode(ctx context.Context, planID, nodeID string, spec agentos.RunSpec, status agentos.RunStatus) error
-	GetRunBackend(ctx context.Context, runID string) (agentos.RunBackendOwnership, bool, error)
-	Resolve(ctx context.Context, runID string) (agentos.BackendRef, error)
-}
+type RunBackendIndex = agentosruntime.RunBackendIndex
 
 type runtimeOptions struct {
-	runBackendIndex RunBackendIndex
-	backendSelector RunBackendSelector
+	runBackendIndex        RunBackendIndex
+	runBackendIndexFactory runtimeRunBackendIndexFactory
+	backendSelector        RunBackendSelector
 }
 
 // RunBackendSelector resolves a backend when RunSpec.Backend is intentionally empty.
 type RunBackendSelector interface {
-	Select(ctx context.Context, spec agentos.RunSpec) (agentos.BackendRef, error)
+	Select(ctx context.Context, spec *agentos.RunSpec) (agentos.BackendRef, error)
 }
 
 // RuntimeOption customizes runtime construction.

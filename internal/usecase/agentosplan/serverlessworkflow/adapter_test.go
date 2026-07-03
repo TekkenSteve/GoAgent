@@ -11,78 +11,94 @@ import (
 )
 
 func TestAdapterJSONRoundTrip(t *testing.T) {
+	t.Parallel()
 	adapter := testAdapter(t)
 	spec := testRunPlanSpec()
 
-	workflow, err := adapter.Export(context.Background(), spec)
+	workflow, err := adapter.Export(context.Background(), &spec)
 	if err != nil {
 		t.Fatalf("Export: %v", err)
 	}
+
 	if workflow.Document.DSL != DSLVersion {
 		t.Fatalf("dsl = %q", workflow.Document.DSL)
 	}
-	if len(workflow.Do) != 2 || workflow.Do[0].Name != "research" || workflow.Do[0].Definition.Then != "verify" {
-		t.Fatalf("tasks = %#v", workflow.Do)
-	}
 
-	data, err := MarshalJSON(workflow)
+	assertTasks(t, workflow.Do)
+
+	data, err := MarshalJSON(&workflow)
 	if err != nil {
 		t.Fatalf("MarshalJSON: %v", err)
 	}
+
 	decoded, err := UnmarshalJSON(data)
 	if err != nil {
 		t.Fatalf("UnmarshalJSON: %v", err)
 	}
-	imported, err := adapter.Import(context.Background(), decoded)
+
+	imported, err := adapter.Import(context.Background(), &decoded)
 	if err != nil {
 		t.Fatalf("Import: %v", err)
 	}
-	if imported.PlanID != spec.PlanID || len(imported.Nodes) != len(spec.Nodes) || len(imported.Edges) != len(spec.Edges) {
-		t.Fatalf("imported = %#v", imported)
-	}
+
+	assertImportedSpec(t, &imported, &spec)
 }
 
 func TestAdapterYAMLRoundTrip(t *testing.T) {
+	t.Parallel()
 	adapter := testAdapter(t)
-	workflow, err := adapter.Export(context.Background(), testRunPlanSpec())
+
+	spec := testRunPlanSpec()
+
+	workflow, err := adapter.Export(context.Background(), &spec)
 	if err != nil {
 		t.Fatalf("Export: %v", err)
 	}
 
-	data, err := MarshalYAML(workflow)
+	data, err := MarshalYAML(&workflow)
 	if err != nil {
 		t.Fatalf("MarshalYAML: %v", err)
 	}
+
 	decoded, err := UnmarshalYAML(data)
 	if err != nil {
 		t.Fatalf("UnmarshalYAML: %v", err)
 	}
-	imported, err := adapter.Import(context.Background(), decoded)
+
+	imported, err := adapter.Import(context.Background(), &decoded)
 	if err != nil {
 		t.Fatalf("Import: %v", err)
 	}
+
 	if imported.PlanID != "plan-swf" {
 		t.Fatalf("plan id = %q", imported.PlanID)
 	}
 }
 
 func TestAdapterRejectsUnsupportedDSLVersion(t *testing.T) {
+	t.Parallel()
 	adapter := testAdapter(t)
-	workflow, err := adapter.Export(context.Background(), testRunPlanSpec())
+
+	spec := testRunPlanSpec()
+
+	workflow, err := adapter.Export(context.Background(), &spec)
 	if err != nil {
 		t.Fatalf("Export: %v", err)
 	}
+
 	workflow.Document.DSL = "0.8"
 
-	_, err = adapter.Import(context.Background(), workflow)
+	_, err = adapter.Import(context.Background(), &workflow)
 	if !errors.Is(err, agentos.ErrInvalidRunPlan) {
 		t.Fatalf("Import error = %v, want ErrInvalidRunPlan", err)
 	}
 }
 
 func TestAdapterRejectsMissingRunPlanExtension(t *testing.T) {
+	t.Parallel()
 	adapter := testAdapter(t)
-	_, err := adapter.Import(context.Background(), Workflow{
+
+	_, err := adapter.Import(context.Background(), &Workflow{
 		Document: Document{DSL: DSLVersion, Name: "missing"},
 		Do:       TaskList{},
 	})
@@ -92,8 +108,12 @@ func TestAdapterRejectsMissingRunPlanExtension(t *testing.T) {
 }
 
 func TestTaskListRejectsAmbiguousTaskObjects(t *testing.T) {
+	t.Parallel()
+
 	data := []byte(`[{"a":{"call":"agentos.run"},"b":{"call":"agentos.run"}}]`)
+
 	var tasks TaskList
+
 	err := json.Unmarshal(data, &tasks)
 	if !errors.Is(err, agentos.ErrInvalidRunPlan) {
 		t.Fatalf("Unmarshal error = %v, want ErrInvalidRunPlan", err)
@@ -101,6 +121,8 @@ func TestTaskListRejectsAmbiguousTaskObjects(t *testing.T) {
 }
 
 func TestUnmarshalRejectsUnknownWorkflowFields(t *testing.T) {
+	t.Parallel()
+
 	_, err := UnmarshalJSON([]byte(`{
 	  "document": {"dsl": "1.0.3", "name": "unknown"},
 	  "do": [],
@@ -112,8 +134,12 @@ func TestUnmarshalRejectsUnknownWorkflowFields(t *testing.T) {
 }
 
 func TestTaskListRejectsUnknownTaskDefinitionFields(t *testing.T) {
+	t.Parallel()
+
 	data := []byte(`[{"a":{"call":"agentos.run","foreach":[]}}]`)
+
 	var tasks TaskList
+
 	err := json.Unmarshal(data, &tasks)
 	if !errors.Is(err, agentos.ErrInvalidRunPlan) {
 		t.Fatalf("Unmarshal error = %v, want ErrInvalidRunPlan", err)
@@ -121,14 +147,17 @@ func TestTaskListRejectsUnknownTaskDefinitionFields(t *testing.T) {
 }
 
 func TestAdapterRejectsUnknownRunPlanExtensionFields(t *testing.T) {
+	t.Parallel()
 	adapter := testAdapter(t)
+
 	specPayload, err := json.Marshal(testRunPlanSpec())
 	if err != nil {
 		t.Fatalf("Marshal spec: %v", err)
 	}
+
 	raw := json.RawMessage(`{"spec":` + string(specPayload) + `,"specc":{}}`)
 
-	_, err = adapter.Import(context.Background(), Workflow{
+	_, err = adapter.Import(context.Background(), &Workflow{
 		Document: Document{DSL: DSLVersion, Name: "bad-extension"},
 		Do:       TaskList{},
 		Use: Use{
@@ -142,9 +171,27 @@ func TestAdapterRejectsUnknownRunPlanExtensionFields(t *testing.T) {
 	}
 }
 
+func assertTasks(t *testing.T, tasks TaskList) {
+	t.Helper()
+
+	if len(tasks) != 2 || tasks[0].Name != "research" || tasks[0].Definition.Then != "verify" {
+		t.Fatalf("tasks = %#v", tasks)
+	}
+}
+
+func assertImportedSpec(t *testing.T, imported, spec *agentos.RunPlanSpec) {
+	t.Helper()
+
+	if imported.PlanID != spec.PlanID || len(imported.Nodes) != len(spec.Nodes) || len(imported.Edges) != len(spec.Edges) {
+		t.Fatalf("imported = %#v", imported)
+	}
+}
+
 func testAdapter(t *testing.T) Adapter {
 	t.Helper()
+
 	ref := agentos.BackendRef{Kind: agentos.BackendKindHTTP, Name: "research"}
+
 	catalog, err := agentosplan.NewStaticCapabilityCatalog([]agentos.Capability{
 		{
 			Backend: ref,
@@ -159,6 +206,7 @@ func testAdapter(t *testing.T) Adapter {
 	if err != nil {
 		t.Fatalf("catalog: %v", err)
 	}
+
 	compiler, err := agentosplan.NewCELCompiler()
 	if err != nil {
 		t.Fatalf("NewCELCompiler: %v", err)

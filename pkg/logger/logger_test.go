@@ -5,6 +5,7 @@ import (
 	"errors"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"regexp"
 	"strings"
 	"testing"
@@ -27,6 +28,8 @@ func newBufferedLogger(level string) (*Logger, *bytes.Buffer) {
 }
 
 func TestNewSetsGlobalLevel(t *testing.T) {
+	t.Parallel()
+
 	cases := []struct {
 		in   string
 		want zerolog.Level
@@ -52,6 +55,8 @@ func TestNewSetsGlobalLevel(t *testing.T) {
 }
 
 func TestInfoAndWarn_LogMessageWithAndWithoutArgs(t *testing.T) {
+	t.Parallel()
+
 	l, buf := newBufferedLogger("info")
 
 	l.Info("hello")
@@ -75,6 +80,7 @@ func TestInfoAndWarn_LogMessageWithAndWithoutArgs(t *testing.T) {
 }
 
 func TestDebug_RespectsLevel(t *testing.T) {
+	t.Parallel()
 	// when level is info, debug should not emit
 	l, buf := newBufferedLogger("info")
 	l.Debug("dbg %d", 1)
@@ -98,6 +104,7 @@ func TestDebug_RespectsLevel(t *testing.T) {
 }
 
 func TestError_LogsErrorAndDebugWhenDebugLevel(t *testing.T) {
+	t.Parallel()
 	// info mode => only error
 	l, buf := newBufferedLogger("info")
 	l.Error("boom")
@@ -128,6 +135,8 @@ func TestError_LogsErrorAndDebugWhenDebugLevel(t *testing.T) {
 }
 
 func TestMsg_TypeSwitch(t *testing.T) {
+	t.Parallel()
+
 	l, buf := newBufferedLogger("debug")
 
 	// string
@@ -158,6 +167,8 @@ func TestMsg_TypeSwitch(t *testing.T) {
 }
 
 func TestFatal_ExitsAndLogs(t *testing.T) {
+	t.Parallel()
+
 	if os.Getenv("LOGGER_FATAL_SUBPROC") == "1" {
 		// child process: run Fatal and exit
 		l, _ := newBufferedLogger("debug")
@@ -167,7 +178,17 @@ func TestFatal_ExitsAndLogs(t *testing.T) {
 		return
 	}
 
-	cmd := exec.CommandContext(t.Context(), os.Args[0], "-test.run", t.Name()) //nolint:gosec // it's ok to exec self in tests
+	execPath, err := os.Executable()
+	if err != nil {
+		t.Fatalf("executable: %v", err)
+	}
+
+	if !filepath.IsAbs(execPath) {
+		t.Fatalf("executable path is not absolute: %q", execPath)
+	}
+
+	testName := t.Name()
+	cmd := exec.CommandContext(t.Context(), execPath, "-test.run", testName)
 
 	cmd.Env = append(os.Environ(), "LOGGER_FATAL_SUBPROC=1")
 
@@ -176,10 +197,12 @@ func TestFatal_ExitsAndLogs(t *testing.T) {
 		t.Fatalf("expected non-nil error due to os.Exit in Fatal, got nil; output: %s", string(out))
 	}
 
-	if exitErr, ok := errors.AsType[*exec.ExitError](err); !ok {
+	if exitErr, ok := errors.AsType[*exec.ExitError](err); ok {
 		// Confirm exit code is non-zero; os.Exit(1) specifically
 		if status := exitErr.ExitCode(); status != 1 {
 			t.Fatalf("expected exit code 1, got %d; output: %s", status, string(out))
 		}
+	} else {
+		t.Fatalf("expected ExitError, got %T: %v; output: %s", err, err, string(out))
 	}
 }

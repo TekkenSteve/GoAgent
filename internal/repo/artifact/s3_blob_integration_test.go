@@ -18,11 +18,12 @@ import (
 )
 
 func TestS3BlobStoreMinIOIntegrationPutGet(t *testing.T) {
+	t.Parallel()
 	ctx := t.Context()
 	cfg := s3IntegrationConfig(t)
 	createS3IntegrationBucket(t, ctx, cfg)
 
-	store, err := NewS3BlobStore(ctx, cfg)
+	store, err := NewS3BlobStore(ctx, &cfg)
 	if err != nil {
 		t.Fatalf("NewS3BlobStore: %v", err)
 	}

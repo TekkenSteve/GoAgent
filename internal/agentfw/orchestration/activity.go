@@ -88,7 +88,6 @@ type billingResult struct {
 
 type limitsResult struct {
 	out *PrepLimitsOutput
-	err error
 }
 
 // PrepareActivity runs the full prep pipeline: tool validation, message assembly,
@@ -98,15 +97,11 @@ func (a *AgentActivities) PrepareActivity(ctx context.Context, input *PrepareInp
 	a.logger.Info("PrepareActivity: started, mcpManager=%v serverConfigs=%d", a.mcpManager != nil, len(input.MCPServerConfigs))
 
 	billingRes, limitsRes, toolsOut, mcpOut := a.runPrepChecks(ctx, input)
-	a.logger.Info("PrepareActivity: pre-checks done, billing.err=%v limits.err=%v", billingRes.err, limitsRes.err)
+	a.logger.Info("PrepareActivity: pre-checks done, billing.err=%v", billingRes.err)
 
 	var errs []string
 	if billingRes.err != nil {
 		errs = append(errs, fmt.Sprintf("billing: %v", billingRes.err))
-	}
-
-	if limitsRes.err != nil {
-		errs = append(errs, fmt.Sprintf("limits: %v", limitsRes.err))
 	}
 
 	for _, name := range toolsOut.Failed {
@@ -162,11 +157,11 @@ func (a *AgentActivities) runPrepChecks(ctx context.Context, input *PrepareInput
 		billingCh <- billingResult{billing, err}
 	}()
 	go func() {
-		limits, err := a.prepLimits(ctx, PrepLimitsInput{
+		limits := a.prepLimits(ctx, PrepLimitsInput{
 			MessageCount: len(input.History),
 			ModelRef:     input.Config.Model,
 		})
-		limitsCh <- limitsResult{limits, err}
+		limitsCh <- limitsResult{limits}
 	}()
 
 	// Tool validation runs inline
@@ -215,11 +210,11 @@ func (a *AgentActivities) prepBilling(ctx context.Context, input PrepBillingInpu
 }
 
 // prepLimits validates concurrent run limits (pass-through: no counter configured).
-func (a *AgentActivities) prepLimits(_ context.Context, _ PrepLimitsInput) (*PrepLimitsOutput, error) { //nolint:unparam // always returns nil error, caller expects interface shape
+func (a *AgentActivities) prepLimits(_ context.Context, _ PrepLimitsInput) *PrepLimitsOutput {
 	return &PrepLimitsOutput{
 		Approved:        true,
 		ConcurrentLimit: defaultConcurrentLimit,
-	}, nil
+	}
 }
 
 // prepTools validates tool definitions and resolves any tool references.

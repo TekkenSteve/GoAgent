@@ -14,7 +14,7 @@ type artifactStoreValidationErrors struct {
 	s3SecretRequired  error
 }
 
-func validateArtifactStoreConfig(cfg ArtifactStoreConfig, errs artifactStoreValidationErrors) error {
+func validateArtifactStoreConfig(cfg *ArtifactStoreConfig, errs *artifactStoreValidationErrors) error {
 	switch cfg.Backend {
 	case ArtifactStoreBackendLocal:
 		if cfg.Local.Root == "" {
@@ -24,12 +24,15 @@ func validateArtifactStoreConfig(cfg ArtifactStoreConfig, errs artifactStoreVali
 		if cfg.S3.Bucket == "" {
 			return errs.s3BucketRequired
 		}
+
 		if cfg.S3.Region == "" {
 			return errs.s3RegionRequired
 		}
+
 		if cfg.S3.AccessKeyID == "" {
 			return errs.s3AccessRequired
 		}
+
 		if cfg.S3.SecretAccessKey == "" {
 			return errs.s3SecretRequired
 		}

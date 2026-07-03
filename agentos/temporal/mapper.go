@@ -9,14 +9,16 @@ import (
 	"github.com/TekkenSteve/GoAgent/internal/entity"
 )
 
-func temporalConfig(cfg RuntimeConfig) agentfwconfig.Temporal {
+func temporalConfig(cfg *RuntimeConfig) agentfwconfig.Temporal {
 	base := agentfwconfig.Default().Temporal
 	if cfg.TemporalAddress != "" {
 		base.Address = cfg.TemporalAddress
 	}
+
 	if cfg.TemporalNamespace != "" {
 		base.Namespace = cfg.TemporalNamespace
 	}
+
 	if cfg.TemporalTaskQueue != "" {
 		base.TaskQueue = cfg.TemporalTaskQueue
 	}
@@ -24,10 +26,11 @@ func temporalConfig(cfg RuntimeConfig) agentfwconfig.Temporal {
 	return base
 }
 
-func executionRequestFromRunSpec(spec agentos.RunSpec) (*entity.ExecuteRequest, error) {
+func executionRequestFromRunSpec(spec *agentos.RunSpec) (*entity.ExecuteRequest, error) {
 	if spec.RunID == "" {
 		return nil, fmt.Errorf("%w: run id is required", agentos.ErrInvalidRunSpec)
 	}
+
 	if spec.UserMessage == "" {
 		return nil, fmt.Errorf("%w: user message is required", agentos.ErrInvalidRunSpec)
 	}
@@ -52,7 +55,7 @@ func executionRequestFromRunSpec(spec agentos.RunSpec) (*entity.ExecuteRequest, 
 	}, nil
 }
 
-func runStatusFromEntity(status entity.RunStatus) agentos.RunStatus {
+func runStatusFromEntity(status *entity.RunStatus) agentos.RunStatus {
 	mapped := agentos.RunStatus{
 		RunID:          status.RunID,
 		LifecycleState: status.LifecycleState,

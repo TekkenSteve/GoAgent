@@ -3,10 +3,7 @@ package agentos
 import (
 	"encoding/json"
 	"fmt"
-	"reflect"
 	"time"
-
-	"github.com/google/jsonschema-go/jsonschema"
 )
 
 // RunPlanSpec describes a cross-backend execution plan. Each node is a
@@ -18,12 +15,12 @@ type RunPlanSpec struct {
 	AccountID      string            `json:"account_id"`
 	ProjectID      string            `json:"project_id"`
 	IdempotencyKey string            `json:"idempotency_key,omitempty"`
-	RequestedAt    time.Time         `json:"requested_at,omitempty"`
+	RequestedAt    time.Time         `json:"requested_at,omitzero" schema:"optional"`
 	Inputs         map[string]any    `json:"inputs,omitempty"`
 	Metadata       map[string]string `json:"metadata,omitempty"`
 	Nodes          []PlanNodeSpec    `json:"nodes"`
 	Edges          []PlanEdgeSpec    `json:"edges,omitempty"`
-	Policy         PlanPolicy        `json:"policy,omitempty"`
+	Policy         PlanPolicy        `json:"policy,omitzero" schema:"optional"`
 }
 
 // PlanRef identifies a plan inside an account/project boundary.
@@ -41,7 +38,7 @@ type PlanNodeSpec struct {
 	Inputs     []InputMapping `json:"inputs,omitempty"`
 	Outputs    []ArtifactSpec `json:"outputs,omitempty"`
 	Conditions []string       `json:"conditions,omitempty"`
-	Policy     NodePolicy     `json:"policy,omitempty"`
+	Policy     NodePolicy     `json:"policy,omitzero" schema:"optional"`
 }
 
 // PlanEdgeSpec describes data/control dependency between backend-owned runs.
@@ -130,7 +127,7 @@ type ArtifactRef struct {
 	SizeBytes  int64             `json:"size_bytes,omitempty"`
 	Digest     string            `json:"digest,omitempty"`
 	Metadata   map[string]string `json:"metadata,omitempty"`
-	CreatedAt  time.Time         `json:"created_at,omitempty"`
+	CreatedAt  time.Time         `json:"created_at,omitzero" schema:"optional"`
 }
 
 // Artifact is the public artifact document returned by ArtifactStore-backed
@@ -205,10 +202,10 @@ type RunPlanStatus struct {
 	ActiveRunIDs   []string          `json:"active_run_ids,omitempty"`
 	Artifacts      []ArtifactRef     `json:"artifacts,omitempty"`
 	Reason         string            `json:"reason,omitempty"`
-	BudgetUsage    PlanBudgetUsage   `json:"budget_usage,omitempty"`
+	BudgetUsage    PlanBudgetUsage   `json:"budget_usage,omitzero" schema:"optional"`
 	Metadata       map[string]string `json:"metadata,omitempty"`
-	StartedAt      time.Time         `json:"started_at,omitempty"`
-	UpdatedAt      time.Time         `json:"updated_at,omitempty"`
+	StartedAt      time.Time         `json:"started_at,omitzero" schema:"optional"`
+	UpdatedAt      time.Time         `json:"updated_at,omitzero" schema:"optional"`
 }
 
 // RunPlanDescription is the public, read-oriented view of a RunPlan. Topology
@@ -221,9 +218,9 @@ type RunPlanDescription struct {
 	ProjectID string            `json:"project_id,omitempty"`
 	Status    RunPlanStatus     `json:"status"`
 	Topology  PlanTopology      `json:"topology"`
-	Policy    PlanPolicy        `json:"policy,omitempty"`
+	Policy    PlanPolicy        `json:"policy,omitzero" schema:"optional"`
 	Metadata  map[string]string `json:"metadata,omitempty"`
-	UpdatedAt time.Time         `json:"updated_at,omitempty"`
+	UpdatedAt time.Time         `json:"updated_at,omitzero" schema:"optional"`
 }
 
 // PlanTopology is a public graph view where each node is one backend-owned
@@ -244,7 +241,7 @@ type PlanTopologyNode struct {
 	Conditions []string       `json:"conditions,omitempty"`
 	Inputs     []InputMapping `json:"inputs,omitempty"`
 	Outputs    []ArtifactSpec `json:"outputs,omitempty"`
-	Policy     NodePolicy     `json:"policy,omitempty"`
+	Policy     NodePolicy     `json:"policy,omitzero" schema:"optional"`
 	Status     PlanNodeStatus `json:"status"`
 }
 
@@ -265,12 +262,12 @@ type PlanNodeStatus struct {
 	Backend        BackendRef      `json:"backend"`
 	LifecycleState string          `json:"lifecycle_state"`
 	Attempts       int32           `json:"attempts,omitempty"`
-	BudgetUsage    PlanBudgetUsage `json:"budget_usage,omitempty"`
+	BudgetUsage    PlanBudgetUsage `json:"budget_usage,omitzero" schema:"optional"`
 	Reason         string          `json:"reason,omitempty"`
 	Artifacts      []ArtifactRef   `json:"artifacts,omitempty"`
-	StartedAt      time.Time       `json:"started_at,omitempty"`
-	CompletedAt    time.Time       `json:"completed_at,omitempty"`
-	UpdatedAt      time.Time       `json:"updated_at,omitempty"`
+	StartedAt      time.Time       `json:"started_at,omitzero" schema:"optional"`
+	CompletedAt    time.Time       `json:"completed_at,omitzero" schema:"optional"`
+	UpdatedAt      time.Time       `json:"updated_at,omitzero" schema:"optional"`
 }
 
 // PlanBudgetUsage reports plan-level resource consumption.
@@ -351,7 +348,7 @@ type PlanDebugTrace struct {
 	RunID           string                    `json:"run_id,omitempty"`
 	ThreadID        string                    `json:"thread_id,omitempty"`
 	Sequence        int64                     `json:"sequence,omitempty"`
-	Timestamp       time.Time                 `json:"timestamp,omitempty"`
+	Timestamp       time.Time                 `json:"timestamp"`
 	Transition      *PlanStateTransition      `json:"transition,omitempty"`
 	Capability      *PlanCapabilityTrace      `json:"capability,omitempty"`
 	InputResolution *PlanInputResolutionTrace `json:"input_resolution,omitempty"`
@@ -437,7 +434,7 @@ type PlanAuditRecord struct {
 	Action         PlanAuditAction `json:"action"`
 	IdempotencyKey string          `json:"idempotency_key,omitempty"`
 	Payload        map[string]any  `json:"payload,omitempty"`
-	CreatedAt      time.Time       `json:"created_at,omitempty"`
+	CreatedAt      time.Time       `json:"created_at,omitzero" schema:"optional"`
 }
 
 // RunPlanSpecJSONSchema returns a JSON Schema inferred from RunPlanSpec.
@@ -498,19 +495,4 @@ func PlanJSONSchema(kind PlanSchemaKind) ([]byte, error) {
 	default:
 		return nil, fmt.Errorf("%w: unsupported plan schema kind %q", ErrInvalidRunPlan, kind)
 	}
-}
-
-func jsonSchemaFor[T any]() ([]byte, error) {
-	schema, err := jsonschema.For[T](&jsonschema.ForOptions{
-		TypeSchemas: map[reflect.Type]*jsonschema.Schema{
-			reflect.TypeFor[json.RawMessage](): {
-				Type: "object",
-			},
-		},
-	})
-	if err != nil {
-		return nil, err
-	}
-
-	return json.MarshalIndent(schema, "", "  ")
 }

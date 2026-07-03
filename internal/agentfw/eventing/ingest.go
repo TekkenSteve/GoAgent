@@ -12,7 +12,8 @@ import (
 const duplicateEventSequence int64 = 0
 
 var (
-	ErrInvalidEvent = errors.New("agentos event ingest: invalid event")
+	ErrInvalidEvent   = errors.New("agentos event ingest: invalid event")
+	errIngestNilStore = errors.New("agentos event ingest: nil event store")
 )
 
 // EventStore appends normalized AgentOS events to the shared event log.
@@ -35,7 +36,7 @@ type Service struct {
 // NewService creates an event ingest service.
 func NewService(eventStore EventStore, dedupe DedupeStore) (*Service, error) {
 	if eventStore == nil {
-		return nil, errors.New("agentos event ingest: nil event store")
+		return nil, errIngestNilStore
 	}
 
 	return &Service{
@@ -46,7 +47,7 @@ func NewService(eventStore EventStore, dedupe DedupeStore) (*Service, error) {
 }
 
 // Ingest validates, normalizes, deduplicates, and persists one external event.
-func (s *Service) Ingest(ctx context.Context, input IngestEvent) (IngestResult, error) {
+func (s *Service) Ingest(ctx context.Context, input *IngestEvent) (IngestResult, error) {
 	event, sessionID, err := s.normalize(input)
 	if err != nil {
 		return IngestResult{}, err
@@ -57,6 +58,7 @@ func (s *Service) Ingest(ctx context.Context, input IngestEvent) (IngestResult, 
 		if err != nil {
 			return IngestResult{}, err
 		}
+
 		if !claimed {
 			return IngestResult{
 				RunID:     event.RunID,
@@ -79,30 +81,34 @@ func (s *Service) Ingest(ctx context.Context, input IngestEvent) (IngestResult, 
 	}, nil
 }
 
-func (s *Service) normalize(input IngestEvent) (entity.AgentOSEvent, string, error) {
+func (s *Service) normalize(input *IngestEvent) (*entity.AgentOSEvent, string, error) {
 	if input.RunID == "" {
-		return entity.AgentOSEvent{}, "", fmt.Errorf("%w: run_id is required", ErrInvalidEvent)
+		return nil, "", fmt.Errorf("%w: run_id is required", ErrInvalidEvent)
 	}
+
 	if input.EventID == "" {
-		return entity.AgentOSEvent{}, "", fmt.Errorf("%w: event_id is required", ErrInvalidEvent)
+		return nil, "", fmt.Errorf("%w: event_id is required", ErrInvalidEvent)
 	}
+
 	if !entity.IsAgentOSStandardEventType(string(input.EventType)) {
-		return entity.AgentOSEvent{}, "", fmt.Errorf("%w: unsupported event_type %q", ErrInvalidEvent, input.EventType)
+		return nil, "", fmt.Errorf("%w: unsupported event_type %q", ErrInvalidEvent, input.EventType)
 	}
+
 	if input.Source == "" {
-		return entity.AgentOSEvent{}, "", fmt.Errorf("%w: source is required", ErrInvalidEvent)
+		return nil, "", fmt.Errorf("%w: source is required", ErrInvalidEvent)
 	}
 
 	timestamp := input.Timestamp
 	if timestamp.IsZero() {
 		timestamp = s.now()
 	}
+
 	sessionID := input.ThreadID
 	if sessionID == "" {
 		sessionID = input.RunID
 	}
 
-	return entity.AgentOSEvent{
+	return &entity.AgentOSEvent{
 		BaseEvent: entity.BaseEvent{
 			EventType: string(input.EventType),
 			Source:    entity.EventSource(input.Source),

@@ -8,6 +8,8 @@ import (
 )
 
 func TestSwaggerDoesNotExposeInternalEntityDefinitions(t *testing.T) {
+	t.Parallel()
+
 	data, err := os.ReadFile("swagger.json")
 	if err != nil {
 		t.Fatalf("ReadFile swagger.json: %v", err)
@@ -22,11 +24,13 @@ func TestSwaggerDoesNotExposeInternalEntityDefinitions(t *testing.T) {
 	if !ok {
 		t.Fatal("swagger.json has no definitions object")
 	}
+
 	for name := range definitions {
 		if strings.HasPrefix(name, "entity.") {
 			t.Fatalf("public swagger must not expose internal entity definition %q", name)
 		}
 	}
+
 	assertNoInternalEntityRef(t, doc)
 }
 
@@ -42,6 +46,7 @@ func assertNoInternalEntityRef(t *testing.T, value any) {
 					t.Fatalf("public swagger must not reference internal entity schema %q", ref)
 				}
 			}
+
 			assertNoInternalEntityRef(t, child)
 		}
 	case []any:

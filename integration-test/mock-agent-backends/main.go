@@ -31,46 +31,60 @@ const (
 	mockWorkflowType         = "MockAgentWorkflow"
 	mockStatusQuery          = "agentos.run.status"
 	mockCancelSignal         = "agentos.control.cancel"
+	canceled                 = "canceled"
+	cancelRequested          = "cancel requested"
+	readHeaderTimeout        = 5 * time.Second
+	serverErrorBuffer        = 2
+	shutdownTimeout          = 5 * time.Second
+	mockWorkflowWait         = 24 * time.Hour
 )
 
 func main() {
+	os.Exit(run())
+}
+
+func run() int {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
 	store := newRunStore()
-	httpServer := &http.Server{
-		Addr:              envString("HTTP_ADDR", defaultHTTPAddress),
-		Handler:           newHTTPHandler(store),
-		ReadHeaderTimeout: 5 * time.Second,
-	}
+	httpServer := &http.Server{Addr: envString("HTTP_ADDR", defaultHTTPAddress), Handler: newHTTPHandler(store), ReadHeaderTimeout: readHeaderTimeout}
+
 	grpcServer, listener, err := newGRPCServer(envString("GRPC_ADDR", defaultGRPCAddress), store)
 	if err != nil {
-		log.Fatalf("mock backend grpc: %v", err)
+		log.Printf("mock backend grpc: %v", err)
+
+		return 1
 	}
 
-	temporalClient, err := client.Dial(client.Options{
-		HostPort:  envString("TEMPORAL_ADDRESS", defaultTemporalAddress),
-		Namespace: envString("TEMPORAL_NAMESPACE", defaultTemporalNamespace),
-	})
+	temporalClient, err := client.Dial(client.Options{HostPort: envString("TEMPORAL_ADDRESS", defaultTemporalAddress), Namespace: envString("TEMPORAL_NAMESPACE", defaultTemporalNamespace)})
 	if err != nil {
-		log.Fatalf("mock backend temporal client: %v", err)
+		log.Printf("mock backend temporal client: %v", err)
+
+		return 1
 	}
 	defer temporalClient.Close()
 
 	temporalWorker := worker.New(temporalClient, envString("TEMPORAL_TASK_QUEUE", defaultTemporalTaskQueue), worker.Options{})
 	temporalWorker.RegisterWorkflowWithOptions(mockTemporalWorkflow, workflow.RegisterOptions{Name: mockWorkflowType})
+
 	if err := temporalWorker.Start(); err != nil {
-		log.Fatalf("mock backend temporal worker: %v", err)
+		log.Printf("mock backend temporal worker: %v", err)
+
+		return 1
 	}
 	defer temporalWorker.Stop()
 
-	errCh := make(chan error, 2)
+	errCh := make(chan error, serverErrorBuffer)
+
 	go func() {
 		log.Printf("mock backend http listening on %s", httpServer.Addr)
+
 		errCh <- ignoreClosed(httpServer.ListenAndServe())
 	}()
 	go func() {
 		log.Printf("mock backend grpc listening on %s", listener.Addr().String())
+
 		errCh <- ignoreStopped(grpcServer.Serve(listener))
 	}()
 
@@ -78,17 +92,25 @@ func main() {
 	case <-ctx.Done():
 	case err := <-errCh:
 		if err != nil {
-			log.Fatalf("mock backend serve: %v", err)
+			log.Printf("mock backend serve: %v", err)
+
+			return 1
 		}
 	}
 
-	shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	shutdownCtx, cancel := context.WithTimeout(context.Background(), shutdownTimeout)
 	defer cancel()
-	_ = httpServer.Shutdown(shutdownCtx)
+
+	if err := httpServer.Shutdown(shutdownCtx); err != nil {
+		log.Printf("http server shutdown: %v", err)
+	}
+
 	grpcServer.GracefulStop()
+
+	return 0
 }
 
-func envString(name string, fallback string) string {
+func envString(name, fallback string) string {
 	if value := os.Getenv(name); value != "" {
 		return value
 	}
@@ -108,6 +130,7 @@ func ignoreStopped(err error) error {
 	if err == nil {
 		return nil
 	}
+
 	if strings.Contains(err.Error(), "use of closed network connection") {
 		return nil
 	}
@@ -124,7 +147,7 @@ func newRunStore() *runStore {
 	return &runStore{statuses: make(map[string]agentos.RunStatus)}
 }
 
-func (s *runStore) start(spec agentos.RunSpec) agentos.RunStatus {
+func (s *runStore) start(spec *agentos.RunSpec) agentos.RunStatus {
 	status := agentos.RunStatus{
 		RunID:          spec.RunID,
 		LifecycleState: "completed",
@@ -134,6 +157,7 @@ func (s *runStore) start(spec agentos.RunSpec) agentos.RunStatus {
 
 	s.mu.Lock()
 	defer s.mu.Unlock()
+
 	s.statuses[spec.RunID] = status
 
 	return status
@@ -142,6 +166,7 @@ func (s *runStore) start(spec agentos.RunSpec) agentos.RunStatus {
 func (s *runStore) status(runID string) agentos.RunStatus {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+
 	if status, ok := s.statuses[runID]; ok {
 		return status
 	}
@@ -164,10 +189,11 @@ func (s *runStore) control(runID string, op agentos.ControlOperation) {
 
 	s.mu.Lock()
 	defer s.mu.Unlock()
+
 	status := s.statuses[runID]
 	status.RunID = runID
-	status.LifecycleState = "canceled"
-	status.Reason = "cancel requested"
+	status.LifecycleState = canceled
+	status.Reason = cancelRequested
 	status.UpdatedAt = time.Now().UTC()
 	s.statuses[runID] = status
 }
@@ -180,43 +206,59 @@ func newHTTPHandler(store *runStore) http.Handler {
 	mux.HandleFunc("/runs", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
 			http.NotFound(w, r)
+
 			return
 		}
+
 		var spec agentos.RunSpec
 		if err := json.NewDecoder(r.Body).Decode(&spec); err != nil {
 			http.Error(w, err.Error(), http.StatusBadRequest)
+
 			return
 		}
-		writeJSON(w, store.start(spec))
+
+		writeJSON(w, store.start(&spec))
 	})
 	mux.HandleFunc("/runs/", func(w http.ResponseWriter, r *http.Request) {
-		runID, action, ok := parseRunAction(r.URL.Path)
-		if !ok {
-			http.NotFound(w, r)
-			return
-		}
-		switch {
-		case r.Method == http.MethodGet && action == "status":
-			writeJSON(w, store.status(runID))
-		case r.Method == http.MethodPost && action == "signals":
-			w.WriteHeader(http.StatusNoContent)
-		case r.Method == http.MethodPost && action == "control":
-			var control agentos.ControlRequest
-			if err := json.NewDecoder(r.Body).Decode(&control); err != nil {
-				http.Error(w, err.Error(), http.StatusBadRequest)
-				return
-			}
-			store.control(runID, control.Operation)
-			w.WriteHeader(http.StatusNoContent)
-		default:
-			http.NotFound(w, r)
-		}
+		handleRunAction(w, r, store)
 	})
 
 	return mux
 }
 
-func parseRunAction(path string) (string, string, bool) {
+func handleRunAction(w http.ResponseWriter, r *http.Request, store *runStore) {
+	runID, action, ok := parseRunAction(r.URL.Path)
+	if !ok {
+		http.NotFound(w, r)
+
+		return
+	}
+
+	switch {
+	case r.Method == http.MethodGet && action == "status":
+		writeJSON(w, store.status(runID))
+	case r.Method == http.MethodPost && action == "signals":
+		w.WriteHeader(http.StatusNoContent)
+	case r.Method == http.MethodPost && action == "control":
+		handleRunControl(w, r, store, runID)
+	default:
+		http.NotFound(w, r)
+	}
+}
+
+func handleRunControl(w http.ResponseWriter, r *http.Request, store *runStore, runID string) {
+	var control agentos.ControlRequest
+	if err := json.NewDecoder(r.Body).Decode(&control); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+
+		return
+	}
+
+	store.control(runID, control.Operation)
+	w.WriteHeader(http.StatusNoContent)
+}
+
+func parseRunAction(path string) (runID, action string, ok bool) {
 	parts := strings.Split(strings.Trim(path, "/"), "/")
 	if len(parts) != 3 || parts[0] != "runs" || parts[1] == "" || parts[2] == "" {
 		return "", "", false
@@ -227,6 +269,7 @@ func parseRunAction(path string) (string, string, bool) {
 
 func writeJSON(w http.ResponseWriter, value any) {
 	w.Header().Set("Content-Type", "application/json")
+
 	if err := json.NewEncoder(w).Encode(value); err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 	}
@@ -248,7 +291,8 @@ func (jsonCodec) Name() string {
 
 func newGRPCServer(addr string, store *runStore) (*grpc.Server, net.Listener, error) {
 	encoding.RegisterCodec(jsonCodec{})
-	listener, err := net.Listen("tcp", addr)
+
+	listener, err := (&net.ListenConfig{}).Listen(context.Background(), "tcp", addr)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -259,13 +303,14 @@ func newGRPCServer(addr string, store *runStore) (*grpc.Server, net.Listener, er
 		HandlerType: (*mockGRPCServiceContract)(nil),
 		Methods: []grpc.MethodDesc{
 			{MethodName: "StartRun", Handler: grpcUnaryHandler(func(_ context.Context, svc *mockGRPCService, spec agentos.RunSpec) (agentos.RunStatus, error) {
-				return svc.store.start(spec), nil
+				return svc.store.start(&spec), nil
 			})},
 			{MethodName: "SignalRun", Handler: grpcUnaryHandler(func(context.Context, *mockGRPCService, grpcSignalRequest) (emptyResponse, error) {
 				return emptyResponse{}, nil
 			})},
 			{MethodName: "ControlRun", Handler: grpcUnaryHandler(func(_ context.Context, svc *mockGRPCService, req grpcControlRequest) (emptyResponse, error) {
 				svc.store.control(req.RunID, req.Operation)
+
 				return emptyResponse{}, nil
 			})},
 			{MethodName: "StatusRun", Handler: grpcUnaryHandler(func(_ context.Context, svc *mockGRPCService, req grpcStatusRequest) (agentos.RunStatus, error) {
@@ -308,7 +353,9 @@ type grpcStatusRequest struct {
 
 type emptyResponse struct{}
 
-func grpcUnaryHandler[Req any, Resp any](
+var errUnexpectedGRPCRequest = errors.New("unexpected grpc request type")
+
+func grpcUnaryHandler[Req, Resp any](
 	fn func(context.Context, *mockGRPCService, Req) (Resp, error),
 ) grpc.MethodHandler {
 	return func(srv any, ctx context.Context, dec func(any) error, interceptor grpc.UnaryServerInterceptor) (any, error) {
@@ -316,8 +363,19 @@ func grpcUnaryHandler[Req any, Resp any](
 		if err := dec(&request); err != nil {
 			return nil, err
 		}
+
 		handler := func(handlerCtx context.Context, request any) (any, error) {
-			return fn(handlerCtx, srv.(*mockGRPCService), request.(Req))
+			req, ok := request.(Req)
+			if !ok {
+				return nil, errUnexpectedGRPCRequest
+			}
+
+			service, ok := srv.(*mockGRPCService)
+			if !ok {
+				return nil, errUnexpectedGRPCRequest
+			}
+
+			return fn(handlerCtx, service, req)
 		}
 		if interceptor == nil {
 			return handler(ctx, request)
@@ -347,11 +405,11 @@ func mockTemporalWorkflow(ctx workflow.Context, input temporalStartInput) (agent
 	}
 
 	cancelCh := workflow.GetSignalChannel(ctx, mockCancelSignal)
-	timer := workflow.NewTimer(ctx, 24*time.Hour)
+	timer := workflow.NewTimer(ctx, mockWorkflowWait)
 	selector := workflow.NewSelector(ctx)
 	selector.AddReceive(cancelCh, func(workflow.ReceiveChannel, bool) {
-		status.LifecycleState = "canceled"
-		status.Reason = "cancel requested"
+		status.LifecycleState = canceled
+		status.Reason = cancelRequested
 		status.UpdatedAt = workflow.Now(ctx)
 	})
 	selector.AddFuture(timer, func(workflow.Future) {})

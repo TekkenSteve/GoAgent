@@ -9,9 +9,11 @@ import (
 )
 
 func TestEventFromStored(t *testing.T) {
+	t.Parallel()
+
 	ts := time.Date(2026, 6, 14, 13, 0, 0, 0, time.UTC)
 
-	event := entity.TextDeltaEvent{
+	event := &entity.TextDeltaEvent{
 		BaseEvent: entity.BaseEvent{
 			EventID:   "evt-1",
 			RunID:     "run-1",

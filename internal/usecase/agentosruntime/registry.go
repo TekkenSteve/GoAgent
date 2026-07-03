@@ -23,12 +23,14 @@ func (r *Registry) Register(ref agentos.BackendRef, backend AgentBackend) error 
 	if err := validateBackendRef(ref); err != nil {
 		return err
 	}
+
 	if backend == nil {
 		return fmt.Errorf("%w: nil backend for %s/%s", agentos.ErrBackendNotFound, ref.Kind, ref.Name)
 	}
 
 	r.mu.Lock()
 	defer r.mu.Unlock()
+
 	r.backends[ref] = backend
 
 	return nil
@@ -55,6 +57,7 @@ func validateBackendRef(ref agentos.BackendRef) error {
 	if ref.Kind == "" {
 		return fmt.Errorf("%w: kind is required", agentos.ErrInvalidBackendRef)
 	}
+
 	if ref.Name == "" {
 		return fmt.Errorf("%w: name is required", agentos.ErrInvalidBackendRef)
 	}

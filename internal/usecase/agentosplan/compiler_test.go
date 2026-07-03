@@ -13,6 +13,7 @@ func TestRunPlanCompilerRejectsUnknownJSONField(t *testing.T) {
 	t.Parallel()
 
 	compiler := testRunPlanCompiler(t)
+
 	_, err := compiler.CompileJSON(context.Background(), []byte(`{
 	  "plan_id": "plan-strict-json",
 	  "account_id": "acct-strict",
@@ -31,6 +32,7 @@ func TestRunPlanCompilerRejectsUnknownJSONField(t *testing.T) {
 	if !errors.Is(err, agentos.ErrInvalidRunPlan) {
 		t.Fatalf("error = %v, want ErrInvalidRunPlan", err)
 	}
+
 	if !strings.Contains(err.Error(), `unknown field "capabilty"`) {
 		t.Fatalf("error = %v, want unknown field", err)
 	}
@@ -40,6 +42,7 @@ func TestRunPlanCompilerRejectsUnknownYAMLField(t *testing.T) {
 	t.Parallel()
 
 	compiler := testRunPlanCompiler(t)
+
 	_, err := compiler.CompileYAML(context.Background(), []byte(`
 plan_id: plan-strict-yaml
 account_id: acct-strict
@@ -56,6 +59,7 @@ nodes:
 	if !errors.Is(err, agentos.ErrInvalidRunPlan) {
 		t.Fatalf("error = %v, want ErrInvalidRunPlan", err)
 	}
+
 	if !strings.Contains(err.Error(), `unknown field "capabilty"`) {
 		t.Fatalf("error = %v, want unknown field", err)
 	}
@@ -65,6 +69,7 @@ func TestRunPlanCompilerAllowsFreeFormRunInput(t *testing.T) {
 	t.Parallel()
 
 	compiler := testRunPlanCompiler(t)
+
 	plan, err := compiler.CompileJSON(context.Background(), []byte(`{
 	  "plan_id": "plan-free-form-input",
 	  "account_id": "acct-strict",
@@ -86,6 +91,7 @@ func TestRunPlanCompilerAllowsFreeFormRunInput(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CompileJSON: %v", err)
 	}
+
 	if got := plan.Spec.Nodes[0].Run.Input["arbitrary"]; got == nil {
 		t.Fatalf("free-form input was not decoded: %#v", plan.Spec.Nodes[0].Run.Input)
 	}
@@ -110,7 +116,8 @@ func TestRunPlanCompilerRejectsUnknownPlanDeltaField(t *testing.T) {
 			},
 		},
 	}
-	_, _, err := compiler.CompileDeltaYAML(context.Background(), base, []byte(`
+
+	_, _, err := compiler.CompileDeltaYAML(context.Background(), &base, []byte(`
 nodes:
   - node_id: expanded
     unexpected: true
@@ -128,6 +135,7 @@ edges:
 	if !errors.Is(err, agentos.ErrInvalidRunPlan) {
 		t.Fatalf("error = %v, want ErrInvalidRunPlan", err)
 	}
+
 	if !strings.Contains(err.Error(), `unknown field "unexpected"`) {
 		t.Fatalf("error = %v, want unknown field", err)
 	}
@@ -137,6 +145,7 @@ func TestRunPlanCompilerAcceptsUnquotedOnEdgeTriggerYAML(t *testing.T) {
 	t.Parallel()
 
 	compiler := testRunPlanCompiler(t)
+
 	plan, err := compiler.CompileYAML(context.Background(), []byte(`
 plan_id: plan-yaml-on
 account_id: acct-strict
@@ -163,6 +172,7 @@ edges:
 	if err != nil {
 		t.Fatalf("CompileYAML: %v", err)
 	}
+
 	if len(plan.Spec.Edges) != 1 || plan.Spec.Edges[0].On != agentos.EdgeOnSuccess {
 		t.Fatalf("edges = %#v", plan.Spec.Edges)
 	}

@@ -16,7 +16,7 @@ type RunSpec struct {
 	SystemPrompt   string            `json:"system_prompt,omitempty"`
 	UserMessage    string            `json:"user_message,omitempty"`
 	IdempotencyKey string            `json:"idempotency_key,omitempty"`
-	RequestedAt    time.Time         `json:"requested_at,omitempty"`
+	RequestedAt    time.Time         `json:"requested_at,omitzero" schema:"optional"`
 	Metadata       map[string]string `json:"metadata,omitempty"`
 	Backend        BackendRef        `json:"backend"`
 	Input          map[string]any    `json:"input,omitempty"`
@@ -54,9 +54,9 @@ type RunStatus struct {
 	LifecycleState string          `json:"lifecycle_state"`
 	Progress       *RunProgress    `json:"progress,omitempty"`
 	Artifacts      []ArtifactRef   `json:"artifacts,omitempty"`
-	BudgetUsage    PlanBudgetUsage `json:"budget_usage,omitempty"`
+	BudgetUsage    PlanBudgetUsage `json:"budget_usage,omitzero" schema:"optional"`
 	Reason         string          `json:"reason,omitempty"`
-	UpdatedAt      time.Time       `json:"updated_at,omitempty"`
+	UpdatedAt      time.Time       `json:"updated_at,omitzero" schema:"optional"`
 }
 
 // RunBackendOwnership is the durable routing record for a backend-owned run.
@@ -70,8 +70,8 @@ type RunBackendOwnership struct {
 	Backend        BackendRef `json:"backend"`
 	IdempotencyKey string     `json:"idempotency_key,omitempty"`
 	LifecycleState string     `json:"lifecycle_state,omitempty"`
-	CreatedAt      time.Time  `json:"created_at,omitempty"`
-	UpdatedAt      time.Time  `json:"updated_at,omitempty"`
+	CreatedAt      time.Time  `json:"created_at,omitzero" schema:"optional"`
+	UpdatedAt      time.Time  `json:"updated_at,omitzero" schema:"optional"`
 }
 
 // RunProgress is a generic public progress view. Backend-specific details
@@ -89,7 +89,7 @@ type Event struct {
 	RunID     string         `json:"run_id,omitempty"`
 	ThreadID  string         `json:"thread_id,omitempty"`
 	Sequence  int64          `json:"sequence,omitempty"`
-	Timestamp time.Time      `json:"timestamp,omitempty"`
+	Timestamp time.Time      `json:"timestamp"`
 	Source    string         `json:"source,omitempty"`
 	Payload   map[string]any `json:"payload,omitempty"`
 }

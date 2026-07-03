@@ -6,7 +6,11 @@ import (
 	"github.com/TekkenSteve/GoAgent/agentos"
 )
 
+const eventLive = "evt-live"
+
 func TestNewPlanReplaySubscriptionPreservesPlanScopeInPayload(t *testing.T) {
+	t.Parallel()
+
 	sub := newPlanReplaySubscription([]agentos.PlanEvent{
 		{
 			Event: agentos.Event{
@@ -27,23 +31,27 @@ func TestNewPlanReplaySubscriptionPreservesPlanScopeInPayload(t *testing.T) {
 	if !ok {
 		t.Fatal("subscription closed before replay event")
 	}
-	if event.Payload["plan_id"] != "plan-1" ||
+
+	if event.Payload["plan_id"] != Plan1 ||
 		event.Payload["account_id"] != "acct-1" ||
 		event.Payload["project_id"] != "proj-1" ||
 		event.Payload["node_id"] != "node-1" ||
 		event.Payload["existing"] != true {
 		t.Fatalf("payload = %#v", event.Payload)
 	}
+
 	if _, ok := <-sub.Events(); ok {
 		t.Fatal("subscription should close after replay")
 	}
 }
 
 func TestNewPlanReplayThenLiveSubscription(t *testing.T) {
+	t.Parallel()
+
 	liveEvents := make(chan agentos.PlanEvent, 1)
 	live := &fakePlanEventSubscription{events: liveEvents}
 	scope := agentos.PlanStreamScope{PlanID: "plan-1", AccountID: "acct-1", ProjectID: "proj-1"}
-	sub := newPlanReplayThenLiveSubscription(scope, []agentos.PlanEvent{
+	sub := newPlanReplayThenLiveSubscription(&scope, []agentos.PlanEvent{
 		{
 			Event: agentos.Event{
 				EventID:   "evt-replay",
@@ -63,7 +71,7 @@ func TestNewPlanReplayThenLiveSubscription(t *testing.T) {
 
 	liveEvents <- agentos.PlanEvent{
 		Event: agentos.Event{
-			EventID:   "evt-live",
+			EventID:   eventLive,
 			EventType: agentos.EventPlanNodeStarted,
 			Sequence:  2,
 		},
@@ -71,24 +79,28 @@ func TestNewPlanReplayThenLiveSubscription(t *testing.T) {
 		AccountID: "acct-1",
 		ProjectID: "proj-1",
 	}
+
 	gotLive := <-sub.Events()
-	if gotLive.EventID != "evt-live" {
+	if gotLive.EventID != eventLive {
 		t.Fatalf("live event = %#v", gotLive)
 	}
 
 	if err := sub.Close(); err != nil {
 		t.Fatalf("Close: %v", err)
 	}
+
 	if !live.closed {
 		t.Fatal("live subscription was not closed")
 	}
 }
 
 func TestNewPlanReplayThenLiveSubscriptionAfterFiltersCoveredLiveEvents(t *testing.T) {
+	t.Parallel()
+
 	liveEvents := make(chan agentos.PlanEvent, 3)
 	live := &fakePlanEventSubscription{events: liveEvents}
 	scope := agentos.PlanStreamScope{PlanID: "plan-1", AccountID: "acct-1", ProjectID: "proj-1"}
-	sub := newPlanReplayThenLiveSubscriptionAfter(scope, []agentos.PlanEvent{
+	sub := newPlanReplayThenLiveSubscriptionAfter(&scope, []agentos.PlanEvent{
 		{
 			Event: agentos.Event{
 				EventID:   "evt-catch-up",
@@ -105,6 +117,7 @@ func TestNewPlanReplayThenLiveSubscriptionAfterFiltersCoveredLiveEvents(t *testi
 	if replay.EventID != "evt-catch-up" {
 		t.Fatalf("replay event = %#v", replay)
 	}
+
 	liveEvents <- agentos.PlanEvent{
 		Event: agentos.Event{
 			EventID:   "evt-duplicate",
@@ -115,6 +128,7 @@ func TestNewPlanReplayThenLiveSubscriptionAfterFiltersCoveredLiveEvents(t *testi
 		AccountID: "acct-1",
 		ProjectID: "proj-1",
 	}
+
 	liveEvents <- agentos.PlanEvent{
 		Event: agentos.Event{
 			EventID:   "evt-other-plan",
@@ -125,9 +139,10 @@ func TestNewPlanReplayThenLiveSubscriptionAfterFiltersCoveredLiveEvents(t *testi
 		AccountID: "acct-1",
 		ProjectID: "proj-1",
 	}
+
 	liveEvents <- agentos.PlanEvent{
 		Event: agentos.Event{
-			EventID:   "evt-live",
+			EventID:   eventLive,
 			EventType: agentos.EventPlanNodeSucceeded,
 			Sequence:  4,
 		},
@@ -137,12 +152,14 @@ func TestNewPlanReplayThenLiveSubscriptionAfterFiltersCoveredLiveEvents(t *testi
 	}
 
 	gotLive := <-sub.Events()
-	if gotLive.EventID != "evt-live" {
+	if gotLive.EventID != eventLive {
 		t.Fatalf("live event = %#v", gotLive)
 	}
 }
 
 func TestLastPlanEventSequence(t *testing.T) {
+	t.Parallel()
+
 	last := lastPlanEventSequence(3, []agentos.PlanEvent{
 		{Event: agentos.Event{Sequence: 2}},
 		{Event: agentos.Event{Sequence: 5}},

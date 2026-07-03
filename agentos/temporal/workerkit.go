@@ -19,10 +19,16 @@ type WorkerKit struct {
 	closeFns              []func() error
 }
 
+var (
+	errWorkerKitNilWorker                          = errors.New("agentos temporal workerkit: nil worker")
+	errWorkerKitPlanActivitiesRequired             = errors.New("agentos temporal workerkit: plan activities are required")
+	errWorkerKitPlanCommandReconcilerNotConfigured = errors.New("agentos temporal workerkit: plan command reconciler is not configured")
+)
+
 // RegisterPlanWorkflow installs the AgentOS RunPlan workflow into an existing worker.
 func RegisterPlanWorkflow(w worker.Worker) error {
 	if w == nil {
-		return errors.New("agentos temporal workerkit: nil worker")
+		return errWorkerKitNilWorker
 	}
 
 	w.RegisterWorkflowWithOptions(PlanWorkflow, workflow.RegisterOptions{
@@ -35,10 +41,11 @@ func RegisterPlanWorkflow(w worker.Worker) error {
 // RegisterPlanActivities installs AgentOS RunPlan activities into an existing worker.
 func RegisterPlanActivities(w worker.Worker, activities *PlanActivities) error {
 	if w == nil {
-		return errors.New("agentos temporal workerkit: nil worker")
+		return errWorkerKitNilWorker
 	}
+
 	if activities == nil {
-		return errors.New("agentos temporal workerkit: plan activities are required")
+		return errWorkerKitPlanActivitiesRequired
 	}
 
 	w.RegisterActivityWithOptions(activities.ValidatePlanActivity, activity.RegisterOptions{
@@ -74,6 +81,7 @@ func RegisterPlan(w worker.Worker, activities *PlanActivities) error {
 	if err := RegisterPlanWorkflow(w); err != nil {
 		return err
 	}
+
 	if err := RegisterPlanActivities(w, activities); err != nil {
 		return fmt.Errorf("agentos temporal workerkit - plan activities: %w", err)
 	}
@@ -83,12 +91,16 @@ func RegisterPlan(w worker.Worker, activities *PlanActivities) error {
 
 // NewWorkerKit creates a worker registration kit backed by the default
 // Temporal/Postgres/Redis/Bifrost implementation.
-func NewWorkerKit(ctx context.Context, cfg WorkerConfig) (*WorkerKit, error) {
+func NewWorkerKit(ctx context.Context, cfg *WorkerConfig) (*WorkerKit, error) {
 	return newWorkerKit(ctx, cfg)
 }
 
 // Register installs GoAgent workflow definitions into a Temporal worker.
 func (k *WorkerKit) Register(w worker.Worker) error {
+	if w == nil {
+		return errWorkerKitNilWorker
+	}
+
 	w.RegisterWorkflowWithOptions(orchestration.AgentWorkflow, workflow.RegisterOptions{
 		Name: orchestration.AgentWorkflowName,
 	})
@@ -101,6 +113,7 @@ func (k *WorkerKit) Register(w worker.Worker) error {
 	w.RegisterWorkflowWithOptions(orchestration.TriggerFireWorkflow, workflow.RegisterOptions{
 		Name: orchestration.TriggerFireWorkflowName,
 	})
+
 	if err := RegisterPlanWorkflow(w); err != nil {
 		return err
 	}
@@ -151,8 +164,12 @@ type PlanCommandRecoveryResult struct {
 // RecoverPlanCommands redelivers pending/failed RunPlan control-plane commands
 // from the durable outbox.
 func (k *WorkerKit) RecoverPlanCommands(ctx context.Context, limit int) (PlanCommandRecoveryResult, error) {
+	if k == nil {
+		return PlanCommandRecoveryResult{}, errWorkerKitPlanCommandReconcilerNotConfigured
+	}
+
 	if k.planCommandReconciler == nil {
-		return PlanCommandRecoveryResult{}, errors.New("agentos temporal workerkit: plan command reconciler is not configured")
+		return PlanCommandRecoveryResult{}, errWorkerKitPlanCommandReconcilerNotConfigured
 	}
 
 	return k.planCommandReconciler.Recover(ctx, limit)
@@ -161,11 +178,19 @@ func (k *WorkerKit) RecoverPlanCommands(ctx context.Context, limit int) (PlanCom
 // StartPlanCommandRecovery starts periodic durable command outbox recovery for
 // this worker kit.
 func (k *WorkerKit) StartPlanCommandRecovery(ctx context.Context, cfg PlanCommandRecoveryLoopConfig, observer PlanCommandRecoveryObserver) (*PlanCommandRecoveryLoop, error) {
+	if k == nil {
+		return nil, errWorkerKitPlanCommandReconcilerNotConfigured
+	}
+
 	return StartPlanCommandRecovery(ctx, k, cfg, observer)
 }
 
 // Close releases resources owned by the kit.
 func (k *WorkerKit) Close() error {
+	if k == nil {
+		return nil
+	}
+
 	var err error
 	for _, closeFn := range k.closeFns {
 		err = errors.Join(err, closeFn())

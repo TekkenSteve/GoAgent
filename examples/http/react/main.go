@@ -44,7 +44,7 @@ func main() {
 
 	fmt.Fprintf(os.Stdout, "=== ReAct Pattern ===\nRun ID: %s\n\n", runID)
 
-	status, err := c.StartRun(ctx, client.AgentOSRunRequest{
+	status, err := c.StartRun(ctx, &client.AgentOSRunRequest{
 		RunID:       runID,
 		ThreadID:    runID,
 		UserMessage: "What is 25 * 4 + 10? Calculate it and then search the web for cool facts about the result.",

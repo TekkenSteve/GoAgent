@@ -52,7 +52,7 @@ func main() {
 
 	fmt.Fprintf(os.Stdout, "=== DAG Orchestration Pattern ===\nRun ID: %s\n\n", runID)
 
-	status, err := c.ExecuteOrchestration(ctx, client.OrchestrationRequest{
+	status, err := c.ExecuteOrchestration(ctx, &client.OrchestrationRequest{
 		RunID:    runID,
 		TeamSpec: dagTeamSpec(),
 	})

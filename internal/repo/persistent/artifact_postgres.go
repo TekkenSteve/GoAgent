@@ -32,87 +32,183 @@ func NewAgentOSArtifactRepo(pg *postgres.Postgres, blob artifactblob.BlobStore) 
 	return &AgentOSArtifactRepo{Postgres: pg, blob: blob}
 }
 
-func (r *AgentOSArtifactRepo) Put(ctx context.Context, ref agentos.ArtifactRef, payload any, idempotencyKey string) (agentos.ArtifactRef, error) {
-	if idempotencyKey == "" {
-		return agentos.ArtifactRef{}, fmt.Errorf("%w: artifact idempotency key is required", agentos.ErrInvalidArtifact)
-	}
-	if ref.PlanID == "" {
-		return agentos.ArtifactRef{}, fmt.Errorf("%w: plan id is required", agentos.ErrInvalidArtifact)
-	}
-	if ref.Name == "" {
-		return agentos.ArtifactRef{}, fmt.Errorf("%w: artifact name is required", agentos.ErrInvalidArtifact)
-	}
-	if ref.Kind == "" {
-		return agentos.ArtifactRef{}, fmt.Errorf("%w: artifact kind is required", agentos.ErrInvalidArtifact)
-	}
-	scope, exists, err := planTenantScopeByPlanID(ctx, r.Pool, ref.PlanID)
-	if err != nil {
-		return agentos.ArtifactRef{}, err
-	}
-	if !exists {
-		return agentos.ArtifactRef{}, fmt.Errorf("%w: %s", agentos.ErrPlanRouteNotFound, ref.PlanID)
-	}
-	if err := r.validateArtifactOwnership(ctx, ref, scope); err != nil {
-		return agentos.ArtifactRef{}, err
-	}
-	if ref.ArtifactID == "" {
-		ref.ArtifactID = agentosplan.ArtifactIDFromRef(ref.PlanID, idempotencyKey)
-	}
-	if ref.CreatedAt.IsZero() {
-		ref.CreatedAt = time.Now().UTC()
-	}
-	var encodedPayload []byte
-	if payload != nil {
-		encoded, mediaType, err := agentosplan.EncodeArtifactPayload(payload, ref.MediaType)
-		if err != nil {
-			return agentos.ArtifactRef{}, err
-		}
-		encodedPayload = encoded
-		ref.MediaType = mediaType
-		ref.SizeBytes = int64(len(encodedPayload))
-		ref.Digest = agentosplan.DigestArtifactPayload(encodedPayload)
+func (r *AgentOSArtifactRepo) Put(ctx context.Context, artifact *agentos.ArtifactRef, payload any, idempotencyKey string) (agentos.ArtifactRef, error) {
+	ref := *artifact
+
+	encodedPayload, encodeErr := encodeArtifactPayload(payload, &ref)
+	if encodeErr != nil {
+		return agentos.ArtifactRef{}, encodeErr
 	}
 
-	existing, exists, err := r.artifactByIdempotencyKey(ctx, ref.PlanID, scope, idempotencyKey)
+	scope, existing, exists, err := r.prepareArtifactPut(ctx, &ref, payload, idempotencyKey)
 	if err != nil {
 		return agentos.ArtifactRef{}, err
 	}
+
 	if exists {
-		if err := agentosplan.ValidateArtifactPublishIdempotency(existing, ref); err != nil {
-			return agentos.ArtifactRef{}, err
-		}
-
 		return existing, nil
 	}
-	if payload == nil {
-		if err := agentosplan.ValidateNewRefOnlyArtifactPublish(ref); err != nil {
-			return agentos.ArtifactRef{}, err
-		}
-	}
-	if existing, exists, err := r.artifactByID(ctx, ref.ArtifactID); err != nil {
+
+	stored, err := r.insertArtifact(ctx, &ref, scope, idempotencyKey, encodedPayload)
+	if err != nil {
 		return agentos.ArtifactRef{}, err
-	} else if exists {
-		return agentos.ArtifactRef{}, artifactIDConflictError(existing, ref.ArtifactID)
 	}
 
-	if payload != nil {
-		if r.blob == nil {
-			return agentos.ArtifactRef{}, fmt.Errorf("%w: blob store is required for artifact payload", agentos.ErrInvalidArtifact)
-		}
-		object, err := r.blob.Put(ctx, artifactBlobKey(ref.ArtifactID, ref.Digest), encodedPayload)
-		if err != nil {
-			return agentos.ArtifactRef{}, err
-		}
-		ref.URI = object.URI
-		ref.SizeBytes = object.SizeBytes
-		ref.Digest = object.Digest
+	if err := agentosplan.ValidateArtifactPublishIdempotency(&stored, &ref); err != nil {
+		return agentos.ArtifactRef{}, err
 	}
+
+	return stored, nil
+}
+
+func (r *AgentOSArtifactRepo) prepareArtifactPut(ctx context.Context, ref *agentos.ArtifactRef, payload any, idempotencyKey string) (planTenantScope, agentos.ArtifactRef, bool, error) {
+	if err := validateArtifactCreateInput(ref, idempotencyKey); err != nil {
+		return planTenantScope{}, agentos.ArtifactRef{}, false, err
+	}
+
+	scope, exists, err := planTenantScopeByPlanID(ctx, r.Pool, ref.PlanID)
+	if err != nil {
+		return planTenantScope{}, agentos.ArtifactRef{}, false, err
+	}
+
+	if !exists {
+		return planTenantScope{}, agentos.ArtifactRef{}, false, fmt.Errorf("%w: %s", agentos.ErrPlanRouteNotFound, ref.PlanID)
+	}
+
+	if err := r.validateArtifactOwnership(ctx, ref, scope); err != nil {
+		return planTenantScope{}, agentos.ArtifactRef{}, false, err
+	}
+
+	setArtifactRefDefaults(ref, idempotencyKey)
+
+	existing, exists, err := r.existingArtifactPublish(ctx, ref, scope, idempotencyKey)
+	if err != nil || exists {
+		return scope, existing, exists, err
+	}
+
+	if err := validateNewArtifactPublishPayload(ref, payload); err != nil {
+		return planTenantScope{}, agentos.ArtifactRef{}, false, err
+	}
+
+	if err := r.validateArtifactIDAvailable(ctx, ref); err != nil {
+		return planTenantScope{}, agentos.ArtifactRef{}, false, err
+	}
+
+	return scope, agentos.ArtifactRef{}, false, nil
+}
+
+func validateNewArtifactPublishPayload(ref *agentos.ArtifactRef, payload any) error {
+	if payload != nil {
+		return nil
+	}
+
+	return agentosplan.ValidateNewRefOnlyArtifactPublish(ref)
+}
+
+func (r *AgentOSArtifactRepo) validateArtifactIDAvailable(ctx context.Context, ref *agentos.ArtifactRef) error {
+	existing, exists, err := r.artifactByID(ctx, ref.ArtifactID)
+	if err != nil {
+		return err
+	}
+
+	if exists {
+		return artifactIDConflictError(&existing, ref.ArtifactID)
+	}
+
+	return nil
+}
+
+func (r *AgentOSArtifactRepo) insertArtifact(ctx context.Context, ref *agentos.ArtifactRef, scope planTenantScope, idempotencyKey string, encodedPayload []byte) (agentos.ArtifactRef, error) {
+	if err := r.storePayloadForArtifact(ctx, ref, encodedPayload); err != nil {
+		return agentos.ArtifactRef{}, err
+	}
+
 	metadataJSON, err := json.Marshal(ref.Metadata)
 	if err != nil {
 		return agentos.ArtifactRef{}, fmt.Errorf("AgentOSArtifactRepo - Put - marshal metadata: %w", err)
 	}
 
-	row := r.Pool.QueryRow(ctx, `
+	row := r.insertArtifactRow(ctx, ref, scope, idempotencyKey, metadataJSON)
+
+	stored, err := scanArtifactRef(row)
+	if err != nil {
+		return r.resolveArtifactPutConflict(ctx, ref, scope, idempotencyKey, err)
+	}
+
+	return stored, nil
+}
+
+func validateArtifactCreateInput(ref *agentos.ArtifactRef, idempotencyKey string) error {
+	if idempotencyKey == "" {
+		return fmt.Errorf("%w: artifact idempotency key is required", agentos.ErrInvalidArtifact)
+	}
+
+	if ref.PlanID == "" {
+		return fmt.Errorf("%w: plan id is required", agentos.ErrInvalidArtifact)
+	}
+
+	if ref.Name == "" {
+		return fmt.Errorf("%w: artifact name is required", agentos.ErrInvalidArtifact)
+	}
+
+	if ref.Kind == "" {
+		return fmt.Errorf("%w: artifact kind is required", agentos.ErrInvalidArtifact)
+	}
+
+	return nil
+}
+
+func setArtifactRefDefaults(ref *agentos.ArtifactRef, idempotencyKey string) {
+	if ref.ArtifactID == "" {
+		ref.ArtifactID = agentosplan.ArtifactIDFromRef(ref.PlanID, idempotencyKey)
+	}
+
+	if ref.CreatedAt.IsZero() {
+		ref.CreatedAt = time.Now().UTC()
+	}
+}
+
+func encodeArtifactPayload(payload any, ref *agentos.ArtifactRef) ([]byte, error) {
+	if payload == nil {
+		return nil, nil
+	}
+
+	encoded, mediaType, err := agentosplan.EncodeArtifactPayload(payload, ref.MediaType)
+	if err != nil {
+		return nil, err
+	}
+
+	ref.MediaType = mediaType
+	ref.SizeBytes = int64(len(encoded))
+	ref.Digest = agentosplan.DigestArtifactPayload(encoded)
+
+	return encoded, nil
+}
+
+func (r *AgentOSArtifactRepo) storePayloadForArtifact(ctx context.Context, ref *agentos.ArtifactRef, encodedPayload []byte) error {
+	if encodedPayload == nil {
+		return nil
+	}
+
+	if r.blob == nil {
+		return fmt.Errorf("%w: blob store is required for artifact payload", agentos.ErrInvalidArtifact)
+	}
+
+	object, err := r.blob.Put(ctx, artifactBlobKey(ref.ArtifactID, ref.Digest), encodedPayload)
+	if err != nil {
+		return err
+	}
+
+	ref.URI = object.URI
+	ref.SizeBytes = object.SizeBytes
+	ref.Digest = object.Digest
+
+	return nil
+}
+
+func (r *AgentOSArtifactRepo) insertArtifactRow(ctx context.Context, ref *agentos.ArtifactRef, scope planTenantScope, idempotencyKey string, metadataJSON []byte) pgx.Row {
+	return r.Pool.QueryRow(
+		ctx, `
 INSERT INTO artifacts (
     artifact_id,
     plan_id,
@@ -148,53 +244,60 @@ RETURNING `+strings.Join(artifactColumns(), ", "),
 		idempotencyKey,
 		ref.CreatedAt,
 	)
-	stored, err := scanArtifactRef(row)
-	if err != nil {
-		if errors.Is(err, pgx.ErrNoRows) {
-			existing, exists, lookupErr := r.artifactByIdempotencyKey(ctx, ref.PlanID, scope, idempotencyKey)
-			if lookupErr != nil {
-				return agentos.ArtifactRef{}, lookupErr
-			}
-			if exists {
-				if err := agentosplan.ValidateArtifactPublishIdempotency(existing, ref); err != nil {
-					return agentos.ArtifactRef{}, err
-				}
-
-				return existing, nil
-			}
-
-			return agentos.ArtifactRef{}, artifactIDConflictError(agentos.ArtifactRef{}, ref.ArtifactID)
-		}
-		if isPostgresUniqueViolation(err) {
-			existing, exists, lookupErr := r.artifactByIdempotencyKey(ctx, ref.PlanID, scope, idempotencyKey)
-			if lookupErr != nil {
-				return agentos.ArtifactRef{}, lookupErr
-			}
-			if exists {
-				if err := agentosplan.ValidateArtifactPublishIdempotency(existing, ref); err != nil {
-					return agentos.ArtifactRef{}, err
-				}
-
-				return existing, nil
-			}
-		}
-
-		return agentos.ArtifactRef{}, fmt.Errorf("AgentOSArtifactRepo - Put - insert: %w", err)
-	}
-	if err := agentosplan.ValidateArtifactPublishIdempotency(stored, ref); err != nil {
-		return agentos.ArtifactRef{}, err
-	}
-
-	return stored, nil
 }
 
-func (r *AgentOSArtifactRepo) Get(ctx context.Context, scope agentos.PlanArtifactScope) (agentos.ArtifactRef, any, error) {
+func (r *AgentOSArtifactRepo) resolveArtifactPutConflict(ctx context.Context, ref *agentos.ArtifactRef, scope planTenantScope, idempotencyKey string, err error) (agentos.ArtifactRef, error) {
+	if errors.Is(err, pgx.ErrNoRows) {
+		return r.resolveArtifactNoRowsConflict(ctx, ref, scope, idempotencyKey)
+	}
+
+	if isPostgresUniqueViolation(err) {
+		return r.resolveArtifactUniqueConflict(ctx, ref, scope, idempotencyKey, err)
+	}
+
+	return agentos.ArtifactRef{}, fmt.Errorf("AgentOSArtifactRepo - Put - insert: %w", err)
+}
+
+func (r *AgentOSArtifactRepo) resolveArtifactNoRowsConflict(ctx context.Context, ref *agentos.ArtifactRef, scope planTenantScope, idempotencyKey string) (agentos.ArtifactRef, error) {
+	existing, exists, err := r.existingArtifactPublish(ctx, ref, scope, idempotencyKey)
+	if err != nil || exists {
+		return existing, err
+	}
+
+	return agentos.ArtifactRef{}, artifactIDConflictError(&agentos.ArtifactRef{}, ref.ArtifactID)
+}
+
+func (r *AgentOSArtifactRepo) resolveArtifactUniqueConflict(ctx context.Context, ref *agentos.ArtifactRef, scope planTenantScope, idempotencyKey string, err error) (agentos.ArtifactRef, error) {
+	existing, exists, lookupErr := r.existingArtifactPublish(ctx, ref, scope, idempotencyKey)
+	if lookupErr != nil || exists {
+		return existing, lookupErr
+	}
+
+	return agentos.ArtifactRef{}, fmt.Errorf("AgentOSArtifactRepo - Put - insert: %w", err)
+}
+
+func (r *AgentOSArtifactRepo) existingArtifactPublish(ctx context.Context, ref *agentos.ArtifactRef, scope planTenantScope, idempotencyKey string) (agentos.ArtifactRef, bool, error) {
+	existing, exists, err := r.artifactByIdempotencyKey(ctx, ref.PlanID, scope, idempotencyKey)
+	if err != nil || !exists {
+		return agentos.ArtifactRef{}, false, err
+	}
+
+	if err := agentosplan.ValidateArtifactPublishIdempotency(&existing, ref); err != nil {
+		return agentos.ArtifactRef{}, false, err
+	}
+
+	return existing, true, nil
+}
+
+func (r *AgentOSArtifactRepo) Get(ctx context.Context, scope *agentos.PlanArtifactScope) (agentos.ArtifactRef, any, error) {
 	if err := agentosplan.ValidatePlanArtifactScope(scope); err != nil {
 		return agentos.ArtifactRef{}, nil, err
 	}
+
 	if scope.ArtifactID == "" {
 		return agentos.ArtifactRef{}, nil, fmt.Errorf("%w: artifact id is required", agentos.ErrInvalidArtifact)
 	}
+
 	ref, exists, err := r.getRef(ctx, artifactScopeWhere(scope))
 	if err != nil || !exists {
 		if !exists {
@@ -203,17 +306,21 @@ func (r *AgentOSArtifactRepo) Get(ctx context.Context, scope agentos.PlanArtifac
 
 		return agentos.ArtifactRef{}, nil, err
 	}
+
 	if ref.URI == "" {
 		return ref, nil, nil
 	}
+
 	if r.blob == nil {
 		return agentos.ArtifactRef{}, nil, fmt.Errorf("%w: blob store is required for artifact payload", agentos.ErrInvalidArtifact)
 	}
+
 	data, err := r.blob.Get(ctx, ref.URI)
 	if err != nil {
 		return agentos.ArtifactRef{}, nil, err
 	}
-	payload, err := decodeStoredArtifactPayload(ref, data)
+
+	payload, err := decodeStoredArtifactPayload(&ref, data)
 	if err != nil {
 		return agentos.ArtifactRef{}, nil, err
 	}
@@ -221,10 +328,11 @@ func (r *AgentOSArtifactRepo) Get(ctx context.Context, scope agentos.PlanArtifac
 	return ref, payload, nil
 }
 
-func decodeStoredArtifactPayload(ref agentos.ArtifactRef, data []byte) (any, error) {
+func decodeStoredArtifactPayload(ref *agentos.ArtifactRef, data []byte) (any, error) {
 	if ref.SizeBytes != int64(len(data)) {
 		return nil, fmt.Errorf("%w: artifact %q blob size %d does not match metadata size %d", agentos.ErrInvalidArtifact, ref.ArtifactID, len(data), ref.SizeBytes)
 	}
+
 	digest := agentosplan.DigestArtifactPayload(data)
 	if ref.Digest != digest {
 		return nil, fmt.Errorf("%w: artifact %q blob digest %q does not match metadata digest %q", agentos.ErrInvalidArtifact, ref.ArtifactID, digest, ref.Digest)
@@ -233,10 +341,11 @@ func decodeStoredArtifactPayload(ref agentos.ArtifactRef, data []byte) (any, err
 	return agentosplan.DecodeArtifactPayload(data, ref.MediaType)
 }
 
-func (r *AgentOSArtifactRepo) List(ctx context.Context, scope agentos.PlanArtifactScope) ([]agentos.ArtifactRef, error) {
+func (r *AgentOSArtifactRepo) List(ctx context.Context, scope *agentos.PlanArtifactScope) ([]agentos.ArtifactRef, error) {
 	if err := agentosplan.ValidatePlanArtifactScope(scope); err != nil {
 		return nil, err
 	}
+
 	builder := r.Builder.
 		Select(artifactColumns()...).
 		From("artifacts").
@@ -245,24 +354,29 @@ func (r *AgentOSArtifactRepo) List(ctx context.Context, scope agentos.PlanArtifa
 	if scope.Limit > 0 {
 		builder = builder.Limit(uint64(scope.Limit))
 	}
-	sql, args, err := builder.ToSql()
+
+	query, args, err := builder.ToSql()
 	if err != nil {
 		return nil, fmt.Errorf("AgentOSArtifactRepo - List - builder: %w", err)
 	}
-	rows, err := r.Pool.Query(ctx, sql, args...)
+
+	rows, err := r.Pool.Query(ctx, query, args...)
 	if err != nil {
 		return nil, fmt.Errorf("AgentOSArtifactRepo - List - query: %w", err)
 	}
 	defer rows.Close()
 
 	var refs []agentos.ArtifactRef
+
 	for rows.Next() {
 		ref, err := scanArtifactRef(rows)
 		if err != nil {
 			return nil, err
 		}
+
 		refs = append(refs, ref)
 	}
+
 	if err := rows.Err(); err != nil {
 		return nil, fmt.Errorf("AgentOSArtifactRepo - List - rows: %w", err)
 	}
@@ -270,16 +384,20 @@ func (r *AgentOSArtifactRepo) List(ctx context.Context, scope agentos.PlanArtifa
 	return refs, nil
 }
 
-func (r *AgentOSArtifactRepo) validateArtifactOwnership(ctx context.Context, ref agentos.ArtifactRef, scope planTenantScope) error {
+func (r *AgentOSArtifactRepo) validateArtifactOwnership(ctx context.Context, ref *agentos.ArtifactRef, scope planTenantScope) error {
 	if ref.NodeID == "" && ref.RunID == "" {
 		return nil
 	}
+
 	if ref.NodeID == "" || ref.RunID == "" {
 		return fmt.Errorf("%w: artifact node id and run id must be provided together", agentos.ErrInvalidArtifact)
 	}
 
-	var nodeRunID string
-	var ownedRunID sql.NullString
+	var (
+		nodeRunID  string
+		ownedRunID sql.NullString
+	)
+
 	err := r.Pool.QueryRow(ctx, `
 SELECT n.run_id, r.run_id
 FROM plan_nodes n
@@ -298,9 +416,11 @@ WHERE n.plan_id = $1
 
 		return fmt.Errorf("AgentOSArtifactRepo - validateArtifactOwnership - query: %w", err)
 	}
+
 	if nodeRunID != ref.RunID {
 		return fmt.Errorf("%w: artifact node %q has durable run id %q, got %q", agentos.ErrInvalidArtifact, ref.NodeID, nodeRunID, ref.RunID)
 	}
+
 	if !ownedRunID.Valid || ownedRunID.String == "" {
 		return fmt.Errorf("%w: %s", agentos.ErrRunRouteNotFound, ref.RunID)
 	}
@@ -325,7 +445,7 @@ func (r *AgentOSArtifactRepo) artifactByID(ctx context.Context, artifactID strin
 	return r.getRef(ctx, sq.Eq{"artifact_id": artifactID})
 }
 
-func artifactIDConflictError(existing agentos.ArtifactRef, requestedID string) error {
+func artifactIDConflictError(existing *agentos.ArtifactRef, requestedID string) error {
 	artifactID := requestedID
 	if artifactID == "" {
 		artifactID = existing.ArtifactID
@@ -334,7 +454,7 @@ func artifactIDConflictError(existing agentos.ArtifactRef, requestedID string) e
 	return fmt.Errorf("%w: artifact id %q already exists with a different idempotency key", agentos.ErrInvalidArtifact, artifactID)
 }
 
-func artifactScopeWhere(scope agentos.PlanArtifactScope) sq.Eq {
+func artifactScopeWhere(scope *agentos.PlanArtifactScope) sq.Eq {
 	where := sq.Eq{
 		"plan_id":    scope.PlanID,
 		"account_id": scope.AccountID,
@@ -343,9 +463,11 @@ func artifactScopeWhere(scope agentos.PlanArtifactScope) sq.Eq {
 	if scope.ArtifactID != "" {
 		where["artifact_id"] = scope.ArtifactID
 	}
+
 	if scope.NodeID != "" {
 		where["node_id"] = scope.NodeID
 	}
+
 	if scope.RunID != "" {
 		where["run_id"] = scope.RunID
 	}
@@ -354,15 +476,17 @@ func artifactScopeWhere(scope agentos.PlanArtifactScope) sq.Eq {
 }
 
 func (r *AgentOSArtifactRepo) getRef(ctx context.Context, where sq.Eq) (agentos.ArtifactRef, bool, error) {
-	sql, args, err := r.Builder.
+	query, args, err := r.Builder.
 		Select(artifactColumns()...).
 		From("artifacts").
 		Where(where).
 		ToSql()
 	if err != nil {
-		return agentos.ArtifactRef{}, false, fmt.Errorf("AgentOSArtifactRepo - getRef - builder: %w", err)
+		return agentos.ArtifactRef{}, false, fmt.Errorf("getRef builder: %w", err)
 	}
-	row := r.Pool.QueryRow(ctx, sql, args...)
+
+	row := r.Pool.QueryRow(ctx, query, args...)
+
 	ref, err := scanArtifactRef(row)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
@@ -398,9 +522,12 @@ type artifactScanner interface {
 }
 
 func scanArtifactRef(scanner artifactScanner) (agentos.ArtifactRef, error) {
-	var ref agentos.ArtifactRef
-	var kind string
-	var metadataJSON []byte
+	var (
+		ref          agentos.ArtifactRef
+		kind         string
+		metadataJSON []byte
+	)
+
 	if err := scanner.Scan(
 		&ref.ArtifactID,
 		&ref.PlanID,
@@ -417,6 +544,7 @@ func scanArtifactRef(scanner artifactScanner) (agentos.ArtifactRef, error) {
 	); err != nil {
 		return agentos.ArtifactRef{}, err
 	}
+
 	ref.Kind = agentos.ArtifactKind(kind)
 	if len(metadataJSON) > 0 {
 		if err := json.Unmarshal(metadataJSON, &ref.Metadata); err != nil {

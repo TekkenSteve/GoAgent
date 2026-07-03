@@ -3,6 +3,7 @@ package agentosplan
 import (
 	"context"
 	"fmt"
+	"maps"
 	"sort"
 	"sync"
 	"time"
@@ -67,71 +68,120 @@ func NewMemoryPlanStore() *MemoryPlanStore {
 	}
 }
 
-func (s *MemoryPlanStore) CreatePlan(ctx context.Context, spec agentos.RunPlanSpec, status agentos.RunPlanStatus) (agentos.RunPlanStatus, bool, error) {
-	if spec.PlanID == "" {
-		return agentos.RunPlanStatus{}, false, fmt.Errorf("%w: plan id is required", agentos.ErrInvalidRunPlan)
+func (s *MemoryPlanStore) lookupExistingPlan(key planStartKey, spec *agentos.RunPlanSpec) (agentos.RunPlanStatus, bool, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	return s.lookupExistingPlanLocked(key, spec)
+}
+
+func (s *MemoryPlanStore) lookupExistingPlanLocked(key planStartKey, spec *agentos.RunPlanSpec) (agentos.RunPlanStatus, bool, error) {
+	if existingPlanID, exists := s.planKeys[key]; exists {
+		existingSpec := s.specs[existingPlanID]
+		existingStatus := s.statuses[existingPlanID]
+
+		if err := ValidatePlanStartIdempotency(&existingSpec, spec); err != nil {
+			return agentos.RunPlanStatus{}, false, err
+		}
+
+		return cloneRunPlanStatus(&existingStatus), true, nil
 	}
-	if spec.IdempotencyKey == "" {
-		return agentos.RunPlanStatus{}, false, fmt.Errorf("%w: plan idempotency key is required", agentos.ErrInvalidRunPlan)
+
+	return agentos.RunPlanStatus{}, false, nil
+}
+
+func (s *MemoryPlanStore) lookupExistingPlanIDLocked(spec *agentos.RunPlanSpec) (agentos.RunPlanStatus, bool, error) {
+	existingSpec, exists := s.specs[spec.PlanID]
+	if !exists {
+		return agentos.RunPlanStatus{}, false, nil
 	}
+
+	if err := ValidatePlanStartIdempotency(&existingSpec, spec); err != nil {
+		return agentos.RunPlanStatus{}, false, err
+	}
+
+	existingStatus := s.statuses[spec.PlanID]
+
+	return cloneRunPlanStatus(&existingStatus), true, nil
+}
+
+func (s *MemoryPlanStore) CreatePlan(_ context.Context, spec *agentos.RunPlanSpec, status *agentos.RunPlanStatus) (agentos.RunPlanStatus, bool, error) {
+	if err := validateMemoryCreatePlanInput(spec); err != nil {
+		return agentos.RunPlanStatus{}, false, err
+	}
+
 	key := planStartKey{
 		AccountID:      spec.AccountID,
 		ProjectID:      spec.ProjectID,
 		IdempotencyKey: spec.IdempotencyKey,
 	}
-	s.mu.RLock()
-	if existingPlanID, exists := s.planKeys[key]; exists {
-		existingSpec := s.specs[existingPlanID]
-		existingStatus := s.statuses[existingPlanID]
-		s.mu.RUnlock()
-		if err := ValidatePlanStartIdempotency(existingSpec, spec); err != nil {
-			return agentos.RunPlanStatus{}, false, err
-		}
 
-		return existingStatus, false, nil
-	}
-	existingSpec, exists := s.specs[spec.PlanID]
-	existingStatus := s.statuses[spec.PlanID]
-	s.mu.RUnlock()
-	if exists {
-		if err := ValidatePlanStartIdempotency(existingSpec, spec); err != nil {
-			return agentos.RunPlanStatus{}, false, err
-		}
-
-		return existingStatus, false, nil
+	if status, found, err := s.lookupExistingPlan(key, spec); found || err != nil {
+		return status, false, err
 	}
 
-	snapshot := PlanStateSnapshot{Spec: spec, Status: status}
-	snapshot, err := normalizeMemoryPlanStateSnapshot(snapshot)
+	if status, found, err := s.lookupExistingPlanByID(spec); found || err != nil {
+		return status, false, err
+	}
+
+	snapshot, err := prepareMemoryCreatePlanSnapshot(spec, status)
 	if err != nil {
 		return agentos.RunPlanStatus{}, false, err
 	}
 
+	return s.createPlanSnapshot(key, spec, &snapshot)
+}
+
+func prepareMemoryCreatePlanSnapshot(spec *agentos.RunPlanSpec, status *agentos.RunPlanStatus) (PlanStateSnapshot, error) {
+	if status == nil {
+		return PlanStateSnapshot{}, fmt.Errorf("%w: plan status is required", agentos.ErrInvalidRunPlan)
+	}
+
+	snapshot := PlanStateSnapshot{Spec: cloneRunPlanSpec(spec), Status: cloneRunPlanStatus(status)}
+
+	return normalizeMemoryPlanStateSnapshot(&snapshot)
+}
+
+func (s *MemoryPlanStore) createPlanSnapshot(key planStartKey, spec *agentos.RunPlanSpec, snapshot *PlanStateSnapshot) (agentos.RunPlanStatus, bool, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	if existingPlanID, exists := s.planKeys[key]; exists {
-		existingSpec := s.specs[existingPlanID]
-		existingStatus := s.statuses[existingPlanID]
-		if err := ValidatePlanStartIdempotency(existingSpec, spec); err != nil {
-			return agentos.RunPlanStatus{}, false, err
-		}
-
-		return existingStatus, false, nil
+	if status, found, err := s.lookupExistingPlanLocked(key, spec); found || err != nil {
+		return cloneRunPlanStatus(&status), false, err
 	}
-	if existingSpec, exists := s.specs[spec.PlanID]; exists {
-		existingStatus := s.statuses[spec.PlanID]
-		if err := ValidatePlanStartIdempotency(existingSpec, spec); err != nil {
-			return agentos.RunPlanStatus{}, false, err
-		}
 
-		return existingStatus, false, nil
+	if status, found, err := s.lookupExistingPlanIDLocked(spec); found || err != nil {
+		return status, false, err
 	}
+
 	if err := s.savePlanStateLocked(snapshot, true); err != nil {
 		return agentos.RunPlanStatus{}, false, err
 	}
 
-	return snapshot.Status, true, nil
+	return cloneRunPlanStatus(&snapshot.Status), true, nil
+}
+
+func (s *MemoryPlanStore) lookupExistingPlanByID(spec *agentos.RunPlanSpec) (agentos.RunPlanStatus, bool, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	return s.lookupExistingPlanIDLocked(spec)
+}
+
+func validateMemoryCreatePlanInput(spec *agentos.RunPlanSpec) error {
+	if spec == nil {
+		return fmt.Errorf("%w: run plan spec is required", agentos.ErrInvalidRunPlan)
+	}
+
+	if spec.PlanID == "" {
+		return fmt.Errorf("%w: plan id is required", agentos.ErrInvalidRunPlan)
+	}
+
+	if spec.IdempotencyKey == "" {
+		return fmt.Errorf("%w: plan idempotency key is required", agentos.ErrInvalidRunPlan)
+	}
+
+	return nil
 }
 
 func (s *MemoryPlanStore) GetPlan(_ context.Context, planID string) (agentos.RunPlanSpec, agentos.RunPlanStatus, bool, error) {
@@ -143,7 +193,9 @@ func (s *MemoryPlanStore) GetPlan(_ context.Context, planID string) (agentos.Run
 		return agentos.RunPlanSpec{}, agentos.RunPlanStatus{}, false, nil
 	}
 
-	return spec, s.statuses[planID], true, nil
+	status := s.statuses[planID]
+
+	return cloneRunPlanSpec(&spec), cloneRunPlanStatus(&status), true, nil
 }
 
 func (s *MemoryPlanStore) GetPlanByRef(_ context.Context, ref agentos.PlanRef) (agentos.RunPlanSpec, agentos.RunPlanStatus, bool, error) {
@@ -153,63 +205,56 @@ func (s *MemoryPlanStore) GetPlanByRef(_ context.Context, ref agentos.PlanRef) (
 
 	s.mu.RLock()
 	defer s.mu.RUnlock()
+
 	spec, ok := s.specs[ref.PlanID]
 	if !ok {
 		return agentos.RunPlanSpec{}, agentos.RunPlanStatus{}, false, nil
 	}
-	if err := ValidatePlanTenantAccess(ref, spec); err != nil {
+
+	if err := ValidatePlanTenantAccess(ref, &spec); err != nil {
 		return agentos.RunPlanSpec{}, agentos.RunPlanStatus{}, false, err
 	}
 
-	return spec, s.statuses[ref.PlanID], true, nil
+	status := s.statuses[ref.PlanID]
+
+	return cloneRunPlanSpec(&spec), cloneRunPlanStatus(&status), true, nil
 }
 
-func (s *MemoryPlanStore) ListPlanRefs(_ context.Context, scope PlanRefScope) ([]agentos.PlanRef, error) {
+func (s *MemoryPlanStore) ListPlanRefs(_ context.Context, scope *PlanRefScope) ([]agentos.PlanRef, error) {
+	if scope == nil {
+		scope = &PlanRefScope{}
+	}
+
 	if scope.Limit < 0 {
 		return nil, fmt.Errorf("%w: plan ref limit must be non-negative", agentos.ErrInvalidPlanScope)
 	}
-	lifecycleStates := make(map[string]struct{}, len(scope.LifecycleStates))
-	for _, state := range scope.LifecycleStates {
-		if state == "" {
-			return nil, fmt.Errorf("%w: lifecycle state is required", agentos.ErrInvalidPlanScope)
-		}
-		lifecycleStates[state] = struct{}{}
+
+	lifecycleStates, err := planLifecycleStateSet(scope.LifecycleStates)
+	if err != nil {
+		return nil, err
 	}
 
 	s.mu.RLock()
 	defer s.mu.RUnlock()
+
 	refs := make([]agentos.PlanRef, 0, len(s.specs))
-	for planID, spec := range s.specs {
+	for planID := range s.specs {
+		spec := s.specs[planID]
 		status := s.statuses[planID]
-		if scope.AccountID != "" && spec.AccountID != scope.AccountID {
+
+		if !memoryPlanRefMatchesScope(&spec, &status, scope, lifecycleStates) {
 			continue
 		}
-		if scope.ProjectID != "" && spec.ProjectID != scope.ProjectID {
-			continue
-		}
-		if len(lifecycleStates) > 0 {
-			if _, ok := lifecycleStates[status.LifecycleState]; !ok {
-				continue
-			}
-		}
-		if !scope.UpdatedAfter.IsZero() && !status.UpdatedAt.After(scope.UpdatedAfter) {
-			continue
-		}
+
 		refs = append(refs, agentos.PlanRef{
 			PlanID:    spec.PlanID,
 			AccountID: spec.AccountID,
 			ProjectID: spec.ProjectID,
 		})
 	}
-	sort.SliceStable(refs, func(i, j int) bool {
-		left := s.statuses[refs[i].PlanID]
-		right := s.statuses[refs[j].PlanID]
-		if !left.UpdatedAt.Equal(right.UpdatedAt) {
-			return left.UpdatedAt.Before(right.UpdatedAt)
-		}
 
-		return refs[i].PlanID < refs[j].PlanID
-	})
+	sortMemoryPlanRefs(refs, s.statuses)
+
 	if scope.Limit > 0 && len(refs) > scope.Limit {
 		refs = refs[:scope.Limit]
 	}
@@ -217,8 +262,52 @@ func (s *MemoryPlanStore) ListPlanRefs(_ context.Context, scope PlanRefScope) ([
 	return refs, nil
 }
 
-func (s *MemoryPlanStore) SavePlanState(_ context.Context, snapshot PlanStateSnapshot) error {
-	snapshot, err := normalizeMemoryPlanStateSnapshot(snapshot)
+func planLifecycleStateSet(states []string) (map[string]struct{}, error) {
+	lifecycleStates := make(map[string]struct{}, len(states))
+	for _, state := range states {
+		if state == "" {
+			return nil, fmt.Errorf("%w: lifecycle state is required", agentos.ErrInvalidPlanScope)
+		}
+
+		lifecycleStates[state] = struct{}{}
+	}
+
+	return lifecycleStates, nil
+}
+
+func memoryPlanRefMatchesScope(spec *agentos.RunPlanSpec, status *agentos.RunPlanStatus, scope *PlanRefScope, lifecycleStates map[string]struct{}) bool {
+	if scope.AccountID != "" && spec.AccountID != scope.AccountID {
+		return false
+	}
+
+	if scope.ProjectID != "" && spec.ProjectID != scope.ProjectID {
+		return false
+	}
+
+	if len(lifecycleStates) > 0 {
+		if _, ok := lifecycleStates[status.LifecycleState]; !ok {
+			return false
+		}
+	}
+
+	return scope.UpdatedAfter.IsZero() || status.UpdatedAt.After(scope.UpdatedAfter)
+}
+
+func sortMemoryPlanRefs(refs []agentos.PlanRef, statuses map[string]agentos.RunPlanStatus) {
+	sort.SliceStable(refs, func(i, j int) bool {
+		left := statuses[refs[i].PlanID]
+		right := statuses[refs[j].PlanID]
+
+		if !left.UpdatedAt.Equal(right.UpdatedAt) {
+			return left.UpdatedAt.Before(right.UpdatedAt)
+		}
+
+		return refs[i].PlanID < refs[j].PlanID
+	})
+}
+
+func (s *MemoryPlanStore) SavePlanState(_ context.Context, snapshot *PlanStateSnapshot) error {
+	normalized, err := normalizeMemoryPlanStateSnapshot(snapshot)
 	if err != nil {
 		return err
 	}
@@ -226,35 +315,44 @@ func (s *MemoryPlanStore) SavePlanState(_ context.Context, snapshot PlanStateSna
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	return s.savePlanStateLocked(snapshot, false)
+	return s.savePlanStateLocked(&normalized, false)
 }
 
-func normalizeMemoryPlanStateSnapshot(snapshot PlanStateSnapshot) (PlanStateSnapshot, error) {
-	if err := ValidateRunPlanScope(snapshot.Spec); err != nil {
+func normalizeMemoryPlanStateSnapshot(snapshot *PlanStateSnapshot) (PlanStateSnapshot, error) {
+	if snapshot == nil {
+		return PlanStateSnapshot{}, fmt.Errorf("%w: plan state snapshot is required", agentos.ErrInvalidRunPlan)
+	}
+
+	if err := ValidateRunPlanScope(&snapshot.Spec); err != nil {
 		return PlanStateSnapshot{}, err
 	}
+
+	normalized := clonePlanStateSnapshot(snapshot)
 	if snapshot.Spec.IdempotencyKey == "" {
 		return PlanStateSnapshot{}, fmt.Errorf("%w: plan idempotency key is required", agentos.ErrInvalidRunPlan)
 	}
-	snapshot.Spec.RequestedAt = NormalizeDurableTimestamp(snapshot.Spec.RequestedAt)
-	if snapshot.Status.PlanID == "" {
-		snapshot.Status.PlanID = snapshot.Spec.PlanID
-	}
-	if snapshot.Status.UpdatedAt.IsZero() {
-		snapshot.Status.UpdatedAt = time.Now().UTC()
+
+	normalized.Spec.RequestedAt = NormalizeDurableTimestamp(normalized.Spec.RequestedAt)
+	if normalized.Status.PlanID == "" {
+		normalized.Status.PlanID = normalized.Spec.PlanID
 	}
 
-	return snapshot, nil
+	if normalized.Status.UpdatedAt.IsZero() {
+		normalized.Status.UpdatedAt = time.Now().UTC()
+	}
+
+	return normalized, nil
 }
 
-func (s *MemoryPlanStore) savePlanStateLocked(snapshot PlanStateSnapshot, allowCreate bool) error {
+func (s *MemoryPlanStore) savePlanStateLocked(snapshot *PlanStateSnapshot, allowCreate bool) error {
 	if existingSpec, ok := s.specs[snapshot.Spec.PlanID]; ok {
-		if err := ValidatePlanStateIdentity(existingSpec, snapshot.Spec); err != nil {
+		if err := ValidatePlanStateIdentity(&existingSpec, &snapshot.Spec); err != nil {
 			return err
 		}
 	} else if !allowCreate {
 		return fmt.Errorf("%w: %s", agentos.ErrPlanRouteNotFound, snapshot.Spec.PlanID)
 	}
+
 	key := planStartKey{
 		AccountID:      snapshot.Spec.AccountID,
 		ProjectID:      snapshot.Spec.ProjectID,
@@ -263,62 +361,88 @@ func (s *MemoryPlanStore) savePlanStateLocked(snapshot PlanStateSnapshot, allowC
 	if existingPlanID, ok := s.planKeys[key]; ok && existingPlanID != snapshot.Spec.PlanID {
 		return fmt.Errorf("%w: plan idempotency key belongs to plan %q", agentos.ErrInvalidRunPlan, existingPlanID)
 	}
-	s.specs[snapshot.Spec.PlanID] = snapshot.Spec
-	s.statuses[snapshot.Spec.PlanID] = snapshot.Status
+
+	s.specs[snapshot.Spec.PlanID] = cloneRunPlanSpec(&snapshot.Spec)
+	s.statuses[snapshot.Spec.PlanID] = cloneRunPlanStatus(&snapshot.Status)
 	s.planKeys[key] = snapshot.Spec.PlanID
 
 	return nil
 }
 
-func (s *MemoryPlanStore) PersistPlanTransition(_ context.Context, snapshot PlanStateSnapshot, event agentos.PlanEvent, idempotencyKey string) (agentos.PlanEvent, error) {
-	snapshot, err := normalizeMemoryPlanStateSnapshot(snapshot)
+func (s *MemoryPlanStore) PersistPlanTransition(_ context.Context, snapshot *PlanStateSnapshot, event *agentos.PlanEvent, idempotencyKey string) (agentos.PlanEvent, error) {
+	normalizedSnapshot, err := normalizeMemoryPlanStateSnapshot(snapshot)
 	if err != nil {
 		return agentos.PlanEvent{}, err
 	}
-	if event.PlanID == "" {
-		return agentos.PlanEvent{}, fmt.Errorf("%w: plan id is required", agentos.ErrInvalidPlanEvent)
+
+	if err := validateMemoryPlanTransitionInput(&normalizedSnapshot, event, idempotencyKey); err != nil {
+		return agentos.PlanEvent{}, err
 	}
-	if event.PlanID != snapshot.Spec.PlanID {
-		return agentos.PlanEvent{}, fmt.Errorf("%w: event plan %q does not match snapshot plan %q", agentos.ErrInvalidPlanEvent, event.PlanID, snapshot.Spec.PlanID)
-	}
-	if idempotencyKey == "" {
-		return agentos.PlanEvent{}, fmt.Errorf("%w: plan event idempotency key is required", agentos.ErrInvalidPlanEvent)
-	}
-	transitionIdentity, err := NewPlanTransitionSnapshotIdentity(snapshot, idempotencyKey)
+
+	transitionIdentity, err := NewPlanTransitionSnapshotIdentity(&normalizedSnapshot, idempotencyKey)
 	if err != nil {
 		return agentos.PlanEvent{}, err
 	}
+
 	requestedEvent := NormalizePlanEventAppendRequest(event)
 
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	requestedEvent, err = ScopePlanEventToSpec(requestedEvent, snapshot.Spec)
+	requestedEvent, err = ScopePlanEventToSpec(&requestedEvent, &normalizedSnapshot.Spec)
 	if err != nil {
 		return agentos.PlanEvent{}, err
 	}
+
 	key := planEventIdempotencyKey{PlanID: requestedEvent.PlanID, IdempotencyKey: idempotencyKey}
 	if existing, ok := s.eventKeys[key]; ok {
-		if err := ValidatePlanEventIdempotency(existing, requestedEvent); err != nil {
-			return agentos.PlanEvent{}, err
-		}
-		if err := ValidatePlanTransitionIdempotency(s.transitionSnapshots[key], transitionIdentity); err != nil {
+		if err := validateMemoryPlanTransitionReplay(&existing, &requestedEvent, s.transitionSnapshots[key], transitionIdentity); err != nil {
 			return agentos.PlanEvent{}, err
 		}
 
-		return existing, nil
+		return clonePlanEvent(&existing), nil
 	}
-	if err := s.savePlanStateLocked(snapshot, false); err != nil {
+
+	if err := s.savePlanStateLocked(&normalizedSnapshot, false); err != nil {
 		return agentos.PlanEvent{}, err
 	}
 
-	stored, err := s.appendPlanEventLocked(requestedEvent, idempotencyKey)
+	stored, err := s.appendPlanEventLocked(&requestedEvent, idempotencyKey)
 	if err != nil {
 		return agentos.PlanEvent{}, err
 	}
+
 	s.transitionSnapshots[key] = transitionIdentity.Digest
 
 	return stored, nil
+}
+
+func validateMemoryPlanTransitionInput(snapshot *PlanStateSnapshot, event *agentos.PlanEvent, idempotencyKey string) error {
+	if event == nil {
+		return fmt.Errorf("%w: plan event is required", agentos.ErrInvalidPlanEvent)
+	}
+
+	if event.PlanID == "" {
+		return fmt.Errorf("%w: plan id is required", agentos.ErrInvalidPlanEvent)
+	}
+
+	if event.PlanID != snapshot.Spec.PlanID {
+		return fmt.Errorf("%w: event plan %q does not match snapshot plan %q", agentos.ErrInvalidPlanEvent, event.PlanID, snapshot.Spec.PlanID)
+	}
+
+	if idempotencyKey == "" {
+		return fmt.Errorf("%w: plan event idempotency key is required", agentos.ErrInvalidPlanEvent)
+	}
+
+	return nil
+}
+
+func validateMemoryPlanTransitionReplay(existing, requested *agentos.PlanEvent, existingDigest string, requestedIdentity PlanTransitionSnapshotIdentity) error {
+	if err := ValidatePlanEventIdempotency(existing, requested); err != nil {
+		return err
+	}
+
+	return ValidatePlanTransitionIdempotency(existingDigest, requestedIdentity)
 }
 
 func (s *MemoryPlanStore) LoadPlanState(_ context.Context, planID string) (PlanStateSnapshot, bool, error) {
@@ -330,112 +454,145 @@ func (s *MemoryPlanStore) LoadPlanState(_ context.Context, planID string) (PlanS
 		return PlanStateSnapshot{}, false, nil
 	}
 
-	return PlanStateSnapshot{
+	return clonePlanStateSnapshot(&PlanStateSnapshot{
 		Spec:   spec,
 		Status: s.statuses[planID],
-	}, true, nil
+	}), true, nil
 }
 
-func (s *MemoryPlanStore) AppendPlanEvent(_ context.Context, event agentos.PlanEvent, idempotencyKey string) (agentos.PlanEvent, error) {
+func (s *MemoryPlanStore) AppendPlanEvent(_ context.Context, event *agentos.PlanEvent, idempotencyKey string) (agentos.PlanEvent, error) {
+	if event == nil {
+		return agentos.PlanEvent{}, fmt.Errorf("%w: plan event is required", agentos.ErrInvalidPlanEvent)
+	}
+
 	if event.PlanID == "" {
 		return agentos.PlanEvent{}, fmt.Errorf("%w: plan id is required", agentos.ErrInvalidPlanEvent)
 	}
+
 	if idempotencyKey == "" {
 		return agentos.PlanEvent{}, fmt.Errorf("%w: plan event idempotency key is required", agentos.ErrInvalidPlanEvent)
 	}
+
 	requestedEvent := NormalizePlanEventAppendRequest(event)
-	event = requestedEvent
 
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	return s.appendPlanEventLocked(event, idempotencyKey)
+	return s.appendPlanEventLocked(&requestedEvent, idempotencyKey)
 }
 
-func (s *MemoryPlanStore) appendPlanEventLocked(event agentos.PlanEvent, idempotencyKey string) (agentos.PlanEvent, error) {
+func (s *MemoryPlanStore) appendPlanEventLocked(event *agentos.PlanEvent, idempotencyKey string) (agentos.PlanEvent, error) {
 	spec, ok := s.specs[event.PlanID]
 	if !ok {
 		return agentos.PlanEvent{}, fmt.Errorf("%w: %s", agentos.ErrPlanRouteNotFound, event.PlanID)
 	}
-	event, err := ScopePlanEventToSpec(event, spec)
+
+	scoped, err := ScopePlanEventToSpec(event, &spec)
 	if err != nil {
 		return agentos.PlanEvent{}, err
 	}
-	key := planEventIdempotencyKey{PlanID: event.PlanID, IdempotencyKey: idempotencyKey}
+
+	key := planEventIdempotencyKey{PlanID: scoped.PlanID, IdempotencyKey: idempotencyKey}
 	if existing, ok := s.eventKeys[key]; ok {
-		if err := ValidatePlanEventIdempotency(existing, event); err != nil {
+		if err := ValidatePlanEventIdempotency(&existing, &scoped); err != nil {
 			return agentos.PlanEvent{}, err
 		}
 
-		return existing, nil
+		return clonePlanEvent(&existing), nil
 	}
-	event.Sequence = int64(len(s.events[event.PlanID]) + 1)
-	event.EventID = fmt.Sprintf("%s:%d", event.PlanID, event.Sequence)
-	if event.Timestamp.IsZero() {
-		event.Timestamp = time.Now().UTC()
-	}
-	event.Timestamp = NormalizeDurableTimestamp(event.Timestamp)
-	s.events[event.PlanID] = append(s.events[event.PlanID], event)
-	s.eventKeys[key] = event
 
-	return event, nil
+	scoped.Sequence = int64(len(s.events[scoped.PlanID]) + 1)
+
+	scoped.EventID = fmt.Sprintf("%s:%d", scoped.PlanID, scoped.Sequence)
+	if scoped.Timestamp.IsZero() {
+		scoped.Timestamp = time.Now().UTC()
+	}
+
+	scoped.Timestamp = NormalizeDurableTimestamp(scoped.Timestamp)
+	stored := clonePlanEvent(&scoped)
+	s.events[scoped.PlanID] = append(s.events[scoped.PlanID], stored)
+	s.eventKeys[key] = stored
+
+	return clonePlanEvent(&stored), nil
 }
 
-func (s *MemoryPlanStore) ListPlanEvents(_ context.Context, scope agentos.PlanStreamScope, limit int) ([]agentos.PlanEvent, error) {
+func (s *MemoryPlanStore) ListPlanEvents(_ context.Context, scope *agentos.PlanStreamScope, limit int) ([]agentos.PlanEvent, error) {
 	if err := ValidatePlanStreamScope(scope); err != nil {
 		return nil, err
 	}
 
 	s.mu.RLock()
 	defer s.mu.RUnlock()
+
 	spec, ok := s.specs[scope.PlanID]
 	if !ok {
 		return nil, fmt.Errorf("%w: %s", agentos.ErrPlanRouteNotFound, scope.PlanID)
 	}
-	if err := ValidatePlanTenantAccess(agentos.PlanRef{PlanID: scope.PlanID, AccountID: scope.AccountID, ProjectID: scope.ProjectID}, spec); err != nil {
+
+	if err := ValidatePlanTenantAccess(agentos.PlanRef{PlanID: scope.PlanID, AccountID: scope.AccountID, ProjectID: scope.ProjectID}, &spec); err != nil {
 		return nil, err
 	}
-	events := append([]agentos.PlanEvent(nil), s.events[scope.PlanID]...)
+
+	events := clonePlanEvents(s.events[scope.PlanID])
 	sort.SliceStable(events, func(i, j int) bool {
 		return events[i].Sequence < events[j].Sequence
 	})
 
+	return filterMemoryPlanEvents(events, scope, limit), nil
+}
+
+func filterMemoryPlanEvents(events []agentos.PlanEvent, scope *agentos.PlanStreamScope, limit int) []agentos.PlanEvent {
 	filtered := make([]agentos.PlanEvent, 0, len(events))
-	for _, event := range events {
-		if event.Sequence <= scope.AfterSequence {
+
+	for i := range events {
+		event := events[i]
+		if !memoryPlanEventMatchesScope(&event, scope) {
 			continue
 		}
-		if scope.NodeID != "" && event.NodeID != scope.NodeID {
-			continue
-		}
-		if scope.RunID != "" && event.RunID != scope.RunID {
-			continue
-		}
-		filtered = append(filtered, event)
+
+		filtered = append(filtered, clonePlanEvent(&event))
 		if limit > 0 && len(filtered) >= limit {
 			break
 		}
 	}
 
-	return filtered, nil
+	return filtered
+}
+
+func memoryPlanEventMatchesScope(event *agentos.PlanEvent, scope *agentos.PlanStreamScope) bool {
+	if event.Sequence <= scope.AfterSequence {
+		return false
+	}
+
+	if scope.NodeID != "" && event.NodeID != scope.NodeID {
+		return false
+	}
+
+	return scope.RunID == "" || event.RunID == scope.RunID
 }
 
 func (s *MemoryPlanStore) GetPlanMetricCheckpoint(_ context.Context, exporterID string, ref agentos.PlanRef) (PlanMetricCheckpoint, bool, error) {
 	if exporterID == "" {
 		return PlanMetricCheckpoint{}, false, fmt.Errorf("%w: metrics exporter id is required", agentos.ErrInvalidRunPlan)
 	}
+
 	if err := ValidatePlanRef(ref); err != nil {
 		return PlanMetricCheckpoint{}, false, err
 	}
 
 	s.mu.RLock()
 	defer s.mu.RUnlock()
+
 	checkpoint, ok := s.metrics[planMetricCheckpointKeyFromRef(exporterID, ref)]
 
 	return checkpoint, ok, nil
 }
 
-func (s *MemoryPlanStore) SavePlanMetricCheckpoint(_ context.Context, checkpoint PlanMetricCheckpoint) error {
+func (s *MemoryPlanStore) SavePlanMetricCheckpoint(_ context.Context, checkpoint *PlanMetricCheckpoint) error {
+	if checkpoint == nil {
+		return fmt.Errorf("%w: metrics checkpoint is required", agentos.ErrInvalidRunPlan)
+	}
+
 	ref := agentos.PlanRef{
 		PlanID:    checkpoint.PlanID,
 		AccountID: checkpoint.AccountID,
@@ -447,116 +604,194 @@ func (s *MemoryPlanStore) SavePlanMetricCheckpoint(_ context.Context, checkpoint
 
 	s.mu.Lock()
 	defer s.mu.Unlock()
+
 	spec, ok := s.specs[checkpoint.PlanID]
 	if !ok {
 		return fmt.Errorf("%w: %s", agentos.ErrPlanRouteNotFound, checkpoint.PlanID)
 	}
+
 	if spec.AccountID != checkpoint.AccountID || spec.ProjectID != checkpoint.ProjectID {
 		return fmt.Errorf("%w: %s", agentos.ErrPlanRouteNotFound, checkpoint.PlanID)
 	}
+
 	key := planMetricCheckpointKeyFromRef(checkpoint.ExporterID, ref)
 	if existing, ok := s.metrics[key]; ok {
 		if checkpoint.Sequence < existing.Sequence {
 			return fmt.Errorf("%w: metrics checkpoint sequence moved backward from %d to %d", agentos.ErrInvalidRunPlan, existing.Sequence, checkpoint.Sequence)
 		}
 	}
-	if checkpoint.UpdatedAt.IsZero() {
-		checkpoint.UpdatedAt = time.Now().UTC()
+
+	stored := *checkpoint
+	if stored.UpdatedAt.IsZero() {
+		stored.UpdatedAt = time.Now().UTC()
 	}
-	s.metrics[key] = checkpoint
+
+	s.metrics[key] = stored
 
 	return nil
 }
 
-func (s *MemoryPlanStore) RecordAudit(_ context.Context, record AuditRecord) (AuditRecord, bool, error) {
-	if record.PlanID == "" {
-		return AuditRecord{}, false, fmt.Errorf("%w: plan id is required", agentos.ErrInvalidRunPlan)
+func (s *MemoryPlanStore) RecordAudit(_ context.Context, record *AuditRecord) (AuditRecord, bool, error) {
+	if err := validateMemoryAuditRecord(record); err != nil {
+		return AuditRecord{}, false, err
 	}
-	if record.Action == "" {
-		return AuditRecord{}, false, fmt.Errorf("%w: audit action is required", agentos.ErrInvalidRunPlan)
-	}
-	if record.IdempotencyKey == "" {
-		return AuditRecord{}, false, fmt.Errorf("%w: audit idempotency key is required", agentos.ErrInvalidRunPlan)
-	}
+
+	stored := cloneAuditRecord(record)
+
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	spec, ok := s.specs[record.PlanID]
+
+	spec, ok := s.specs[stored.PlanID]
 	if !ok {
-		return AuditRecord{}, false, fmt.Errorf("%w: %s", agentos.ErrPlanRouteNotFound, record.PlanID)
+		return AuditRecord{}, false, fmt.Errorf("%w: %s", agentos.ErrPlanRouteNotFound, stored.PlanID)
 	}
-	record.AccountID = spec.AccountID
-	record.ProjectID = spec.ProjectID
-	ref := AuditRefFromRecord(record)
+
+	stored.AccountID = spec.AccountID
+	stored.ProjectID = spec.ProjectID
+
+	ref := AuditRefFromRecord(&stored)
 	if existing, ok := s.auditKeys[ref]; ok {
-		if err := ValidateAuditIdempotency(existing, record); err != nil {
+		if err := ValidateAuditIdempotency(&existing, &stored); err != nil {
 			return AuditRecord{}, false, err
 		}
 
-		return existing, false, nil
+		return cloneAuditRecord(&existing), false, nil
 	}
-	if err := ValidateAuditNodeRunInPlan(record, spec, s.statuses[record.PlanID]); err != nil {
+
+	status := s.statuses[stored.PlanID]
+	if err := ValidateAuditNodeRunInPlan(&stored, &spec, &status); err != nil {
 		return AuditRecord{}, false, err
 	}
+
+	prepareMemoryAuditRecord(&stored, ref)
+
+	stored = cloneAuditRecord(&stored)
+	s.auditKeys[ref] = stored
+
+	return cloneAuditRecord(&stored), true, nil
+}
+
+func validateMemoryAuditRecord(record *AuditRecord) error {
+	if record == nil {
+		return fmt.Errorf("%w: audit record is required", agentos.ErrInvalidRunPlan)
+	}
+
+	required := []struct {
+		value string
+		label string
+	}{
+		{value: record.PlanID, label: "plan id"},
+		{value: string(record.Action), label: "audit action"},
+		{value: record.IdempotencyKey, label: "audit idempotency key"},
+	}
+
+	for _, field := range required {
+		if field.value == "" {
+			return fmt.Errorf("%w: %s is required", agentos.ErrInvalidRunPlan, field.label)
+		}
+	}
+
+	return nil
+}
+
+func prepareMemoryAuditRecord(record *AuditRecord, ref AuditRef) {
 	if record.AuditID == "" {
 		record.AuditID = AuditIDFromRef(ref)
 	}
+
 	if record.CreatedAt.IsZero() {
 		record.CreatedAt = time.Now().UTC()
 	}
+
 	if record.Payload == nil {
 		record.Payload = map[string]any{}
 	}
-	s.auditKeys[ref] = record
-
-	return record, true, nil
 }
 
-func (s *MemoryPlanStore) RecordPlanCommand(_ context.Context, command PlanCommandRecord) (PlanCommandRecord, bool, error) {
-	if command.PlanID == "" {
-		return PlanCommandRecord{}, false, fmt.Errorf("%w: plan id is required", agentos.ErrInvalidRunPlan)
+func (s *MemoryPlanStore) RecordPlanCommand(_ context.Context, command *PlanCommandRecord) (PlanCommandRecord, bool, error) {
+	if err := validateMemoryPlanCommandRecord(command); err != nil {
+		return PlanCommandRecord{}, false, err
 	}
-	if command.Action == "" {
-		return PlanCommandRecord{}, false, fmt.Errorf("%w: command action is required", agentos.ErrInvalidRunPlan)
-	}
-	if command.IdempotencyKey == "" {
-		return PlanCommandRecord{}, false, fmt.Errorf("%w: command idempotency key is required", agentos.ErrInvalidRunPlan)
-	}
+
+	stored := clonePlanCommandRecord(command)
+
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	spec, ok := s.specs[command.PlanID]
+
+	spec, ok := s.specs[stored.PlanID]
 	if !ok {
-		return PlanCommandRecord{}, false, fmt.Errorf("%w: %s", agentos.ErrPlanRouteNotFound, command.PlanID)
+		return PlanCommandRecord{}, false, fmt.Errorf("%w: %s", agentos.ErrPlanRouteNotFound, stored.PlanID)
 	}
-	command.AccountID = spec.AccountID
-	command.ProjectID = spec.ProjectID
-	ref := PlanCommandRefFromRecord(command)
+
+	stored.AccountID = spec.AccountID
+	stored.ProjectID = spec.ProjectID
+
+	ref := PlanCommandRefFromRecord(&stored)
 	if existing, ok := s.commands[ref]; ok {
-		if err := ValidatePlanCommandIdempotency(existing, command); err != nil {
+		if err := ValidatePlanCommandIdempotency(&existing, &stored); err != nil {
 			return PlanCommandRecord{}, false, err
 		}
 
-		return existing, false, nil
+		return clonePlanCommandRecord(&existing), false, nil
 	}
+
+	if err := prepareMemoryPlanCommandRecord(&stored, ref); err != nil {
+		return PlanCommandRecord{}, false, err
+	}
+
+	stored = clonePlanCommandRecord(&stored)
+	s.commands[ref] = stored
+
+	return clonePlanCommandRecord(&stored), true, nil
+}
+
+func validateMemoryPlanCommandRecord(command *PlanCommandRecord) error {
+	if command == nil {
+		return fmt.Errorf("%w: command record is required", agentos.ErrInvalidRunPlan)
+	}
+
+	required := []struct {
+		value string
+		label string
+	}{
+		{value: command.PlanID, label: "plan id"},
+		{value: string(command.Action), label: "command action"},
+		{value: command.IdempotencyKey, label: "command idempotency key"},
+	}
+
+	for _, field := range required {
+		if field.value == "" {
+			return fmt.Errorf("%w: %s is required", agentos.ErrInvalidRunPlan, field.label)
+		}
+	}
+
+	return nil
+}
+
+func prepareMemoryPlanCommandRecord(command *PlanCommandRecord, ref PlanCommandRef) error {
 	if command.CommandID == "" {
 		command.CommandID = PlanCommandIDFromRef(ref)
 	}
+
 	status, err := NormalizeNewPlanCommandStatus(command.Status)
 	if err != nil {
-		return PlanCommandRecord{}, false, err
+		return err
 	}
+
 	command.Status = status
 	if command.CreatedAt.IsZero() {
 		command.CreatedAt = time.Now().UTC()
 	}
+
 	if command.UpdatedAt.IsZero() {
 		command.UpdatedAt = command.CreatedAt
 	}
+
 	if command.Payload == nil {
 		command.Payload = map[string]any{}
 	}
-	s.commands[ref] = command
 
-	return command, true, nil
+	return nil
 }
 
 func (s *MemoryPlanStore) GetPlanCommand(_ context.Context, ref PlanCommandRef) (PlanCommandRecord, bool, error) {
@@ -566,42 +801,70 @@ func (s *MemoryPlanStore) GetPlanCommand(_ context.Context, ref PlanCommandRef) 
 
 	s.mu.RLock()
 	defer s.mu.RUnlock()
+
 	command, ok := s.commands[ref]
 
-	return command, ok, nil
+	return clonePlanCommandRecord(&command), ok, nil
 }
 
-func (s *MemoryPlanStore) ListRecoverablePlanCommands(_ context.Context, scope PlanCommandScope) ([]PlanCommandRecord, error) {
+func (s *MemoryPlanStore) ListRecoverablePlanCommands(_ context.Context, scope *PlanCommandScope) ([]PlanCommandRecord, error) {
 	statuses, err := RecoverablePlanCommandStatuses(scope)
 	if err != nil {
 		return nil, err
 	}
+
 	statusSet := make(map[PlanCommandStatus]struct{}, len(statuses))
-	for _, status := range statuses {
+	for i := range statuses {
+		status := statuses[i]
 		statusSet[status] = struct{}{}
 	}
 
 	s.mu.RLock()
 	defer s.mu.RUnlock()
+
 	commands := make([]PlanCommandRecord, 0, len(s.commands))
-	for _, command := range s.commands {
-		if scope.PlanID != "" && command.PlanID != scope.PlanID {
+	for key := range s.commands {
+		command := s.commands[key]
+
+		if !memoryPlanCommandMatchesScope(&command, scope, statusSet) {
 			continue
 		}
-		if scope.AccountID != "" && command.AccountID != scope.AccountID {
-			continue
-		}
-		if scope.ProjectID != "" && command.ProjectID != scope.ProjectID {
-			continue
-		}
-		if scope.Action != "" && command.Action != scope.Action {
-			continue
-		}
-		if _, ok := statusSet[command.Status]; !ok {
-			continue
-		}
-		commands = append(commands, command)
+
+		commands = append(commands, clonePlanCommandRecord(&command))
 	}
+
+	sortPlanCommandRecords(commands)
+
+	if scope.Limit > 0 && len(commands) > scope.Limit {
+		commands = commands[:scope.Limit]
+	}
+
+	return commands, nil
+}
+
+func memoryPlanCommandMatchesScope(command *PlanCommandRecord, scope *PlanCommandScope, statusSet map[PlanCommandStatus]struct{}) bool {
+	if scope.PlanID != "" && command.PlanID != scope.PlanID {
+		return false
+	}
+
+	if scope.AccountID != "" && command.AccountID != scope.AccountID {
+		return false
+	}
+
+	if scope.ProjectID != "" && command.ProjectID != scope.ProjectID {
+		return false
+	}
+
+	if scope.Action != "" && command.Action != scope.Action {
+		return false
+	}
+
+	_, ok := statusSet[command.Status]
+
+	return ok
+}
+
+func sortPlanCommandRecords(commands []PlanCommandRecord) {
 	sort.SliceStable(commands, func(i, j int) bool {
 		if !commands[i].UpdatedAt.Equal(commands[j].UpdatedAt) {
 			return commands[i].UpdatedAt.Before(commands[j].UpdatedAt)
@@ -609,11 +872,6 @@ func (s *MemoryPlanStore) ListRecoverablePlanCommands(_ context.Context, scope P
 
 		return commands[i].CommandID < commands[j].CommandID
 	})
-	if scope.Limit > 0 && len(commands) > scope.Limit {
-		commands = commands[:scope.Limit]
-	}
-
-	return commands, nil
 }
 
 func (s *MemoryPlanStore) MarkPlanCommandDelivered(_ context.Context, ref PlanCommandRef) (PlanCommandRecord, error) {
@@ -631,28 +889,36 @@ func (s *MemoryPlanStore) updatePlanCommandStatus(ref PlanCommandRef, status Pla
 
 	s.mu.Lock()
 	defer s.mu.Unlock()
+
 	command, ok := s.commands[ref]
 	if !ok {
 		return PlanCommandRecord{}, fmt.Errorf("%w: command %q", agentos.ErrInvalidRunPlan, ref.IdempotencyKey)
 	}
+
 	if err := ValidatePlanCommandStatusTransition(command.Status, status); err != nil {
 		return PlanCommandRecord{}, err
 	}
+
 	if status == PlanCommandDelivered {
-		audit, ok := s.auditKeys[AuditRefFromRecord(AuditRecordFromPlanCommand(command))]
+		commandAudit := AuditRecordFromPlanCommand(&command)
+		audit, ok := s.auditKeys[AuditRefFromRecord(&commandAudit)]
+
 		if !ok {
 			return PlanCommandRecord{}, fmt.Errorf("%w: delivered command requires durable audit %q", agentos.ErrInvalidRunPlan, ref.IdempotencyKey)
 		}
-		if err := ValidatePlanCommandDeliveredAudit(command, audit); err != nil {
+
+		if err := ValidatePlanCommandDeliveredAudit(&command, &audit); err != nil {
 			return PlanCommandRecord{}, err
 		}
 	}
+
 	command.Status = status
 	command.FailureReason = reason
 	command.UpdatedAt = time.Now().UTC()
+	command = clonePlanCommandRecord(&command)
 	s.commands[ref] = command
 
-	return command, nil
+	return clonePlanCommandRecord(&command), nil
 }
 
 func (s *MemoryPlanStore) GetAuditRecord(_ context.Context, ref AuditRef) (AuditRecord, bool, error) {
@@ -662,42 +928,72 @@ func (s *MemoryPlanStore) GetAuditRecord(_ context.Context, ref AuditRef) (Audit
 
 	s.mu.RLock()
 	defer s.mu.RUnlock()
+
 	record, ok := s.auditKeys[ref]
 
-	return record, ok, nil
+	return cloneAuditRecord(&record), ok, nil
 }
 
-func (s *MemoryPlanStore) ListAuditRecords(_ context.Context, scope agentos.PlanAuditScope) ([]agentos.PlanAuditRecord, error) {
+func (s *MemoryPlanStore) ListAuditRecords(_ context.Context, scope *agentos.PlanAuditScope) ([]agentos.PlanAuditRecord, error) {
 	if err := ValidatePlanAuditScope(scope); err != nil {
 		return nil, err
 	}
 
 	s.mu.RLock()
 	defer s.mu.RUnlock()
+
 	spec, ok := s.specs[scope.PlanID]
 	if !ok {
 		return nil, fmt.Errorf("%w: %s", agentos.ErrPlanRouteNotFound, scope.PlanID)
 	}
-	if err := ValidatePlanTenantAccess(agentos.PlanRef{PlanID: scope.PlanID, AccountID: scope.AccountID, ProjectID: scope.ProjectID}, spec); err != nil {
+
+	if err := ValidatePlanTenantAccess(agentos.PlanRef{PlanID: scope.PlanID, AccountID: scope.AccountID, ProjectID: scope.ProjectID}, &spec); err != nil {
 		return nil, err
 	}
 
 	records := make([]AuditRecord, 0, len(s.auditKeys))
-	for _, record := range s.auditKeys {
-		if record.PlanID != scope.PlanID {
+	for key := range s.auditKeys {
+		record := s.auditKeys[key]
+
+		if !memoryAuditRecordMatchesScope(&record, scope) {
 			continue
 		}
-		if scope.NodeID != "" && record.NodeID != scope.NodeID {
-			continue
-		}
-		if scope.RunID != "" && record.RunID != scope.RunID {
-			continue
-		}
-		if scope.Action != "" && string(record.Action) != string(scope.Action) {
-			continue
-		}
-		records = append(records, record)
+
+		records = append(records, cloneAuditRecord(&record))
 	}
+
+	sortAuditRecords(records)
+
+	if scope.Limit > 0 && len(records) > scope.Limit {
+		records = records[:scope.Limit]
+	}
+
+	audits := make([]agentos.PlanAuditRecord, 0, len(records))
+	for i := range records {
+		record := &records[i]
+		audits = append(audits, PlanAuditRecordFromAuditRecord(record))
+	}
+
+	return audits, nil
+}
+
+func memoryAuditRecordMatchesScope(record *AuditRecord, scope *agentos.PlanAuditScope) bool {
+	if record.PlanID != scope.PlanID {
+		return false
+	}
+
+	if scope.NodeID != "" && record.NodeID != scope.NodeID {
+		return false
+	}
+
+	if scope.RunID != "" && record.RunID != scope.RunID {
+		return false
+	}
+
+	return scope.Action == "" || string(record.Action) == string(scope.Action)
+}
+
+func sortAuditRecords(records []AuditRecord) {
 	sort.SliceStable(records, func(i, j int) bool {
 		if records[i].CreatedAt.Equal(records[j].CreatedAt) {
 			return records[i].AuditID < records[j].AuditID
@@ -705,16 +1001,232 @@ func (s *MemoryPlanStore) ListAuditRecords(_ context.Context, scope agentos.Plan
 
 		return records[i].CreatedAt.Before(records[j].CreatedAt)
 	})
-	if scope.Limit > 0 && len(records) > scope.Limit {
-		records = records[:scope.Limit]
+}
+
+func clonePlanStateSnapshot(snapshot *PlanStateSnapshot) PlanStateSnapshot {
+	if snapshot == nil {
+		return PlanStateSnapshot{}
 	}
 
-	audits := make([]agentos.PlanAuditRecord, 0, len(records))
-	for _, record := range records {
-		audits = append(audits, PlanAuditRecordFromAuditRecord(record))
+	return PlanStateSnapshot{
+		Spec:   cloneRunPlanSpec(&snapshot.Spec),
+		Status: cloneRunPlanStatus(&snapshot.Status),
+	}
+}
+
+func cloneRunPlanSpec(spec *agentos.RunPlanSpec) agentos.RunPlanSpec {
+	if spec == nil {
+		return agentos.RunPlanSpec{}
 	}
 
-	return audits, nil
+	clone := *spec
+	clone.Inputs = cloneMemoryAnyMap(spec.Inputs)
+	clone.Metadata = cloneMemoryStringMap(spec.Metadata)
+	clone.Nodes = clonePlanNodeSpecs(spec.Nodes)
+	clone.Edges = clonePlanEdgeSpecs(spec.Edges)
+
+	return clone
+}
+
+func clonePlanNodeSpecs(nodes []agentos.PlanNodeSpec) []agentos.PlanNodeSpec {
+	if nodes == nil {
+		return nil
+	}
+
+	clone := make([]agentos.PlanNodeSpec, len(nodes))
+	for i := range nodes {
+		node := nodes[i]
+		node.Run = cloneRunSpec(&node.Run)
+		node.Inputs = append([]agentos.InputMapping(nil), node.Inputs...)
+		node.Outputs = append([]agentos.ArtifactSpec(nil), node.Outputs...)
+		node.Conditions = append([]string(nil), node.Conditions...)
+		clone[i] = node
+	}
+
+	return clone
+}
+
+func clonePlanEdgeSpecs(edges []agentos.PlanEdgeSpec) []agentos.PlanEdgeSpec {
+	if edges == nil {
+		return nil
+	}
+
+	clone := make([]agentos.PlanEdgeSpec, len(edges))
+	for i := range edges {
+		edge := edges[i]
+		edge.InputMapping = append([]agentos.InputMapping(nil), edge.InputMapping...)
+		clone[i] = edge
+	}
+
+	return clone
+}
+
+func cloneRunPlanStatus(status *agentos.RunPlanStatus) agentos.RunPlanStatus {
+	if status == nil {
+		return agentos.RunPlanStatus{}
+	}
+
+	clone := *status
+	clone.Nodes = clonePlanNodeStatuses(status.Nodes)
+	clone.ActiveRunIDs = append([]string(nil), status.ActiveRunIDs...)
+	clone.Artifacts = cloneArtifactRefs(status.Artifacts)
+	clone.Metadata = cloneMemoryStringMap(status.Metadata)
+
+	return clone
+}
+
+func clonePlanNodeStatuses(nodes []agentos.PlanNodeStatus) []agentos.PlanNodeStatus {
+	if nodes == nil {
+		return nil
+	}
+
+	clone := make([]agentos.PlanNodeStatus, len(nodes))
+	for i := range nodes {
+		node := nodes[i]
+		node.Artifacts = cloneArtifactRefs(node.Artifacts)
+		clone[i] = node
+	}
+
+	return clone
+}
+
+func cloneRunSpec(spec *agentos.RunSpec) agentos.RunSpec {
+	if spec == nil {
+		return agentos.RunSpec{}
+	}
+
+	clone := *spec
+	clone.Metadata = cloneMemoryStringMap(spec.Metadata)
+	clone.Input = cloneMemoryAnyMap(spec.Input)
+
+	return clone
+}
+
+func clonePlanEvents(events []agentos.PlanEvent) []agentos.PlanEvent {
+	if events == nil {
+		return nil
+	}
+
+	clone := make([]agentos.PlanEvent, len(events))
+	for i := range events {
+		clone[i] = clonePlanEvent(&events[i])
+	}
+
+	return clone
+}
+
+func clonePlanEvent(event *agentos.PlanEvent) agentos.PlanEvent {
+	if event == nil {
+		return agentos.PlanEvent{}
+	}
+
+	clone := *event
+	clone.Payload = cloneMemoryAnyMap(event.Payload)
+
+	return clone
+}
+
+func cloneAuditRecord(record *AuditRecord) AuditRecord {
+	if record == nil {
+		return AuditRecord{}
+	}
+
+	clone := *record
+	clone.Payload = cloneMemoryAnyMap(record.Payload)
+
+	return clone
+}
+
+func clonePlanCommandRecord(command *PlanCommandRecord) PlanCommandRecord {
+	if command == nil {
+		return PlanCommandRecord{}
+	}
+
+	clone := *command
+	clone.Payload = cloneMemoryAnyMap(command.Payload)
+
+	return clone
+}
+
+func cloneArtifactRefs(artifacts []agentos.ArtifactRef) []agentos.ArtifactRef {
+	if artifacts == nil {
+		return nil
+	}
+
+	clone := make([]agentos.ArtifactRef, len(artifacts))
+	for i := range artifacts {
+		artifact := artifacts[i]
+		artifact.Metadata = cloneMemoryStringMap(artifact.Metadata)
+		clone[i] = artifact
+	}
+
+	return clone
+}
+
+func cloneMemoryStringMap(input map[string]string) map[string]string {
+	if input == nil {
+		return nil
+	}
+
+	clone := make(map[string]string, len(input))
+	maps.Copy(clone, input)
+
+	return clone
+}
+
+func cloneMemoryAnyMap(input map[string]any) map[string]any {
+	if input == nil {
+		return nil
+	}
+
+	clone := make(map[string]any, len(input))
+	for key, value := range input {
+		clone[key] = cloneMemoryAnyValue(value)
+	}
+
+	return clone
+}
+
+func cloneMemoryAnyValue(value any) any {
+	switch typed := value.(type) {
+	case map[string]any:
+		return cloneMemoryAnyMap(typed)
+	case []any:
+		return cloneMemoryAnySlice(typed)
+	case map[string]string:
+		return cloneMemoryStringMap(typed)
+	case []string:
+		return append([]string(nil), typed...)
+	case []map[string]any:
+		clone := make([]map[string]any, len(typed))
+		for i := range typed {
+			clone[i] = cloneMemoryAnyMap(typed[i])
+		}
+
+		return clone
+	case []map[string]string:
+		clone := make([]map[string]string, len(typed))
+		for i := range typed {
+			clone[i] = cloneMemoryStringMap(typed[i])
+		}
+
+		return clone
+	default:
+		return value
+	}
+}
+
+func cloneMemoryAnySlice(input []any) []any {
+	if input == nil {
+		return nil
+	}
+
+	clone := make([]any, len(input))
+	for i := range input {
+		clone[i] = cloneMemoryAnyValue(input[i])
+	}
+
+	return clone
 }
 
 var (

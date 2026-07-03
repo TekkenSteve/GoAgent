@@ -9,6 +9,8 @@ import (
 )
 
 func TestDecodeStoredArtifactPayloadRejectsSizeMismatch(t *testing.T) {
+	t.Parallel()
+
 	payload := []byte(`{"ok":true}`)
 	ref := agentos.ArtifactRef{
 		ArtifactID: "artifact-1",
@@ -17,13 +19,15 @@ func TestDecodeStoredArtifactPayloadRejectsSizeMismatch(t *testing.T) {
 		Digest:     agentosplan.DigestArtifactPayload(payload),
 	}
 
-	_, err := decodeStoredArtifactPayload(ref, payload)
+	_, err := decodeStoredArtifactPayload(&ref, payload)
 	if !errors.Is(err, agentos.ErrInvalidArtifact) {
 		t.Fatalf("error = %v, want ErrInvalidArtifact", err)
 	}
 }
 
 func TestDecodeStoredArtifactPayloadRejectsDigestMismatch(t *testing.T) {
+	t.Parallel()
+
 	payload := []byte(`{"ok":true}`)
 	ref := agentos.ArtifactRef{
 		ArtifactID: "artifact-1",
@@ -32,13 +36,15 @@ func TestDecodeStoredArtifactPayloadRejectsDigestMismatch(t *testing.T) {
 		Digest:     agentosplan.DigestArtifactPayload([]byte(`{"ok":false}`)),
 	}
 
-	_, err := decodeStoredArtifactPayload(ref, payload)
+	_, err := decodeStoredArtifactPayload(&ref, payload)
 	if !errors.Is(err, agentos.ErrInvalidArtifact) {
 		t.Fatalf("error = %v, want ErrInvalidArtifact", err)
 	}
 }
 
 func TestDecodeStoredArtifactPayloadDecodesVerifiedPayload(t *testing.T) {
+	t.Parallel()
+
 	payload := []byte(`{"ok":true}`)
 	ref := agentos.ArtifactRef{
 		ArtifactID: "artifact-1",
@@ -47,10 +53,11 @@ func TestDecodeStoredArtifactPayloadDecodesVerifiedPayload(t *testing.T) {
 		Digest:     agentosplan.DigestArtifactPayload(payload),
 	}
 
-	decoded, err := decodeStoredArtifactPayload(ref, payload)
+	decoded, err := decodeStoredArtifactPayload(&ref, payload)
 	if err != nil {
 		t.Fatalf("decodeStoredArtifactPayload: %v", err)
 	}
+
 	object, ok := decoded.(map[string]any)
 	if !ok || object["ok"] != true {
 		t.Fatalf("decoded = %#v, want JSON object", decoded)

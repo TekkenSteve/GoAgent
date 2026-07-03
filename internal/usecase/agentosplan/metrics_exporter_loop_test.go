@@ -7,7 +7,11 @@ import (
 	"time"
 )
 
+var errTestMetricSinkUnavailable = errors.New("metric sink unavailable")
+
 func TestStartPlanMetricsExporterLoopRunsImmediatePass(t *testing.T) {
+	t.Parallel()
+
 	exporter := &recordingPlanMetricsExporterRunner{
 		result: PlanMetricsExportResult{PlansScanned: 2, EventsScanned: 3, SamplesRecorded: 4, CheckpointsSaved: 1},
 	}
@@ -16,7 +20,7 @@ func TestStartPlanMetricsExporterLoopRunsImmediatePass(t *testing.T) {
 		failed:  make(chan error, 1),
 	}
 
-	loop, err := StartPlanMetricsExporterLoop(t.Context(), exporter, PlanMetricsExporterLoopConfig{
+	loop, err := StartPlanMetricsExporterLoop(t.Context(), exporter, &PlanMetricsExporterLoopConfig{
 		Interval:          time.Hour,
 		Scope:             PlanRefScope{Limit: 7},
 		ExportImmediately: true,
@@ -36,20 +40,23 @@ func TestStartPlanMetricsExporterLoopRunsImmediatePass(t *testing.T) {
 	case <-time.After(time.Second):
 		t.Fatal("timed out waiting for immediate export")
 	}
+
 	if exporter.scope.Limit != 7 {
 		t.Fatalf("scope limit = %d, want 7", exporter.scope.Limit)
 	}
 }
 
 func TestStartPlanMetricsExporterLoopReportsImmediateFailure(t *testing.T) {
-	exportErr := errors.New("metric sink unavailable")
+	t.Parallel()
+
+	exportErr := errTestMetricSinkUnavailable
 	exporter := &recordingPlanMetricsExporterRunner{err: exportErr}
 	observer := &recordingPlanMetricsExporterObserver{
 		success: make(chan PlanMetricsExportResult, 1),
 		failed:  make(chan error, 1),
 	}
 
-	loop, err := StartPlanMetricsExporterLoop(t.Context(), exporter, PlanMetricsExporterLoopConfig{
+	loop, err := StartPlanMetricsExporterLoop(t.Context(), exporter, &PlanMetricsExporterLoopConfig{
 		Interval:          time.Hour,
 		ExportImmediately: true,
 	}, observer)
@@ -71,14 +78,18 @@ func TestStartPlanMetricsExporterLoopReportsImmediateFailure(t *testing.T) {
 }
 
 func TestStartPlanMetricsExporterLoopRequiresExporter(t *testing.T) {
-	_, err := StartPlanMetricsExporterLoop(t.Context(), nil, PlanMetricsExporterLoopConfig{}, nil)
+	t.Parallel()
+
+	_, err := StartPlanMetricsExporterLoop(t.Context(), nil, &PlanMetricsExporterLoopConfig{}, nil)
 	if err == nil {
 		t.Fatal("StartPlanMetricsExporterLoop succeeded without exporter")
 	}
 }
 
 func TestStartPlanMetricsExporterLoopRejectsNegativeLimit(t *testing.T) {
-	_, err := StartPlanMetricsExporterLoop(t.Context(), &recordingPlanMetricsExporterRunner{}, PlanMetricsExporterLoopConfig{
+	t.Parallel()
+
+	_, err := StartPlanMetricsExporterLoop(t.Context(), &recordingPlanMetricsExporterRunner{}, &PlanMetricsExporterLoopConfig{
 		Scope: PlanRefScope{Limit: -1},
 	}, nil)
 	if err == nil {
@@ -92,8 +103,8 @@ type recordingPlanMetricsExporterRunner struct {
 	scope  PlanRefScope
 }
 
-func (r *recordingPlanMetricsExporterRunner) Export(_ context.Context, scope PlanRefScope) (PlanMetricsExportResult, error) {
-	r.scope = scope
+func (r *recordingPlanMetricsExporterRunner) Export(_ context.Context, scope *PlanRefScope) (PlanMetricsExportResult, error) {
+	r.scope = *scope
 	if r.err != nil {
 		return PlanMetricsExportResult{}, r.err
 	}

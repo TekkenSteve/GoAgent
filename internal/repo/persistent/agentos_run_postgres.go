@@ -23,8 +23,8 @@ func NewAgentOSRunRepo(pg *postgres.Postgres) *AgentOSRunRepo {
 }
 
 // Bind stores the backend reference for a run.
-func (r *AgentOSRunRepo) Bind(ctx context.Context, spec agentos.RunSpec) error {
-	return r.Upsert(ctx, entity.AgentOSRunRecord{
+func (r *AgentOSRunRepo) Bind(ctx context.Context, spec *agentos.RunSpec) error {
+	return r.Upsert(ctx, &entity.AgentOSRunRecord{
 		RunID:          spec.RunID,
 		ThreadID:       spec.ThreadID,
 		AccountID:      spec.AccountID,
@@ -41,6 +41,7 @@ func (r *AgentOSRunRepo) Resolve(ctx context.Context, runID string) (agentos.Bac
 	if err != nil {
 		return agentos.BackendRef{}, err
 	}
+
 	if !exists {
 		return agentos.BackendRef{}, fmt.Errorf("%w: %s", agentos.ErrRunRouteNotFound, runID)
 	}
@@ -52,13 +53,15 @@ func (r *AgentOSRunRepo) Resolve(ctx context.Context, runID string) (agentos.Bac
 }
 
 // Upsert creates or updates the control-plane run record.
-func (r *AgentOSRunRepo) Upsert(ctx context.Context, record entity.AgentOSRunRecord) error {
+func (r *AgentOSRunRepo) Upsert(ctx context.Context, record *entity.AgentOSRunRecord) error {
 	if record.RunID == "" {
 		return fmt.Errorf("%w: run id is required", agentos.ErrInvalidRunSpec)
 	}
+
 	if record.BackendKind == "" || record.BackendName == "" {
 		return fmt.Errorf("%w: kind and name are required", agentos.ErrInvalidBackendRef)
 	}
+
 	if record.LifecycleState == "" {
 		record.LifecycleState = "created"
 	}
@@ -134,6 +137,7 @@ func (r *AgentOSRunRepo) Get(ctx context.Context, runID string) (entity.AgentOSR
 	}
 
 	var record entity.AgentOSRunRecord
+
 	err = r.Pool.QueryRow(ctx, sql, args...).Scan(
 		&record.RunID,
 		&record.ThreadID,

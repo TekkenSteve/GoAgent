@@ -2,12 +2,15 @@ package app
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	"github.com/TekkenSteve/GoAgent/agentos"
 	"github.com/TekkenSteve/GoAgent/internal/entity"
 	"github.com/TekkenSteve/GoAgent/internal/usecase"
 )
+
+var errAgentOSExecutorUnknownControl = errors.New("agentos executor - unknown control operation")
 
 type agentOSExecutor struct {
 	runtime agentos.Runtime
@@ -18,7 +21,7 @@ func newAgentOSExecutor(runtime agentos.Runtime) *agentOSExecutor {
 }
 
 func (e *agentOSExecutor) Execute(ctx context.Context, req *entity.ExecuteRequest) (entity.RunStatus, error) {
-	status, err := e.runtime.Start(ctx, agentos.RunSpec{
+	spec := agentos.RunSpec{
 		RunID:          req.RunID,
 		ThreadID:       req.ThreadID,
 		AccountID:      req.AccountID,
@@ -30,12 +33,14 @@ func (e *agentOSExecutor) Execute(ctx context.Context, req *entity.ExecuteReques
 		IdempotencyKey: req.IdempotencyKey,
 		RequestedAt:    req.RequestedAt,
 		Backend:        agentos.BackendRef{Kind: agentos.BackendKindNative, Name: agentos.BackendNameGoAgentNative},
-	})
+	}
+
+	status, err := e.runtime.Start(ctx, &spec)
 	if err != nil {
 		return entity.RunStatus{}, fmt.Errorf("agentos executor - execute: %w", err)
 	}
 
-	return runStatusToEntity(status), nil
+	return runStatusToEntity(&status), nil
 }
 
 func (e *agentOSExecutor) GetStatus(ctx context.Context, runID string) (entity.RunStatus, error) {
@@ -44,7 +49,7 @@ func (e *agentOSExecutor) GetStatus(ctx context.Context, runID string) (entity.R
 		return entity.RunStatus{}, fmt.Errorf("agentos executor - status: %w", err)
 	}
 
-	return runStatusToEntity(status), nil
+	return runStatusToEntity(&status), nil
 }
 
 func (e *agentOSExecutor) Control(ctx context.Context, runID string, op entity.ControlOperation) error {
@@ -53,14 +58,15 @@ func (e *agentOSExecutor) Control(ctx context.Context, runID string, op entity.C
 		return err
 	}
 
-	if err := e.runtime.Control(ctx, runID, agentos.ControlRequest{Operation: agentOSOp}); err != nil {
+	control := agentos.ControlRequest{Operation: agentOSOp}
+	if err := e.runtime.Control(ctx, runID, &control); err != nil {
 		return fmt.Errorf("agentos executor - control: %w", err)
 	}
 
 	return nil
 }
 
-func runStatusToEntity(status agentos.RunStatus) entity.RunStatus {
+func runStatusToEntity(status *agentos.RunStatus) entity.RunStatus {
 	var step int32
 	if status.Progress != nil {
 		step = status.Progress.Current
@@ -84,7 +90,7 @@ func controlOperationToAgentOS(op entity.ControlOperation) (agentos.ControlOpera
 	case entity.ControlCancel:
 		return agentos.ControlCancel, nil
 	default:
-		return "", fmt.Errorf("agentos executor - unknown control operation: %s", op)
+		return "", fmt.Errorf("%w: %s", errAgentOSExecutorUnknownControl, op)
 	}
 }
 

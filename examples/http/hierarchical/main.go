@@ -39,83 +39,48 @@ const (
 	pollTimeout  = 4 * time.Minute
 )
 
-//nolint:gochecknoglobals // config data — long spec map, not complex logic
-var hierarchicalTeamSpec = map[string]any{
-	"id":   "exec-team",
-	"name": "Executive Team",
-	"agents": []map[string]any{
-		{
-			"id": "executive", "name": "Executive",
-			"model_ref": "gpt-4.1-mini", "system_prompt": "You set strategic direction and consolidate plans.",
+func hierarchicalTeamSpec() map[string]any {
+	return map[string]any{
+		"id": "exec-team", "name": "Executive Team",
+		"agents": []map[string]any{
+			{"id": "executive", "name": "Executive", "model_ref": "gpt-4.1-mini", "system_prompt": "You set strategic direction and consolidate plans."},
 		},
-	},
-	"sub_teams": []map[string]any{
-		{
-			"id": "product-team", "name": "Product Management",
-			"agents": []map[string]any{
-				{
-					"id": "product-manager", "name": "Product Manager",
-					"model_ref": "gpt-4.1-mini", "system_prompt": "You define product requirements and priorities.",
+		"sub_teams": []map[string]any{
+			{
+				"id": "product-team", "name": "Product Management",
+				"agents": []map[string]any{
+					{"id": "product-manager", "name": "Product Manager", "model_ref": "gpt-4.1-mini", "system_prompt": "You define product requirements and priorities."},
+				},
+				"steps": []map[string]any{
+					{"id": "product-plan", "type": "agent", "agent_ref": "product-manager", "input": map[string]any{"message": "Create a product roadmap for a new SaaS platform"}},
 				},
 			},
-			"steps": []map[string]any{
-				{
-					"id": "product-plan", "type": "agent", "agent_ref": "product-manager",
-					"input": map[string]any{"message": "Create a product roadmap for a new SaaS platform"},
+			{
+				"id": "eng-team", "name": "Engineering",
+				"agents": []map[string]any{
+					{"id": "architect", "name": "Architect", "model_ref": "gpt-4.1-mini", "system_prompt": "You design system architecture."},
+					{"id": "developer", "name": "Developer", "model_ref": "gpt-4.1-mini", "system_prompt": "You write technical specifications."},
+				},
+				"steps": []map[string]any{
+					{"id": "eng-plan", "type": "agent", "agent_ref": "architect", "input": map[string]any{"message": "Design the high-level system architecture"}},
+					{"id": "eng-spec", "type": "agent", "agent_ref": "developer", "input": map[string]any{"message": "Write detailed technical specs for each component"}, "depends_on": []string{"eng-plan"}},
 				},
 			},
-		},
-		{
-			"id": "eng-team", "name": "Engineering",
-			"agents": []map[string]any{
-				{
-					"id": "architect", "name": "Architect",
-					"model_ref": "gpt-4.1-mini", "system_prompt": "You design system architecture.",
+			{
+				"id": "marketing-team", "name": "Marketing",
+				"agents": []map[string]any{
+					{"id": "marketing-lead", "name": "Marketing Lead", "model_ref": "gpt-4.1-mini", "system_prompt": "You create go-to-market strategies."},
 				},
-				{
-					"id": "developer", "name": "Developer",
-					"model_ref": "gpt-4.1-mini", "system_prompt": "You write technical specifications.",
-				},
-			},
-			"steps": []map[string]any{
-				{
-					"id": "eng-plan", "type": "agent", "agent_ref": "architect",
-					"input": map[string]any{"message": "Design the high-level system architecture"},
-				},
-				{
-					"id": "eng-spec", "type": "agent", "agent_ref": "developer",
-					"input":      map[string]any{"message": "Write detailed technical specs for each component"},
-					"depends_on": []string{"eng-plan"},
+				"steps": []map[string]any{
+					{"id": "marketing-plan", "type": "agent", "agent_ref": "marketing-lead", "input": map[string]any{"message": "Create a go-to-market strategy for the new platform"}},
 				},
 			},
 		},
-		{
-			"id": "marketing-team", "name": "Marketing",
-			"agents": []map[string]any{
-				{
-					"id": "marketing-lead", "name": "Marketing Lead",
-					"model_ref": "gpt-4.1-mini", "system_prompt": "You create go-to-market strategies.",
-				},
-			},
-			"steps": []map[string]any{
-				{
-					"id": "marketing-plan", "type": "agent", "agent_ref": "marketing-lead",
-					"input": map[string]any{"message": "Create a go-to-market strategy for the new platform"},
-				},
-			},
+		"steps": []map[string]any{
+			{"id": "strategy", "type": "agent", "agent_ref": "executive", "input": map[string]any{"message": "Define the strategic vision and goals for the new SaaS platform"}},
+			{"id": "consolidate", "type": "agent", "agent_ref": "executive", "input": map[string]any{"message": "Consolidate all department plans into a unified execution roadmap"}, "depends_on": []string{"product-plan", "eng-spec", "marketing-plan"}},
 		},
-	},
-	"steps": []map[string]any{
-		{
-			"id": "strategy", "type": "agent", "agent_ref": "executive",
-			"input": map[string]any{"message": "Define the strategic vision and goals for the new SaaS platform"},
-		},
-		{
-			"id": "consolidate", "type": "agent", "agent_ref": "executive",
-			"input":      map[string]any{"message": "Consolidate all department plans into a unified execution roadmap"},
-			"depends_on": []string{"product-plan", "eng-spec", "marketing-plan"},
-		},
-	},
+	}
 }
 
 func main() {
@@ -142,9 +107,9 @@ func main() {
 	fmt.Fprintln(os.Stdout, "    └── Marketing (marketing-lead)")
 	fmt.Fprintln(os.Stdout)
 
-	status, err := c.ExecuteOrchestration(ctx, client.OrchestrationRequest{
+	status, err := c.ExecuteOrchestration(ctx, &client.OrchestrationRequest{
 		RunID:    runID,
-		TeamSpec: hierarchicalTeamSpec,
+		TeamSpec: hierarchicalTeamSpec(),
 	})
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)

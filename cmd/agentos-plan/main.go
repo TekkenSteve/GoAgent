@@ -7,6 +7,7 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"math"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -15,6 +16,29 @@ import (
 	"github.com/TekkenSteve/GoAgent/internal/usecase/agentosplan"
 	"github.com/TekkenSteve/GoAgent/internal/usecase/agentosplan/serverlessworkflow"
 	"sigs.k8s.io/yaml"
+)
+
+var (
+	errFileRequired                           = errors.New("file is required")
+	errCapabilitiesFormatRequiresCapabilities = errors.New("capabilities-format requires capabilities")
+	errArtifactSchemasFormatRequiresSchemas   = errors.New("artifact-schemas-format requires artifact-schemas")
+	errBaseRequired                           = errors.New("base is required")
+	errExpansionCountCannotBeNegative         = errors.New("expansion-count cannot be negative")
+	errInvalidFormat                          = errors.New("unsupported format")
+	errInvalidDecodeTarget                    = errors.New("unsupported decode target")
+	errInvalidFilePath                        = errors.New("invalid file path")
+)
+
+const (
+	exitCodeSuccess = 0
+	exitCodeError   = 1
+	exitCodeUsage   = 2
+
+	JSON = "json"
+	YAML = "yaml"
+
+	dirPerm  os.FileMode = 0o755
+	filePerm os.FileMode = 0o600
 )
 
 type compiledPlanOutput struct {
@@ -26,11 +50,11 @@ func main() {
 	os.Exit(run(os.Args[1:], os.Stdout, os.Stderr))
 }
 
-func run(args []string, stdout io.Writer, stderr io.Writer) int {
+func run(args []string, stdout, stderr io.Writer) int {
 	if len(args) == 0 {
 		printUsage(stderr)
 
-		return 2
+		return exitCodeUsage
 	}
 
 	switch args[0] {
@@ -52,176 +76,184 @@ func run(args []string, stdout io.Writer, stderr io.Writer) int {
 		_, _ = fmt.Fprintf(stderr, "unknown command %q\n", args[0])
 		printUsage(stderr)
 
-		return 2
+		return exitCodeUsage
 	}
 }
 
-func runSchema(args []string, stdout io.Writer, stderr io.Writer) int {
+func runSchema(args []string, stdout, stderr io.Writer) int {
 	fs := flag.NewFlagSet("schema", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	outPath := fs.String("out", "", "write schema to path instead of stdout")
+
 	kind := fs.String("kind", string(agentos.PlanSchemaKindRunPlan), "schema kind: run-plan, plan-delta, capability-catalog, or artifact-schema-catalog")
 	if err := fs.Parse(args); err != nil {
-		return 2
+		return exitCodeUsage
 	}
 
 	schema, err := agentos.PlanJSONSchema(agentos.PlanSchemaKind(*kind))
 	if err != nil {
 		_, _ = fmt.Fprintf(stderr, "generate schema: %v\n", err)
 
-		return 1
+		return exitCodeError
 	}
+
 	if err := writeOutput(*outPath, schema, stdout); err != nil {
 		_, _ = fmt.Fprintf(stderr, "write schema: %v\n", err)
 
-		return 1
+		return exitCodeError
 	}
 
-	return 0
+	return exitCodeSuccess
 }
 
-func runValidate(args []string, stdout io.Writer, stderr io.Writer) int {
+func runValidate(args []string, stdout, stderr io.Writer) int {
 	_, err := compilePlanCommand(args, stderr)
 	if err != nil {
 		_, _ = fmt.Fprintf(stderr, "validate run plan: %v\n", err)
 
-		return 1
+		return exitCodeError
 	}
+
 	_, _ = fmt.Fprintln(stdout, "valid")
 
-	return 0
+	return exitCodeSuccess
 }
 
-func runValidateDelta(args []string, stdout io.Writer, stderr io.Writer) int {
+func runValidateDelta(args []string, stdout, stderr io.Writer) int {
 	_, err := compilePlanDeltaCommand(args, stderr)
 	if err != nil {
 		_, _ = fmt.Fprintf(stderr, "validate plan delta: %v\n", err)
 
-		return 1
+		return exitCodeError
 	}
+
 	_, _ = fmt.Fprintln(stdout, "valid")
 
-	return 0
+	return exitCodeSuccess
 }
 
-func runCompile(args []string, stdout io.Writer, stderr io.Writer) int {
+func runCompile(args []string, stdout, stderr io.Writer) int {
 	fs := newCompileFlagSet("compile", stderr)
+
 	opts, err := parseCompileFlags(fs, args)
 	if err != nil {
 		_, _ = fmt.Fprintf(stderr, "compile run plan: %v\n", err)
 
-		return 2
+		return exitCodeUsage
 	}
-	plan, err := compilePlan(opts)
+
+	plan, err := compilePlan(&opts)
 	if err != nil {
 		_, _ = fmt.Fprintf(stderr, "compile run plan: %v\n", err)
 
-		return 1
+		return exitCodeError
 	}
 
-	payload, err := json.MarshalIndent(compiledPlanOutput{Spec: plan.Spec, Order: plan.Order}, "", "  ")
-	if err != nil {
-		_, _ = fmt.Fprintf(stderr, "encode compiled plan: %v\n", err)
-
-		return 1
-	}
-	payload = append(payload, '\n')
-	if err := writeOutput(opts.outPath, payload, stdout); err != nil {
-		_, _ = fmt.Fprintf(stderr, "write compiled plan: %v\n", err)
-
-		return 1
-	}
-
-	return 0
+	return emitCompiledPlan(&plan, opts.outPath, stdout, stderr)
 }
 
-func runCompileDelta(args []string, stdout io.Writer, stderr io.Writer) int {
+func runCompileDelta(args []string, stdout, stderr io.Writer) int {
 	fs := newDeltaFlagSet("compile-delta", stderr)
+
 	opts, err := parseDeltaFlags(fs, args)
 	if err != nil {
 		_, _ = fmt.Fprintf(stderr, "compile plan delta: %v\n", err)
 
-		return 2
+		return exitCodeUsage
 	}
-	plan, err := compilePlanDelta(opts)
+
+	plan, err := compilePlanDelta(&opts)
 	if err != nil {
 		_, _ = fmt.Fprintf(stderr, "compile plan delta: %v\n", err)
 
-		return 1
+		return exitCodeError
 	}
 
-	payload, err := json.MarshalIndent(compiledPlanOutput{Spec: plan.Spec, Order: plan.Order}, "", "  ")
-	if err != nil {
-		_, _ = fmt.Fprintf(stderr, "encode compiled plan delta: %v\n", err)
-
-		return 1
-	}
-	payload = append(payload, '\n')
-	if err := writeOutput(opts.outPath, payload, stdout); err != nil {
-		_, _ = fmt.Fprintf(stderr, "write compiled plan delta: %v\n", err)
-
-		return 1
-	}
-
-	return 0
+	return emitCompiledPlan(&plan, opts.outPath, stdout, stderr)
 }
 
-func runExportServerless(args []string, stdout io.Writer, stderr io.Writer) int {
+func emitCompiledPlan(plan *agentosplan.ExecutablePlan, outPath string, stdout, stderr io.Writer) int {
+	payload, err := json.MarshalIndent(compiledPlanOutput{Spec: plan.Spec, Order: plan.Order}, "", "  ")
+	if err != nil {
+		_, _ = fmt.Fprintf(stderr, "encode compiled plan: %v\n", err)
+
+		return exitCodeError
+	}
+
+	payload = append(payload, '\n')
+	if err := writeOutput(outPath, payload, stdout); err != nil {
+		_, _ = fmt.Fprintf(stderr, "write compiled plan: %v\n", err)
+
+		return exitCodeError
+	}
+
+	return exitCodeSuccess
+}
+
+func runExportServerless(args []string, stdout, stderr io.Writer) int {
 	fs := newServerlessExportFlagSet("export-serverless", stderr)
+
 	opts, err := parseServerlessExportFlags(fs, args)
 	if err != nil {
 		_, _ = fmt.Fprintf(stderr, "export serverless workflow: %v\n", err)
 
-		return 2
+		return exitCodeUsage
 	}
-	workflow, err := exportServerless(opts)
+
+	workflow, err := exportServerless(&opts)
 	if err != nil {
 		_, _ = fmt.Fprintf(stderr, "export serverless workflow: %v\n", err)
 
-		return 1
+		return exitCodeError
 	}
-	payload, err := encodeServerlessWorkflow(opts.outputFormat, workflow)
+
+	payload, err := encodeServerlessWorkflow(opts.outputFormat, &workflow)
 	if err != nil {
 		_, _ = fmt.Fprintf(stderr, "encode serverless workflow: %v\n", err)
 
-		return 1
+		return exitCodeError
 	}
+
 	if err := writeOutput(opts.outPath, payload, stdout); err != nil {
 		_, _ = fmt.Fprintf(stderr, "write serverless workflow: %v\n", err)
 
-		return 1
+		return exitCodeError
 	}
 
-	return 0
+	return exitCodeSuccess
 }
 
-func runImportServerless(args []string, stdout io.Writer, stderr io.Writer) int {
+func runImportServerless(args []string, stdout, stderr io.Writer) int {
 	fs := newServerlessImportFlagSet("import-serverless", stderr)
+
 	opts, err := parseServerlessImportFlags(fs, args)
 	if err != nil {
 		_, _ = fmt.Fprintf(stderr, "import serverless workflow: %v\n", err)
 
-		return 2
+		return exitCodeUsage
 	}
-	plan, err := importServerless(opts)
+
+	plan, err := importServerless(&opts)
 	if err != nil {
 		_, _ = fmt.Fprintf(stderr, "import serverless workflow: %v\n", err)
 
-		return 1
+		return exitCodeError
 	}
+
 	payload, err := encodeWire(opts.outputFormat, compiledPlanOutput{Spec: plan.Spec, Order: plan.Order})
 	if err != nil {
 		_, _ = fmt.Fprintf(stderr, "encode imported run plan: %v\n", err)
 
-		return 1
+		return exitCodeError
 	}
+
 	if err := writeOutput(opts.outPath, payload, stdout); err != nil {
 		_, _ = fmt.Fprintf(stderr, "write imported run plan: %v\n", err)
 
-		return 1
+		return exitCodeError
 	}
 
-	return 0
+	return exitCodeSuccess
 }
 
 type compileOptions struct {
@@ -265,22 +297,24 @@ type serverlessImportOptions struct {
 
 func compilePlanCommand(args []string, stderr io.Writer) (agentosplan.ExecutablePlan, error) {
 	fs := newCompileFlagSet("validate", stderr)
+
 	opts, err := parseCompileFlags(fs, args)
 	if err != nil {
 		return agentosplan.ExecutablePlan{}, err
 	}
 
-	return compilePlan(opts)
+	return compilePlan(&opts)
 }
 
 func compilePlanDeltaCommand(args []string, stderr io.Writer) (agentosplan.ExecutablePlan, error) {
 	fs := newDeltaFlagSet("validate-delta", stderr)
+
 	opts, err := parseDeltaFlags(fs, args)
 	if err != nil {
 		return agentosplan.ExecutablePlan{}, err
 	}
 
-	return compilePlanDelta(opts)
+	return compilePlanDelta(&opts)
 }
 
 func newCompileFlagSet(name string, stderr io.Writer) *flag.FlagSet {
@@ -340,6 +374,7 @@ func parseCompileFlags(fs *flag.FlagSet, args []string) (compileOptions, error) 
 	if err := fs.Parse(args); err != nil {
 		return compileOptions{}, err
 	}
+
 	opts := compileOptions{
 		filePath:              fs.Lookup("file").Value.String(),
 		format:                fs.Lookup("format").Value.String(),
@@ -349,25 +384,17 @@ func parseCompileFlags(fs *flag.FlagSet, args []string) (compileOptions, error) 
 		artifactSchemasFormat: fs.Lookup("artifact-schemas-format").Value.String(),
 		outPath:               fs.Lookup("out").Value.String(),
 	}
-	if opts.filePath == "" {
-		return compileOptions{}, errors.New("file is required")
-	}
-	if err := validateWireFormat(opts.format); err != nil {
+	if err := validatePlanInputFlags(opts.filePath, opts.format); err != nil {
 		return compileOptions{}, err
 	}
-	if opts.capabilitiesPath != "" {
-		if err := validateWireFormat(opts.capabilitiesFormat); err != nil {
-			return compileOptions{}, fmt.Errorf("capabilities format: %w", err)
-		}
-	} else if opts.capabilitiesFormat != "" {
-		return compileOptions{}, errors.New("capabilities-format requires capabilities")
-	}
-	if opts.artifactSchemasPath != "" {
-		if err := validateWireFormat(opts.artifactSchemasFormat); err != nil {
-			return compileOptions{}, fmt.Errorf("artifact-schemas format: %w", err)
-		}
-	} else if opts.artifactSchemasFormat != "" {
-		return compileOptions{}, errors.New("artifact-schemas-format requires artifact-schemas")
+
+	if err := validateCatalogFormatFlags(
+		opts.capabilitiesPath,
+		opts.capabilitiesFormat,
+		opts.artifactSchemasPath,
+		opts.artifactSchemasFormat,
+	); err != nil {
+		return compileOptions{}, err
 	}
 
 	return opts, nil
@@ -377,10 +404,12 @@ func parseDeltaFlags(fs *flag.FlagSet, args []string) (deltaOptions, error) {
 	if err := fs.Parse(args); err != nil {
 		return deltaOptions{}, err
 	}
+
 	expansionCount, err := strconv.Atoi(fs.Lookup("expansion-count").Value.String())
 	if err != nil {
 		return deltaOptions{}, fmt.Errorf("expansion-count: %w", err)
 	}
+
 	opts := deltaOptions{
 		basePath:              fs.Lookup("base").Value.String(),
 		baseFormat:            fs.Lookup("base-format").Value.String(),
@@ -393,34 +422,21 @@ func parseDeltaFlags(fs *flag.FlagSet, args []string) (deltaOptions, error) {
 		expansionCount:        expansionCount,
 		outPath:               fs.Lookup("out").Value.String(),
 	}
-	if opts.basePath == "" {
-		return deltaOptions{}, errors.New("base is required")
-	}
-	if opts.filePath == "" {
-		return deltaOptions{}, errors.New("file is required")
-	}
-	if err := validateWireFormat(opts.baseFormat); err != nil {
-		return deltaOptions{}, fmt.Errorf("base format: %w", err)
-	}
-	if err := validateWireFormat(opts.format); err != nil {
+	if err := validateDeltaInputFlags(opts.basePath, opts.baseFormat, opts.filePath, opts.format); err != nil {
 		return deltaOptions{}, err
 	}
-	if opts.capabilitiesPath != "" {
-		if err := validateWireFormat(opts.capabilitiesFormat); err != nil {
-			return deltaOptions{}, fmt.Errorf("capabilities format: %w", err)
-		}
-	} else if opts.capabilitiesFormat != "" {
-		return deltaOptions{}, errors.New("capabilities-format requires capabilities")
+
+	if err := validateCatalogFormatFlags(
+		opts.capabilitiesPath,
+		opts.capabilitiesFormat,
+		opts.artifactSchemasPath,
+		opts.artifactSchemasFormat,
+	); err != nil {
+		return deltaOptions{}, err
 	}
-	if opts.artifactSchemasPath != "" {
-		if err := validateWireFormat(opts.artifactSchemasFormat); err != nil {
-			return deltaOptions{}, fmt.Errorf("artifact-schemas format: %w", err)
-		}
-	} else if opts.artifactSchemasFormat != "" {
-		return deltaOptions{}, errors.New("artifact-schemas-format requires artifact-schemas")
-	}
+
 	if opts.expansionCount < 0 {
-		return deltaOptions{}, errors.New("expansion-count cannot be negative")
+		return deltaOptions{}, errExpansionCountCannotBeNegative
 	}
 
 	return opts, nil
@@ -431,6 +447,7 @@ func parseServerlessExportFlags(fs *flag.FlagSet, args []string) (serverlessExpo
 	if err != nil {
 		return serverlessExportOptions{}, err
 	}
+
 	outputFormat := fs.Lookup("out-format").Value.String()
 	if err := validateWireFormat(outputFormat); err != nil {
 		return serverlessExportOptions{}, fmt.Errorf("out-format: %w", err)
@@ -446,6 +463,7 @@ func parseServerlessImportFlags(fs *flag.FlagSet, args []string) (serverlessImpo
 	if err := fs.Parse(args); err != nil {
 		return serverlessImportOptions{}, err
 	}
+
 	opts := serverlessImportOptions{
 		filePath:              fs.Lookup("file").Value.String(),
 		format:                fs.Lookup("format").Value.String(),
@@ -456,44 +474,96 @@ func parseServerlessImportFlags(fs *flag.FlagSet, args []string) (serverlessImpo
 		outputFormat:          fs.Lookup("out-format").Value.String(),
 		outPath:               fs.Lookup("out").Value.String(),
 	}
-	if opts.filePath == "" {
-		return serverlessImportOptions{}, errors.New("file is required")
-	}
-	if err := validateWireFormat(opts.format); err != nil {
+	if err := validatePlanInputFlags(opts.filePath, opts.format); err != nil {
 		return serverlessImportOptions{}, err
 	}
+
 	if err := validateWireFormat(opts.outputFormat); err != nil {
 		return serverlessImportOptions{}, fmt.Errorf("out-format: %w", err)
 	}
-	if opts.capabilitiesPath != "" {
-		if err := validateWireFormat(opts.capabilitiesFormat); err != nil {
-			return serverlessImportOptions{}, fmt.Errorf("capabilities format: %w", err)
-		}
-	} else if opts.capabilitiesFormat != "" {
-		return serverlessImportOptions{}, errors.New("capabilities-format requires capabilities")
-	}
-	if opts.artifactSchemasPath != "" {
-		if err := validateWireFormat(opts.artifactSchemasFormat); err != nil {
-			return serverlessImportOptions{}, fmt.Errorf("artifact-schemas format: %w", err)
-		}
-	} else if opts.artifactSchemasFormat != "" {
-		return serverlessImportOptions{}, errors.New("artifact-schemas-format requires artifact-schemas")
+
+	if err := validateCatalogFormatFlags(
+		opts.capabilitiesPath,
+		opts.capabilitiesFormat,
+		opts.artifactSchemasPath,
+		opts.artifactSchemasFormat,
+	); err != nil {
+		return serverlessImportOptions{}, err
 	}
 
 	return opts, nil
 }
 
-func compilePlan(opts compileOptions) (agentosplan.ExecutablePlan, error) {
+func validatePlanInputFlags(filePath, format string) error {
+	if filePath == "" {
+		return errFileRequired
+	}
+
+	return validateWireFormat(format)
+}
+
+func validateDeltaInputFlags(basePath, baseFormat, filePath, format string) error {
+	if basePath == "" {
+		return errBaseRequired
+	}
+
+	if err := validatePlanInputFlags(filePath, format); err != nil {
+		return err
+	}
+
+	if err := validateWireFormat(baseFormat); err != nil {
+		return fmt.Errorf("base format: %w", err)
+	}
+
+	return nil
+}
+
+func validateCatalogFormatFlags(capabilitiesPath, capabilitiesFormat, artifactSchemasPath, artifactSchemasFormat string) error {
+	if err := validateOptionalFormatFlag(
+		capabilitiesPath,
+		capabilitiesFormat,
+		"capabilities format",
+		errCapabilitiesFormatRequiresCapabilities,
+	); err != nil {
+		return err
+	}
+
+	return validateOptionalFormatFlag(
+		artifactSchemasPath,
+		artifactSchemasFormat,
+		"artifact-schemas format",
+		errArtifactSchemasFormatRequiresSchemas,
+	)
+}
+
+func validateOptionalFormatFlag(path, format, label string, missingPathErr error) error {
+	if path == "" {
+		if format != "" {
+			return missingPathErr
+		}
+
+		return nil
+	}
+
+	if err := validateWireFormat(format); err != nil {
+		return fmt.Errorf("%s: %w", label, err)
+	}
+
+	return nil
+}
+
+func compilePlan(opts *compileOptions) (agentosplan.ExecutablePlan, error) {
 	plan, _, err := compilePlanWithValidator(opts)
 
 	return plan, err
 }
 
-func compilePlanWithValidator(opts compileOptions) (agentosplan.ExecutablePlan, agentosplan.Validator, error) {
-	data, err := os.ReadFile(opts.filePath)
+func compilePlanWithValidator(opts *compileOptions) (agentosplan.ExecutablePlan, agentosplan.Validator, error) {
+	data, err := readInputFile(opts.filePath)
 	if err != nil {
 		return agentosplan.ExecutablePlan{}, agentosplan.Validator{}, err
 	}
+
 	validator, err := newRunPlanValidator(opts.capabilitiesPath, opts.capabilitiesFormat, opts.artifactSchemasPath, opts.artifactSchemasFormat)
 	if err != nil {
 		return agentosplan.ExecutablePlan{}, agentosplan.Validator{}, err
@@ -502,15 +572,18 @@ func compilePlanWithValidator(opts compileOptions) (agentosplan.ExecutablePlan, 
 	runPlanCompiler := agentosplan.RunPlanCompiler{
 		Validator: validator,
 	}
+
 	var plan agentosplan.ExecutablePlan
+
 	switch opts.format {
-	case "json":
+	case JSON:
 		plan, err = runPlanCompiler.CompileJSON(context.Background(), data)
-	case "yaml":
+	case YAML:
 		plan, err = runPlanCompiler.CompileYAML(context.Background(), data)
 	default:
-		err = fmt.Errorf("unsupported format %q", opts.format)
+		err = fmt.Errorf("%w: %q", errInvalidFormat, opts.format)
 	}
+
 	if err != nil {
 		return agentosplan.ExecutablePlan{}, agentosplan.Validator{}, err
 	}
@@ -518,8 +591,8 @@ func compilePlanWithValidator(opts compileOptions) (agentosplan.ExecutablePlan, 
 	return plan, validator, nil
 }
 
-func compilePlanDelta(opts deltaOptions) (agentosplan.ExecutablePlan, error) {
-	basePlan, err := compilePlan(compileOptions{
+func compilePlanDelta(opts *deltaOptions) (agentosplan.ExecutablePlan, error) {
+	basePlan, err := compilePlan(&compileOptions{
 		filePath:              opts.basePath,
 		format:                opts.baseFormat,
 		capabilitiesPath:      opts.capabilitiesPath,
@@ -530,26 +603,37 @@ func compilePlanDelta(opts deltaOptions) (agentosplan.ExecutablePlan, error) {
 	if err != nil {
 		return agentosplan.ExecutablePlan{}, fmt.Errorf("base plan: %w", err)
 	}
-	data, err := os.ReadFile(opts.filePath)
+
+	data, err := readInputFile(opts.filePath)
 	if err != nil {
 		return agentosplan.ExecutablePlan{}, err
 	}
+
 	validator, err := newRunPlanValidator(opts.capabilitiesPath, opts.capabilitiesFormat, opts.artifactSchemasPath, opts.artifactSchemasFormat)
 	if err != nil {
 		return agentosplan.ExecutablePlan{}, err
 	}
+
 	runPlanCompiler := agentosplan.RunPlanCompiler{
 		Validator: validator,
 	}
+
 	var plan agentosplan.ExecutablePlan
-	switch opts.format {
-	case "json":
-		_, plan, err = runPlanCompiler.CompileDeltaJSON(context.Background(), basePlan.Spec, data, int32(opts.expansionCount))
-	case "yaml":
-		_, plan, err = runPlanCompiler.CompileDeltaYAML(context.Background(), basePlan.Spec, data, int32(opts.expansionCount))
-	default:
-		err = fmt.Errorf("unsupported format %q", opts.format)
+
+	expansionCount32, err := checkedInt32("expansion count", opts.expansionCount)
+	if err != nil {
+		return agentosplan.ExecutablePlan{}, err
 	}
+
+	switch opts.format {
+	case JSON:
+		_, plan, err = runPlanCompiler.CompileDeltaJSON(context.Background(), &basePlan.Spec, data, expansionCount32)
+	case YAML:
+		_, plan, err = runPlanCompiler.CompileDeltaYAML(context.Background(), &basePlan.Spec, data, expansionCount32)
+	default:
+		err = fmt.Errorf("%w: %q", errInvalidFormat, opts.format)
+	}
+
 	if err != nil {
 		return agentosplan.ExecutablePlan{}, err
 	}
@@ -557,47 +641,54 @@ func compilePlanDelta(opts deltaOptions) (agentosplan.ExecutablePlan, error) {
 	return plan, nil
 }
 
-func exportServerless(opts serverlessExportOptions) (serverlessworkflow.Workflow, error) {
-	plan, validator, err := compilePlanWithValidator(opts.compileOptions)
+func exportServerless(opts *serverlessExportOptions) (serverlessworkflow.Workflow, error) {
+	plan, validator, err := compilePlanWithValidator(&opts.compileOptions)
 	if err != nil {
 		return serverlessworkflow.Workflow{}, err
 	}
+
 	adapter := serverlessworkflow.Adapter{Validator: validator}
 
-	return adapter.Export(context.Background(), plan.Spec)
+	return adapter.Export(context.Background(), &plan.Spec)
 }
 
-func importServerless(opts serverlessImportOptions) (agentosplan.ExecutablePlan, error) {
-	data, err := os.ReadFile(opts.filePath)
+func importServerless(opts *serverlessImportOptions) (agentosplan.ExecutablePlan, error) {
+	data, err := readInputFile(opts.filePath)
 	if err != nil {
 		return agentosplan.ExecutablePlan{}, err
 	}
+
 	workflow, err := decodeServerlessWorkflow(opts.format, data)
 	if err != nil {
 		return agentosplan.ExecutablePlan{}, err
 	}
+
 	validator, err := newRunPlanValidator(opts.capabilitiesPath, opts.capabilitiesFormat, opts.artifactSchemasPath, opts.artifactSchemasFormat)
 	if err != nil {
 		return agentosplan.ExecutablePlan{}, err
 	}
+
 	adapter := serverlessworkflow.Adapter{Validator: validator}
-	spec, err := adapter.Import(context.Background(), workflow)
+
+	spec, err := adapter.Import(context.Background(), &workflow)
 	if err != nil {
 		return agentosplan.ExecutablePlan{}, err
 	}
 
-	return validator.Validate(context.Background(), spec)
+	return validator.Validate(context.Background(), &spec)
 }
 
-func newRunPlanValidator(capabilitiesPath string, capabilitiesFormat string, artifactSchemasPath string, artifactSchemasFormat string) (agentosplan.Validator, error) {
+func newRunPlanValidator(capabilitiesPath, capabilitiesFormat, artifactSchemasPath, artifactSchemasFormat string) (agentosplan.Validator, error) {
 	compiler, err := agentosplan.NewCELCompiler()
 	if err != nil {
 		return agentosplan.Validator{}, err
 	}
+
 	catalog, err := loadCapabilityCatalog(capabilitiesPath, capabilitiesFormat)
 	if err != nil {
 		return agentosplan.Validator{}, err
 	}
+
 	artifactSchemas, err := loadArtifactSchemaCatalog(artifactSchemasPath, artifactSchemasFormat)
 	if err != nil {
 		return agentosplan.Validator{}, err
@@ -610,14 +701,16 @@ func newRunPlanValidator(capabilitiesPath string, capabilitiesFormat string, art
 	}, nil
 }
 
-func loadCapabilityCatalog(path string, format string) (agentosplan.CapabilityCatalog, error) {
+func loadCapabilityCatalog(path, format string) (agentosplan.CapabilityCatalog, error) {
 	if path == "" {
 		return nil, nil
 	}
-	data, err := os.ReadFile(path)
+
+	data, err := readInputFile(path)
 	if err != nil {
 		return nil, err
 	}
+
 	var catalogFile agentos.CapabilityCatalogSpec
 	if err := decodeWire(format, data, &catalogFile); err != nil {
 		return nil, err
@@ -626,14 +719,16 @@ func loadCapabilityCatalog(path string, format string) (agentosplan.CapabilityCa
 	return agentosplan.NewStaticCapabilityCatalog(catalogFile.Capabilities)
 }
 
-func loadArtifactSchemaCatalog(path string, format string) (agentosplan.ArtifactSchemaCatalog, error) {
+func loadArtifactSchemaCatalog(path, format string) (agentosplan.ArtifactSchemaCatalog, error) {
 	if path == "" {
 		return nil, nil
 	}
-	data, err := os.ReadFile(path)
+
+	data, err := readInputFile(path)
 	if err != nil {
 		return nil, err
 	}
+
 	var catalogFile agentos.ArtifactSchemaCatalogSpec
 	if err := decodeWire(format, data, &catalogFile); err != nil {
 		return nil, err
@@ -642,43 +737,43 @@ func loadArtifactSchemaCatalog(path string, format string) (agentosplan.Artifact
 	return agentosplan.NewStaticArtifactSchemaCatalog(catalogFile.ArtifactSchemas)
 }
 
-func encodeServerlessWorkflow(format string, workflow serverlessworkflow.Workflow) ([]byte, error) {
+func encodeServerlessWorkflow(format string, workflow *serverlessworkflow.Workflow) ([]byte, error) {
 	switch format {
-	case "json":
+	case JSON:
 		payload, err := serverlessworkflow.MarshalJSON(workflow)
 		if err != nil {
 			return nil, err
 		}
 
 		return append(payload, '\n'), nil
-	case "yaml":
+	case YAML:
 		return serverlessworkflow.MarshalYAML(workflow)
 	default:
-		return nil, fmt.Errorf("unsupported format %q", format)
+		return nil, fmt.Errorf("%w: %q", errInvalidFormat, format)
 	}
 }
 
 func decodeServerlessWorkflow(format string, data []byte) (serverlessworkflow.Workflow, error) {
 	switch format {
-	case "json":
+	case JSON:
 		return serverlessworkflow.UnmarshalJSON(data)
-	case "yaml":
+	case YAML:
 		return serverlessworkflow.UnmarshalYAML(data)
 	default:
-		return serverlessworkflow.Workflow{}, fmt.Errorf("unsupported format %q", format)
+		return serverlessworkflow.Workflow{}, fmt.Errorf("%w: %q", errInvalidFormat, format)
 	}
 }
 
 func encodeWire(format string, value any) ([]byte, error) {
 	switch format {
-	case "json":
+	case JSON:
 		payload, err := json.MarshalIndent(value, "", "  ")
 		if err != nil {
 			return nil, err
 		}
 
 		return append(payload, '\n'), nil
-	case "yaml":
+	case YAML:
 		payload, err := json.MarshalIndent(value, "", "  ")
 		if err != nil {
 			return nil, err
@@ -686,18 +781,18 @@ func encodeWire(format string, value any) ([]byte, error) {
 
 		return yaml.JSONToYAML(payload)
 	default:
-		return nil, fmt.Errorf("unsupported format %q", format)
+		return nil, fmt.Errorf("%w: %q", errInvalidFormat, format)
 	}
 }
 
 func decodeWire(format string, data []byte, target any) error {
 	switch format {
-	case "json":
+	case JSON:
 		return decodeWireJSONTarget(data, target)
-	case "yaml":
+	case YAML:
 		return decodeWireYAMLTarget(data, target)
 	default:
-		return fmt.Errorf("unsupported format %q", format)
+		return fmt.Errorf("%w: %q", errInvalidFormat, format)
 	}
 }
 
@@ -708,6 +803,7 @@ func decodeWireJSONTarget(data []byte, target any) error {
 		if err != nil {
 			return err
 		}
+
 		*value = decoded
 
 		return nil
@@ -716,11 +812,12 @@ func decodeWireJSONTarget(data []byte, target any) error {
 		if err != nil {
 			return err
 		}
+
 		*value = decoded
 
 		return nil
 	default:
-		return fmt.Errorf("unsupported decode target %T", target)
+		return fmt.Errorf("%w: %T", errInvalidDecodeTarget, target)
 	}
 }
 
@@ -731,6 +828,7 @@ func decodeWireYAMLTarget(data []byte, target any) error {
 		if err != nil {
 			return err
 		}
+
 		*value = decoded
 
 		return nil
@@ -739,20 +837,21 @@ func decodeWireYAMLTarget(data []byte, target any) error {
 		if err != nil {
 			return err
 		}
+
 		*value = decoded
 
 		return nil
 	default:
-		return fmt.Errorf("unsupported decode target %T", target)
+		return fmt.Errorf("%w: %T", errInvalidDecodeTarget, target)
 	}
 }
 
 func validateWireFormat(format string) error {
 	switch format {
-	case "json", "yaml":
+	case JSON, YAML:
 		return nil
 	default:
-		return fmt.Errorf("format must be json or yaml, got %q", format)
+		return fmt.Errorf("%w: format must be json or yaml, got %q", errInvalidFormat, format)
 	}
 }
 
@@ -762,11 +861,87 @@ func writeOutput(path string, data []byte, stdout io.Writer) error {
 
 		return err
 	}
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+
+	target, err := parseFileTarget(path)
+	if err != nil {
 		return err
 	}
 
-	return os.WriteFile(path, data, 0o644)
+	return writeRootedFile(target, data)
+}
+
+func readInputFile(path string) ([]byte, error) {
+	target, err := parseFileTarget(path)
+	if err != nil {
+		return nil, err
+	}
+
+	root, err := os.OpenRoot(target.dir)
+	if err != nil {
+		return nil, err
+	}
+	defer root.Close()
+
+	file, err := root.Open(target.name)
+	if err != nil {
+		return nil, err
+	}
+	defer file.Close()
+
+	return io.ReadAll(file)
+}
+
+type fileTarget struct {
+	dir  string
+	name string
+}
+
+func parseFileTarget(path string) (fileTarget, error) {
+	cleanPath := filepath.Clean(path)
+	name := filepath.Base(cleanPath)
+
+	if name == "." || name == string(filepath.Separator) {
+		return fileTarget{}, fmt.Errorf("%w: %q", errInvalidFilePath, path)
+	}
+
+	return fileTarget{
+		dir:  filepath.Dir(cleanPath),
+		name: name,
+	}, nil
+}
+
+func writeRootedFile(target fileTarget, data []byte) error {
+	if err := os.MkdirAll(target.dir, dirPerm); err != nil {
+		return err
+	}
+
+	root, err := os.OpenRoot(target.dir)
+	if err != nil {
+		return err
+	}
+	defer root.Close()
+
+	file, err := root.OpenFile(target.name, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, filePerm)
+	if err != nil {
+		return err
+	}
+	defer file.Close()
+
+	_, err = file.Write(data)
+
+	return err
+}
+
+func checkedInt32(name string, value int) (int32, error) {
+	if value < 0 {
+		return 0, fmt.Errorf("%w: %s %d", errExpansionCountCannotBeNegative, name, value)
+	}
+
+	if value > math.MaxInt32 {
+		return 0, fmt.Errorf("%w: %s %d exceeds max int32", errExpansionCountCannotBeNegative, name, value)
+	}
+
+	return int32(value), nil
 }
 
 func printUsage(w io.Writer) {

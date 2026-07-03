@@ -14,7 +14,7 @@ const (
 	inputMappingSourcePlanInput  inputMappingSourceMode = "plan_input"
 )
 
-func validateInputMappingShape(scope string, mapping agentos.InputMapping) (inputMappingSourceMode, error) {
+func validateInputMappingShape(scope string, mapping *agentos.InputMapping) (inputMappingSourceMode, error) {
 	if mapping.Target == "" {
 		return "", fmt.Errorf("%w: %s input mapping target is required", agentos.ErrInvalidRunPlan, scope)
 	}
@@ -31,6 +31,7 @@ func validateInputMappingShape(scope string, mapping agentos.InputMapping) (inpu
 
 		return inputMappingSourceExpression, nil
 	}
+
 	if hasArtifact {
 		if !hasSourceNode {
 			return "", fmt.Errorf("%w: %s input mapping %q source_node_id is required for source_artifact %q", agentos.ErrInvalidArtifact, scope, mapping.Target, mapping.SourceArtifact)
@@ -38,9 +39,11 @@ func validateInputMappingShape(scope string, mapping agentos.InputMapping) (inpu
 
 		return inputMappingSourceArtifact, nil
 	}
+
 	if hasSourceNode {
 		return "", fmt.Errorf("%w: %s input mapping %q source_node_id requires source_artifact", agentos.ErrInvalidRunPlan, scope, mapping.Target)
 	}
+
 	if hasSourcePath {
 		return inputMappingSourcePlanInput, nil
 	}

@@ -24,5 +24,6 @@ func (r *V1) agentOSPlanSchema(ctx *fiber.Ctx) error {
 	}
 
 	ctx.Set(fiber.HeaderContentType, fiber.MIMEApplicationJSONCharsetUTF8)
+
 	return ctx.Status(http.StatusOK).Send(schema)
 }

@@ -26,57 +26,68 @@ func NewAgentOSRunIndex() *AgentOSRunIndex {
 }
 
 // Bind stores the backend reference for a run.
-func (i *AgentOSRunIndex) Bind(_ context.Context, spec agentos.RunSpec, status agentos.RunStatus) error {
-	return i.bind(agentosruntime.RunBackendIndexRecordFromRunSpec(spec, status), true)
+func (i *AgentOSRunIndex) Bind(_ context.Context, spec *agentos.RunSpec, status *agentos.RunStatus) error {
+	record := agentosruntime.RunBackendIndexRecordFromRunSpec(spec, status)
+
+	return i.bind(&record, true)
 }
 
 // BindPlanNode stores the backend reference for a plan-owned child run.
-func (i *AgentOSRunIndex) BindPlanNode(_ context.Context, planID string, nodeID string, spec agentos.RunSpec, status agentos.RunStatus) error {
-	return i.bind(agentosruntime.RunBackendIndexRecordFromPlanNode(planID, nodeID, spec, status), true)
+func (i *AgentOSRunIndex) BindPlanNode(_ context.Context, planID, nodeID string, spec *agentos.RunSpec, status *agentos.RunStatus) error {
+	record := agentosruntime.RunBackendIndexRecordFromPlanNode(planID, nodeID, spec, status)
+
+	return i.bind(&record, true)
 }
 
-func (i *AgentOSRunIndex) bind(record entity.RunBackendIndexRecord, requireIdempotencyKey bool) error {
-	record = agentosruntime.NormalizeRunBackendIndexRecord(record)
-	if err := agentosruntime.ValidateRunBackendIndexRecord(record, requireIdempotencyKey); err != nil {
+func (i *AgentOSRunIndex) bind(record *entity.RunBackendIndexRecord, requireIdempotencyKey bool) error {
+	normalized := agentosruntime.NormalizeRunBackendIndexRecord(record)
+	if err := agentosruntime.ValidateRunBackendIndexRecord(&normalized, requireIdempotencyKey); err != nil {
 		return err
 	}
 
 	i.mu.Lock()
 	defer i.mu.Unlock()
-	if record.IdempotencyKey != "" {
-		if existingRunID, exists := i.keys[record.IdempotencyKey]; exists {
+
+	if normalized.IdempotencyKey != "" {
+		if existingRunID, exists := i.keys[normalized.IdempotencyKey]; exists {
 			existing := i.records[existingRunID]
-			if err := agentosruntime.ValidateRunBackendIndexIdempotency(existing, record); err != nil {
+			if err := agentosruntime.ValidateRunBackendIndexIdempotency(&existing, &normalized); err != nil {
 				return err
 			}
-			i.records[existingRunID] = mergeRunBackendIndexRecord(existing, record)
+
+			i.records[existingRunID] = mergeRunBackendIndexRecord(&existing, &normalized)
 
 			return nil
 		}
 	}
-	if existing, exists := i.records[record.RunID]; exists {
-		if err := agentosruntime.ValidateRunBackendIndexIdempotency(existing, record); err != nil {
+
+	if existing, exists := i.records[normalized.RunID]; exists {
+		if err := agentosruntime.ValidateRunBackendIndexIdempotency(&existing, &normalized); err != nil {
 			return err
 		}
-		i.records[record.RunID] = mergeRunBackendIndexRecord(existing, record)
+
+		i.records[normalized.RunID] = mergeRunBackendIndexRecord(&existing, &normalized)
 
 		return nil
 	}
-	i.records[record.RunID] = record
-	if record.IdempotencyKey != "" {
-		i.keys[record.IdempotencyKey] = record.RunID
+
+	i.records[normalized.RunID] = normalized
+	if normalized.IdempotencyKey != "" {
+		i.keys[normalized.IdempotencyKey] = normalized.RunID
 	}
 
 	return nil
 }
 
-func mergeRunBackendIndexRecord(existing entity.RunBackendIndexRecord, requested entity.RunBackendIndexRecord) entity.RunBackendIndexRecord {
+func mergeRunBackendIndexRecord(existing, requested *entity.RunBackendIndexRecord) entity.RunBackendIndexRecord {
 	if requested.LifecycleState == agentosruntime.RunBackendLifecycleClaiming && existing.LifecycleState != agentosruntime.RunBackendLifecycleClaiming {
-		return existing
+		return *existing
 	}
-	existing.LifecycleState = requested.LifecycleState
 
-	return existing
+	merged := *existing
+	merged.LifecycleState = requested.LifecycleState
+
+	return merged
 }
 
 func (i *AgentOSRunIndex) GetRunBackend(_ context.Context, runID string) (agentos.RunBackendOwnership, bool, error) {
@@ -92,7 +103,7 @@ func (i *AgentOSRunIndex) GetRunBackend(_ context.Context, runID string) (agento
 		return agentos.RunBackendOwnership{}, false, nil
 	}
 
-	return agentosruntime.RunBackendOwnershipFromRecord(record), true, nil
+	return agentosruntime.RunBackendOwnershipFromRecord(&record), true, nil
 }
 
 // Resolve returns the backend reference that owns a run.

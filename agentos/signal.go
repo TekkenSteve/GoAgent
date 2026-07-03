@@ -8,7 +8,7 @@ type Signal struct {
 	IdempotencyKey string         `json:"idempotency_key,omitempty"`
 	ActorID        string         `json:"actor_id,omitempty"`
 	Payload        map[string]any `json:"payload,omitempty"`
-	SentAt         time.Time      `json:"sent_at,omitempty"`
+	SentAt         time.Time      `json:"sent_at,omitzero" schema:"optional"`
 }
 
 // SignalType identifies a cross-backend control-plane signal.

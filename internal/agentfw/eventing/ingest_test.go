@@ -10,13 +10,20 @@ import (
 	"github.com/TekkenSteve/GoAgent/internal/entity"
 )
 
+const (
+	Run1 = "run-1"
+	Evt1 = "evt-1"
+)
+
 func TestServiceIngestAppendsNormalizedEvent(t *testing.T) {
+	t.Parallel()
+
 	store := &fakeEventStore{sequence: 12}
 	dedupe := &fakeDedupeStore{claimed: true}
 	service := newTestService(t, store, dedupe)
 	service.now = func() time.Time { return time.Date(2026, 6, 16, 12, 0, 0, 0, time.UTC) }
 
-	result, err := service.Ingest(context.Background(), IngestEvent{
+	input := IngestEvent{
 		EventID:   "evt-1",
 		RunID:     "run-1",
 		ThreadID:  "thread-1",
@@ -25,43 +32,74 @@ func TestServiceIngestAppendsNormalizedEvent(t *testing.T) {
 		Payload: map[string]any{
 			"text": "hello",
 		},
-	})
+	}
+
+	result, err := service.Ingest(context.Background(), &input)
 	if err != nil {
 		t.Fatalf("Ingest: %v", err)
 	}
 
-	if result.Sequence != 12 || result.Duplicate {
-		t.Fatalf("unexpected result: %#v", result)
-	}
-	if store.sessionID != "thread-1" || store.runID != "run-1" {
-		t.Fatalf("unexpected store route: session=%q run=%q", store.sessionID, store.runID)
-	}
+	assertIngestResult(t, &result)
+	assertEventStoreRoute(t, store)
 
-	event, ok := store.event.(entity.AgentOSEvent)
+	event, ok := store.event.(*entity.AgentOSEvent)
 	if !ok {
 		t.Fatalf("event type = %T", store.event)
 	}
+
+	assertNormalizedEvent(t, event)
+	assertDedupeKey(t, dedupe)
+}
+
+func assertIngestResult(t *testing.T, result *IngestResult) {
+	t.Helper()
+
+	if result.Sequence != 12 || result.Duplicate {
+		t.Fatalf("unexpected result: %#v", result)
+	}
+}
+
+func assertEventStoreRoute(t *testing.T, store *fakeEventStore) {
+	t.Helper()
+
+	if store.sessionID != "thread-1" || store.runID != Run1 {
+		t.Fatalf("unexpected store route: session=%q run=%q", store.sessionID, store.runID)
+	}
+}
+
+func assertNormalizedEvent(t *testing.T, event *entity.AgentOSEvent) {
+	t.Helper()
+
 	if event.EventType() != "agent.message.delta" ||
-		event.BaseEvent.EventID != "evt-1" ||
-		event.BaseEvent.Source != "langgraph" ||
+		event.EventID != Evt1 ||
+		event.Source != "langgraph" ||
 		event.Payload["text"] != "hello" {
 		t.Fatalf("unexpected normalized event: %#v", event)
 	}
+}
+
+func assertDedupeKey(t *testing.T, dedupe *fakeDedupeStore) {
+	t.Helper()
+
 	if dedupe.runID != "run-1" || dedupe.eventID != "evt-1" {
 		t.Fatalf("unexpected dedupe key: %#v", dedupe)
 	}
 }
 
 func TestServiceIngestIgnoresDuplicateEvent(t *testing.T) {
+	t.Parallel()
+
 	store := &fakeEventStore{sequence: 12}
 	service := newTestService(t, store, &fakeDedupeStore{claimed: false})
 
-	result, err := service.Ingest(context.Background(), IngestEvent{
+	input := IngestEvent{
 		EventID:   "evt-1",
 		RunID:     "run-1",
 		EventType: agentos.EventRunStarted,
 		Source:    "python-agent",
-	})
+	}
+
+	result, err := service.Ingest(context.Background(), &input)
 	if err != nil {
 		t.Fatalf("Ingest: %v", err)
 	}
@@ -69,20 +107,24 @@ func TestServiceIngestIgnoresDuplicateEvent(t *testing.T) {
 	if !result.Duplicate || result.Sequence != duplicateEventSequence {
 		t.Fatalf("unexpected duplicate result: %#v", result)
 	}
+
 	if store.event != nil {
 		t.Fatalf("duplicate event was appended: %#v", store.event)
 	}
 }
 
 func TestServiceIngestRejectsUnknownEventType(t *testing.T) {
+	t.Parallel()
 	service := newTestService(t, &fakeEventStore{}, nil)
 
-	_, err := service.Ingest(context.Background(), IngestEvent{
+	input := IngestEvent{
 		EventID:   "evt-1",
 		RunID:     "run-1",
 		EventType: "backend.random",
 		Source:    "external",
-	})
+	}
+
+	_, err := service.Ingest(context.Background(), &input)
 	if !errors.Is(err, ErrInvalidEvent) {
 		t.Fatalf("err = %v", err)
 	}

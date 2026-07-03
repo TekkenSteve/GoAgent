@@ -52,7 +52,7 @@ func main() {
 	fmt.Fprintln(os.Stdout, "Flow: plan → Split(tasks) → Join → evaluate → [inject] → report")
 	fmt.Fprintln(os.Stdout)
 
-	status, err := c.ExecuteOrchestration(ctx, client.OrchestrationRequest{
+	status, err := c.ExecuteOrchestration(ctx, &client.OrchestrationRequest{
 		RunID: runID,
 		Steps: planExecuteSteps(),
 	})

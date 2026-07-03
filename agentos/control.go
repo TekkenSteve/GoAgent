@@ -18,13 +18,17 @@ const (
 type ControlRequest struct {
 	Operation      ControlOperation  `json:"operation"`
 	IdempotencyKey string            `json:"idempotency_key,omitempty"`
-	RequestedAt    time.Time         `json:"requested_at,omitempty"`
+	RequestedAt    time.Time         `json:"requested_at,omitzero" schema:"optional"`
 	ActorID        string            `json:"actor_id,omitempty"`
 	Metadata       map[string]string `json:"metadata,omitempty"`
 }
 
 // ValidateControlRequest validates a lifecycle control request.
-func ValidateControlRequest(req ControlRequest) error {
+func ValidateControlRequest(req *ControlRequest) error {
+	if req == nil {
+		return fmt.Errorf("%w: control request is required", ErrInvalidControlOperation)
+	}
+
 	switch req.Operation {
 	case ControlPause, ControlResume, ControlCancel:
 		return nil

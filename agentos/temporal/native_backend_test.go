@@ -11,18 +11,22 @@ import (
 	"github.com/TekkenSteve/GoAgent/internal/usecase/agentosruntime/agentosruntimetest"
 )
 
+const AgentOSConformanceRun = "agentos-conformance-run"
+
 func TestTemporalNativeBackendConformance(t *testing.T) {
+	t.Parallel()
+
 	probe := &agentosruntimetest.SubscriberProbe{}
 	executor := &fakeNativeExecutor{
 		status: entity.RunStatus{
-			RunID:          "agentos-conformance-run",
+			RunID:          AgentOSConformanceRun,
 			LifecycleState: "running",
 			UpdatedAt:      time.Date(2026, 6, 16, 12, 1, 0, 0, time.UTC),
 		},
 	}
 	backend := newTemporalNativeBackend(executor, probe)
 
-	agentosruntimetest.RunBackendConformance(t, agentosruntimetest.BackendConformanceCase{
+	agentosruntimetest.RunBackendConformance(t, &agentosruntimetest.BackendConformanceCase{
 		Name:            "native",
 		Backend:         backend,
 		Ref:             agentos.BackendRef{Kind: agentos.BackendKindNative, Name: agentos.BackendNameGoAgentNative},
@@ -31,20 +35,22 @@ func TestTemporalNativeBackendConformance(t *testing.T) {
 	})
 
 	if executor.start == nil ||
-		executor.start.RunID != "agentos-conformance-run" ||
-		executor.start.UserMessage != "hello" ||
-		executor.userMessageRunID != "agentos-conformance-run" ||
-		executor.canceledRunID != "agentos-conformance-run" {
+		executor.start.RunID != AgentOSConformanceRun ||
+		executor.start.UserMessage != Hello ||
+		executor.userMessageRunID != AgentOSConformanceRun ||
+		executor.canceledRunID != AgentOSConformanceRun {
 		t.Fatalf("native backend calls were not routed through the shared contract: %#v", executor)
 	}
 }
 
 func TestTemporalNativeBackendSignalUserMessage(t *testing.T) {
+	t.Parallel()
+
 	executor := &fakeNativeExecutor{}
 	backend := newTemporalNativeBackend(executor, nil)
 	sentAt := time.Date(2026, 6, 16, 12, 0, 0, 0, time.UTC)
 
-	err := backend.Signal(context.Background(), "run-1", agentos.Signal{
+	signal := agentos.Signal{
 		Type:           agentos.SignalUserMessage,
 		IdempotencyKey: "idem-1",
 		SentAt:         sentAt,
@@ -58,14 +64,17 @@ func TestTemporalNativeBackendSignalUserMessage(t *testing.T) {
 				map[string]any{"file_id": "file-1"},
 			},
 		},
-	})
+	}
+
+	err := backend.Signal(context.Background(), "run-1", &signal)
 	if err != nil {
 		t.Fatalf("Signal: %v", err)
 	}
 
-	if executor.userMessageRunID != "run-1" {
+	if executor.userMessageRunID != Run1 {
 		t.Fatalf("run id = %q", executor.userMessageRunID)
 	}
+
 	if executor.userMessage.MessageID != "msg-1" ||
 		executor.userMessage.IdempotencyKey != "idem-1" ||
 		executor.userMessage.Content != "continue" ||
@@ -77,18 +86,24 @@ func TestTemporalNativeBackendSignalUserMessage(t *testing.T) {
 }
 
 func TestTemporalNativeBackendRejectsEmptyUserMessageContent(t *testing.T) {
+	t.Parallel()
+
 	backend := newTemporalNativeBackend(&fakeNativeExecutor{}, nil)
 
-	err := backend.Signal(context.Background(), "run-1", agentos.Signal{
+	signal := agentos.Signal{
 		Type:    agentos.SignalUserMessage,
 		Payload: map[string]any{},
-	})
+	}
+
+	err := backend.Signal(context.Background(), "run-1", &signal)
 	if err == nil {
 		t.Fatal("expected error")
 	}
 }
 
 func TestTemporalNativeBackendCapabilitiesIncludeUserMessage(t *testing.T) {
+	t.Parallel()
+
 	backend := newTemporalNativeBackend(&fakeNativeExecutor{}, nil)
 
 	capabilities := backend.Capabilities()
@@ -147,9 +162,9 @@ func (e *fakeNativeExecutor) Cancel(_ context.Context, runID string) error {
 	return nil
 }
 
-func (e *fakeNativeExecutor) SignalUserMessage(_ context.Context, runID string, message orchestration.UserMessageSignal) error {
+func (e *fakeNativeExecutor) SignalUserMessage(_ context.Context, runID string, message *orchestration.UserMessageSignal) error {
 	e.userMessageRunID = runID
-	e.userMessage = message
+	e.userMessage = *message
 
 	return nil
 }

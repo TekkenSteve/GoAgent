@@ -121,7 +121,7 @@ type TemporalExternalBackend struct {
 	TaskQueue    string              `json:"task_queue"`
 	WorkflowType string              `json:"workflow_type"`
 	QueryType    string              `json:"query_type,omitempty"`
-	Signals      ExternalSignalNames `json:"signals,omitempty"`
+	Signals      ExternalSignalNames `json:"signals"`
 }
 
 // ExternalSignalNames maps AgentOS signals/control operations to external workflow signal names.
@@ -146,7 +146,7 @@ type GRPCBackend struct {
 	Authority string          `json:"authority,omitempty"`
 	Insecure  bool            `json:"insecure,omitempty"`
 	Service   string          `json:"service,omitempty"`
-	Methods   GRPCMethodNames `json:"methods,omitempty"`
+	Methods   GRPCMethodNames `json:"methods"`
 }
 
 // GRPCMethodNames maps AgentOS operations to external gRPC unary method names.
@@ -189,7 +189,7 @@ type S3ArtifactStoreConfig struct {
 }
 
 // TemporalExternalBackends parses configured temporal_external backends.
-func (c AgentFW) TemporalExternalBackends() ([]TemporalExternalBackend, error) {
+func (c *AgentFW) TemporalExternalBackends() ([]TemporalExternalBackend, error) {
 	var backends []TemporalExternalBackend
 	if err := json.Unmarshal([]byte(c.TemporalExternalBackendsJSON), &backends); err != nil {
 		return nil, fmt.Errorf("parse AGENTFW_TEMPORAL_EXTERNAL_BACKENDS_JSON: %w", err)
@@ -199,7 +199,7 @@ func (c AgentFW) TemporalExternalBackends() ([]TemporalExternalBackend, error) {
 }
 
 // HTTPBackends parses configured HTTP agent backends.
-func (c AgentFW) HTTPBackends() ([]HTTPBackend, error) {
+func (c *AgentFW) HTTPBackends() ([]HTTPBackend, error) {
 	var backends []HTTPBackend
 	if err := json.Unmarshal([]byte(c.HTTPBackendsJSON), &backends); err != nil {
 		return nil, fmt.Errorf("parse AGENTFW_HTTP_BACKENDS_JSON: %w", err)
@@ -209,7 +209,7 @@ func (c AgentFW) HTTPBackends() ([]HTTPBackend, error) {
 }
 
 // GRPCBackends parses configured gRPC agent backends.
-func (c AgentFW) GRPCBackends() ([]GRPCBackend, error) {
+func (c *AgentFW) GRPCBackends() ([]GRPCBackend, error) {
 	var backends []GRPCBackend
 	if err := json.Unmarshal([]byte(c.GRPCBackendsJSON), &backends); err != nil {
 		return nil, fmt.Errorf("parse AGENTFW_GRPC_BACKENDS_JSON: %w", err)
@@ -219,7 +219,7 @@ func (c AgentFW) GRPCBackends() ([]GRPCBackend, error) {
 }
 
 // BackendSelectionRules parses ordered backend selection rules.
-func (c AgentFW) BackendSelectionRules() ([]BackendSelectionRule, error) {
+func (c *AgentFW) BackendSelectionRules() ([]BackendSelectionRule, error) {
 	var rules []BackendSelectionRule
 	if err := json.Unmarshal([]byte(c.BackendSelectionRulesJSON), &rules); err != nil {
 		return nil, fmt.Errorf("parse AGENTFW_BACKEND_SELECTION_RULES_JSON: %w", err)
@@ -229,7 +229,7 @@ func (c AgentFW) BackendSelectionRules() ([]BackendSelectionRule, error) {
 }
 
 // Capabilities parses configured AgentOS backend capabilities.
-func (c AgentOS) Capabilities() ([]agentos.Capability, error) {
+func (c *AgentOS) Capabilities() ([]agentos.Capability, error) {
 	var capabilities []agentos.Capability
 	if err := json.Unmarshal([]byte(c.CapabilitiesJSON), &capabilities); err != nil {
 		return nil, fmt.Errorf("parse AGENTOS_CAPABILITIES_JSON: %w", err)
@@ -239,7 +239,7 @@ func (c AgentOS) Capabilities() ([]agentos.Capability, error) {
 }
 
 // ArtifactSchemas parses configured AgentOS artifact schema declarations.
-func (c AgentOS) ArtifactSchemas() ([]agentos.ArtifactSchema, error) {
+func (c *AgentOS) ArtifactSchemas() ([]agentos.ArtifactSchema, error) {
 	var schemas []agentos.ArtifactSchema
 	if err := json.Unmarshal([]byte(c.ArtifactSchemasJSON), &schemas); err != nil {
 		return nil, fmt.Errorf("parse AGENTOS_ARTIFACT_SCHEMAS_JSON: %w", err)
@@ -248,7 +248,7 @@ func (c AgentOS) ArtifactSchemas() ([]agentos.ArtifactSchema, error) {
 	return schemas, nil
 }
 
-func (c AgentOS) ArtifactStoreConfig() ArtifactStoreConfig {
+func (c *AgentOS) ArtifactStoreConfig() ArtifactStoreConfig {
 	return ArtifactStoreConfig{
 		Backend: c.ArtifactStoreBackend,
 		Local: LocalArtifactStoreConfig{

@@ -34,13 +34,20 @@ const (
 type RedisEventStore struct {
 	rdb       *redis.Redis
 	sequencer stream.Sequencer
+	codec     entity.EventCodec
 }
 
 // NewRedisEventStore creates a RedisEventStore.
 func NewRedisEventStore(rdb *redis.Redis, sequencer stream.Sequencer) *RedisEventStore {
+	return NewRedisEventStoreWithCodec(rdb, sequencer, entity.NewEventCodec(nil))
+}
+
+// NewRedisEventStoreWithCodec creates a RedisEventStore with an explicit event codec.
+func NewRedisEventStoreWithCodec(rdb *redis.Redis, sequencer stream.Sequencer, codec entity.EventCodec) *RedisEventStore {
 	return &RedisEventStore{
 		rdb:       rdb,
 		sequencer: sequencer,
+		codec:     codec,
 	}
 }
 
@@ -53,7 +60,7 @@ func (s *RedisEventStore) Append(ctx context.Context, sessionID, runID string, e
 	}
 
 	// Marshal then inject sessionID/runID into JSON payload.
-	data, err := entity.MarshalEvent(event)
+	data, err := s.codec.MarshalEvent(event)
 	if err != nil {
 		return 0, fmt.Errorf("event_store: marshal: %w", err)
 	}
@@ -109,7 +116,7 @@ func (s *RedisEventStore) Replay(ctx context.Context, sessionID string, afterSeq
 			continue // skip corrupt entries
 		}
 
-		event, err := entity.UnmarshalEvent([]byte(dataStr))
+		event, err := s.codec.UnmarshalEvent([]byte(dataStr))
 		if err != nil {
 			continue // skip corrupt events
 		}

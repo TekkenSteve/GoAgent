@@ -36,42 +36,53 @@ func newPlanCommandReconciler(
 
 func (r *planCommandReconciler) Recover(ctx context.Context, limit int) (PlanCommandRecoveryResult, error) {
 	if r.temporalClient == nil {
-		return PlanCommandRecoveryResult{}, errors.New("agentos temporal plan command reconciler: temporal client is not configured")
+		return PlanCommandRecoveryResult{}, errPlanRuntimeTemporalClientNotConfigured
 	}
+
 	if r.commandStore == nil {
 		return PlanCommandRecoveryResult{}, errPlanRuntimeCommandStoreRequired
 	}
+
 	if r.auditStore == nil {
 		return PlanCommandRecoveryResult{}, errPlanRuntimeAuditStoreRequired
 	}
+
 	if r.planIndex == nil {
 		return PlanCommandRecoveryResult{}, errPlanRuntimePlanIndexRequired
 	}
 
-	commands, err := r.commandStore.ListRecoverablePlanCommands(ctx, agentosplan.PlanCommandScope{Limit: limit})
+	scope := agentosplan.PlanCommandScope{Limit: limit}
+
+	commands, err := r.commandStore.ListRecoverablePlanCommands(ctx, &scope)
 	if err != nil {
 		return PlanCommandRecoveryResult{}, err
 	}
 
 	result := PlanCommandRecoveryResult{Scanned: len(commands)}
+
 	var errs []error
-	for _, command := range commands {
-		if err := r.deliver(ctx, command); err != nil {
+
+	for i := range commands {
+		command := commands[i]
+		if err := r.deliver(ctx, &command); err != nil {
 			result.Failed++
+
 			errs = append(errs, err)
 
 			continue
 		}
+
 		result.Delivered++
 	}
 
 	return result, errors.Join(errs...)
 }
 
-func (r *planCommandReconciler) deliver(ctx context.Context, command agentosplan.PlanCommandRecord) error {
+func (r *planCommandReconciler) deliver(ctx context.Context, command *agentosplan.PlanCommandRecord) error {
 	if command.Status == agentosplan.PlanCommandDelivered {
 		return nil
 	}
+
 	if command.Action == agentosplan.AuditActionPlanStart {
 		return r.deliverPlanStart(ctx, command)
 	}
@@ -90,9 +101,11 @@ func (r *planCommandReconciler) deliver(ctx context.Context, command agentosplan
 
 		return errors.Join(fmt.Errorf("agentos temporal plan command reconciler - signal workflow: %w", err), markErr)
 	}
-	if _, _, err := r.auditStore.RecordAudit(ctx, auditRecord); err != nil {
+
+	if _, _, err := r.auditStore.RecordAudit(ctx, &auditRecord); err != nil {
 		return err
 	}
+
 	if _, err := r.commandStore.MarkPlanCommandDelivered(ctx, agentosplan.PlanCommandRefFromRecord(command)); err != nil {
 		return err
 	}
@@ -100,27 +113,31 @@ func (r *planCommandReconciler) deliver(ctx context.Context, command agentosplan
 	return nil
 }
 
-func (r *planCommandReconciler) deliverPlanStart(ctx context.Context, command agentosplan.PlanCommandRecord) error {
+func (r *planCommandReconciler) deliverPlanStart(ctx context.Context, command *agentosplan.PlanCommandRecord) error {
 	spec, _, exists, err := r.planIndex.GetPlanByRef(ctx, planRefFromCommand(command))
 	if err != nil {
 		return r.markCommandFailed(ctx, command, err)
 	}
+
 	if !exists {
 		return r.markCommandFailed(ctx, command, fmt.Errorf("%w: %s", agentos.ErrPlanRouteNotFound, command.PlanID))
 	}
+
 	if command.IdempotencyKey != spec.IdempotencyKey {
 		err := fmt.Errorf("%w: plan.start command idempotency key does not match plan start request", agentos.ErrInvalidRunPlan)
 
 		return r.markCommandFailed(ctx, command, err)
 	}
 
-	auditRecord := planStartAuditRecord(spec)
-	if err := executePlanWorkflow(ctx, r.temporalClient, r.taskQueue, spec); err != nil {
+	auditRecord := planStartAuditRecord(&spec)
+	if err := executePlanWorkflow(ctx, r.temporalClient, r.taskQueue, &spec); err != nil {
 		return r.markCommandFailed(ctx, command, err)
 	}
+
 	if _, _, err := r.auditStore.RecordAudit(ctx, auditRecord); err != nil {
 		return err
 	}
+
 	if _, err := r.commandStore.MarkPlanCommandDelivered(ctx, agentosplan.PlanCommandRefFromRecord(command)); err != nil {
 		return err
 	}
@@ -128,13 +145,18 @@ func (r *planCommandReconciler) deliverPlanStart(ctx context.Context, command ag
 	return nil
 }
 
-func (r *planCommandReconciler) markCommandFailed(ctx context.Context, command agentosplan.PlanCommandRecord, cause error) error {
+func (r *planCommandReconciler) markCommandFailed(ctx context.Context, command *agentosplan.PlanCommandRecord, cause error) error {
 	_, markErr := r.commandStore.MarkPlanCommandFailed(ctx, agentosplan.PlanCommandRefFromRecord(command), cause.Error())
 
 	return errors.Join(cause, markErr)
 }
 
-func commandDeliveryPayload(command agentosplan.PlanCommandRecord) (string, any, agentosplan.AuditRecord, error) {
+func commandDeliveryPayload(command *agentosplan.PlanCommandRecord) (
+	signalName string,
+	payload any,
+	audit agentosplan.AuditRecord,
+	err error,
+) {
 	switch command.Action {
 	case agentosplan.AuditActionPlanSignal:
 		signal, err := signalFromPlanCommand(command)
@@ -142,28 +164,36 @@ func commandDeliveryPayload(command agentosplan.PlanCommandRecord) (string, any,
 			return "", nil, agentosplan.AuditRecord{}, err
 		}
 
-		return PlanSignalName, signal, planSignalAuditRecord(planRefFromCommand(command), signal), nil
+		audit := planSignalAuditRecord(planRefFromCommand(command), &signal)
+
+		return PlanSignalName, signal, *audit, nil
 	case agentosplan.AuditActionPlanControl:
 		control, err := controlFromPlanCommand(command)
 		if err != nil {
 			return "", nil, agentosplan.AuditRecord{}, err
 		}
 
-		return PlanControlSignalName, control, planControlAuditRecord(planRefFromCommand(command), control), nil
+		audit := planControlAuditRecord(planRefFromCommand(command), &control)
+
+		return PlanControlSignalName, control, *audit, nil
+	case agentosplan.AuditActionPlanStart:
+		return "", nil, agentosplan.AuditRecord{}, fmt.Errorf("%w: plan start is handled by deliverPlanStart", agentos.ErrInvalidRunPlan)
 	default:
 		return "", nil, agentosplan.AuditRecord{}, fmt.Errorf("%w: unsupported plan command action %q", agentos.ErrInvalidRunPlan, command.Action)
 	}
 }
 
-func signalFromPlanCommand(command agentosplan.PlanCommandRecord) (agentos.Signal, error) {
+func signalFromPlanCommand(command *agentosplan.PlanCommandRecord) (agentos.Signal, error) {
 	signalType, err := signalTypePayload(command.Payload, planCommandPayloadSignalType)
 	if err != nil {
 		return agentos.Signal{}, err
 	}
+
 	payload, err := mapPayload(command.Payload, planCommandPayloadPayload)
 	if err != nil {
 		return agentos.Signal{}, err
 	}
+
 	sentAt, err := optionalTimePayload(command.Payload, planCommandPayloadSentAt)
 	if err != nil {
 		return agentos.Signal{}, err
@@ -176,22 +206,24 @@ func signalFromPlanCommand(command agentosplan.PlanCommandRecord) (agentos.Signa
 		Payload:        payload,
 		SentAt:         sentAt,
 	}
-	if err := agentosplan.ValidatePlanSignal(signal); err != nil {
+	if err := agentosplan.ValidatePlanSignal(&signal); err != nil {
 		return agentos.Signal{}, err
 	}
 
 	return signal, nil
 }
 
-func controlFromPlanCommand(command agentosplan.PlanCommandRecord) (agentos.ControlRequest, error) {
+func controlFromPlanCommand(command *agentosplan.PlanCommandRecord) (agentos.ControlRequest, error) {
 	operation, err := controlOperationPayload(command.Payload, planCommandPayloadOperation)
 	if err != nil {
 		return agentos.ControlRequest{}, err
 	}
+
 	metadata, err := stringMapPayload(command.Payload, planCommandPayloadMetadata)
 	if err != nil {
 		return agentos.ControlRequest{}, err
 	}
+
 	requestedAt, err := optionalTimePayload(command.Payload, planCommandPayloadRequestedAt)
 	if err != nil {
 		return agentos.ControlRequest{}, err
@@ -204,9 +236,10 @@ func controlFromPlanCommand(command agentosplan.PlanCommandRecord) (agentos.Cont
 		ActorID:        command.ActorID,
 		Metadata:       metadata,
 	}
-	if err := agentos.ValidateControlRequest(control); err != nil {
+	if err := agentos.ValidateControlRequest(&control); err != nil {
 		return agentos.ControlRequest{}, err
 	}
+
 	if control.ActorID == "" {
 		return agentos.ControlRequest{}, fmt.Errorf("%w: control actor id is required", agentos.ErrInvalidControlOperation)
 	}
@@ -219,6 +252,7 @@ func signalTypePayload(payload map[string]any, key string) (agentos.SignalType, 
 	if !exists {
 		return "", fmt.Errorf("%w: command payload.%s is required", agentos.ErrInvalidRunPlan, key)
 	}
+
 	switch typed := value.(type) {
 	case agentos.SignalType:
 		return typed, nil
@@ -234,6 +268,7 @@ func controlOperationPayload(payload map[string]any, key string) (agentos.Contro
 	if !exists {
 		return "", fmt.Errorf("%w: command payload.%s is required", agentos.ErrInvalidRunPlan, key)
 	}
+
 	switch typed := value.(type) {
 	case agentos.ControlOperation:
 		return typed, nil
@@ -249,6 +284,7 @@ func mapPayload(payload map[string]any, key string) (map[string]any, error) {
 	if !exists || value == nil {
 		return map[string]any{}, nil
 	}
+
 	switch typed := value.(type) {
 	case map[string]any:
 		return typed, nil
@@ -269,6 +305,7 @@ func stringMapPayload(payload map[string]any, key string) (map[string]string, er
 	if !exists || value == nil {
 		return nil, nil
 	}
+
 	switch typed := value.(type) {
 	case map[string]string:
 		return typed, nil
@@ -279,6 +316,7 @@ func stringMapPayload(payload map[string]any, key string) (map[string]string, er
 			if !ok {
 				return nil, fmt.Errorf("%w: command payload.%s.%s must be a string", agentos.ErrInvalidRunPlan, planCommandPayloadMetadata, key)
 			}
+
 			converted[key] = stringValue
 		}
 
@@ -293,6 +331,7 @@ func optionalTimePayload(payload map[string]any, key string) (time.Time, error) 
 	if !exists || value == nil {
 		return time.Time{}, nil
 	}
+
 	switch typed := value.(type) {
 	case time.Time:
 		return typed, nil
@@ -308,7 +347,7 @@ func optionalTimePayload(payload map[string]any, key string) (time.Time, error) 
 	}
 }
 
-func planRefFromCommand(command agentosplan.PlanCommandRecord) agentos.PlanRef {
+func planRefFromCommand(command *agentosplan.PlanCommandRecord) agentos.PlanRef {
 	return agentos.PlanRef{
 		PlanID:    command.PlanID,
 		AccountID: command.AccountID,
@@ -316,7 +355,7 @@ func planRefFromCommand(command agentosplan.PlanCommandRecord) agentos.PlanRef {
 	}
 }
 
-func planControlAuditRecord(ref agentos.PlanRef, control agentos.ControlRequest) agentosplan.AuditRecord {
+func planControlAuditRecord(ref agentos.PlanRef, control *agentos.ControlRequest) *agentosplan.AuditRecord {
 	payload := map[string]any{
 		planCommandPayloadOperation: control.Operation,
 		planCommandPayloadMetadata:  control.Metadata,
@@ -325,7 +364,7 @@ func planControlAuditRecord(ref agentos.PlanRef, control agentos.ControlRequest)
 		payload[planCommandPayloadRequestedAt] = control.RequestedAt
 	}
 
-	return agentosplan.AuditRecord{
+	return &agentosplan.AuditRecord{
 		PlanID:         ref.PlanID,
 		AccountID:      ref.AccountID,
 		ProjectID:      ref.ProjectID,

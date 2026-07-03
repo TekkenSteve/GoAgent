@@ -35,16 +35,16 @@ type CapabilityCatalog interface {
 
 // CapabilityRegistry persists backend capability declarations.
 type CapabilityRegistry interface {
-	RegisterCapability(ctx context.Context, capability agentos.Capability, idempotencyKey string) (agentos.Capability, bool, error)
+	RegisterCapability(ctx context.Context, capability *agentos.Capability, idempotencyKey string) (agentos.Capability, bool, error)
 }
 
 // ArtifactStore stores artifacts outside workflow history. Reads must carry the
 // full account/project plan scope because artifact IDs are not a tenant
 // boundary.
 type ArtifactStore interface {
-	Put(ctx context.Context, artifact agentos.ArtifactRef, payload any, idempotencyKey string) (agentos.ArtifactRef, error)
-	Get(ctx context.Context, scope agentos.PlanArtifactScope) (agentos.ArtifactRef, any, error)
-	List(ctx context.Context, scope agentos.PlanArtifactScope) ([]agentos.ArtifactRef, error)
+	Put(ctx context.Context, artifact *agentos.ArtifactRef, payload any, idempotencyKey string) (agentos.ArtifactRef, error)
+	Get(ctx context.Context, scope *agentos.PlanArtifactScope) (agentos.ArtifactRef, any, error)
+	List(ctx context.Context, scope *agentos.PlanArtifactScope) ([]agentos.ArtifactRef, error)
 }
 
 // ArtifactSchemaCatalog resolves JSON Schemas referenced by ArtifactSpec.
@@ -60,7 +60,7 @@ type ArtifactSchemaRegistry interface {
 
 // PlanIndex stores durable plan identity and the latest aggregate status.
 type PlanIndex interface {
-	CreatePlan(ctx context.Context, spec agentos.RunPlanSpec, status agentos.RunPlanStatus) (agentos.RunPlanStatus, bool, error)
+	CreatePlan(ctx context.Context, spec *agentos.RunPlanSpec, status *agentos.RunPlanStatus) (agentos.RunPlanStatus, bool, error)
 	GetPlanByRef(ctx context.Context, ref agentos.PlanRef) (agentos.RunPlanSpec, agentos.RunPlanStatus, bool, error)
 	GetPlan(ctx context.Context, planID string) (agentos.RunPlanSpec, agentos.RunPlanStatus, bool, error)
 }
@@ -77,7 +77,7 @@ type PlanRefScope struct {
 // PlanRefStore lists durable plan identities without exposing implementation
 // tables to projectors.
 type PlanRefStore interface {
-	ListPlanRefs(ctx context.Context, scope PlanRefScope) ([]agentos.PlanRef, error)
+	ListPlanRefs(ctx context.Context, scope *PlanRefScope) ([]agentos.PlanRef, error)
 }
 
 // PlanStateSnapshot is the durable replay/audit snapshot written by plan activities.
@@ -88,7 +88,7 @@ type PlanStateSnapshot struct {
 
 // PlanStateStore persists the latest deterministic reducer snapshot.
 type PlanStateStore interface {
-	SavePlanState(ctx context.Context, snapshot PlanStateSnapshot) error
+	SavePlanState(ctx context.Context, snapshot *PlanStateSnapshot) error
 	LoadPlanState(ctx context.Context, planID string) (PlanStateSnapshot, bool, error)
 }
 
@@ -96,15 +96,15 @@ type PlanStateStore interface {
 // public event. Implementations must not expose a newer state without the
 // corresponding event in the durable stream.
 type PlanTransitionStore interface {
-	PersistPlanTransition(ctx context.Context, snapshot PlanStateSnapshot, event agentos.PlanEvent, idempotencyKey string) (agentos.PlanEvent, error)
+	PersistPlanTransition(ctx context.Context, snapshot *PlanStateSnapshot, event *agentos.PlanEvent, idempotencyKey string) (agentos.PlanEvent, error)
 }
 
 // PlanEventStore is the durable event source for RunPlan timelines. Reads must
 // carry the full account/project plan scope; PlanID alone is not a production
 // isolation boundary.
 type PlanEventStore interface {
-	AppendPlanEvent(ctx context.Context, event agentos.PlanEvent, idempotencyKey string) (agentos.PlanEvent, error)
-	ListPlanEvents(ctx context.Context, scope agentos.PlanStreamScope, limit int) ([]agentos.PlanEvent, error)
+	AppendPlanEvent(ctx context.Context, event *agentos.PlanEvent, idempotencyKey string) (agentos.PlanEvent, error)
+	ListPlanEvents(ctx context.Context, scope *agentos.PlanStreamScope, limit int) ([]agentos.PlanEvent, error)
 }
 
 // PlanMetricCheckpoint stores the exporter-owned cursor and projection state
@@ -122,20 +122,20 @@ type PlanMetricCheckpoint struct {
 // PlanMetricCheckpointStore persists metric projection checkpoints.
 type PlanMetricCheckpointStore interface {
 	GetPlanMetricCheckpoint(ctx context.Context, exporterID string, ref agentos.PlanRef) (PlanMetricCheckpoint, bool, error)
-	SavePlanMetricCheckpoint(ctx context.Context, checkpoint PlanMetricCheckpoint) error
+	SavePlanMetricCheckpoint(ctx context.Context, checkpoint *PlanMetricCheckpoint) error
 }
 
 // PlanMetricsSink receives idempotent durable metric samples. Implementations
 // must de-duplicate by PlanMetricSample.Key before mutating non-idempotent
 // counters or external metrics systems.
 type PlanMetricsSink interface {
-	RecordPlanMetric(ctx context.Context, sample PlanMetricSample) error
+	RecordPlanMetric(ctx context.Context, sample *PlanMetricSample) error
 }
 
 // PlanEventPublisher publishes live PlanEvents after the durable event source
 // has assigned sequence and event identity.
 type PlanEventPublisher interface {
-	PublishPlanEvent(ctx context.Context, event agentos.PlanEvent) error
+	PublishPlanEvent(ctx context.Context, event *agentos.PlanEvent) error
 }
 
 // PlanEventSubscription is the typed live tail for public RunPlan events.
@@ -148,7 +148,7 @@ type PlanEventSubscription interface {
 
 // PlanEventSubscriber subscribes to the live PlanEvent tail.
 type PlanEventSubscriber interface {
-	SubscribePlanEvents(ctx context.Context, scope agentos.PlanStreamScope) (PlanEventSubscription, error)
+	SubscribePlanEvents(ctx context.Context, scope *agentos.PlanStreamScope) (PlanEventSubscription, error)
 }
 
 // AuditAction identifies durable control-plane actions.
@@ -183,7 +183,7 @@ type AuditRef struct {
 	IdempotencyKey string
 }
 
-func AuditRefFromRecord(record AuditRecord) AuditRef {
+func AuditRefFromRecord(record *AuditRecord) AuditRef {
 	return AuditRef{
 		PlanID:         record.PlanID,
 		AccountID:      record.AccountID,
@@ -195,9 +195,9 @@ func AuditRefFromRecord(record AuditRecord) AuditRef {
 // AuditStore persists idempotent control-plane audit records. List operations
 // must carry the full account/project plan scope.
 type AuditStore interface {
-	RecordAudit(ctx context.Context, record AuditRecord) (AuditRecord, bool, error)
+	RecordAudit(ctx context.Context, record *AuditRecord) (AuditRecord, bool, error)
 	GetAuditRecord(ctx context.Context, ref AuditRef) (AuditRecord, bool, error)
-	ListAuditRecords(ctx context.Context, scope agentos.PlanAuditScope) ([]agentos.PlanAuditRecord, error)
+	ListAuditRecords(ctx context.Context, scope *agentos.PlanAuditScope) ([]agentos.PlanAuditRecord, error)
 }
 
 // PlanCommandStatus is the durable outbox state for a control-plane command.
@@ -234,7 +234,7 @@ type PlanCommandRef struct {
 	IdempotencyKey string
 }
 
-func PlanCommandRefFromRecord(command PlanCommandRecord) PlanCommandRef {
+func PlanCommandRefFromRecord(command *PlanCommandRecord) PlanCommandRef {
 	return PlanCommandRef{
 		PlanID:         command.PlanID,
 		AccountID:      command.AccountID,
@@ -255,18 +255,18 @@ type PlanCommandScope struct {
 
 // PlanCommandStore persists recoverable plan start/signal/control commands.
 type PlanCommandStore interface {
-	RecordPlanCommand(ctx context.Context, command PlanCommandRecord) (PlanCommandRecord, bool, error)
+	RecordPlanCommand(ctx context.Context, command *PlanCommandRecord) (PlanCommandRecord, bool, error)
 	GetPlanCommand(ctx context.Context, ref PlanCommandRef) (PlanCommandRecord, bool, error)
-	ListRecoverablePlanCommands(ctx context.Context, scope PlanCommandScope) ([]PlanCommandRecord, error)
+	ListRecoverablePlanCommands(ctx context.Context, scope *PlanCommandScope) ([]PlanCommandRecord, error)
 	MarkPlanCommandDelivered(ctx context.Context, ref PlanCommandRef) (PlanCommandRecord, error)
 	MarkPlanCommandFailed(ctx context.Context, ref PlanCommandRef, reason string) (PlanCommandRecord, error)
 }
 
 // Runner starts and controls backend-owned child runs.
 type Runner interface {
-	Start(ctx context.Context, spec agentos.RunSpec) (agentos.RunStatus, error)
-	Signal(ctx context.Context, runID string, signal agentos.Signal) error
+	Start(ctx context.Context, spec *agentos.RunSpec) (agentos.RunStatus, error)
+	Signal(ctx context.Context, runID string, signal *agentos.Signal) error
 	Status(ctx context.Context, runID string) (agentos.RunStatus, error)
-	Control(ctx context.Context, runID string, control agentos.ControlRequest) error
+	Control(ctx context.Context, runID string, control *agentos.ControlRequest) error
 	Subscribe(ctx context.Context, scope agentos.StreamScope) (agentos.Subscription, error)
 }

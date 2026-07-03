@@ -23,9 +23,8 @@ type recordAuditSink struct {
 	records []AuditRecord
 }
 
-//nolint:gocritic // test file, intentional
-func (s *recordAuditSink) Write(_ context.Context, record AuditRecord) error {
-	s.records = append(s.records, record)
+func (s *recordAuditSink) Write(_ context.Context, record *AuditRecord) error {
+	s.records = append(s.records, *record)
 
 	return nil
 }

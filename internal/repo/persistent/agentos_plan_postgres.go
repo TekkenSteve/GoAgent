@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"slices"
 	"time"
 
 	sq "github.com/Masterminds/squirrel"
@@ -14,6 +15,9 @@ import (
 	"github.com/TekkenSteve/GoAgent/internal/usecase/agentosplan"
 	"github.com/jackc/pgx/v5"
 )
+
+// errcheckIgnore is a helper for intentional error discards.
+func errcheckIgnore(_ error) {}
 
 // AgentOSPlanRepo persists RunPlan aggregate state and durable plan events.
 type AgentOSPlanRepo struct {
@@ -25,55 +29,41 @@ func NewAgentOSPlanRepo(pg *postgres.Postgres) *AgentOSPlanRepo {
 	return &AgentOSPlanRepo{pg}
 }
 
-func (r *AgentOSPlanRepo) CreatePlan(ctx context.Context, spec agentos.RunPlanSpec, status agentos.RunPlanStatus) (agentos.RunPlanStatus, bool, error) {
+func (r *AgentOSPlanRepo) CreatePlan(ctx context.Context, spec *agentos.RunPlanSpec, status *agentos.RunPlanStatus) (agentos.RunPlanStatus, bool, error) {
 	if spec.PlanID == "" {
 		return agentos.RunPlanStatus{}, false, fmt.Errorf("%w: plan id is required", agentos.ErrInvalidRunPlan)
 	}
+
 	if spec.IdempotencyKey == "" {
 		return agentos.RunPlanStatus{}, false, fmt.Errorf("%w: plan idempotency key is required", agentos.ErrInvalidRunPlan)
 	}
-	if status.PlanID == "" {
-		status.PlanID = spec.PlanID
+
+	normalizedStatus := *status
+	if normalizedStatus.PlanID == "" {
+		normalizedStatus.PlanID = spec.PlanID
 	}
-	existingSpec, existing, exists, err := r.planByIdempotencyKey(ctx, spec.AccountID, spec.ProjectID, spec.IdempotencyKey)
+
+	existing, exists, err := r.existingPlanForCreate(ctx, spec)
 	if err != nil {
 		return agentos.RunPlanStatus{}, false, err
 	}
-	if exists {
-		if err := agentosplan.ValidatePlanStartIdempotency(existingSpec, spec); err != nil {
-			return agentos.RunPlanStatus{}, false, err
-		}
 
+	if exists {
 		return existing, false, nil
 	}
-	existingSpec, existing, exists, err = r.GetPlan(ctx, spec.PlanID)
-	if err != nil {
-		return agentos.RunPlanStatus{}, false, err
-	}
-	if exists {
-		if err := agentosplan.ValidatePlanStartIdempotency(existingSpec, spec); err != nil {
-			return agentos.RunPlanStatus{}, false, err
-		}
 
-		return existing, false, nil
-	}
-	createdStatus, err := r.createPlanState(ctx, agentosplan.PlanStateSnapshot{
-		Spec:   spec,
-		Status: status,
+	createdStatus, err := r.createPlanState(ctx, &agentosplan.PlanStateSnapshot{
+		Spec:   *spec,
+		Status: normalizedStatus,
 	})
 	if err != nil {
-		if isPostgresUniqueViolation(err) {
-			existingSpec, existing, exists, lookupErr := r.planByIdempotencyKey(ctx, spec.AccountID, spec.ProjectID, spec.IdempotencyKey)
-			if lookupErr != nil {
-				return agentos.RunPlanStatus{}, false, lookupErr
-			}
-			if exists {
-				if validateErr := agentosplan.ValidatePlanStartIdempotency(existingSpec, spec); validateErr != nil {
-					return agentos.RunPlanStatus{}, false, validateErr
-				}
+		existing, lookupErr := r.resolvePlanCreateConflict(ctx, spec, err)
+		if lookupErr != nil {
+			return agentos.RunPlanStatus{}, false, lookupErr
+		}
 
-				return existing, false, nil
-			}
+		if existing != nil {
+			return *existing, false, nil
 		}
 
 		return agentos.RunPlanStatus{}, false, err
@@ -82,8 +72,51 @@ func (r *AgentOSPlanRepo) CreatePlan(ctx context.Context, spec agentos.RunPlanSp
 	return createdStatus, true, nil
 }
 
-func (r *AgentOSPlanRepo) createPlanState(ctx context.Context, snapshot agentosplan.PlanStateSnapshot) (agentos.RunPlanStatus, error) {
-	snapshot, err := normalizePlanStateSnapshotForPostgres(snapshot)
+func (r *AgentOSPlanRepo) existingPlanForCreate(ctx context.Context, spec *agentos.RunPlanSpec) (agentos.RunPlanStatus, bool, error) {
+	existingSpec, existing, exists, err := r.planByIdempotencyKey(ctx, spec.AccountID, spec.ProjectID, spec.IdempotencyKey)
+	if err != nil || exists {
+		return existing, exists, validateExistingPlanStart(&existingSpec, spec, exists)
+	}
+
+	existingSpec, existing, exists, err = r.GetPlan(ctx, spec.PlanID)
+	if err != nil || exists {
+		return existing, exists, validateExistingPlanStart(&existingSpec, spec, exists)
+	}
+
+	return agentos.RunPlanStatus{}, false, nil
+}
+
+func validateExistingPlanStart(existingSpec, spec *agentos.RunPlanSpec, exists bool) error {
+	if !exists {
+		return nil
+	}
+
+	return agentosplan.ValidatePlanStartIdempotency(existingSpec, spec)
+}
+
+func (r *AgentOSPlanRepo) resolvePlanCreateConflict(ctx context.Context, spec *agentos.RunPlanSpec, err error) (*agentos.RunPlanStatus, error) {
+	if !isPostgresUniqueViolation(err) {
+		return nil, nil
+	}
+
+	existingSpec, existing, exists, lookupErr := r.planByIdempotencyKey(ctx, spec.AccountID, spec.ProjectID, spec.IdempotencyKey)
+	if lookupErr != nil {
+		return nil, lookupErr
+	}
+
+	if !exists {
+		return nil, nil
+	}
+
+	if validateErr := agentosplan.ValidatePlanStartIdempotency(&existingSpec, spec); validateErr != nil {
+		return nil, validateErr
+	}
+
+	return &existing, nil
+}
+
+func (r *AgentOSPlanRepo) createPlanState(ctx context.Context, snapshot *agentosplan.PlanStateSnapshot) (agentos.RunPlanStatus, error) {
+	normalized, err := normalizePlanStateSnapshotForPostgres(snapshot)
 	if err != nil {
 		return agentos.RunPlanStatus{}, err
 	}
@@ -92,18 +125,20 @@ func (r *AgentOSPlanRepo) createPlanState(ctx context.Context, snapshot agentosp
 	if err != nil {
 		return agentos.RunPlanStatus{}, fmt.Errorf("AgentOSPlanRepo - createPlanState - begin: %w", err)
 	}
+
 	defer func() {
-		_ = tx.Rollback(ctx)
+		errcheckIgnore(tx.Rollback(ctx))
 	}()
 
-	if err := r.savePlanStateWithTx(ctx, tx, snapshot, true); err != nil {
+	if err := r.savePlanStateWithTx(ctx, tx, &normalized, true); err != nil {
 		return agentos.RunPlanStatus{}, err
 	}
+
 	if err := tx.Commit(ctx); err != nil {
 		return agentos.RunPlanStatus{}, fmt.Errorf("AgentOSPlanRepo - createPlanState - commit: %w", err)
 	}
 
-	return snapshot.Status, nil
+	return normalized.Status, nil
 }
 
 func (r *AgentOSPlanRepo) GetPlan(ctx context.Context, planID string) (agentos.RunPlanSpec, agentos.RunPlanStatus, bool, error) {
@@ -119,6 +154,7 @@ func (r *AgentOSPlanRepo) GetPlanByRef(ctx context.Context, ref agentos.PlanRef)
 	if err := agentosplan.ValidatePlanRef(ref); err != nil {
 		return agentos.RunPlanSpec{}, agentos.RunPlanStatus{}, false, err
 	}
+
 	snapshot, exists, err := r.loadPlanStateByWhere(ctx, sq.Eq{
 		"plan_id":    ref.PlanID,
 		"account_id": ref.AccountID,
@@ -127,61 +163,42 @@ func (r *AgentOSPlanRepo) GetPlanByRef(ctx context.Context, ref agentos.PlanRef)
 	if err != nil || !exists {
 		return agentos.RunPlanSpec{}, agentos.RunPlanStatus{}, exists, err
 	}
-	if err := agentosplan.ValidatePlanTenantAccess(ref, snapshot.Spec); err != nil {
+
+	if err := agentosplan.ValidatePlanTenantAccess(ref, &snapshot.Spec); err != nil {
 		return agentos.RunPlanSpec{}, agentos.RunPlanStatus{}, false, err
 	}
 
 	return snapshot.Spec, snapshot.Status, true, nil
 }
 
-func (r *AgentOSPlanRepo) ListPlanRefs(ctx context.Context, scope agentosplan.PlanRefScope) ([]agentos.PlanRef, error) {
-	if scope.Limit < 0 {
-		return nil, fmt.Errorf("%w: plan ref limit must be non-negative", agentos.ErrInvalidPlanScope)
-	}
-	for _, state := range scope.LifecycleStates {
-		if state == "" {
-			return nil, fmt.Errorf("%w: lifecycle state is required", agentos.ErrInvalidPlanScope)
-		}
+func (r *AgentOSPlanRepo) ListPlanRefs(ctx context.Context, scope *agentosplan.PlanRefScope) ([]agentos.PlanRef, error) {
+	builder, err := r.planRefsBuilder(scope)
+	if err != nil {
+		return nil, err
 	}
 
-	builder := r.Builder.
-		Select("plan_id", "account_id", "project_id").
-		From("plans").
-		OrderBy("updated_at ASC", "plan_id ASC")
-	if scope.AccountID != "" {
-		builder = builder.Where(sq.Eq{"account_id": scope.AccountID})
-	}
-	if scope.ProjectID != "" {
-		builder = builder.Where(sq.Eq{"project_id": scope.ProjectID})
-	}
-	if len(scope.LifecycleStates) > 0 {
-		builder = builder.Where(sq.Eq{"lifecycle_state": scope.LifecycleStates})
-	}
-	if !scope.UpdatedAfter.IsZero() {
-		builder = builder.Where(sq.Gt{"updated_at": scope.UpdatedAfter})
-	}
-	if scope.Limit > 0 {
-		builder = builder.Limit(uint64(scope.Limit))
-	}
-
-	sql, args, err := builder.ToSql()
+	query, args, err := builder.ToSql()
 	if err != nil {
 		return nil, fmt.Errorf("AgentOSPlanRepo - ListPlanRefs - builder: %w", err)
 	}
-	rows, err := r.Pool.Query(ctx, sql, args...)
+
+	rows, err := r.Pool.Query(ctx, query, args...)
 	if err != nil {
 		return nil, fmt.Errorf("AgentOSPlanRepo - ListPlanRefs - query: %w", err)
 	}
 	defer rows.Close()
 
 	var refs []agentos.PlanRef
+
 	for rows.Next() {
 		var ref agentos.PlanRef
 		if err := rows.Scan(&ref.PlanID, &ref.AccountID, &ref.ProjectID); err != nil {
 			return nil, fmt.Errorf("AgentOSPlanRepo - ListPlanRefs - scan: %w", err)
 		}
+
 		refs = append(refs, ref)
 	}
+
 	if err := rows.Err(); err != nil {
 		return nil, fmt.Errorf("AgentOSPlanRepo - ListPlanRefs - rows: %w", err)
 	}
@@ -189,8 +206,36 @@ func (r *AgentOSPlanRepo) ListPlanRefs(ctx context.Context, scope agentosplan.Pl
 	return refs, nil
 }
 
-func (r *AgentOSPlanRepo) SavePlanState(ctx context.Context, snapshot agentosplan.PlanStateSnapshot) error {
-	snapshot, err := normalizePlanStateSnapshotForPostgres(snapshot)
+func (r *AgentOSPlanRepo) planRefsBuilder(scope *agentosplan.PlanRefScope) (sq.SelectBuilder, error) {
+	if scope.Limit < 0 {
+		return sq.SelectBuilder{}, fmt.Errorf("%w: plan ref limit must be non-negative", agentos.ErrInvalidPlanScope)
+	}
+
+	if slices.Contains(scope.LifecycleStates, "") {
+		return sq.SelectBuilder{}, fmt.Errorf("%w: lifecycle state is required", agentos.ErrInvalidPlanScope)
+	}
+
+	builder := r.Builder.
+		Select("plan_id", "account_id", "project_id").
+		From("plans").
+		OrderBy("updated_at ASC", "plan_id ASC")
+
+	builder = applyOptionalEq(builder, "account_id", scope.AccountID)
+	builder = applyOptionalEq(builder, "project_id", scope.ProjectID)
+
+	if len(scope.LifecycleStates) > 0 {
+		builder = builder.Where(sq.Eq{"lifecycle_state": scope.LifecycleStates})
+	}
+
+	if !scope.UpdatedAfter.IsZero() {
+		builder = builder.Where(sq.Gt{"updated_at": scope.UpdatedAfter})
+	}
+
+	return applyOptionalLimit(builder, scope.Limit), nil
+}
+
+func (r *AgentOSPlanRepo) SavePlanState(ctx context.Context, snapshot *agentosplan.PlanStateSnapshot) error {
+	normalized, err := normalizePlanStateSnapshotForPostgres(snapshot)
 	if err != nil {
 		return err
 	}
@@ -199,11 +244,12 @@ func (r *AgentOSPlanRepo) SavePlanState(ctx context.Context, snapshot agentospla
 	if err != nil {
 		return fmt.Errorf("AgentOSPlanRepo - SavePlanState - begin: %w", err)
 	}
+
 	defer func() {
-		_ = tx.Rollback(ctx)
+		errcheckIgnore(tx.Rollback(ctx))
 	}()
 
-	if err := r.savePlanStateWithTx(ctx, tx, snapshot, false); err != nil {
+	if err := r.savePlanStateWithTx(ctx, tx, &normalized, false); err != nil {
 		return err
 	}
 
@@ -214,37 +260,45 @@ func (r *AgentOSPlanRepo) SavePlanState(ctx context.Context, snapshot agentospla
 	return nil
 }
 
-func normalizePlanStateSnapshotForPostgres(snapshot agentosplan.PlanStateSnapshot) (agentosplan.PlanStateSnapshot, error) {
-	if err := agentosplan.ValidateRunPlanScope(snapshot.Spec); err != nil {
+func normalizePlanStateSnapshotForPostgres(snapshot *agentosplan.PlanStateSnapshot) (agentosplan.PlanStateSnapshot, error) {
+	if err := agentosplan.ValidateRunPlanScope(&snapshot.Spec); err != nil {
 		return agentosplan.PlanStateSnapshot{}, err
 	}
+
+	normalized := *snapshot
 	if snapshot.Spec.IdempotencyKey == "" {
 		return agentosplan.PlanStateSnapshot{}, fmt.Errorf("%w: plan idempotency key is required", agentos.ErrInvalidRunPlan)
 	}
-	snapshot.Spec.RequestedAt = agentosplan.NormalizeDurableTimestamp(snapshot.Spec.RequestedAt)
-	if snapshot.Status.PlanID == "" {
-		snapshot.Status.PlanID = snapshot.Spec.PlanID
+
+	normalized.Spec.RequestedAt = agentosplan.NormalizeDurableTimestamp(normalized.Spec.RequestedAt)
+	if normalized.Status.PlanID == "" {
+		normalized.Status.PlanID = normalized.Spec.PlanID
 	}
-	if snapshot.Status.LifecycleState == "" {
-		snapshot.Status.LifecycleState = agentos.PlanLifecyclePending
+
+	if normalized.Status.LifecycleState == "" {
+		normalized.Status.LifecycleState = agentos.PlanLifecyclePending
 	}
-	if snapshot.Status.UpdatedAt.IsZero() {
-		snapshot.Status.UpdatedAt = time.Now().UTC()
+
+	if normalized.Status.UpdatedAt.IsZero() {
+		normalized.Status.UpdatedAt = time.Now().UTC()
 	}
-	state, err := agentosplan.NewStateFromStatus(snapshot.Spec, snapshot.Status)
+
+	state, err := agentosplan.NewStateFromStatus(&normalized.Spec, &normalized.Status)
 	if err != nil {
 		return agentosplan.PlanStateSnapshot{}, err
 	}
-	snapshot.Status = state.Status
 
-	return snapshot, nil
+	normalized.Status = state.Status
+
+	return normalized, nil
 }
 
-func (r *AgentOSPlanRepo) savePlanStateWithTx(ctx context.Context, tx pgx.Tx, snapshot agentosplan.PlanStateSnapshot, allowCreate bool) error {
+func (r *AgentOSPlanRepo) savePlanStateWithTx(ctx context.Context, tx pgx.Tx, snapshot *agentosplan.PlanStateSnapshot, allowCreate bool) error {
 	specJSON, err := json.Marshal(snapshot.Spec)
 	if err != nil {
 		return fmt.Errorf("AgentOSPlanRepo - SavePlanState - marshal spec: %w", err)
 	}
+
 	statusJSON, err := json.Marshal(snapshot.Status)
 	if err != nil {
 		return fmt.Errorf("AgentOSPlanRepo - SavePlanState - marshal status: %w", err)
@@ -254,16 +308,63 @@ func (r *AgentOSPlanRepo) savePlanStateWithTx(ctx context.Context, tx pgx.Tx, sn
 	if err != nil {
 		return err
 	}
-	if exists {
-		if err := agentosplan.ValidatePlanStateIdentity(existingSpec, snapshot.Spec); err != nil {
-			return err
-		}
-	} else if !allowCreate {
-		return fmt.Errorf("%w: %s", agentos.ErrPlanRouteNotFound, snapshot.Spec.PlanID)
+
+	if err := validatePlanStateSaveTarget(&existingSpec, &snapshot.Spec, exists, allowCreate); err != nil {
+		return err
 	}
 
+	query, args, err := r.buildPlanUpsertQuery(snapshot, specJSON, statusJSON)
+	if err != nil {
+		return err
+	}
+
+	if _, err := tx.Exec(ctx, query, args...); err != nil {
+		return fmt.Errorf("AgentOSPlanRepo - SavePlanState - plan exec: %w", err)
+	}
+
+	capabilityByNode := r.buildNodeCapabilityMap(snapshot.Spec.Nodes)
+	for i := range snapshot.Status.Nodes {
+		node := &snapshot.Status.Nodes[i]
+		if err := r.upsertPlanNode(ctx, tx, snapshot.Spec.PlanID, capabilityByNode[node.NodeID], node); err != nil {
+			return err
+		}
+	}
+
+	return r.deleteStalePlanNodes(ctx, tx, snapshot.Spec.PlanID, snapshot.Status.Nodes)
+}
+
+func validatePlanStateSaveTarget(existingSpec, spec *agentos.RunPlanSpec, exists, allowCreate bool) error {
+	if exists {
+		return agentosplan.ValidatePlanStateIdentity(existingSpec, spec)
+	}
+
+	if !allowCreate {
+		return fmt.Errorf("%w: %s", agentos.ErrPlanRouteNotFound, spec.PlanID)
+	}
+
+	return nil
+}
+
+func applyOptionalEq(builder sq.SelectBuilder, column, value string) sq.SelectBuilder {
+	if value == "" {
+		return builder
+	}
+
+	return builder.Where(sq.Eq{column: value})
+}
+
+func applyOptionalLimit(builder sq.SelectBuilder, limit int) sq.SelectBuilder {
+	if limit <= 0 {
+		return builder
+	}
+
+	return builder.Limit(uint64(limit))
+}
+
+func (r *AgentOSPlanRepo) buildPlanUpsertQuery(snapshot *agentosplan.PlanStateSnapshot, specJSON, statusJSON []byte) (query string, args []any, err error) {
 	idempotencyKey := snapshot.Spec.IdempotencyKey
-	sql, args, err := r.Builder.
+
+	query, args, err = r.Builder.
 		Insert("plans").
 		Columns(
 			"plan_id",
@@ -302,30 +403,25 @@ ON CONFLICT (plan_id) DO UPDATE SET
     updated_at = NOW()`).
 		ToSql()
 	if err != nil {
-		return fmt.Errorf("AgentOSPlanRepo - SavePlanState - plan builder: %w", err)
-	}
-	if _, err := tx.Exec(ctx, sql, args...); err != nil {
-		return fmt.Errorf("AgentOSPlanRepo - SavePlanState - plan exec: %w", err)
+		return "", nil, fmt.Errorf("AgentOSPlanRepo - SavePlanState - plan builder: %w", err)
 	}
 
-	capabilityByNode := make(map[string]string, len(snapshot.Spec.Nodes))
-	for _, node := range snapshot.Spec.Nodes {
+	return query, args, nil
+}
+
+func (r *AgentOSPlanRepo) buildNodeCapabilityMap(nodes []agentos.PlanNodeSpec) map[string]string {
+	capabilityByNode := make(map[string]string, len(nodes))
+	for i := range nodes {
+		node := &nodes[i]
 		capabilityByNode[node.NodeID] = node.Capability
 	}
-	for _, node := range snapshot.Status.Nodes {
-		if err := r.upsertPlanNode(ctx, tx, snapshot.Spec.PlanID, capabilityByNode[node.NodeID], node); err != nil {
-			return err
-		}
-	}
-	if err := r.deleteStalePlanNodes(ctx, tx, snapshot.Spec.PlanID, snapshot.Status.Nodes); err != nil {
-		return err
-	}
 
-	return nil
+	return capabilityByNode
 }
 
 func (r *AgentOSPlanRepo) planSpecForUpdate(ctx context.Context, tx pgx.Tx, planID string) (agentos.RunPlanSpec, bool, error) {
 	var specJSON []byte
+
 	err := tx.QueryRow(ctx, `
 SELECT spec_json
 FROM plans
@@ -347,13 +443,13 @@ FOR UPDATE`, planID).Scan(&specJSON)
 	return spec, true, nil
 }
 
-func (r *AgentOSPlanRepo) upsertPlanNode(ctx context.Context, tx pgx.Tx, planID, capability string, node agentos.PlanNodeStatus) error {
+func (r *AgentOSPlanRepo) upsertPlanNode(ctx context.Context, tx pgx.Tx, planID, capability string, node *agentos.PlanNodeStatus) error {
 	statusJSON, err := json.Marshal(node)
 	if err != nil {
 		return fmt.Errorf("AgentOSPlanRepo - upsertPlanNode - marshal: %w", err)
 	}
 
-	sql, args, err := r.Builder.
+	query, args, err := r.Builder.
 		Insert("plan_nodes").
 		Columns(
 			"plan_id",
@@ -394,7 +490,8 @@ ON CONFLICT (plan_id, node_id) DO UPDATE SET
 	if err != nil {
 		return fmt.Errorf("AgentOSPlanRepo - upsertPlanNode - builder: %w", err)
 	}
-	if _, err := tx.Exec(ctx, sql, args...); err != nil {
+
+	if _, err := tx.Exec(ctx, query, args...); err != nil {
 		return fmt.Errorf("AgentOSPlanRepo - upsertPlanNode - exec: %w", err)
 	}
 
@@ -403,9 +500,11 @@ ON CONFLICT (plan_id, node_id) DO UPDATE SET
 
 func (r *AgentOSPlanRepo) deleteStalePlanNodes(ctx context.Context, tx pgx.Tx, planID string, nodes []agentos.PlanNodeStatus) error {
 	nodeIDs := make([]string, 0, len(nodes))
-	for _, node := range nodes {
+	for i := range nodes {
+		node := nodes[i]
 		nodeIDs = append(nodeIDs, node.NodeID)
 	}
+
 	if len(nodeIDs) == 0 {
 		if _, err := tx.Exec(ctx, `DELETE FROM plan_nodes WHERE plan_id = $1`, planID); err != nil {
 			return fmt.Errorf("AgentOSPlanRepo - deleteStalePlanNodes - delete all: %w", err)
@@ -430,7 +529,7 @@ func (r *AgentOSPlanRepo) LoadPlanState(ctx context.Context, planID string) (age
 }
 
 func (r *AgentOSPlanRepo) loadPlanStateByWhere(ctx context.Context, where sq.Eq, op string) (agentosplan.PlanStateSnapshot, bool, error) {
-	sql, args, err := r.Builder.
+	query, args, err := r.Builder.
 		Select("spec_json", "status_json").
 		From("plans").
 		Where(where).
@@ -439,9 +538,12 @@ func (r *AgentOSPlanRepo) loadPlanStateByWhere(ctx context.Context, where sq.Eq,
 		return agentosplan.PlanStateSnapshot{}, false, fmt.Errorf("AgentOSPlanRepo - %s - builder: %w", op, err)
 	}
 
-	var specJSON []byte
-	var statusJSON []byte
-	err = r.Pool.QueryRow(ctx, sql, args...).Scan(&specJSON, &statusJSON)
+	var (
+		specJSON   []byte
+		statusJSON []byte
+	)
+
+	err = r.Pool.QueryRow(ctx, query, args...).Scan(&specJSON, &statusJSON)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return agentosplan.PlanStateSnapshot{}, false, nil
@@ -454,19 +556,24 @@ func (r *AgentOSPlanRepo) loadPlanStateByWhere(ctx context.Context, where sq.Eq,
 	if err := json.Unmarshal(specJSON, &spec); err != nil {
 		return agentosplan.PlanStateSnapshot{}, false, fmt.Errorf("AgentOSPlanRepo - %s - decode spec: %w", op, err)
 	}
+
 	var status agentos.RunPlanStatus
 	if err := json.Unmarshal(statusJSON, &status); err != nil {
 		return agentosplan.PlanStateSnapshot{}, false, fmt.Errorf("AgentOSPlanRepo - %s - decode status: %w", op, err)
 	}
+
 	nodes, err := r.loadPlanNodeStatuses(ctx, spec.PlanID)
 	if err != nil {
 		return agentosplan.PlanStateSnapshot{}, false, err
 	}
+
 	status.Nodes = nodes
-	state, err := agentosplan.NewStateFromStatus(spec, status)
+
+	state, err := agentosplan.NewStateFromStatus(&spec, &status)
 	if err != nil {
 		return agentosplan.PlanStateSnapshot{}, false, err
 	}
+
 	status = state.Status
 
 	return agentosplan.PlanStateSnapshot{
@@ -476,7 +583,7 @@ func (r *AgentOSPlanRepo) loadPlanStateByWhere(ctx context.Context, where sq.Eq,
 }
 
 func (r *AgentOSPlanRepo) loadPlanNodeStatuses(ctx context.Context, planID string) ([]agentos.PlanNodeStatus, error) {
-	sql, args, err := r.Builder.
+	query, args, err := r.Builder.
 		Select("status_json").
 		From("plan_nodes").
 		Where(sq.Eq{"plan_id": planID}).
@@ -485,24 +592,29 @@ func (r *AgentOSPlanRepo) loadPlanNodeStatuses(ctx context.Context, planID strin
 	if err != nil {
 		return nil, fmt.Errorf("AgentOSPlanRepo - loadPlanNodeStatuses - builder: %w", err)
 	}
-	rows, err := r.Pool.Query(ctx, sql, args...)
+
+	rows, err := r.Pool.Query(ctx, query, args...)
 	if err != nil {
 		return nil, fmt.Errorf("AgentOSPlanRepo - loadPlanNodeStatuses - query: %w", err)
 	}
 	defer rows.Close()
 
 	nodes := make([]agentos.PlanNodeStatus, 0)
+
 	for rows.Next() {
 		var statusJSON []byte
 		if err := rows.Scan(&statusJSON); err != nil {
 			return nil, fmt.Errorf("AgentOSPlanRepo - loadPlanNodeStatuses - scan: %w", err)
 		}
+
 		var node agentos.PlanNodeStatus
 		if err := json.Unmarshal(statusJSON, &node); err != nil {
 			return nil, fmt.Errorf("AgentOSPlanRepo - loadPlanNodeStatuses - decode status: %w", err)
 		}
+
 		nodes = append(nodes, node)
 	}
+
 	if err := rows.Err(); err != nil {
 		return nil, fmt.Errorf("AgentOSPlanRepo - loadPlanNodeStatuses - rows: %w", err)
 	}
@@ -515,7 +627,7 @@ func (r *AgentOSPlanRepo) planByIdempotencyKey(ctx context.Context, accountID, p
 		return agentos.RunPlanSpec{}, agentos.RunPlanStatus{}, false, fmt.Errorf("%w: plan idempotency key is required", agentos.ErrInvalidRunPlan)
 	}
 
-	sql, args, err := r.Builder.
+	query, args, err := r.Builder.
 		Select("spec_json", "status_json").
 		From("plans").
 		Where(sq.Eq{"account_id": accountID, "project_id": projectID, "idempotency_key": idempotencyKey}).
@@ -524,9 +636,12 @@ func (r *AgentOSPlanRepo) planByIdempotencyKey(ctx context.Context, accountID, p
 		return agentos.RunPlanSpec{}, agentos.RunPlanStatus{}, false, fmt.Errorf("AgentOSPlanRepo - planByIdempotencyKey - builder: %w", err)
 	}
 
-	var specJSON []byte
-	var statusJSON []byte
-	err = r.Pool.QueryRow(ctx, sql, args...).Scan(&specJSON, &statusJSON)
+	var (
+		specJSON   []byte
+		statusJSON []byte
+	)
+
+	err = r.Pool.QueryRow(ctx, query, args...).Scan(&specJSON, &statusJSON)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return agentos.RunPlanSpec{}, agentos.RunPlanStatus{}, false, nil
@@ -539,6 +654,7 @@ func (r *AgentOSPlanRepo) planByIdempotencyKey(ctx context.Context, accountID, p
 	if err := json.Unmarshal(specJSON, &spec); err != nil {
 		return agentos.RunPlanSpec{}, agentos.RunPlanStatus{}, false, fmt.Errorf("AgentOSPlanRepo - planByIdempotencyKey - decode spec: %w", err)
 	}
+
 	var status agentos.RunPlanStatus
 	if err := json.Unmarshal(statusJSON, &status); err != nil {
 		return agentos.RunPlanSpec{}, agentos.RunPlanStatus{}, false, fmt.Errorf("AgentOSPlanRepo - planByIdempotencyKey - decode status: %w", err)
@@ -558,6 +674,7 @@ type planTenantScopeQuerier interface {
 
 func planTenantScopeByPlanID(ctx context.Context, querier planTenantScopeQuerier, planID string) (planTenantScope, bool, error) {
 	var scope planTenantScope
+
 	err := querier.QueryRow(ctx, `
 SELECT account_id, project_id
 FROM plans
@@ -573,23 +690,8 @@ WHERE plan_id = $1`, planID).Scan(&scope.AccountID, &scope.ProjectID)
 	return scope, true, nil
 }
 
-func (r *AgentOSPlanRepo) PersistPlanTransition(ctx context.Context, snapshot agentosplan.PlanStateSnapshot, event agentos.PlanEvent, idempotencyKey string) (agentos.PlanEvent, error) {
-	snapshot, err := normalizePlanStateSnapshotForPostgres(snapshot)
-	if err != nil {
-		return agentos.PlanEvent{}, err
-	}
-	event, err = normalizePlanEventAppendForPostgres(event, idempotencyKey)
-	if err != nil {
-		return agentos.PlanEvent{}, err
-	}
-	if event.PlanID != snapshot.Spec.PlanID {
-		return agentos.PlanEvent{}, fmt.Errorf("%w: event plan %q does not match snapshot plan %q", agentos.ErrInvalidPlanEvent, event.PlanID, snapshot.Spec.PlanID)
-	}
-	transitionIdentity, err := agentosplan.NewPlanTransitionSnapshotIdentity(snapshot, idempotencyKey)
-	if err != nil {
-		return agentos.PlanEvent{}, err
-	}
-	event, err = agentosplan.ScopePlanEventToSpec(event, snapshot.Spec)
+func (r *AgentOSPlanRepo) PersistPlanTransition(ctx context.Context, snapshot *agentosplan.PlanStateSnapshot, event *agentos.PlanEvent, idempotencyKey string) (agentos.PlanEvent, error) {
+	normalizedSnapshot, normalizedEvent, transitionIdentity, err := normalizePlanTransitionForPostgres(snapshot, event, idempotencyKey)
 	if err != nil {
 		return agentos.PlanEvent{}, err
 	}
@@ -598,43 +700,30 @@ func (r *AgentOSPlanRepo) PersistPlanTransition(ctx context.Context, snapshot ag
 	if err != nil {
 		return agentos.PlanEvent{}, fmt.Errorf("AgentOSPlanRepo - PersistPlanTransition - begin: %w", err)
 	}
+
 	defer func() {
-		_ = tx.Rollback(ctx)
+		errcheckIgnore(tx.Rollback(ctx))
 	}()
 
-	var scope planTenantScope
-	err = tx.QueryRow(ctx, `
-SELECT account_id, project_id
-FROM plans
-WHERE plan_id = $1
-FOR UPDATE`, event.PlanID).Scan(&scope.AccountID, &scope.ProjectID)
-	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
-		return agentos.PlanEvent{}, fmt.Errorf("AgentOSPlanRepo - PersistPlanTransition - lock plan: %w", err)
-	}
-	if err == nil {
-		existing, exists, err := r.planEventByIdempotencyKeyWith(ctx, tx, scope, event.PlanID, idempotencyKey)
-		if err != nil {
-			return agentos.PlanEvent{}, err
-		}
-		if exists {
-			if err := agentosplan.ValidatePlanEventIdempotency(existing.Event, event); err != nil {
-				return agentos.PlanEvent{}, err
-			}
-			if err := agentosplan.ValidatePlanTransitionIdempotency(existing.TransitionSnapshotDigest, transitionIdentity); err != nil {
-				return agentos.PlanEvent{}, err
-			}
-
-			return existing.Event, nil
-		}
-	}
-
-	if err := r.savePlanStateWithTx(ctx, tx, snapshot, false); err != nil {
-		return agentos.PlanEvent{}, err
-	}
-	stored, err := r.appendPlanEventWithTx(ctx, tx, event, idempotencyKey, transitionIdentity)
+	scope, planFound, err := r.lockPlanRow(ctx, tx, normalizedEvent.PlanID)
 	if err != nil {
 		return agentos.PlanEvent{}, err
 	}
+
+	existing, exists, err := r.existingPlanTransitionEvent(ctx, tx, scope, planFound, &normalizedEvent, idempotencyKey, transitionIdentity)
+	if err != nil || exists {
+		return existing, err
+	}
+
+	if err := r.savePlanStateWithTx(ctx, tx, &normalizedSnapshot, false); err != nil {
+		return agentos.PlanEvent{}, err
+	}
+
+	stored, err := r.appendPlanEventWithTx(ctx, tx, &normalizedEvent, idempotencyKey, transitionIdentity)
+	if err != nil {
+		return agentos.PlanEvent{}, err
+	}
+
 	if err := tx.Commit(ctx); err != nil {
 		return agentos.PlanEvent{}, fmt.Errorf("AgentOSPlanRepo - PersistPlanTransition - commit: %w", err)
 	}
@@ -642,8 +731,78 @@ FOR UPDATE`, event.PlanID).Scan(&scope.AccountID, &scope.ProjectID)
 	return stored, nil
 }
 
-func (r *AgentOSPlanRepo) AppendPlanEvent(ctx context.Context, event agentos.PlanEvent, idempotencyKey string) (agentos.PlanEvent, error) {
-	event, err := normalizePlanEventAppendForPostgres(event, idempotencyKey)
+func normalizePlanTransitionForPostgres(snapshot *agentosplan.PlanStateSnapshot, event *agentos.PlanEvent, idempotencyKey string) (agentosplan.PlanStateSnapshot, agentos.PlanEvent, agentosplan.PlanTransitionSnapshotIdentity, error) {
+	normalizedSnapshot, err := normalizePlanStateSnapshotForPostgres(snapshot)
+	if err != nil {
+		return agentosplan.PlanStateSnapshot{}, agentos.PlanEvent{}, agentosplan.PlanTransitionSnapshotIdentity{}, err
+	}
+
+	normalizedEvent, err := normalizePlanEventAppendForPostgres(event, idempotencyKey)
+	if err != nil {
+		return agentosplan.PlanStateSnapshot{}, agentos.PlanEvent{}, agentosplan.PlanTransitionSnapshotIdentity{}, err
+	}
+
+	if normalizedEvent.PlanID != normalizedSnapshot.Spec.PlanID {
+		return agentosplan.PlanStateSnapshot{}, agentos.PlanEvent{}, agentosplan.PlanTransitionSnapshotIdentity{}, fmt.Errorf("%w: event plan %q does not match snapshot plan %q", agentos.ErrInvalidPlanEvent, normalizedEvent.PlanID, normalizedSnapshot.Spec.PlanID)
+	}
+
+	transitionIdentity, err := agentosplan.NewPlanTransitionSnapshotIdentity(&normalizedSnapshot, idempotencyKey)
+	if err != nil {
+		return agentosplan.PlanStateSnapshot{}, agentos.PlanEvent{}, agentosplan.PlanTransitionSnapshotIdentity{}, err
+	}
+
+	normalizedEvent, err = agentosplan.ScopePlanEventToSpec(&normalizedEvent, &normalizedSnapshot.Spec)
+	if err != nil {
+		return agentosplan.PlanStateSnapshot{}, agentos.PlanEvent{}, agentosplan.PlanTransitionSnapshotIdentity{}, err
+	}
+
+	return normalizedSnapshot, normalizedEvent, transitionIdentity, nil
+}
+
+func (r *AgentOSPlanRepo) existingPlanTransitionEvent(
+	ctx context.Context,
+	tx pgx.Tx,
+	scope planTenantScope,
+	planFound bool,
+	event *agentos.PlanEvent,
+	idempotencyKey string,
+	transitionIdentity agentosplan.PlanTransitionSnapshotIdentity,
+) (agentos.PlanEvent, bool, error) {
+	if !planFound {
+		return agentos.PlanEvent{}, false, nil
+	}
+
+	existing, exists, err := r.planEventByIdempotencyKeyWith(ctx, tx, scope, event.PlanID, idempotencyKey)
+	if err != nil || !exists {
+		return agentos.PlanEvent{}, false, err
+	}
+
+	err = r.validatePlanEventIdempotency(&existing.Event, existing.TransitionSnapshotDigest, event, transitionIdentity)
+
+	return existing.Event, true, err
+}
+
+func (r *AgentOSPlanRepo) lockPlanRow(ctx context.Context, tx pgx.Tx, planID string) (planTenantScope, bool, error) {
+	var scope planTenantScope
+
+	err := tx.QueryRow(ctx, `
+SELECT account_id, project_id
+FROM plans
+WHERE plan_id = $1
+FOR UPDATE`, planID).Scan(&scope.AccountID, &scope.ProjectID)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return scope, false, nil
+		}
+
+		return scope, false, fmt.Errorf("AgentOSPlanRepo - PersistPlanTransition - lock plan: %w", err)
+	}
+
+	return scope, true, nil
+}
+
+func (r *AgentOSPlanRepo) AppendPlanEvent(ctx context.Context, event *agentos.PlanEvent, idempotencyKey string) (agentos.PlanEvent, error) {
+	normalizedEvent, err := normalizePlanEventAppendForPostgres(event, idempotencyKey)
 	if err != nil {
 		return agentos.PlanEvent{}, err
 	}
@@ -652,14 +811,16 @@ func (r *AgentOSPlanRepo) AppendPlanEvent(ctx context.Context, event agentos.Pla
 	if err != nil {
 		return agentos.PlanEvent{}, fmt.Errorf("AgentOSPlanRepo - AppendPlanEvent - begin: %w", err)
 	}
+
 	defer func() {
-		_ = tx.Rollback(ctx)
+		errcheckIgnore(tx.Rollback(ctx))
 	}()
 
-	stored, err := r.appendPlanEventWithTx(ctx, tx, event, idempotencyKey, agentosplan.PlanTransitionSnapshotIdentity{})
+	stored, err := r.appendPlanEventWithTx(ctx, tx, &normalizedEvent, idempotencyKey, agentosplan.PlanTransitionSnapshotIdentity{})
 	if err != nil {
 		return agentos.PlanEvent{}, err
 	}
+
 	if err := tx.Commit(ctx); err != nil {
 		return agentos.PlanEvent{}, fmt.Errorf("AgentOSPlanRepo - AppendPlanEvent - commit: %w", err)
 	}
@@ -667,10 +828,11 @@ func (r *AgentOSPlanRepo) AppendPlanEvent(ctx context.Context, event agentos.Pla
 	return stored, nil
 }
 
-func normalizePlanEventAppendForPostgres(event agentos.PlanEvent, idempotencyKey string) (agentos.PlanEvent, error) {
+func normalizePlanEventAppendForPostgres(event *agentos.PlanEvent, idempotencyKey string) (agentos.PlanEvent, error) {
 	if event.PlanID == "" {
 		return agentos.PlanEvent{}, fmt.Errorf("%w: plan id is required", agentos.ErrInvalidPlanEvent)
 	}
+
 	if idempotencyKey == "" {
 		return agentos.PlanEvent{}, fmt.Errorf("%w: plan event idempotency key is required", agentos.ErrInvalidPlanEvent)
 	}
@@ -678,10 +840,14 @@ func normalizePlanEventAppendForPostgres(event agentos.PlanEvent, idempotencyKey
 	return agentosplan.NormalizePlanEventAppendRequest(event), nil
 }
 
-func (r *AgentOSPlanRepo) appendPlanEventWithTx(ctx context.Context, tx pgx.Tx, requestedEvent agentos.PlanEvent, idempotencyKey string, transitionIdentity agentosplan.PlanTransitionSnapshotIdentity) (agentos.PlanEvent, error) {
-	event := requestedEvent
-	var currentSequence int64
-	var scope planTenantScope
+func (r *AgentOSPlanRepo) appendPlanEventWithTx(ctx context.Context, tx pgx.Tx, requestedEvent *agentos.PlanEvent, idempotencyKey string, transitionIdentity agentosplan.PlanTransitionSnapshotIdentity) (agentos.PlanEvent, error) {
+	event := *requestedEvent
+
+	var (
+		currentSequence int64
+		scope           planTenantScope
+	)
+
 	err := tx.QueryRow(ctx, `
 SELECT event_sequence, account_id, project_id
 FROM plans
@@ -694,33 +860,40 @@ FOR UPDATE`, event.PlanID).Scan(&currentSequence, &scope.AccountID, &scope.Proje
 
 		return agentos.PlanEvent{}, fmt.Errorf("AgentOSPlanRepo - AppendPlanEvent - lock plan: %w", err)
 	}
-	event, err = agentosplan.ScopePlanEventToSpec(event, agentos.RunPlanSpec{
+
+	spec := agentos.RunPlanSpec{
 		PlanID:    event.PlanID,
 		AccountID: scope.AccountID,
 		ProjectID: scope.ProjectID,
-	})
+	}
+
+	event, err = agentosplan.ScopePlanEventToSpec(&event, &spec)
 	if err != nil {
 		return agentos.PlanEvent{}, err
 	}
-	requestedEvent = event
 
 	existing, exists, err := r.planEventByIdempotencyKeyWith(ctx, tx, scope, event.PlanID, idempotencyKey)
 	if err != nil {
 		return agentos.PlanEvent{}, err
 	}
+
 	if exists {
-		if err := agentosplan.ValidatePlanEventIdempotency(existing.Event, requestedEvent); err != nil {
+		if err := r.validatePlanEventIdempotency(&existing.Event, existing.TransitionSnapshotDigest, &event, transitionIdentity); err != nil {
 			return agentos.PlanEvent{}, err
-		}
-		if transitionIdentity.Digest != "" {
-			if err := agentosplan.ValidatePlanTransitionIdempotency(existing.TransitionSnapshotDigest, transitionIdentity); err != nil {
-				return agentos.PlanEvent{}, err
-			}
 		}
 
 		return existing.Event, nil
 	}
 
+	stored, err := r.buildAndInsertPlanEvent(ctx, tx, &event, currentSequence, scope, idempotencyKey, transitionIdentity)
+	if err != nil {
+		return agentos.PlanEvent{}, err
+	}
+
+	return stored, nil
+}
+
+func (r *AgentOSPlanRepo) buildAndInsertPlanEvent(ctx context.Context, tx pgx.Tx, event *agentos.PlanEvent, currentSequence int64, scope planTenantScope, idempotencyKey string, transitionIdentity agentosplan.PlanTransitionSnapshotIdentity) (agentos.PlanEvent, error) {
 	event.Sequence = currentSequence + 1
 	if _, err := tx.Exec(ctx, `
 UPDATE plans
@@ -728,10 +901,12 @@ SET event_sequence = $2
 WHERE plan_id = $1`, event.PlanID, event.Sequence); err != nil {
 		return agentos.PlanEvent{}, fmt.Errorf("AgentOSPlanRepo - AppendPlanEvent - update sequence: %w", err)
 	}
+
 	event.EventID = fmt.Sprintf("%s:%d", event.PlanID, event.Sequence)
 	if event.Timestamp.IsZero() {
 		event.Timestamp = time.Now().UTC()
 	}
+
 	event.Timestamp = agentosplan.NormalizeDurableTimestamp(event.Timestamp)
 	if event.Payload == nil {
 		event.Payload = map[string]any{}
@@ -741,12 +916,46 @@ WHERE plan_id = $1`, event.PlanID, event.Sequence); err != nil {
 	if err != nil {
 		return agentos.PlanEvent{}, fmt.Errorf("AgentOSPlanRepo - AppendPlanEvent - marshal payload: %w", err)
 	}
+
 	eventJSON, err := agentos.MarshalPlanEvent(event)
 	if err != nil {
 		return agentos.PlanEvent{}, err
 	}
 
-	insertSQL := `
+	transitionSnapshotDigest := transitionIdentity.Digest
+
+	var transitionSnapshotJSON any
+	if transitionIdentity.Digest != "" {
+		transitionSnapshotJSON = transitionIdentity.JSON
+	}
+
+	var storedJSON []byte
+
+	err = tx.QueryRow(
+		ctx, planEventInsertSQL,
+		event.EventID,
+		event.PlanID,
+		scope.AccountID,
+		scope.ProjectID,
+		event.NodeID,
+		event.RunID,
+		string(event.EventType),
+		event.Sequence,
+		idempotencyKey,
+		transitionSnapshotDigest,
+		transitionSnapshotJSON,
+		payloadJSON,
+		eventJSON,
+		event.Timestamp,
+	).Scan(&storedJSON)
+	if err != nil {
+		return r.resolvePlanEventInsertConflict(ctx, tx, scope, event.PlanID, idempotencyKey, event, transitionIdentity, err)
+	}
+
+	return agentos.UnmarshalPlanEvent(storedJSON)
+}
+
+const planEventInsertSQL = `
 INSERT INTO plan_events (
     event_id,
     plan_id,
@@ -764,58 +973,40 @@ INSERT INTO plan_events (
     timestamp
 ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)
 RETURNING event_json`
-	transitionSnapshotDigest := transitionIdentity.Digest
-	var transitionSnapshotJSON any
-	if transitionIdentity.Digest != "" {
-		transitionSnapshotJSON = transitionIdentity.JSON
+
+func (r *AgentOSPlanRepo) validatePlanEventIdempotency(existing *agentos.PlanEvent, existingDigest string, requested *agentos.PlanEvent, transitionIdentity agentosplan.PlanTransitionSnapshotIdentity) error {
+	if err := agentosplan.ValidatePlanEventIdempotency(existing, requested); err != nil {
+		return err
 	}
 
-	var storedJSON []byte
-	err = tx.QueryRow(ctx, insertSQL,
-		event.EventID,
-		event.PlanID,
-		scope.AccountID,
-		scope.ProjectID,
-		event.NodeID,
-		event.RunID,
-		string(event.EventType),
-		event.Sequence,
-		idempotencyKey,
-		transitionSnapshotDigest,
-		transitionSnapshotJSON,
-		payloadJSON,
-		eventJSON,
-		event.Timestamp,
-	).Scan(&storedJSON)
-	if err != nil {
-		if isPostgresUniqueViolation(err) {
-			existing, exists, lookupErr := r.planEventByIdempotencyKeyWith(ctx, tx, scope, event.PlanID, idempotencyKey)
-			if lookupErr != nil {
-				return agentos.PlanEvent{}, lookupErr
-			}
-			if exists {
-				if err := agentosplan.ValidatePlanEventIdempotency(existing.Event, requestedEvent); err != nil {
-					return agentos.PlanEvent{}, err
-				}
-				if transitionIdentity.Digest != "" {
-					if err := agentosplan.ValidatePlanTransitionIdempotency(existing.TransitionSnapshotDigest, transitionIdentity); err != nil {
-						return agentos.PlanEvent{}, err
-					}
-				}
-
-				return existing.Event, nil
-			}
+	if transitionIdentity.Digest != "" {
+		if err := agentosplan.ValidatePlanTransitionIdempotency(existingDigest, transitionIdentity); err != nil {
+			return err
 		}
+	}
 
+	return nil
+}
+
+func (r *AgentOSPlanRepo) resolvePlanEventInsertConflict(ctx context.Context, tx pgx.Tx, scope planTenantScope, planID, idempotencyKey string, requestedEvent *agentos.PlanEvent, transitionIdentity agentosplan.PlanTransitionSnapshotIdentity, err error) (agentos.PlanEvent, error) {
+	if !isPostgresUniqueViolation(err) {
 		return agentos.PlanEvent{}, fmt.Errorf("AgentOSPlanRepo - AppendPlanEvent - insert: %w", err)
 	}
 
-	stored, err := agentos.UnmarshalPlanEvent(storedJSON)
-	if err != nil {
+	existing, exists, lookupErr := r.planEventByIdempotencyKeyWith(ctx, tx, scope, planID, idempotencyKey)
+	if lookupErr != nil {
+		return agentos.PlanEvent{}, lookupErr
+	}
+
+	if !exists {
+		return agentos.PlanEvent{}, fmt.Errorf("AgentOSPlanRepo - AppendPlanEvent - insert: %w", err)
+	}
+
+	if err := r.validatePlanEventIdempotency(&existing.Event, existing.TransitionSnapshotDigest, requestedEvent, transitionIdentity); err != nil {
 		return agentos.PlanEvent{}, err
 	}
 
-	return stored, nil
+	return existing.Event, nil
 }
 
 type planEventRowQuerier interface {
@@ -828,7 +1019,7 @@ type planEventIdempotencyRecord struct {
 }
 
 func (r *AgentOSPlanRepo) planEventByIdempotencyKeyWith(ctx context.Context, querier planEventRowQuerier, scope planTenantScope, planID, idempotencyKey string) (planEventIdempotencyRecord, bool, error) {
-	sql, args, err := r.Builder.
+	query, args, err := r.Builder.
 		Select("event_json", "transition_snapshot_digest").
 		From("plan_events").
 		Where(sq.Eq{
@@ -842,9 +1033,12 @@ func (r *AgentOSPlanRepo) planEventByIdempotencyKeyWith(ctx context.Context, que
 		return planEventIdempotencyRecord{}, false, fmt.Errorf("AgentOSPlanRepo - planEventByIdempotencyKey - builder: %w", err)
 	}
 
-	var eventJSON []byte
-	var transitionSnapshotDigest string
-	err = querier.QueryRow(ctx, sql, args...).Scan(&eventJSON, &transitionSnapshotDigest)
+	var (
+		eventJSON                []byte
+		transitionSnapshotDigest string
+	)
+
+	err = querier.QueryRow(ctx, query, args...).Scan(&eventJSON, &transitionSnapshotDigest)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return planEventIdempotencyRecord{}, false, nil
@@ -864,21 +1058,63 @@ func (r *AgentOSPlanRepo) planEventByIdempotencyKeyWith(ctx context.Context, que
 	}, true, nil
 }
 
-func (r *AgentOSPlanRepo) ListPlanEvents(ctx context.Context, scope agentos.PlanStreamScope, limit int) ([]agentos.PlanEvent, error) {
-	if err := agentosplan.ValidatePlanStreamScope(scope); err != nil {
-		return nil, err
-	}
-	spec, _, exists, err := r.GetPlan(ctx, scope.PlanID)
-	if err != nil {
-		return nil, err
-	}
-	if !exists {
-		return nil, fmt.Errorf("%w: %s", agentos.ErrPlanRouteNotFound, scope.PlanID)
-	}
-	if err := agentosplan.ValidatePlanTenantAccess(agentos.PlanRef{PlanID: scope.PlanID, AccountID: scope.AccountID, ProjectID: scope.ProjectID}, spec); err != nil {
+func (r *AgentOSPlanRepo) ListPlanEvents(ctx context.Context, scope *agentos.PlanStreamScope, limit int) ([]agentos.PlanEvent, error) {
+	if err := r.authorizePlanStreamScope(ctx, scope); err != nil {
 		return nil, err
 	}
 
+	query, args, err := r.planEventsBuilder(scope, limit).ToSql()
+	if err != nil {
+		return nil, fmt.Errorf("AgentOSPlanRepo - ListPlanEvents - builder: %w", err)
+	}
+
+	rows, err := r.Pool.Query(ctx, query, args...)
+	if err != nil {
+		return nil, fmt.Errorf("AgentOSPlanRepo - ListPlanEvents - query: %w", err)
+	}
+	defer rows.Close()
+
+	var events []agentos.PlanEvent
+
+	for rows.Next() {
+		var eventJSON []byte
+		if err := rows.Scan(&eventJSON); err != nil {
+			return nil, fmt.Errorf("AgentOSPlanRepo - ListPlanEvents - scan: %w", err)
+		}
+
+		event, err := agentos.UnmarshalPlanEvent(eventJSON)
+		if err != nil {
+			return nil, err
+		}
+
+		events = append(events, event)
+	}
+
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("AgentOSPlanRepo - ListPlanEvents - rows: %w", err)
+	}
+
+	return events, nil
+}
+
+func (r *AgentOSPlanRepo) authorizePlanStreamScope(ctx context.Context, scope *agentos.PlanStreamScope) error {
+	if err := agentosplan.ValidatePlanStreamScope(scope); err != nil {
+		return err
+	}
+
+	spec, _, exists, err := r.GetPlan(ctx, scope.PlanID)
+	if err != nil {
+		return err
+	}
+
+	if !exists {
+		return fmt.Errorf("%w: %s", agentos.ErrPlanRouteNotFound, scope.PlanID)
+	}
+
+	return agentosplan.ValidatePlanTenantAccess(agentos.PlanRef{PlanID: scope.PlanID, AccountID: scope.AccountID, ProjectID: scope.ProjectID}, &spec)
+}
+
+func (r *AgentOSPlanRepo) planEventsBuilder(scope *agentos.PlanStreamScope, limit int) sq.SelectBuilder {
 	builder := r.Builder.
 		Select("event_json").
 		From("plan_events").
@@ -887,54 +1123,23 @@ func (r *AgentOSPlanRepo) ListPlanEvents(ctx context.Context, scope agentos.Plan
 		Where(sq.Eq{"project_id": scope.ProjectID}).
 		Where(sq.Gt{"sequence": scope.AfterSequence}).
 		OrderBy("sequence ASC")
-	if scope.NodeID != "" {
-		builder = builder.Where(sq.Eq{"node_id": scope.NodeID})
-	}
-	if scope.RunID != "" {
-		builder = builder.Where(sq.Eq{"run_id": scope.RunID})
-	}
-	if limit > 0 {
-		builder = builder.Limit(uint64(limit))
-	}
 
-	sql, args, err := builder.ToSql()
-	if err != nil {
-		return nil, fmt.Errorf("AgentOSPlanRepo - ListPlanEvents - builder: %w", err)
-	}
-	rows, err := r.Pool.Query(ctx, sql, args...)
-	if err != nil {
-		return nil, fmt.Errorf("AgentOSPlanRepo - ListPlanEvents - query: %w", err)
-	}
-	defer rows.Close()
+	builder = applyOptionalEq(builder, "node_id", scope.NodeID)
+	builder = applyOptionalEq(builder, "run_id", scope.RunID)
 
-	var events []agentos.PlanEvent
-	for rows.Next() {
-		var eventJSON []byte
-		if err := rows.Scan(&eventJSON); err != nil {
-			return nil, fmt.Errorf("AgentOSPlanRepo - ListPlanEvents - scan: %w", err)
-		}
-		event, err := agentos.UnmarshalPlanEvent(eventJSON)
-		if err != nil {
-			return nil, err
-		}
-		events = append(events, event)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("AgentOSPlanRepo - ListPlanEvents - rows: %w", err)
-	}
-
-	return events, nil
+	return applyOptionalLimit(builder, limit)
 }
 
 func (r *AgentOSPlanRepo) GetPlanMetricCheckpoint(ctx context.Context, exporterID string, ref agentos.PlanRef) (agentosplan.PlanMetricCheckpoint, bool, error) {
 	if exporterID == "" {
 		return agentosplan.PlanMetricCheckpoint{}, false, fmt.Errorf("%w: metrics exporter id is required", agentos.ErrInvalidRunPlan)
 	}
+
 	if err := agentosplan.ValidatePlanRef(ref); err != nil {
 		return agentosplan.PlanMetricCheckpoint{}, false, err
 	}
 
-	sql, args, err := r.Builder.
+	query, args, err := r.Builder.
 		Select("exporter_id", "plan_id", "account_id", "project_id", "sequence", "projection_json", "updated_at").
 		From("plan_metric_checkpoints").
 		Where(sq.Eq{
@@ -948,9 +1153,12 @@ func (r *AgentOSPlanRepo) GetPlanMetricCheckpoint(ctx context.Context, exporterI
 		return agentosplan.PlanMetricCheckpoint{}, false, fmt.Errorf("AgentOSPlanRepo - GetPlanMetricCheckpoint - builder: %w", err)
 	}
 
-	var checkpoint agentosplan.PlanMetricCheckpoint
-	var projectionJSON []byte
-	err = r.Pool.QueryRow(ctx, sql, args...).Scan(
+	var (
+		checkpoint     agentosplan.PlanMetricCheckpoint
+		projectionJSON []byte
+	)
+
+	err = r.Pool.QueryRow(ctx, query, args...).Scan(
 		&checkpoint.ExporterID,
 		&checkpoint.PlanID,
 		&checkpoint.AccountID,
@@ -966,19 +1174,21 @@ func (r *AgentOSPlanRepo) GetPlanMetricCheckpoint(ctx context.Context, exporterI
 
 		return agentosplan.PlanMetricCheckpoint{}, false, fmt.Errorf("AgentOSPlanRepo - GetPlanMetricCheckpoint - query: %w", err)
 	}
+
 	if len(projectionJSON) > 0 {
 		if err := json.Unmarshal(projectionJSON, &checkpoint.Projection); err != nil {
 			return agentosplan.PlanMetricCheckpoint{}, false, fmt.Errorf("AgentOSPlanRepo - GetPlanMetricCheckpoint - decode projection: %w", err)
 		}
 	}
-	if err := agentosplan.ValidatePlanMetricCheckpointRef(checkpoint, exporterID, ref); err != nil {
+
+	if err := agentosplan.ValidatePlanMetricCheckpointRef(&checkpoint, exporterID, ref); err != nil {
 		return agentosplan.PlanMetricCheckpoint{}, false, err
 	}
 
 	return checkpoint, true, nil
 }
 
-func (r *AgentOSPlanRepo) SavePlanMetricCheckpoint(ctx context.Context, checkpoint agentosplan.PlanMetricCheckpoint) error {
+func (r *AgentOSPlanRepo) SavePlanMetricCheckpoint(ctx context.Context, checkpoint *agentosplan.PlanMetricCheckpoint) error {
 	ref := agentos.PlanRef{
 		PlanID:    checkpoint.PlanID,
 		AccountID: checkpoint.AccountID,
@@ -987,13 +1197,16 @@ func (r *AgentOSPlanRepo) SavePlanMetricCheckpoint(ctx context.Context, checkpoi
 	if err := agentosplan.ValidatePlanMetricCheckpointRef(checkpoint, checkpoint.ExporterID, ref); err != nil {
 		return err
 	}
+
 	scope, exists, err := planTenantScopeByPlanID(ctx, r.Pool, checkpoint.PlanID)
 	if err != nil {
 		return err
 	}
+
 	if !exists {
 		return fmt.Errorf("%w: %s", agentos.ErrPlanRouteNotFound, checkpoint.PlanID)
 	}
+
 	if scope.AccountID != checkpoint.AccountID || scope.ProjectID != checkpoint.ProjectID {
 		return fmt.Errorf("%w: %s", agentos.ErrPlanRouteNotFound, checkpoint.PlanID)
 	}
@@ -1002,7 +1215,9 @@ func (r *AgentOSPlanRepo) SavePlanMetricCheckpoint(ctx context.Context, checkpoi
 	if err != nil {
 		return fmt.Errorf("AgentOSPlanRepo - SavePlanMetricCheckpoint - marshal projection: %w", err)
 	}
-	result, err := r.Pool.Exec(ctx, `
+
+	result, err := r.Pool.Exec(
+		ctx, `
 INSERT INTO plan_metric_checkpoints (
     exporter_id,
     plan_id,
@@ -1029,6 +1244,7 @@ WHERE plan_metric_checkpoints.sequence <= EXCLUDED.sequence`,
 	if err != nil {
 		return fmt.Errorf("AgentOSPlanRepo - SavePlanMetricCheckpoint - upsert: %w", err)
 	}
+
 	if result.RowsAffected() == 0 {
 		return fmt.Errorf("%w: metrics checkpoint sequence moved backward for plan %q", agentos.ErrInvalidRunPlan, checkpoint.PlanID)
 	}
@@ -1036,117 +1252,82 @@ WHERE plan_metric_checkpoints.sequence <= EXCLUDED.sequence`,
 	return nil
 }
 
-func (r *AgentOSPlanRepo) RecordPlanMetric(ctx context.Context, sample agentosplan.PlanMetricSample) error {
-	sample = agentosplan.NormalizePlanMetricSample(sample)
+func (r *AgentOSPlanRepo) RecordPlanMetric(ctx context.Context, sample *agentosplan.PlanMetricSample) error {
+	normalized := agentosplan.NormalizePlanMetricSample(sample)
+
+	sample = &normalized
 	if err := agentosplan.ValidatePlanMetricSample(sample); err != nil {
 		return err
 	}
+
 	scope, exists, err := planTenantScopeByPlanID(ctx, r.Pool, sample.PlanID)
 	if err != nil {
 		return err
 	}
-	if !exists {
-		return fmt.Errorf("%w: %s", agentos.ErrPlanRouteNotFound, sample.PlanID)
-	}
-	if scope.AccountID != sample.AccountID || scope.ProjectID != sample.ProjectID {
-		return fmt.Errorf("%w: %s", agentos.ErrPlanRouteNotFound, sample.PlanID)
+
+	if err := validatePlanMetricScope(sample, scope, exists); err != nil {
+		return err
 	}
 
 	labelsJSON, err := json.Marshal(planMetricLabelsForStorage(sample.Labels))
 	if err != nil {
 		return fmt.Errorf("AgentOSPlanRepo - RecordPlanMetric - marshal labels: %w", err)
 	}
-	result, err := r.Pool.Exec(ctx, `
-INSERT INTO plan_metric_samples (
-    metric_name,
-    plan_id,
-    account_id,
-    project_id,
-    node_id,
-    run_id,
-    event_id,
-    sequence,
-    value,
-    unit,
-    labels_json,
-    sample_timestamp
-) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)
-ON CONFLICT DO NOTHING`,
-		string(sample.Name),
-		sample.PlanID,
-		sample.AccountID,
-		sample.ProjectID,
-		sample.NodeID,
-		sample.RunID,
-		sample.EventID,
-		sample.Sequence,
-		sample.Value,
-		sample.Unit,
-		labelsJSON,
-		sample.Timestamp,
+
+	result, err := r.Pool.Exec(
+		ctx, `INSERT INTO plan_metric_samples (metric_name, plan_id, account_id, project_id, node_id, run_id, event_id, sequence, value, unit, labels_json, sample_timestamp) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12) ON CONFLICT DO NOTHING`,
+		string(sample.Name), sample.PlanID, sample.AccountID, sample.ProjectID, sample.NodeID, sample.RunID, sample.EventID, sample.Sequence, sample.Value, sample.Unit, labelsJSON, sample.Timestamp,
 	)
 	if err != nil {
 		return fmt.Errorf("AgentOSPlanRepo - RecordPlanMetric - insert: %w", err)
 	}
+
 	if result.RowsAffected() == 1 {
 		return nil
 	}
 
-	existing, exists, err := r.planMetricSampleByKey(ctx, sample.Key())
+	return r.validateMetricSampleConflict(ctx, sample)
+}
+
+func validatePlanMetricScope(sample *agentosplan.PlanMetricSample, scope planTenantScope, exists bool) error {
+	if !exists {
+		return fmt.Errorf("%w: %s", agentos.ErrPlanRouteNotFound, sample.PlanID)
+	}
+
+	if scope.AccountID != sample.AccountID || scope.ProjectID != sample.ProjectID {
+		return fmt.Errorf("%w: %s", agentos.ErrPlanRouteNotFound, sample.PlanID)
+	}
+
+	return nil
+}
+
+func (r *AgentOSPlanRepo) validateMetricSampleConflict(ctx context.Context, sample *agentosplan.PlanMetricSample) error {
+	key := sample.Key()
+
+	existing, exists, err := r.planMetricSampleByKey(ctx, &key)
 	if err != nil {
 		return err
 	}
+
 	if !exists {
 		return fmt.Errorf("%w: metric sample identity conflict for plan %q event %q", agentos.ErrInvalidRunPlan, sample.PlanID, sample.EventID)
 	}
 
-	return agentosplan.ValidatePlanMetricSampleIdempotency(existing, sample)
+	return agentosplan.ValidatePlanMetricSampleIdempotency(&existing, sample)
 }
 
-func (r *AgentOSPlanRepo) planMetricSampleByKey(ctx context.Context, key agentosplan.PlanMetricSampleKey) (agentosplan.PlanMetricSample, bool, error) {
-	var sample agentosplan.PlanMetricSample
-	var name string
-	var labelsJSON []byte
-	err := r.Pool.QueryRow(ctx, `
-SELECT
-    metric_name,
-    plan_id,
-    account_id,
-    project_id,
-    node_id,
-    run_id,
-    event_id,
-    sequence,
-    value,
-    unit,
-    labels_json,
-    sample_timestamp
-FROM plan_metric_samples
-WHERE metric_name = $1
-  AND plan_id = $2
-  AND node_id = $3
-  AND run_id = $4
-  AND event_id = $5
-  AND sequence = $6`,
-		string(key.Name),
-		key.PlanID,
-		key.NodeID,
-		key.RunID,
-		key.EventID,
-		key.Sequence,
+func (r *AgentOSPlanRepo) planMetricSampleByKey(ctx context.Context, key *agentosplan.PlanMetricSampleKey) (agentosplan.PlanMetricSample, bool, error) {
+	var (
+		sample     agentosplan.PlanMetricSample
+		name       string
+		labelsJSON []byte
+	)
+
+	err := r.Pool.QueryRow(
+		ctx, `SELECT metric_name, plan_id, account_id, project_id, node_id, run_id, event_id, sequence, value, unit, labels_json, sample_timestamp FROM plan_metric_samples WHERE metric_name = $1 AND plan_id = $2 AND node_id = $3 AND run_id = $4 AND event_id = $5 AND sequence = $6`,
+		string(key.Name), key.PlanID, key.NodeID, key.RunID, key.EventID, key.Sequence,
 	).Scan(
-		&name,
-		&sample.PlanID,
-		&sample.AccountID,
-		&sample.ProjectID,
-		&sample.NodeID,
-		&sample.RunID,
-		&sample.EventID,
-		&sample.Sequence,
-		&sample.Value,
-		&sample.Unit,
-		&labelsJSON,
-		&sample.Timestamp,
+		&name, &sample.PlanID, &sample.AccountID, &sample.ProjectID, &sample.NodeID, &sample.RunID, &sample.EventID, &sample.Sequence, &sample.Value, &sample.Unit, &labelsJSON, &sample.Timestamp,
 	)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
@@ -1155,11 +1336,13 @@ WHERE metric_name = $1
 
 		return agentosplan.PlanMetricSample{}, false, fmt.Errorf("AgentOSPlanRepo - planMetricSampleByKey - query: %w", err)
 	}
+
 	if len(labelsJSON) > 0 {
 		if err := json.Unmarshal(labelsJSON, &sample.Labels); err != nil {
 			return agentosplan.PlanMetricSample{}, false, fmt.Errorf("AgentOSPlanRepo - planMetricSampleByKey - decode labels: %w", err)
 		}
 	}
+
 	sample.Name = agentosplan.PlanMetricName(name)
 
 	return sample, true, nil
@@ -1173,55 +1356,94 @@ func planMetricLabelsForStorage(labels map[string]string) map[string]string {
 	return labels
 }
 
-func (r *AgentOSPlanRepo) RecordAudit(ctx context.Context, record agentosplan.AuditRecord) (agentosplan.AuditRecord, bool, error) {
-	if record.PlanID == "" {
-		return agentosplan.AuditRecord{}, false, fmt.Errorf("%w: plan id is required", agentos.ErrInvalidRunPlan)
-	}
-	if record.Action == "" {
-		return agentosplan.AuditRecord{}, false, fmt.Errorf("%w: audit action is required", agentos.ErrInvalidRunPlan)
-	}
-	if record.IdempotencyKey == "" {
-		return agentosplan.AuditRecord{}, false, fmt.Errorf("%w: audit idempotency key is required", agentos.ErrInvalidRunPlan)
-	}
-	scope, exists, err := planTenantScopeByPlanID(ctx, r.Pool, record.PlanID)
+func (r *AgentOSPlanRepo) RecordAudit(ctx context.Context, record *agentosplan.AuditRecord) (agentosplan.AuditRecord, bool, error) {
+	ref, scope, err := r.prepareAuditRecord(ctx, record)
 	if err != nil {
 		return agentosplan.AuditRecord{}, false, err
 	}
-	if !exists {
-		return agentosplan.AuditRecord{}, false, fmt.Errorf("%w: %s", agentos.ErrPlanRouteNotFound, record.PlanID)
-	}
-	record.AccountID = scope.AccountID
-	record.ProjectID = scope.ProjectID
-	ref := agentosplan.AuditRefFromRecord(record)
-	existing, exists, err := r.GetAuditRecord(ctx, ref)
-	if err != nil {
-		return agentosplan.AuditRecord{}, false, err
-	}
-	if exists {
-		if err := agentosplan.ValidateAuditIdempotency(existing, record); err != nil {
-			return agentosplan.AuditRecord{}, false, err
-		}
 
-		return existing, false, nil
+	existing, exists, err := r.existingAuditRecord(ctx, ref, record)
+	if err != nil || exists {
+		return existing, false, err
 	}
+
 	if err := r.validateAuditOwnership(ctx, record, scope); err != nil {
 		return agentosplan.AuditRecord{}, false, err
 	}
+
+	setAuditRecordDefaults(record, ref)
+
+	stored, err := r.insertAuditRecord(ctx, record, ref)
+	if err != nil {
+		return agentosplan.AuditRecord{}, false, err
+	}
+
+	return stored, true, nil
+}
+
+func (r *AgentOSPlanRepo) prepareAuditRecord(ctx context.Context, record *agentosplan.AuditRecord) (agentosplan.AuditRef, planTenantScope, error) {
+	if record.PlanID == "" {
+		return agentosplan.AuditRef{}, planTenantScope{}, fmt.Errorf("%w: plan id is required", agentos.ErrInvalidRunPlan)
+	}
+
+	if record.Action == "" {
+		return agentosplan.AuditRef{}, planTenantScope{}, fmt.Errorf("%w: audit action is required", agentos.ErrInvalidRunPlan)
+	}
+
+	if record.IdempotencyKey == "" {
+		return agentosplan.AuditRef{}, planTenantScope{}, fmt.Errorf("%w: audit idempotency key is required", agentos.ErrInvalidRunPlan)
+	}
+
+	scope, exists, err := planTenantScopeByPlanID(ctx, r.Pool, record.PlanID)
+	if err != nil {
+		return agentosplan.AuditRef{}, planTenantScope{}, err
+	}
+
+	if !exists {
+		return agentosplan.AuditRef{}, planTenantScope{}, fmt.Errorf("%w: %s", agentos.ErrPlanRouteNotFound, record.PlanID)
+	}
+
+	record.AccountID = scope.AccountID
+	record.ProjectID = scope.ProjectID
+
+	return agentosplan.AuditRefFromRecord(record), scope, nil
+}
+
+func (r *AgentOSPlanRepo) existingAuditRecord(ctx context.Context, ref agentosplan.AuditRef, record *agentosplan.AuditRecord) (agentosplan.AuditRecord, bool, error) {
+	existing, exists, err := r.GetAuditRecord(ctx, ref)
+	if err != nil || !exists {
+		return agentosplan.AuditRecord{}, false, err
+	}
+
+	if err := agentosplan.ValidateAuditIdempotency(&existing, record); err != nil {
+		return agentosplan.AuditRecord{}, false, err
+	}
+
+	return existing, true, nil
+}
+
+func setAuditRecordDefaults(record *agentosplan.AuditRecord, ref agentosplan.AuditRef) {
 	if record.AuditID == "" {
 		record.AuditID = agentosplan.AuditIDFromRef(ref)
 	}
+
 	if record.CreatedAt.IsZero() {
 		record.CreatedAt = time.Now().UTC()
 	}
+
 	if record.Payload == nil {
 		record.Payload = map[string]any{}
 	}
+}
+
+func (r *AgentOSPlanRepo) insertAuditRecord(ctx context.Context, record *agentosplan.AuditRecord, ref agentosplan.AuditRef) (agentosplan.AuditRecord, error) {
 	payloadJSON, err := json.Marshal(record.Payload)
 	if err != nil {
-		return agentosplan.AuditRecord{}, false, fmt.Errorf("AgentOSPlanRepo - RecordAudit - marshal payload: %w", err)
+		return agentosplan.AuditRecord{}, fmt.Errorf("AgentOSPlanRepo - RecordAudit - marshal payload: %w", err)
 	}
 
-	_, err = r.Pool.Exec(ctx, `
+	_, err = r.Pool.Exec(
+		ctx, `
 INSERT INTO audit_logs (
     audit_id,
     plan_id,
@@ -1248,24 +1470,40 @@ INSERT INTO audit_logs (
 		record.CreatedAt,
 	)
 	if err != nil {
-		if isPostgresUniqueViolation(err) {
-			existing, exists, lookupErr := r.GetAuditRecord(ctx, ref)
-			if lookupErr != nil {
-				return agentosplan.AuditRecord{}, false, lookupErr
-			}
-			if exists {
-				if err := agentosplan.ValidateAuditIdempotency(existing, record); err != nil {
-					return agentosplan.AuditRecord{}, false, err
-				}
-
-				return existing, false, nil
-			}
-		}
-
-		return agentosplan.AuditRecord{}, false, fmt.Errorf("AgentOSPlanRepo - RecordAudit - insert: %w", err)
+		return resolveUniqueInsertConflict(
+			err,
+			"AgentOSPlanRepo - RecordAudit - insert",
+			func() (agentosplan.AuditRecord, bool, error) { return r.GetAuditRecord(ctx, ref) },
+			func(existing *agentosplan.AuditRecord) error {
+				return agentosplan.ValidateAuditIdempotency(existing, record)
+			},
+		)
 	}
 
-	return record, true, nil
+	return agentosplan.AuditRecord{}, nil
+}
+
+func resolveUniqueInsertConflict[T any](err error, operation string, lookup func() (T, bool, error), validate func(*T) error) (T, error) {
+	var zero T
+
+	if !isPostgresUniqueViolation(err) {
+		return zero, fmt.Errorf("%s: %w", operation, err)
+	}
+
+	existing, exists, lookupErr := lookup()
+	if lookupErr != nil {
+		return zero, lookupErr
+	}
+
+	if !exists {
+		return zero, fmt.Errorf("%s: %w", operation, err)
+	}
+
+	if err := validate(&existing); err != nil {
+		return zero, err
+	}
+
+	return existing, nil
 }
 
 func (r *AgentOSPlanRepo) GetAuditRecord(ctx context.Context, ref agentosplan.AuditRef) (agentosplan.AuditRecord, bool, error) {
@@ -1273,7 +1511,7 @@ func (r *AgentOSPlanRepo) GetAuditRecord(ctx context.Context, ref agentosplan.Au
 		return agentosplan.AuditRecord{}, false, err
 	}
 
-	sql, args, err := r.Builder.
+	query, args, err := r.Builder.
 		Select("audit_id", "plan_id", "account_id", "project_id", "COALESCE(run_id, '') AS run_id", "COALESCE(node_id, '') AS node_id", "actor_id", "action", "idempotency_key", "payload_json", "created_at").
 		From("audit_logs").
 		Where(sq.Eq{
@@ -1287,10 +1525,13 @@ func (r *AgentOSPlanRepo) GetAuditRecord(ctx context.Context, ref agentosplan.Au
 		return agentosplan.AuditRecord{}, false, fmt.Errorf("AgentOSPlanRepo - GetAuditRecord - builder: %w", err)
 	}
 
-	var record agentosplan.AuditRecord
-	var action string
-	var payloadJSON []byte
-	err = r.Pool.QueryRow(ctx, sql, args...).Scan(
+	var (
+		record      agentosplan.AuditRecord
+		action      string
+		payloadJSON []byte
+	)
+
+	err = r.Pool.QueryRow(ctx, query, args...).Scan(
 		&record.AuditID,
 		&record.PlanID,
 		&record.AccountID,
@@ -1310,69 +1551,58 @@ func (r *AgentOSPlanRepo) GetAuditRecord(ctx context.Context, ref agentosplan.Au
 
 		return agentosplan.AuditRecord{}, false, fmt.Errorf("AgentOSPlanRepo - GetAuditRecord - query: %w", err)
 	}
+
 	if len(payloadJSON) > 0 {
 		if err := json.Unmarshal(payloadJSON, &record.Payload); err != nil {
 			return agentosplan.AuditRecord{}, false, fmt.Errorf("AgentOSPlanRepo - GetAuditRecord - decode payload: %w", err)
 		}
 	}
+
 	record.Action = agentosplan.AuditAction(action)
 
 	return record, true, nil
 }
 
-func (r *AgentOSPlanRepo) ListAuditRecords(ctx context.Context, scope agentos.PlanAuditScope) ([]agentos.PlanAuditRecord, error) {
+func (r *AgentOSPlanRepo) ListAuditRecords(ctx context.Context, scope *agentos.PlanAuditScope) ([]agentos.PlanAuditRecord, error) {
 	if err := agentosplan.ValidatePlanAuditScope(scope); err != nil {
 		return nil, err
 	}
+
 	spec, _, exists, err := r.GetPlan(ctx, scope.PlanID)
 	if err != nil {
 		return nil, err
 	}
+
 	if !exists {
 		return nil, fmt.Errorf("%w: %s", agentos.ErrPlanRouteNotFound, scope.PlanID)
 	}
-	if err := agentosplan.ValidatePlanTenantAccess(agentos.PlanRef{PlanID: scope.PlanID, AccountID: scope.AccountID, ProjectID: scope.ProjectID}, spec); err != nil {
+
+	if err := agentosplan.ValidatePlanTenantAccess(agentos.PlanRef{PlanID: scope.PlanID, AccountID: scope.AccountID, ProjectID: scope.ProjectID}, &spec); err != nil {
 		return nil, err
 	}
 
-	builder := r.Builder.
-		Select("audit_id", "plan_id", "account_id", "project_id", "COALESCE(run_id, '') AS run_id", "COALESCE(node_id, '') AS node_id", "actor_id", "action", "idempotency_key", "payload_json", "created_at").
-		From("audit_logs").
-		Where(sq.Eq{"plan_id": scope.PlanID}).
-		Where(sq.Eq{"account_id": scope.AccountID}).
-		Where(sq.Eq{"project_id": scope.ProjectID}).
-		OrderBy("created_at ASC", "audit_id ASC")
-	if scope.NodeID != "" {
-		builder = builder.Where(sq.Eq{"node_id": scope.NodeID})
-	}
-	if scope.RunID != "" {
-		builder = builder.Where(sq.Eq{"run_id": scope.RunID})
-	}
-	if scope.Action != "" {
-		builder = builder.Where(sq.Eq{"action": string(scope.Action)})
-	}
-	if scope.Limit > 0 {
-		builder = builder.Limit(uint64(scope.Limit))
-	}
-
-	sql, args, err := builder.ToSql()
+	query, args, err := r.auditRecordsBuilder(scope).ToSql()
 	if err != nil {
 		return nil, fmt.Errorf("AgentOSPlanRepo - ListAuditRecords - builder: %w", err)
 	}
-	rows, err := r.Pool.Query(ctx, sql, args...)
+
+	rows, err := r.Pool.Query(ctx, query, args...)
 	if err != nil {
 		return nil, fmt.Errorf("AgentOSPlanRepo - ListAuditRecords - query: %w", err)
 	}
 	defer rows.Close()
 
 	var records []agentos.PlanAuditRecord
+
 	for rows.Next() {
 		record, err := scanPlanAuditRecord(rows)
 		if err != nil {
 			return nil, err
 		}
+
 		records = append(records, record)
 	}
+
 	if err := rows.Err(); err != nil {
 		return nil, fmt.Errorf("AgentOSPlanRepo - ListAuditRecords - rows: %w", err)
 	}
@@ -1380,10 +1610,32 @@ func (r *AgentOSPlanRepo) ListAuditRecords(ctx context.Context, scope agentos.Pl
 	return records, nil
 }
 
+func (r *AgentOSPlanRepo) auditRecordsBuilder(scope *agentos.PlanAuditScope) sq.SelectBuilder {
+	builder := r.Builder.
+		Select("audit_id", "plan_id", "account_id", "project_id", "COALESCE(run_id, '') AS run_id", "COALESCE(node_id, '') AS node_id", "actor_id", "action", "idempotency_key", "payload_json", "created_at").
+		From("audit_logs").
+		Where(sq.Eq{"plan_id": scope.PlanID}).
+		Where(sq.Eq{"account_id": scope.AccountID}).
+		Where(sq.Eq{"project_id": scope.ProjectID}).
+		OrderBy("created_at ASC", "audit_id ASC")
+
+	builder = applyOptionalEq(builder, "node_id", scope.NodeID)
+	builder = applyOptionalEq(builder, "run_id", scope.RunID)
+
+	if scope.Action != "" {
+		builder = builder.Where(sq.Eq{"action": string(scope.Action)})
+	}
+
+	return applyOptionalLimit(builder, scope.Limit)
+}
+
 func scanPlanAuditRecord(scanner interface{ Scan(dest ...any) error }) (agentos.PlanAuditRecord, error) {
-	var record agentos.PlanAuditRecord
-	var action string
-	var payloadJSON []byte
+	var (
+		record      agentos.PlanAuditRecord
+		action      string
+		payloadJSON []byte
+	)
+
 	if err := scanner.Scan(
 		&record.AuditID,
 		&record.PlanID,
@@ -1399,26 +1651,32 @@ func scanPlanAuditRecord(scanner interface{ Scan(dest ...any) error }) (agentos.
 	); err != nil {
 		return agentos.PlanAuditRecord{}, fmt.Errorf("AgentOSPlanRepo - scanPlanAuditRecord: %w", err)
 	}
+
 	if len(payloadJSON) > 0 {
 		if err := json.Unmarshal(payloadJSON, &record.Payload); err != nil {
 			return agentos.PlanAuditRecord{}, fmt.Errorf("AgentOSPlanRepo - scanPlanAuditRecord - decode payload: %w", err)
 		}
 	}
+
 	record.Action = agentos.PlanAuditAction(action)
 
 	return record, nil
 }
 
-func (r *AgentOSPlanRepo) validateAuditOwnership(ctx context.Context, record agentosplan.AuditRecord, scope planTenantScope) error {
+func (r *AgentOSPlanRepo) validateAuditOwnership(ctx context.Context, record *agentosplan.AuditRecord, scope planTenantScope) error {
 	if err := agentosplan.ValidateAuditNodeRunPair(record); err != nil {
 		return err
 	}
+
 	if record.NodeID == "" {
 		return nil
 	}
 
-	var nodeRunID string
-	var ownedRunID sql.NullString
+	var (
+		nodeRunID  string
+		ownedRunID sql.NullString
+	)
+
 	err := r.Pool.QueryRow(ctx, `
 SELECT n.run_id, r.run_id
 FROM plan_nodes n
@@ -1437,9 +1695,11 @@ WHERE n.plan_id = $1
 
 		return fmt.Errorf("AgentOSPlanRepo - validateAuditOwnership - query: %w", err)
 	}
+
 	if nodeRunID != record.RunID {
 		return fmt.Errorf("%w: audit node %q has durable run id %q, got %q", agentos.ErrInvalidRunPlan, record.NodeID, nodeRunID, record.RunID)
 	}
+
 	if !ownedRunID.Valid || ownedRunID.String == "" {
 		return fmt.Errorf("%w: %s", agentos.ErrRunRouteNotFound, record.RunID)
 	}
@@ -1447,60 +1707,104 @@ WHERE n.plan_id = $1
 	return nil
 }
 
-func (r *AgentOSPlanRepo) RecordPlanCommand(ctx context.Context, command agentosplan.PlanCommandRecord) (agentosplan.PlanCommandRecord, bool, error) {
+func (r *AgentOSPlanRepo) RecordPlanCommand(ctx context.Context, command *agentosplan.PlanCommandRecord) (agentosplan.PlanCommandRecord, bool, error) {
+	ref, err := r.preparePlanCommandRecord(ctx, command)
+	if err != nil {
+		return agentosplan.PlanCommandRecord{}, false, err
+	}
+
+	existing, exists, err := r.existingPlanCommand(ctx, ref, command)
+	if err != nil || exists {
+		return existing, false, err
+	}
+
+	if err := setPlanCommandRecordDefaults(command, ref); err != nil {
+		return agentosplan.PlanCommandRecord{}, false, err
+	}
+
+	stored, err := r.insertPlanCommand(ctx, command, ref)
+	if err != nil {
+		return agentosplan.PlanCommandRecord{}, false, err
+	}
+
+	return stored, true, nil
+}
+
+func (r *AgentOSPlanRepo) preparePlanCommandRecord(ctx context.Context, command *agentosplan.PlanCommandRecord) (agentosplan.PlanCommandRef, error) {
 	if command.PlanID == "" {
-		return agentosplan.PlanCommandRecord{}, false, fmt.Errorf("%w: plan id is required", agentos.ErrInvalidRunPlan)
+		return agentosplan.PlanCommandRef{}, fmt.Errorf("%w: plan id is required", agentos.ErrInvalidRunPlan)
 	}
+
 	if command.Action == "" {
-		return agentosplan.PlanCommandRecord{}, false, fmt.Errorf("%w: command action is required", agentos.ErrInvalidRunPlan)
+		return agentosplan.PlanCommandRef{}, fmt.Errorf("%w: command action is required", agentos.ErrInvalidRunPlan)
 	}
+
 	if command.IdempotencyKey == "" {
-		return agentosplan.PlanCommandRecord{}, false, fmt.Errorf("%w: command idempotency key is required", agentos.ErrInvalidRunPlan)
+		return agentosplan.PlanCommandRef{}, fmt.Errorf("%w: command idempotency key is required", agentos.ErrInvalidRunPlan)
 	}
+
 	scope, exists, err := planTenantScopeByPlanID(ctx, r.Pool, command.PlanID)
 	if err != nil {
-		return agentosplan.PlanCommandRecord{}, false, err
+		return agentosplan.PlanCommandRef{}, err
 	}
+
 	if !exists {
-		return agentosplan.PlanCommandRecord{}, false, fmt.Errorf("%w: %s", agentos.ErrPlanRouteNotFound, command.PlanID)
+		return agentosplan.PlanCommandRef{}, fmt.Errorf("%w: %s", agentos.ErrPlanRouteNotFound, command.PlanID)
 	}
+
 	command.AccountID = scope.AccountID
 	command.ProjectID = scope.ProjectID
-	ref := agentosplan.PlanCommandRefFromRecord(command)
+
+	return agentosplan.PlanCommandRefFromRecord(command), nil
+}
+
+func (r *AgentOSPlanRepo) existingPlanCommand(ctx context.Context, ref agentosplan.PlanCommandRef, command *agentosplan.PlanCommandRecord) (agentosplan.PlanCommandRecord, bool, error) {
 	existing, exists, err := r.GetPlanCommand(ctx, ref)
-	if err != nil {
+	if err != nil || !exists {
 		return agentosplan.PlanCommandRecord{}, false, err
 	}
-	if exists {
-		if err := agentosplan.ValidatePlanCommandIdempotency(existing, command); err != nil {
-			return agentosplan.PlanCommandRecord{}, false, err
-		}
 
-		return existing, false, nil
+	if err := agentosplan.ValidatePlanCommandIdempotency(&existing, command); err != nil {
+		return agentosplan.PlanCommandRecord{}, false, err
 	}
+
+	return existing, true, nil
+}
+
+func setPlanCommandRecordDefaults(command *agentosplan.PlanCommandRecord, ref agentosplan.PlanCommandRef) error {
 	if command.CommandID == "" {
 		command.CommandID = agentosplan.PlanCommandIDFromRef(ref)
 	}
+
 	status, err := agentosplan.NormalizeNewPlanCommandStatus(command.Status)
 	if err != nil {
-		return agentosplan.PlanCommandRecord{}, false, err
+		return err
 	}
+
 	command.Status = status
 	if command.CreatedAt.IsZero() {
 		command.CreatedAt = time.Now().UTC()
 	}
+
 	if command.UpdatedAt.IsZero() {
 		command.UpdatedAt = command.CreatedAt
 	}
+
 	if command.Payload == nil {
 		command.Payload = map[string]any{}
 	}
+
+	return nil
+}
+
+func (r *AgentOSPlanRepo) insertPlanCommand(ctx context.Context, command *agentosplan.PlanCommandRecord, ref agentosplan.PlanCommandRef) (agentosplan.PlanCommandRecord, error) {
 	payloadJSON, err := json.Marshal(command.Payload)
 	if err != nil {
-		return agentosplan.PlanCommandRecord{}, false, fmt.Errorf("AgentOSPlanRepo - RecordPlanCommand - marshal payload: %w", err)
+		return agentosplan.PlanCommandRecord{}, fmt.Errorf("AgentOSPlanRepo - RecordPlanCommand - marshal payload: %w", err)
 	}
 
-	_, err = r.Pool.Exec(ctx, `
+	_, err = r.Pool.Exec(
+		ctx, `
 INSERT INTO plan_commands (
     command_id,
     plan_id,
@@ -1529,24 +1833,17 @@ INSERT INTO plan_commands (
 		command.UpdatedAt,
 	)
 	if err != nil {
-		if isPostgresUniqueViolation(err) {
-			existing, exists, lookupErr := r.GetPlanCommand(ctx, ref)
-			if lookupErr != nil {
-				return agentosplan.PlanCommandRecord{}, false, lookupErr
-			}
-			if exists {
-				if err := agentosplan.ValidatePlanCommandIdempotency(existing, command); err != nil {
-					return agentosplan.PlanCommandRecord{}, false, err
-				}
-
-				return existing, false, nil
-			}
-		}
-
-		return agentosplan.PlanCommandRecord{}, false, fmt.Errorf("AgentOSPlanRepo - RecordPlanCommand - insert: %w", err)
+		return resolveUniqueInsertConflict(
+			err,
+			"AgentOSPlanRepo - RecordPlanCommand - insert",
+			func() (agentosplan.PlanCommandRecord, bool, error) { return r.GetPlanCommand(ctx, ref) },
+			func(existing *agentosplan.PlanCommandRecord) error {
+				return agentosplan.ValidatePlanCommandIdempotency(existing, command)
+			},
+		)
 	}
 
-	return command, true, nil
+	return *command, nil
 }
 
 func (r *AgentOSPlanRepo) GetPlanCommand(ctx context.Context, ref agentosplan.PlanCommandRef) (agentosplan.PlanCommandRecord, bool, error) {
@@ -1554,7 +1851,7 @@ func (r *AgentOSPlanRepo) GetPlanCommand(ctx context.Context, ref agentosplan.Pl
 		return agentosplan.PlanCommandRecord{}, false, err
 	}
 
-	sql, args, err := r.Builder.
+	query, args, err := r.Builder.
 		Select("command_id", "plan_id", "account_id", "project_id", "actor_id", "action", "idempotency_key", "payload_json", "status", "failure_reason", "created_at", "updated_at").
 		From("plan_commands").
 		Where(sq.Eq{
@@ -1568,7 +1865,7 @@ func (r *AgentOSPlanRepo) GetPlanCommand(ctx context.Context, ref agentosplan.Pl
 		return agentosplan.PlanCommandRecord{}, false, fmt.Errorf("AgentOSPlanRepo - GetPlanCommand - builder: %w", err)
 	}
 
-	command, err := r.scanPlanCommandRow(ctx, r.Pool.QueryRow(ctx, sql, args...))
+	command, err := r.scanPlanCommandRow(ctx, r.Pool.QueryRow(ctx, query, args...))
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return agentosplan.PlanCommandRecord{}, false, nil
@@ -1580,14 +1877,45 @@ func (r *AgentOSPlanRepo) GetPlanCommand(ctx context.Context, ref agentosplan.Pl
 	return command, true, nil
 }
 
-func (r *AgentOSPlanRepo) ListRecoverablePlanCommands(ctx context.Context, scope agentosplan.PlanCommandScope) ([]agentosplan.PlanCommandRecord, error) {
+func (r *AgentOSPlanRepo) ListRecoverablePlanCommands(ctx context.Context, scope *agentosplan.PlanCommandScope) ([]agentosplan.PlanCommandRecord, error) {
 	statuses, err := agentosplan.RecoverablePlanCommandStatuses(scope)
 	if err != nil {
 		return nil, err
 	}
+
+	query, args, err := r.recoverablePlanCommandsBuilder(scope, statuses).ToSql()
+	if err != nil {
+		return nil, fmt.Errorf("AgentOSPlanRepo - ListRecoverablePlanCommands - builder: %w", err)
+	}
+
+	rows, err := r.Pool.Query(ctx, query, args...)
+	if err != nil {
+		return nil, fmt.Errorf("AgentOSPlanRepo - ListRecoverablePlanCommands - query: %w", err)
+	}
+	defer rows.Close()
+
+	var commands []agentosplan.PlanCommandRecord
+
+	for rows.Next() {
+		command, err := r.scanPlanCommandRow(ctx, rows)
+		if err != nil {
+			return nil, err
+		}
+
+		commands = append(commands, command)
+	}
+
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("AgentOSPlanRepo - ListRecoverablePlanCommands - rows: %w", err)
+	}
+
+	return commands, nil
+}
+
+func (r *AgentOSPlanRepo) recoverablePlanCommandsBuilder(scope *agentosplan.PlanCommandScope, statuses []agentosplan.PlanCommandStatus) sq.SelectBuilder {
 	statusValues := make([]string, 0, len(statuses))
-	for _, status := range statuses {
-		statusValues = append(statusValues, string(status))
+	for i := range statuses {
+		statusValues = append(statusValues, string(statuses[i]))
 	}
 
 	builder := r.Builder.
@@ -1595,45 +1923,16 @@ func (r *AgentOSPlanRepo) ListRecoverablePlanCommands(ctx context.Context, scope
 		From("plan_commands").
 		Where(sq.Eq{"status": statusValues}).
 		OrderBy("updated_at ASC", "command_id ASC")
-	if scope.PlanID != "" {
-		builder = builder.Where(sq.Eq{"plan_id": scope.PlanID})
-	}
-	if scope.AccountID != "" {
-		builder = builder.Where(sq.Eq{"account_id": scope.AccountID})
-	}
-	if scope.ProjectID != "" {
-		builder = builder.Where(sq.Eq{"project_id": scope.ProjectID})
-	}
+
+	builder = applyOptionalEq(builder, "plan_id", scope.PlanID)
+	builder = applyOptionalEq(builder, "account_id", scope.AccountID)
+	builder = applyOptionalEq(builder, "project_id", scope.ProjectID)
+
 	if scope.Action != "" {
 		builder = builder.Where(sq.Eq{"action": string(scope.Action)})
 	}
-	if scope.Limit > 0 {
-		builder = builder.Limit(uint64(scope.Limit))
-	}
 
-	sql, args, err := builder.ToSql()
-	if err != nil {
-		return nil, fmt.Errorf("AgentOSPlanRepo - ListRecoverablePlanCommands - builder: %w", err)
-	}
-	rows, err := r.Pool.Query(ctx, sql, args...)
-	if err != nil {
-		return nil, fmt.Errorf("AgentOSPlanRepo - ListRecoverablePlanCommands - query: %w", err)
-	}
-	defer rows.Close()
-
-	var commands []agentosplan.PlanCommandRecord
-	for rows.Next() {
-		command, err := r.scanPlanCommandRow(ctx, rows)
-		if err != nil {
-			return nil, err
-		}
-		commands = append(commands, command)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("AgentOSPlanRepo - ListRecoverablePlanCommands - rows: %w", err)
-	}
-
-	return commands, nil
+	return applyOptionalLimit(builder, scope.Limit)
 }
 
 func (r *AgentOSPlanRepo) MarkPlanCommandDelivered(ctx context.Context, ref agentosplan.PlanCommandRef) (agentosplan.PlanCommandRecord, error) {
@@ -1653,22 +1952,26 @@ func (r *AgentOSPlanRepo) updatePlanCommandStatus(ctx context.Context, ref agent
 	if err != nil {
 		return agentosplan.PlanCommandRecord{}, err
 	}
+
 	if !exists {
 		return agentosplan.PlanCommandRecord{}, fmt.Errorf("%w: command %q", agentos.ErrInvalidRunPlan, ref.IdempotencyKey)
 	}
+
 	if err := agentosplan.ValidatePlanCommandStatusTransition(command.Status, status); err != nil {
 		return agentosplan.PlanCommandRecord{}, err
 	}
+
 	if status == agentosplan.PlanCommandDelivered {
-		if err := r.validatePlanCommandDeliveredAudit(ctx, command); err != nil {
+		if err := r.validatePlanCommandDeliveredAudit(ctx, &command); err != nil {
 			return agentosplan.PlanCommandRecord{}, err
 		}
 	}
+
 	command.Status = status
 	command.FailureReason = reason
 	command.UpdatedAt = time.Now().UTC()
 
-	sql := `
+	query := `
 UPDATE plan_commands
 SET status = $2,
 	    failure_reason = $3,
@@ -1679,27 +1982,33 @@ SET status = $2,
 	  AND idempotency_key = $1
 	RETURNING command_id, plan_id, account_id, project_id, actor_id, action, idempotency_key, payload_json, status, failure_reason, created_at, updated_at`
 
-	return r.scanPlanCommandRow(ctx, r.Pool.QueryRow(ctx, sql, ref.IdempotencyKey, string(command.Status), command.FailureReason, command.UpdatedAt, ref.PlanID, ref.AccountID, ref.ProjectID))
+	return r.scanPlanCommandRow(ctx, r.Pool.QueryRow(ctx, query, ref.IdempotencyKey, string(command.Status), command.FailureReason, command.UpdatedAt, ref.PlanID, ref.AccountID, ref.ProjectID))
 }
 
-func (r *AgentOSPlanRepo) validatePlanCommandDeliveredAudit(ctx context.Context, command agentosplan.PlanCommandRecord) error {
-	ref := agentosplan.AuditRefFromRecord(agentosplan.AuditRecordFromPlanCommand(command))
+func (r *AgentOSPlanRepo) validatePlanCommandDeliveredAudit(ctx context.Context, command *agentosplan.PlanCommandRecord) error {
+	commandAudit := agentosplan.AuditRecordFromPlanCommand(command)
+	ref := agentosplan.AuditRefFromRecord(&commandAudit)
+
 	audit, exists, err := r.GetAuditRecord(ctx, ref)
 	if err != nil {
 		return err
 	}
+
 	if !exists {
 		return fmt.Errorf("%w: delivered command requires durable audit %q", agentos.ErrInvalidRunPlan, command.IdempotencyKey)
 	}
 
-	return agentosplan.ValidatePlanCommandDeliveredAudit(command, audit)
+	return agentosplan.ValidatePlanCommandDeliveredAudit(command, &audit)
 }
 
 func (r *AgentOSPlanRepo) scanPlanCommandRow(_ context.Context, scanner interface{ Scan(dest ...any) error }) (agentosplan.PlanCommandRecord, error) {
-	var command agentosplan.PlanCommandRecord
-	var action string
-	var status string
-	var payloadJSON []byte
+	var (
+		command     agentosplan.PlanCommandRecord
+		action      string
+		status      string
+		payloadJSON []byte
+	)
+
 	err := scanner.Scan(
 		&command.CommandID,
 		&command.PlanID,
@@ -1717,11 +2026,13 @@ func (r *AgentOSPlanRepo) scanPlanCommandRow(_ context.Context, scanner interfac
 	if err != nil {
 		return agentosplan.PlanCommandRecord{}, fmt.Errorf("AgentOSPlanRepo - scanPlanCommand: %w", err)
 	}
+
 	if len(payloadJSON) > 0 {
 		if err := json.Unmarshal(payloadJSON, &command.Payload); err != nil {
 			return agentosplan.PlanCommandRecord{}, fmt.Errorf("AgentOSPlanRepo - scanPlanCommand - decode payload: %w", err)
 		}
 	}
+
 	command.Action = agentosplan.AuditAction(action)
 	command.Status = agentosplan.PlanCommandStatus(status)
 

@@ -7,8 +7,15 @@ import (
 	"github.com/TekkenSteve/GoAgent/agentos"
 )
 
+const (
+	RESEARCH    = "research"
+	runResearch = "run-research"
+)
+
 func TestNormalizeRunArtifactsAddsPlanNodeAndRunRefs(t *testing.T) {
-	node := agentos.PlanNodeSpec{NodeID: "research"}
+	t.Parallel()
+
+	node := agentos.PlanNodeSpec{NodeID: RESEARCH}
 	status := agentos.RunStatus{
 		RunID: "run-research",
 		Artifacts: []agentos.ArtifactRef{
@@ -20,20 +27,24 @@ func TestNormalizeRunArtifactsAddsPlanNodeAndRunRefs(t *testing.T) {
 		},
 	}
 
-	refs, err := normalizeRunArtifacts("plan-1", node, status)
+	refs, err := normalizeRunArtifacts("plan-1", &node, &status)
 	if err != nil {
 		t.Fatalf("normalizeRunArtifacts: %v", err)
 	}
+
 	if len(refs) != 1 {
 		t.Fatalf("refs = %#v", refs)
 	}
-	if refs[0].PlanID != "plan-1" || refs[0].NodeID != "research" || refs[0].RunID != "run-research" {
+
+	if refs[0].PlanID != Plan1 || refs[0].NodeID != RESEARCH || refs[0].RunID != runResearch {
 		t.Fatalf("ref = %#v", refs[0])
 	}
 }
 
 func TestNormalizeRunArtifactsRejectsMismatchedOwnership(t *testing.T) {
-	node := agentos.PlanNodeSpec{NodeID: "research"}
+	t.Parallel()
+
+	node := agentos.PlanNodeSpec{NodeID: RESEARCH}
 	status := agentos.RunStatus{RunID: "run-research"}
 
 	for _, test := range []struct {
@@ -77,7 +88,9 @@ func TestNormalizeRunArtifactsRejectsMismatchedOwnership(t *testing.T) {
 		},
 	} {
 		t.Run(test.name, func(t *testing.T) {
-			_, err := normalizeRunArtifacts("plan-1", node, agentos.RunStatus{
+			t.Parallel()
+
+			_, err := normalizeRunArtifacts("plan-1", &node, &agentos.RunStatus{
 				RunID:     status.RunID,
 				Artifacts: []agentos.ArtifactRef{test.ref},
 			})
@@ -89,6 +102,8 @@ func TestNormalizeRunArtifactsRejectsMismatchedOwnership(t *testing.T) {
 }
 
 func TestValidateRequiredArtifactsRejectsMissingOutput(t *testing.T) {
+	t.Parallel()
+
 	err := validateRequiredArtifacts(
 		[]agentos.ArtifactSpec{{Name: "summary", Kind: agentos.ArtifactKindObject, Required: true}},
 		nil,

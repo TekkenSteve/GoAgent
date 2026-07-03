@@ -2,6 +2,7 @@ package grpcbackend
 
 import (
 	"context"
+	"errors"
 	"net"
 	"testing"
 	"time"
@@ -11,41 +12,77 @@ import (
 	"google.golang.org/grpc"
 )
 
+const Run1 = "run-1"
+
+var errUnexpectedGRPCRequest = errors.New("unexpected grpc request type")
+
 func TestBackendConformance(t *testing.T) {
+	t.Parallel()
 	server := newTestServer(t)
 	subscriber := &agentosruntimetest.SubscriberProbe{}
-	backend, err := NewBackend(subscriber, Config{
+
+	config := Config{
 		Name:     "grpc-test",
 		Target:   server.target,
 		Insecure: true,
-	})
+	}
+
+	backend, err := NewBackend(subscriber, &config)
 	if err != nil {
 		t.Fatalf("NewBackend: %v", err)
 	}
+
 	t.Cleanup(func() { _ = backend.Close() })
 
-	agentosruntimetest.RunBackendConformance(t, agentosruntimetest.BackendConformanceCase{
+	agentosruntimetest.RunBackendConformance(t, &agentosruntimetest.BackendConformanceCase{
 		Name:            "grpc",
 		Backend:         backend,
 		Ref:             backend.config.Ref(),
-		RunID:           "run-1",
+		RunID:           Run1,
 		StatusState:     "running",
 		SubscriberProbe: subscriber,
 	})
 
-	if server.service.start.RunID != "run-1" ||
-		server.service.signal.RunID != "run-1" ||
+	if server.service.start.RunID != Run1 ||
+		server.service.signal.RunID != Run1 ||
 		server.service.signal.Type != agentos.SignalUserMessage ||
 		server.service.control.Operation != agentos.ControlCancel ||
-		server.service.status.RunID != "run-1" {
+		server.service.status.RunID != Run1 {
 		t.Fatalf("unexpected grpc calls: %#v", server.service)
 	}
 }
 
 func TestBackendRejectsInvalidConfig(t *testing.T) {
-	_, err := NewBackend(nil, Config{})
+	t.Parallel()
+
+	config := Config{}
+
+	_, err := NewBackend(nil, &config)
 	if err == nil {
 		t.Fatal("expected error")
+	}
+}
+
+func TestBackendRejectsNilConfig(t *testing.T) {
+	t.Parallel()
+
+	_, err := NewBackend(nil, nil)
+	if !errors.Is(err, agentos.ErrInvalidBackendRef) {
+		t.Fatalf("NewBackend nil config error = %v, want ErrInvalidBackendRef", err)
+	}
+}
+
+func TestBackendRejectsNilRunInputs(t *testing.T) {
+	t.Parallel()
+
+	backend := &Backend{config: Config{Name: "grpc-test"}}
+
+	if _, err := backend.Start(context.Background(), nil); !errors.Is(err, agentos.ErrInvalidRunSpec) {
+		t.Fatalf("Start nil error = %v, want ErrInvalidRunSpec", err)
+	}
+
+	if err := backend.Signal(context.Background(), Run1, nil); !errors.Is(err, agentos.ErrInvalidSignal) {
+		t.Fatalf("Signal nil error = %v, want ErrInvalidSignal", err)
 	}
 }
 
@@ -58,7 +95,7 @@ type testServer struct {
 func newTestServer(t *testing.T) *testServer {
 	t.Helper()
 
-	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	listener, err := (&net.ListenConfig{}).Listen(context.Background(), "tcp", "127.0.0.1:0")
 	if err != nil {
 		t.Fatalf("listen: %v", err)
 	}
@@ -69,22 +106,22 @@ func newTestServer(t *testing.T) *testServer {
 		ServiceName: defaultService,
 		HandlerType: (*testAgentBackendServer)(nil),
 		Methods: []grpc.MethodDesc{
-			{MethodName: "StartRun", Handler: unaryHandler(func(ctx context.Context, svc *testAgentBackendService, req *startRequest) (*agentos.RunStatus, error) {
+			{MethodName: "StartRun", Handler: unaryHandler(func(_ context.Context, svc *testAgentBackendService, req *startRequest) (*agentos.RunStatus, error) {
 				svc.start = *req
 
 				return &agentos.RunStatus{RunID: req.RunID, LifecycleState: "created", UpdatedAt: time.Now().UTC()}, nil
 			})},
-			{MethodName: "SignalRun", Handler: unaryHandler(func(ctx context.Context, svc *testAgentBackendService, req *signalRequest) (*emptyResponse, error) {
+			{MethodName: "SignalRun", Handler: unaryHandler(func(_ context.Context, svc *testAgentBackendService, req *signalRequest) (*emptyResponse, error) {
 				svc.signal = *req
 
 				return &emptyResponse{}, nil
 			})},
-			{MethodName: "ControlRun", Handler: unaryHandler(func(ctx context.Context, svc *testAgentBackendService, req *controlRequest) (*emptyResponse, error) {
+			{MethodName: "ControlRun", Handler: unaryHandler(func(_ context.Context, svc *testAgentBackendService, req *controlRequest) (*emptyResponse, error) {
 				svc.control = *req
 
 				return &emptyResponse{}, nil
 			})},
-			{MethodName: "StatusRun", Handler: unaryHandler(func(ctx context.Context, svc *testAgentBackendService, req *statusRequest) (*agentos.RunStatus, error) {
+			{MethodName: "StatusRun", Handler: unaryHandler(func(_ context.Context, svc *testAgentBackendService, req *statusRequest) (*agentos.RunStatus, error) {
 				svc.status = *req
 
 				return &agentos.RunStatus{RunID: req.RunID, LifecycleState: "running", UpdatedAt: time.Now().UTC()}, nil
@@ -93,8 +130,11 @@ func newTestServer(t *testing.T) *testServer {
 	}, service)
 
 	go func() {
-		_ = server.Serve(listener)
+		if err := server.Serve(listener); err != nil {
+			panic(err)
+		}
 	}()
+
 	t.Cleanup(server.Stop)
 
 	return &testServer{
@@ -117,7 +157,7 @@ type testAgentBackendServer interface {
 
 func (*testAgentBackendService) mustEmbedTestAgentBackendServer() {}
 
-func unaryHandler[Req any, Resp any](
+func unaryHandler[Req, Resp any](
 	fn func(context.Context, *testAgentBackendService, *Req) (*Resp, error),
 ) grpc.MethodHandler {
 	return func(srv any, ctx context.Context, dec func(any) error, interceptor grpc.UnaryServerInterceptor) (any, error) {
@@ -125,8 +165,14 @@ func unaryHandler[Req any, Resp any](
 		if err := dec(req); err != nil {
 			return nil, err
 		}
+
+		svc, ok := srv.(*testAgentBackendService)
+		if !ok {
+			return nil, errUnexpectedGRPCRequest
+		}
+
 		if interceptor == nil {
-			return fn(ctx, srv.(*testAgentBackendService), req)
+			return fn(ctx, svc, req)
 		}
 
 		info := &grpc.UnaryServerInfo{
@@ -134,7 +180,12 @@ func unaryHandler[Req any, Resp any](
 			FullMethod: defaultService,
 		}
 		handler := func(ctx context.Context, request any) (any, error) {
-			return fn(ctx, srv.(*testAgentBackendService), request.(*Req))
+			req, ok := request.(*Req)
+			if !ok {
+				return nil, errUnexpectedGRPCRequest
+			}
+
+			return fn(ctx, svc, req)
 		}
 
 		return interceptor(ctx, req, info, handler)

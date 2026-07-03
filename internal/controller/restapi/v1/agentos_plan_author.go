@@ -10,8 +10,6 @@ import (
 	"github.com/gofiber/fiber/v2"
 )
 
-var agentOSPlanAuthorTemplate = template.Must(template.New("agentos_plan_author").Parse(agentOSPlanAuthorHTML))
-
 // @Summary     AgentOS plan author
 // @Description Render a RunPlanSpec authoring surface backed by the public AgentOS schema.
 // @ID          agentos-plan-author
@@ -47,12 +45,23 @@ func (r *V1) agentOSPlanAuthor(ctx *fiber.Ctx) error {
 	}
 
 	var body bytes.Buffer
-	if err := agentOSPlanAuthorTemplate.Execute(&body, view); err != nil {
+
+	tmpl, err := newAgentOSPlanAuthorTemplate()
+	if err != nil {
+		return errorResponse(ctx, http.StatusInternalServerError, fmt.Sprintf("parse plan author template: %v", err))
+	}
+
+	if err := tmpl.Execute(&body, view); err != nil {
 		return errorResponse(ctx, http.StatusInternalServerError, fmt.Sprintf("render plan author: %v", err))
 	}
 
 	ctx.Set(fiber.HeaderContentType, fiber.MIMETextHTMLCharsetUTF8)
+
 	return ctx.Status(http.StatusOK).Send(body.Bytes())
+}
+
+func newAgentOSPlanAuthorTemplate() (*template.Template, error) {
+	return template.New("agentos_plan_author").Parse(agentOSPlanAuthorHTML)
 }
 
 type agentOSPlanAuthorView struct {

@@ -10,45 +10,32 @@ import (
 
 // NormalizePlanMetricSample returns the canonical representation used for
 // durable metric sample idempotency.
-func NormalizePlanMetricSample(sample PlanMetricSample) PlanMetricSample {
-	sample.Timestamp = sample.Timestamp.UTC().Truncate(planMetricSampleTimestampPrecision)
-	if sample.Labels == nil {
-		sample.Labels = map[string]string{}
+func NormalizePlanMetricSample(sample *PlanMetricSample) PlanMetricSample {
+	normalized := *sample
+	normalized.Timestamp = normalized.Timestamp.UTC().Truncate(planMetricSampleTimestampPrecision)
+
+	if normalized.Labels == nil {
+		normalized.Labels = map[string]string{}
 	}
 
-	return sample
+	return normalized
 }
 
 // ValidatePlanMetricSample verifies the durable identity and tenant scope of a
 // projected PlanMetricSample before a sink records it.
-func ValidatePlanMetricSample(sample PlanMetricSample) error {
-	if sample.Name == "" {
-		return fmt.Errorf("%w: metric name is required", agentos.ErrInvalidRunPlan)
+func ValidatePlanMetricSample(sample *PlanMetricSample) error {
+	if err := validatePlanMetricSampleIdentity(sample); err != nil {
+		return err
 	}
-	if sample.PlanID == "" {
-		return fmt.Errorf("%w: metric plan id is required", agentos.ErrInvalidRunPlan)
-	}
-	if sample.AccountID == "" {
-		return fmt.Errorf("%w: metric account id is required", agentos.ErrInvalidRunPlan)
-	}
-	if sample.ProjectID == "" {
-		return fmt.Errorf("%w: metric project id is required", agentos.ErrInvalidRunPlan)
-	}
-	if sample.EventID == "" {
-		return fmt.Errorf("%w: metric event id is required", agentos.ErrInvalidRunPlan)
-	}
-	if sample.Sequence <= 0 {
-		return fmt.Errorf("%w: metric event sequence must be positive", agentos.ErrInvalidRunPlan)
-	}
-	if sample.Unit == "" {
-		return fmt.Errorf("%w: metric unit is required", agentos.ErrInvalidRunPlan)
-	}
+
 	if math.IsNaN(sample.Value) || math.IsInf(sample.Value, 0) {
 		return fmt.Errorf("%w: metric value must be finite", agentos.ErrInvalidRunPlan)
 	}
+
 	if sample.Timestamp.IsZero() {
 		return fmt.Errorf("%w: metric timestamp is required", agentos.ErrInvalidRunPlan)
 	}
+
 	for key := range sample.Labels {
 		if key == "" {
 			return fmt.Errorf("%w: metric label key is required", agentos.ErrInvalidRunPlan)
@@ -58,25 +45,69 @@ func ValidatePlanMetricSample(sample PlanMetricSample) error {
 	return nil
 }
 
-// ValidatePlanMetricSampleIdempotency verifies that a replayed metric sample is
-// the same durable fact as the existing sample for its idempotency key.
-func ValidatePlanMetricSampleIdempotency(existing, requested PlanMetricSample) error {
-	existing = NormalizePlanMetricSample(existing)
-	requested = NormalizePlanMetricSample(requested)
-	if existing.Name != requested.Name ||
-		existing.PlanID != requested.PlanID ||
-		existing.AccountID != requested.AccountID ||
-		existing.ProjectID != requested.ProjectID ||
-		existing.NodeID != requested.NodeID ||
-		existing.RunID != requested.RunID ||
-		existing.EventID != requested.EventID ||
-		existing.Sequence != requested.Sequence ||
-		existing.Value != requested.Value ||
-		existing.Unit != requested.Unit ||
-		!existing.Timestamp.Equal(requested.Timestamp) ||
-		!maps.Equal(existing.Labels, requested.Labels) {
-		return fmt.Errorf("%w: metric sample identity conflict for plan %q event %q", agentos.ErrInvalidRunPlan, requested.PlanID, requested.EventID)
+func validatePlanMetricSampleIdentity(sample *PlanMetricSample) error {
+	required := []struct {
+		value string
+		label string
+	}{
+		{value: string(sample.Name), label: "metric name"},
+		{value: sample.PlanID, label: "metric plan id"},
+		{value: sample.AccountID, label: "metric account id"},
+		{value: sample.ProjectID, label: "metric project id"},
+		{value: sample.EventID, label: "metric event id"},
+		{value: sample.Unit, label: "metric unit"},
+	}
+
+	for _, field := range required {
+		if field.value == "" {
+			return fmt.Errorf("%w: %s is required", agentos.ErrInvalidRunPlan, field.label)
+		}
+	}
+
+	if sample.Sequence <= 0 {
+		return fmt.Errorf("%w: metric event sequence must be positive", agentos.ErrInvalidRunPlan)
 	}
 
 	return nil
+}
+
+// ValidatePlanMetricSampleIdempotency verifies that a replayed metric sample is
+// the same durable fact as the existing sample for its idempotency key.
+func ValidatePlanMetricSampleIdempotency(existing, requested *PlanMetricSample) error {
+	existingSample := NormalizePlanMetricSample(existing)
+
+	requestedSample := NormalizePlanMetricSample(requested)
+
+	if !samePlanMetricSampleFact(&existingSample, &requestedSample) {
+		return fmt.Errorf("%w: metric sample identity conflict for plan %q event %q", agentos.ErrInvalidRunPlan, requestedSample.PlanID, requestedSample.EventID)
+	}
+
+	return nil
+}
+
+func samePlanMetricSampleFact(existing, requested *PlanMetricSample) bool {
+	stringFields := []struct {
+		existing  string
+		requested string
+	}{
+		{existing: string(existing.Name), requested: string(requested.Name)},
+		{existing: existing.PlanID, requested: requested.PlanID},
+		{existing: existing.AccountID, requested: requested.AccountID},
+		{existing: existing.ProjectID, requested: requested.ProjectID},
+		{existing: existing.NodeID, requested: requested.NodeID},
+		{existing: existing.RunID, requested: requested.RunID},
+		{existing: existing.EventID, requested: requested.EventID},
+		{existing: existing.Unit, requested: requested.Unit},
+	}
+
+	for _, field := range stringFields {
+		if field.existing != field.requested {
+			return false
+		}
+	}
+
+	return existing.Sequence == requested.Sequence &&
+		existing.Value == requested.Value &&
+		existing.Timestamp.Equal(requested.Timestamp) &&
+		maps.Equal(existing.Labels, requested.Labels)
 }

@@ -3,6 +3,7 @@ package temporal
 import (
 	"context"
 	"fmt"
+	"io"
 
 	"github.com/TekkenSteve/GoAgent/agentos"
 	"github.com/TekkenSteve/GoAgent/internal/usecase/agentosplan"
@@ -24,7 +25,7 @@ type PlanActivities struct {
 // PlanNodeStarter starts backend-owned child runs and records plan-node route
 // ownership atomically at the AgentOS runtime boundary.
 type PlanNodeStarter interface {
-	StartPlanNode(ctx context.Context, planID, nodeID string, spec agentos.RunSpec) (agentos.RunStatus, error)
+	StartPlanNode(ctx context.Context, planID, nodeID string, spec *agentos.RunSpec) (agentos.RunStatus, error)
 }
 
 // NewPlanActivitiesWithStores creates plan activities with explicit durable
@@ -69,16 +70,20 @@ func NewPlanActivitiesWithCatalogAndSchemas(
 	if runtime == nil {
 		return nil, fmt.Errorf("%w: plan activity runtime is required", agentos.ErrInvalidRunPlan)
 	}
+
 	planNodeStarter, ok := runtime.(PlanNodeStarter)
 	if !ok {
 		return nil, fmt.Errorf("%w: plan activity runtime must support plan-node start", agentos.ErrInvalidRunPlan)
 	}
+
 	if transitionStore == nil {
 		return nil, fmt.Errorf("%w: plan transition store is required", agentos.ErrInvalidRunPlan)
 	}
+
 	if artifactStore == nil {
 		return nil, fmt.Errorf("%w: artifact store is required", agentos.ErrInvalidArtifact)
 	}
+
 	compiler, err := agentosplan.NewCELCompiler()
 	if err != nil {
 		return nil, err
@@ -105,69 +110,80 @@ type validatePlanInput struct {
 	Spec agentos.RunPlanSpec
 }
 
-type validatePlanOutput struct {
+type ValidatePlanOutput struct {
 	Plan               agentosplan.ExecutablePlan
 	ControlsByNode     map[string][]agentos.ControlOperation
 	CapabilitiesByNode map[string]agentosplan.CapabilitySelectionTrace
 }
 
 // ValidatePlanActivity validates a RunPlan before workflow execution.
-func (a *PlanActivities) ValidatePlanActivity(ctx context.Context, input validatePlanInput) (validatePlanOutput, error) {
-	plan, err := a.Validator.Validate(ctx, input.Spec)
+func (a *PlanActivities) ValidatePlanActivity(ctx context.Context, input *validatePlanInput) (ValidatePlanOutput, error) {
+	plan, err := a.Validator.Validate(ctx, &input.Spec)
 	if err != nil {
-		return validatePlanOutput{}, err
+		return ValidatePlanOutput{}, err
 	}
 
-	controlsByNode, err := a.controlsByNode(ctx, plan)
+	controlsByNode, err := a.controlsByNode(ctx, &plan)
 	if err != nil {
-		return validatePlanOutput{}, err
-	}
-	capabilitiesByNode, err := a.capabilitiesByNode(ctx, plan)
-	if err != nil {
-		return validatePlanOutput{}, err
+		return ValidatePlanOutput{}, err
 	}
 
-	return validatePlanOutput{
+	capabilitiesByNode, err := a.capabilitiesByNode(ctx, &plan)
+	if err != nil {
+		return ValidatePlanOutput{}, err
+	}
+
+	return ValidatePlanOutput{
 		Plan:               plan,
 		ControlsByNode:     controlsByNode,
 		CapabilitiesByNode: capabilitiesByNode,
 	}, nil
 }
 
-func (a *PlanActivities) controlsByNode(ctx context.Context, plan agentosplan.ExecutablePlan) (map[string][]agentos.ControlOperation, error) {
+func (a *PlanActivities) controlsByNode(ctx context.Context, plan *agentosplan.ExecutablePlan) (map[string][]agentos.ControlOperation, error) {
 	controlsByNode := make(map[string][]agentos.ControlOperation, len(plan.Spec.Nodes))
-	for _, node := range plan.Spec.Nodes {
+	for i := range plan.Spec.Nodes {
+		node := &plan.Spec.Nodes[i]
 		if node.Capability == "" || a.Validator.Capabilities == nil {
 			controlsByNode[node.NodeID] = nil
+
 			continue
 		}
+
 		capability, ok, err := a.Validator.Capabilities.GetCapability(ctx, node.Run.Backend, node.Capability)
 		if err != nil {
 			return nil, err
 		}
+
 		if !ok {
 			return nil, fmt.Errorf("%w: node %q capability %s/%s/%s", agentos.ErrCapabilityNotFound, node.NodeID, node.Run.Backend.Kind, node.Run.Backend.Name, node.Capability)
 		}
+
 		controlsByNode[node.NodeID] = append([]agentos.ControlOperation(nil), capability.Controls...)
 	}
 
 	return controlsByNode, nil
 }
 
-func (a *PlanActivities) capabilitiesByNode(ctx context.Context, plan agentosplan.ExecutablePlan) (map[string]agentosplan.CapabilitySelectionTrace, error) {
+func (a *PlanActivities) capabilitiesByNode(ctx context.Context, plan *agentosplan.ExecutablePlan) (map[string]agentosplan.CapabilitySelectionTrace, error) {
 	capabilitiesByNode := make(map[string]agentosplan.CapabilitySelectionTrace)
-	for _, node := range plan.Spec.Nodes {
+
+	for i := range plan.Spec.Nodes {
+		node := &plan.Spec.Nodes[i]
 		if node.Capability == "" || a.Validator.Capabilities == nil {
 			continue
 		}
+
 		capability, ok, err := a.Validator.Capabilities.GetCapability(ctx, node.Run.Backend, node.Capability)
 		if err != nil {
 			return nil, err
 		}
+
 		if !ok {
 			return nil, fmt.Errorf("%w: node %q capability %s/%s/%s", agentos.ErrCapabilityNotFound, node.NodeID, node.Run.Backend.Kind, node.Run.Backend.Name, node.Capability)
 		}
-		capabilitiesByNode[node.NodeID] = agentosplan.NewCapabilitySelectionTrace(capability)
+
+		capabilitiesByNode[node.NodeID] = agentosplan.NewCapabilitySelectionTrace(&capability)
 	}
 
 	return capabilitiesByNode, nil
@@ -180,19 +196,19 @@ type resolvePlanNodeInputInput struct {
 	Edges  []agentos.PlanEdgeSpec
 }
 
-type resolvePlanNodeInputOutput struct {
+type ResolvePlanNodeInputOutput struct {
 	Input map[string]any
 	Trace agentosplan.InputResolutionTrace
 }
 
 // ResolvePlanNodeInputActivity resolves node input mapping before a child run starts.
-func (a *PlanActivities) ResolvePlanNodeInputActivity(ctx context.Context, input resolvePlanNodeInputInput) (resolvePlanNodeInputOutput, error) {
-	resolvedInput, err := agentosplan.ResolveRunInput(ctx, a.ArtifactStore, a.Expressions, input.Spec, input.Status, input.Node, input.Edges)
+func (a *PlanActivities) ResolvePlanNodeInputActivity(ctx context.Context, input *resolvePlanNodeInputInput) (ResolvePlanNodeInputOutput, error) {
+	resolvedInput, err := agentosplan.ResolveRunInput(ctx, a.ArtifactStore, a.Expressions, &input.Spec, &input.Status, &input.Node, input.Edges)
 	if err != nil {
-		return resolvePlanNodeInputOutput{}, err
+		return ResolvePlanNodeInputOutput{}, err
 	}
 
-	return resolvePlanNodeInputOutput{
+	return ResolvePlanNodeInputOutput{
 		Input: resolvedInput,
 		Trace: agentosplan.NewInputResolutionTrace(
 			resolvedInput,
@@ -210,46 +226,55 @@ type startPlanNodeInput struct {
 	Attempt   int32
 }
 
-type startPlanNodeOutput struct {
+type StartPlanNodeOutput struct {
 	Status agentos.RunStatus
 }
 
 // StartPlanNodeActivity starts one backend-owned child run.
-func (a *PlanActivities) StartPlanNodeActivity(ctx context.Context, input startPlanNodeInput) (startPlanNodeOutput, error) {
+func (a *PlanActivities) StartPlanNodeActivity(ctx context.Context, input *startPlanNodeInput) (StartPlanNodeOutput, error) {
 	if a.Runtime == nil {
-		return startPlanNodeOutput{}, fmt.Errorf("%w: plan activity runtime is required", agentos.ErrInvalidRunPlan)
+		return StartPlanNodeOutput{}, fmt.Errorf("%w: plan activity runtime is required", agentos.ErrInvalidRunPlan)
 	}
+
 	attempt := input.Attempt
 	if attempt <= 0 {
 		attempt = 1
 	}
+
 	if input.Node.Run.IdempotencyKey == "" {
 		key, err := agentosplan.NodeStartIdempotencyKey(input.PlanID, input.Node.NodeID, attempt)
 		if err != nil {
-			return startPlanNodeOutput{}, err
+			return StartPlanNodeOutput{}, err
 		}
+
 		input.Node.Run.IdempotencyKey = key
 	}
+
 	if input.AccountID == "" {
-		return startPlanNodeOutput{}, fmt.Errorf("%w: account id is required", agentos.ErrInvalidRunSpec)
+		return StartPlanNodeOutput{}, fmt.Errorf("%w: account id is required", agentos.ErrInvalidRunSpec)
 	}
+
 	if input.ProjectID == "" {
-		return startPlanNodeOutput{}, fmt.Errorf("%w: project id is required", agentos.ErrInvalidRunSpec)
+		return StartPlanNodeOutput{}, fmt.Errorf("%w: project id is required", agentos.ErrInvalidRunSpec)
 	}
+
 	input.Node.Run.AccountID = input.AccountID
 	input.Node.Run.ProjectID = input.ProjectID
-	status, err := a.PlanNodeStarter.StartPlanNode(ctx, input.PlanID, input.Node.NodeID, input.Node.Run)
+
+	status, err := a.PlanNodeStarter.StartPlanNode(ctx, input.PlanID, input.Node.NodeID, &input.Node.Run)
 	if err != nil {
-		return startPlanNodeOutput{}, err
+		return StartPlanNodeOutput{}, err
 	}
+
 	if status.RunID == "" {
 		status.RunID = input.Node.Run.RunID
 	}
+
 	if status.RunID != input.Node.Run.RunID {
-		return startPlanNodeOutput{}, fmt.Errorf("%w: backend returned run id %q for requested run %q", agentos.ErrInvalidRunSpec, status.RunID, input.Node.Run.RunID)
+		return StartPlanNodeOutput{}, fmt.Errorf("%w: backend returned run id %q for requested run %q", agentos.ErrInvalidRunSpec, status.RunID, input.Node.Run.RunID)
 	}
 
-	return startPlanNodeOutput{Status: status}, nil
+	return StartPlanNodeOutput{Status: status}, nil
 }
 
 type persistPlanStateInput struct {
@@ -259,31 +284,37 @@ type persistPlanStateInput struct {
 	IdempotencyKey string
 }
 
-type persistPlanStateOutput struct {
+type PersistPlanStateOutput struct {
 	Event agentos.PlanEvent
 }
 
 // PersistPlanStateActivity writes the latest reducer snapshot and appends the
 // corresponding public PlanEvent to the durable event source.
-func (a *PlanActivities) PersistPlanStateActivity(ctx context.Context, input persistPlanStateInput) (persistPlanStateOutput, error) {
+func (a *PlanActivities) PersistPlanStateActivity(ctx context.Context, input *persistPlanStateInput) (PersistPlanStateOutput, error) {
 	if a.PlanTransitionStore == nil {
-		return persistPlanStateOutput{}, fmt.Errorf("%w: plan transition store is required", agentos.ErrInvalidRunPlan)
+		return PersistPlanStateOutput{}, fmt.Errorf("%w: plan transition store is required", agentos.ErrInvalidRunPlan)
 	}
-	event, err := a.PlanTransitionStore.PersistPlanTransition(ctx, agentosplan.PlanStateSnapshot{
+
+	snapshot := agentosplan.PlanStateSnapshot{
 		Spec:   input.Spec,
 		Status: input.Status,
-	}, input.Event, input.IdempotencyKey)
-	if err != nil {
-		return persistPlanStateOutput{}, err
 	}
+
+	event, err := a.PlanTransitionStore.PersistPlanTransition(ctx, &snapshot, &input.Event, input.IdempotencyKey)
+	if err != nil {
+		return PersistPlanStateOutput{}, err
+	}
+
 	if a.PlanEventPublisher != nil {
 		// Redis is a live transport only. The durable event source is the
 		// PlanTransitionStore above, so live publish failures must not block
 		// workflow progress or make Redis part of replay correctness.
-		_ = a.PlanEventPublisher.PublishPlanEvent(ctx, event)
+		if err := a.PlanEventPublisher.PublishPlanEvent(ctx, &event); err != nil {
+			fmt.Fprintf(io.Discard, "plan_activity: publish: %v\n", err)
+		}
 	}
 
-	return persistPlanStateOutput{Event: event}, nil
+	return PersistPlanStateOutput{Event: event}, nil
 }
 
 type publishPlanArtifactsInput struct {
@@ -292,7 +323,7 @@ type publishPlanArtifactsInput struct {
 	Status agentos.RunStatus
 }
 
-type publishPlanArtifactsOutput struct {
+type PublishPlanArtifactsOutput struct {
 	Artifacts []agentos.ArtifactRef
 }
 
@@ -300,52 +331,64 @@ type publishPlanArtifactsOutput struct {
 // workflow history. Backends that produce payloads must write those payloads to
 // the configured AgentOS ArtifactStore before returning refs; this activity
 // only claims the ref idempotently and returns metadata to the workflow.
-func (a *PlanActivities) PublishPlanArtifactsActivity(ctx context.Context, input publishPlanArtifactsInput) (publishPlanArtifactsOutput, error) {
+func (a *PlanActivities) PublishPlanArtifactsActivity(ctx context.Context, input *publishPlanArtifactsInput) (PublishPlanArtifactsOutput, error) {
 	if a.ArtifactStore == nil {
-		return publishPlanArtifactsOutput{}, fmt.Errorf("%w: artifact store is required", agentos.ErrInvalidArtifact)
+		return PublishPlanArtifactsOutput{}, fmt.Errorf("%w: artifact store is required", agentos.ErrInvalidArtifact)
 	}
-	refs, err := normalizeRunArtifacts(input.Spec.PlanID, input.Node, input.Status)
+
+	refs, err := normalizeRunArtifacts(input.Spec.PlanID, &input.Node, &input.Status)
 	if err != nil {
-		return publishPlanArtifactsOutput{}, err
+		return PublishPlanArtifactsOutput{}, err
 	}
+
 	if runSucceeded(input.Status.LifecycleState) {
-		if err := a.validatePublishedArtifacts(ctx, input.Spec, input.Node, refs); err != nil {
-			return publishPlanArtifactsOutput{}, err
+		if err := a.validatePublishedArtifacts(ctx, &input.Spec, &input.Node, refs); err != nil {
+			return PublishPlanArtifactsOutput{}, err
 		}
 	}
+
 	stored := make([]agentos.ArtifactRef, 0, len(refs))
-	for _, ref := range refs {
+	for i := range refs {
+		ref := refs[i]
+
 		key, err := agentosplan.ArtifactPublishIdempotencyKey(input.Spec.PlanID, input.Node.NodeID, input.Status.RunID, ref.Name)
 		if err != nil {
-			return publishPlanArtifactsOutput{}, err
+			return PublishPlanArtifactsOutput{}, err
 		}
-		storedRef, err := a.ArtifactStore.Put(ctx, ref, nil, key)
+
+		storedRef, err := a.ArtifactStore.Put(ctx, &ref, nil, key)
 		if err != nil {
-			return publishPlanArtifactsOutput{}, err
+			return PublishPlanArtifactsOutput{}, err
 		}
+
 		stored = append(stored, storedRef)
 	}
 
-	return publishPlanArtifactsOutput{Artifacts: stored}, nil
+	return PublishPlanArtifactsOutput{Artifacts: stored}, nil
 }
 
-func (a *PlanActivities) validatePublishedArtifacts(ctx context.Context, spec agentos.RunPlanSpec, node agentos.PlanNodeSpec, refs []agentos.ArtifactRef) error {
+func (a *PlanActivities) validatePublishedArtifacts(ctx context.Context, spec *agentos.RunPlanSpec, node *agentos.PlanNodeSpec, refs []agentos.ArtifactRef) error {
 	if err := agentosplan.ValidateArtifactsAgainstSpecs(node.NodeID, node.Outputs, refs); err != nil {
 		return err
 	}
+
 	if err := agentosplan.ValidateArtifactPayloadsAgainstSchemas(ctx, a.ArtifactStore, a.ArtifactSchemas, spec, node, refs); err != nil {
 		return err
 	}
+
 	if node.Capability == "" || a.Validator.Capabilities == nil {
 		return nil
 	}
+
 	capability, ok, err := a.Validator.Capabilities.GetCapability(ctx, node.Run.Backend, node.Capability)
 	if err != nil {
 		return err
 	}
+
 	if !ok {
 		return fmt.Errorf("%w: node %q capability %s/%s/%s", agentos.ErrCapabilityNotFound, node.NodeID, node.Run.Backend.Kind, node.Run.Backend.Name, node.Capability)
 	}
+
 	if err := agentosplan.ValidateCapabilityOutputArtifacts(node.NodeID, capability.OutputSchema, refs); err != nil {
 		return err
 	}
@@ -362,7 +405,7 @@ type evaluatePlanExpansionInput struct {
 	ExpansionCount int32
 }
 
-type evaluatePlanExpansionOutput struct {
+type EvaluatePlanExpansionOutput struct {
 	Expanded           bool
 	Delta              agentosplan.PlanDelta
 	Spec               agentos.RunPlanSpec
@@ -374,36 +417,41 @@ type evaluatePlanExpansionOutput struct {
 // EvaluatePlanExpansionActivity materializes and validates workflow-owned
 // dynamic topology expansion after a child run publishes explicit plan_delta
 // artifacts.
-func (a *PlanActivities) EvaluatePlanExpansionActivity(ctx context.Context, input evaluatePlanExpansionInput) (evaluatePlanExpansionOutput, error) {
+func (a *PlanActivities) EvaluatePlanExpansionActivity(ctx context.Context, input *evaluatePlanExpansionInput) (EvaluatePlanExpansionOutput, error) {
 	if a.PlanDeltaProvider == nil {
-		return evaluatePlanExpansionOutput{}, fmt.Errorf("%w: plan delta provider is required", agentos.ErrInvalidRunPlan)
+		return EvaluatePlanExpansionOutput{}, fmt.Errorf("%w: plan delta provider is required", agentos.ErrInvalidRunPlan)
 	}
-	delta, ok, err := a.PlanDeltaProvider.NextPlanDelta(ctx, agentosplan.PlanDeltaInput{
+
+	deltaInput := agentosplan.PlanDeltaInput{
 		Spec:           input.Spec,
 		Status:         input.Status,
 		Node:           input.Node,
 		RunStatus:      input.RunStatus,
 		Artifacts:      input.Artifacts,
 		ExpansionCount: input.ExpansionCount,
-	})
+	}
+
+	delta, ok, err := a.PlanDeltaProvider.NextPlanDelta(ctx, &deltaInput)
 	if err != nil || !ok {
-		return evaluatePlanExpansionOutput{Expanded: false}, err
+		return EvaluatePlanExpansionOutput{Expanded: false}, err
 	}
 
-	nextSpec, plan, err := agentosplan.ApplyDelta(ctx, a.Validator, input.Spec, delta, input.ExpansionCount)
+	nextSpec, plan, err := agentosplan.ApplyDelta(ctx, a.Validator, &input.Spec, delta, input.ExpansionCount)
 	if err != nil {
-		return evaluatePlanExpansionOutput{}, err
-	}
-	controlsByNode, err := a.controlsByNode(ctx, plan)
-	if err != nil {
-		return evaluatePlanExpansionOutput{}, err
-	}
-	capabilitiesByNode, err := a.capabilitiesByNode(ctx, plan)
-	if err != nil {
-		return evaluatePlanExpansionOutput{}, err
+		return EvaluatePlanExpansionOutput{}, err
 	}
 
-	return evaluatePlanExpansionOutput{
+	controlsByNode, err := a.controlsByNode(ctx, &plan)
+	if err != nil {
+		return EvaluatePlanExpansionOutput{}, err
+	}
+
+	capabilitiesByNode, err := a.capabilitiesByNode(ctx, &plan)
+	if err != nil {
+		return EvaluatePlanExpansionOutput{}, err
+	}
+
+	return EvaluatePlanExpansionOutput{
 		Expanded:           true,
 		Delta:              delta,
 		Spec:               nextSpec,
@@ -417,21 +465,22 @@ type statusPlanNodeInput struct {
 	RunID string
 }
 
-type statusPlanNodeOutput struct {
+type StatusPlanNodeOutput struct {
 	Status agentos.RunStatus
 }
 
 // StatusPlanNodeActivity queries one backend-owned child run.
-func (a *PlanActivities) StatusPlanNodeActivity(ctx context.Context, input statusPlanNodeInput) (statusPlanNodeOutput, error) {
+func (a *PlanActivities) StatusPlanNodeActivity(ctx context.Context, input statusPlanNodeInput) (StatusPlanNodeOutput, error) {
 	if a.Runtime == nil {
-		return statusPlanNodeOutput{}, fmt.Errorf("%w: plan activity runtime is required", agentos.ErrInvalidRunPlan)
-	}
-	status, err := a.Runtime.Status(ctx, input.RunID)
-	if err != nil {
-		return statusPlanNodeOutput{}, err
+		return StatusPlanNodeOutput{}, fmt.Errorf("%w: plan activity runtime is required", agentos.ErrInvalidRunPlan)
 	}
 
-	return statusPlanNodeOutput{Status: status}, nil
+	status, err := a.Runtime.Status(ctx, input.RunID)
+	if err != nil {
+		return StatusPlanNodeOutput{}, err
+	}
+
+	return StatusPlanNodeOutput{Status: status}, nil
 }
 
 type controlPlanNodeInput struct {
@@ -440,10 +489,10 @@ type controlPlanNodeInput struct {
 }
 
 // ControlPlanNodeActivity sends lifecycle control to one child run.
-func (a *PlanActivities) ControlPlanNodeActivity(ctx context.Context, input controlPlanNodeInput) error {
+func (a *PlanActivities) ControlPlanNodeActivity(ctx context.Context, input *controlPlanNodeInput) error {
 	if a.Runtime == nil {
 		return fmt.Errorf("%w: plan activity runtime is required", agentos.ErrInvalidRunPlan)
 	}
 
-	return a.Runtime.Control(ctx, input.RunID, input.Control)
+	return a.Runtime.Control(ctx, input.RunID, &input.Control)
 }

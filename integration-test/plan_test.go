@@ -82,31 +82,22 @@ type planAuditRecord struct {
 }
 
 func TestHTTPAgentOSRunPlanNativeCancelV1(t *testing.T) {
+	t.Parallel()
+
 	now := time.Now().UnixNano()
 	planID := fmt.Sprintf("e2e-plan-%d", now)
 	runID := fmt.Sprintf("e2e-plan-run-%d", now)
 
 	started := startAgentOSPlan(t, planID, runID)
-	if started.PlanID != planID ||
-		(started.LifecycleState != agentos.PlanLifecyclePending && started.LifecycleState != agentos.PlanLifecycleRunning) {
-		t.Fatalf("start status = %#v", started)
-	}
+	requireStartedPlan(t, &started, planID)
 
 	running := waitForPlanNodeState(t, planID, agentOSPlanNodeID, agentos.PlanNodeRunning)
-	node := requirePlanNode(t, running, agentOSPlanNodeID)
-	if node.RunID != runID ||
-		node.Backend.Kind != agentos.BackendKindNative ||
-		node.Backend.Name != agentos.BackendNameGoAgentNative {
-		t.Fatalf("running node = %#v", node)
-	}
+
+	node := requirePlanNode(t, &running, agentOSPlanNodeID)
+	requireNativeRunningNode(t, &node, runID)
 
 	description := getAgentOSPlanDescription(t, planID)
-	if description.PlanID != planID || len(description.Topology.Nodes) != 1 {
-		t.Fatalf("description = %#v", description)
-	}
-	if description.Topology.Nodes[0].Capability != agentos.CapabilityRun {
-		t.Fatalf("topology capability = %q", description.Topology.Nodes[0].Capability)
-	}
+	requireNativePlanDescription(t, &description, planID)
 
 	events := listAgentOSPlanEvents(t, planID)
 	requirePlanEvent(t, events, agentos.EventPlanStarted)
@@ -123,7 +114,8 @@ func TestHTTPAgentOSRunPlanNativeCancelV1(t *testing.T) {
 
 	controlAgentOSPlan(t, planID, agentos.ControlCancel, fmt.Sprintf("%s-cancel", planID))
 	canceled := waitForPlanLifecycle(t, planID, agentos.PlanLifecycleCanceled)
-	canceledNode := requirePlanNode(t, canceled, agentOSPlanNodeID)
+
+	canceledNode := requirePlanNode(t, &canceled, agentOSPlanNodeID)
 	if canceledNode.LifecycleState != agentos.PlanNodeCanceled {
 		t.Fatalf("canceled node = %#v", canceledNode)
 	}
@@ -132,27 +124,51 @@ func TestHTTPAgentOSRunPlanNativeCancelV1(t *testing.T) {
 	requirePlanAudit(t, audits, agentos.PlanAuditActionControl)
 }
 
+func requireStartedPlan(t *testing.T, started *planStatus, planID string) {
+	t.Helper()
+
+	if started.PlanID != planID ||
+		(started.LifecycleState != agentos.PlanLifecyclePending && started.LifecycleState != agentos.PlanLifecycleRunning) {
+		t.Fatalf("start status = %#v", started)
+	}
+}
+
+func requireNativeRunningNode(t *testing.T, node *planNodeStatus, runID string) {
+	t.Helper()
+
+	if node.RunID != runID ||
+		node.Backend.Kind != agentos.BackendKindNative ||
+		node.Backend.Name != agentos.BackendNameGoAgentNative {
+		t.Fatalf("running node = %#v", node)
+	}
+}
+
+func requireNativePlanDescription(t *testing.T, description *planDescription, planID string) {
+	t.Helper()
+
+	if description.PlanID != planID || len(description.Topology.Nodes) != 1 {
+		t.Fatalf("description = %#v", description)
+	}
+
+	if description.Topology.Nodes[0].Capability != agentos.CapabilityRun {
+		t.Fatalf("topology capability = %q", description.Topology.Nodes[0].Capability)
+	}
+}
+
 func TestHTTPAgentOSRunPlanMixedBackendsV1(t *testing.T) {
+	t.Parallel()
+
 	now := time.Now().UnixNano()
 	planID := fmt.Sprintf("e2e-mixed-plan-%d", now)
-	nativeRunID := fmt.Sprintf("e2e-mixed-native-%d", now)
-	temporalRunID := fmt.Sprintf("e2e-mixed-temporal-%d", now)
-	httpRunID := fmt.Sprintf("e2e-mixed-http-%d", now)
-	grpcRunID := fmt.Sprintf("e2e-mixed-grpc-%d", now)
-
+	nativeRunID, temporalRunID := fmt.Sprintf("e2e-mixed-native-%d", now), fmt.Sprintf("e2e-mixed-temporal-%d", now)
+	httpRunID, grpcRunID := fmt.Sprintf("e2e-mixed-http-%d", now), fmt.Sprintf("e2e-mixed-grpc-%d", now)
 	nativeBackend := agentos.BackendRef{Kind: agentos.BackendKindNative, Name: agentos.BackendNameGoAgentNative}
 	temporalBackend := agentos.BackendRef{Kind: agentos.BackendKindTemporalExternal, Name: "mock-temporal"}
 	httpBackend := agentos.BackendRef{Kind: agentos.BackendKindHTTP, Name: "mock-http"}
 	grpcBackend := agentos.BackendRef{Kind: agentos.BackendKindGRPC, Name: "mock-grpc"}
 
-	started := startAgentOSPlanSpec(t, agentos.RunPlanSpec{
-		PlanID:         planID,
-		ThreadID:       planID + "-thread",
-		AccountID:      agentOSPlanAccountID,
-		ProjectID:      agentOSPlanProjectID,
-		IdempotencyKey: planID + "-start",
-		RequestedAt:    time.Now().UTC(),
-		Policy:         agentos.PlanPolicy{MaxParallelNodes: 4},
+	started := startAgentOSPlanSpec(t, &agentos.RunPlanSpec{
+		PlanID: planID, ThreadID: planID + "-thread", AccountID: agentOSPlanAccountID, ProjectID: agentOSPlanProjectID, IdempotencyKey: planID + "-start", RequestedAt: time.Now().UTC(), Policy: agentos.PlanPolicy{MaxParallelNodes: 4},
 		Nodes: []agentos.PlanNodeSpec{
 			mixedPlanNode("native", nativeRunID, nativeBackend, "Start a native AgentOS plan integration test and wait for follow-up input."),
 			mixedPlanNode("temporal", temporalRunID, temporalBackend, "temporal external child run"),
@@ -164,16 +180,11 @@ func TestHTTPAgentOSRunPlanMixedBackendsV1(t *testing.T) {
 		t.Fatalf("start status = %#v", started)
 	}
 
-	running := waitForPlanNodeStates(t, planID, map[string]string{
-		"native":   agentos.PlanNodeRunning,
-		"temporal": agentos.PlanNodeSucceeded,
-		"http":     agentos.PlanNodeSucceeded,
-		"grpc":     agentos.PlanNodeSucceeded,
-	})
-	requirePlanNodeBackend(t, running, "native", nativeRunID, nativeBackend)
-	requirePlanNodeBackend(t, running, "temporal", temporalRunID, temporalBackend)
-	requirePlanNodeBackend(t, running, "http", httpRunID, httpBackend)
-	requirePlanNodeBackend(t, running, "grpc", grpcRunID, grpcBackend)
+	running := waitForPlanNodeStates(t, planID, map[string]string{"native": agentos.PlanNodeRunning, "temporal": agentos.PlanNodeSucceeded, "http": agentos.PlanNodeSucceeded, "grpc": agentos.PlanNodeSucceeded})
+	requirePlanNodeBackend(t, &running, "native", nativeRunID, nativeBackend)
+	requirePlanNodeBackend(t, &running, "temporal", temporalRunID, temporalBackend)
+	requirePlanNodeBackend(t, &running, "http", httpRunID, httpBackend)
+	requirePlanNodeBackend(t, &running, "grpc", grpcRunID, grpcBackend)
 
 	description := getAgentOSPlanDescription(t, planID)
 	if len(description.Topology.Nodes) != 4 {
@@ -184,16 +195,15 @@ func TestHTTPAgentOSRunPlanMixedBackendsV1(t *testing.T) {
 	requirePlanEvent(t, events, agentos.EventPlanStarted)
 	requirePlanEvent(t, events, agentos.EventPlanNodeSucceeded)
 	requirePlanEvent(t, events, agentos.EventUsageReported)
-
 	traces := listAgentOSPlanDebugTraces(t, planID)
 	requireCapabilityTraceForBackend(t, traces, nativeBackend)
 	requireCapabilityTraceForBackend(t, traces, temporalBackend)
 	requireCapabilityTraceForBackend(t, traces, httpBackend)
 	requireCapabilityTraceForBackend(t, traces, grpcBackend)
-
 	controlAgentOSPlan(t, planID, agentos.ControlCancel, fmt.Sprintf("%s-cancel", planID))
 	canceled := waitForPlanLifecycle(t, planID, agentos.PlanLifecycleCanceled)
-	canceledNative := requirePlanNode(t, canceled, "native")
+
+	canceledNative := requirePlanNode(t, &canceled, "native")
 	if canceledNative.LifecycleState != agentos.PlanNodeCanceled {
 		t.Fatalf("native node after plan cancel = %#v", canceledNative)
 	}
@@ -248,10 +258,11 @@ func startAgentOSPlan(t *testing.T, planID, runID string) planStatus {
 			},
 		},
 	}
-	return startAgentOSPlanSpec(t, spec)
+
+	return startAgentOSPlanSpec(t, &spec)
 }
 
-func startAgentOSPlanSpec(t *testing.T, spec agentos.RunPlanSpec) planStatus {
+func startAgentOSPlanSpec(t *testing.T, spec *agentos.RunPlanSpec) planStatus {
 	t.Helper()
 
 	body, err := json.Marshal(spec)
@@ -290,6 +301,7 @@ func waitForPlanNodeState(t *testing.T, planID, nodeID, lifecycle string) planSt
 				return status
 			}
 		}
+
 		time.Sleep(time.Second)
 	}
 
@@ -304,17 +316,21 @@ func waitForPlanNodeStates(t *testing.T, planID string, expected map[string]stri
 	for range 60 {
 		status := getAgentOSPlanStatus(t, planID)
 		matches := 0
+
 		for nodeID, lifecycle := range expected {
 			for _, node := range status.Nodes {
 				if node.NodeID == nodeID && node.LifecycleState == lifecycle {
 					matches++
+
 					break
 				}
 			}
 		}
+
 		if matches == len(expected) {
 			return status
 		}
+
 		time.Sleep(time.Second)
 	}
 
@@ -331,6 +347,7 @@ func waitForPlanLifecycle(t *testing.T, planID, lifecycle string) planStatus {
 		if status.LifecycleState == lifecycle {
 			return status
 		}
+
 		time.Sleep(time.Second)
 	}
 
@@ -445,6 +462,7 @@ func getAgentOSPlanJSON(t *testing.T, endpoint string, out any) {
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("getAgentOSPlanJSON: expected 200, got %d: %s", resp.StatusCode, readResponseBody(t, resp.Body))
 	}
+
 	if err := json.NewDecoder(resp.Body).Decode(out); err != nil {
 		t.Fatalf("getAgentOSPlanJSON: decode failed: %v", err)
 	}
@@ -458,7 +476,7 @@ func planScopedPath(planID, suffix string) string {
 	return fmt.Sprintf("%s/agentos/plans/%s/%s?%s", basePathV1(), planID, suffix, values.Encode())
 }
 
-func requirePlanNode(t *testing.T, status planStatus, nodeID string) planNodeStatus {
+func requirePlanNode(t *testing.T, status *planStatus, nodeID string) planNodeStatus {
 	t.Helper()
 
 	for _, node := range status.Nodes {
@@ -472,7 +490,7 @@ func requirePlanNode(t *testing.T, status planStatus, nodeID string) planNodeSta
 	return planNodeStatus{}
 }
 
-func requirePlanNodeBackend(t *testing.T, status planStatus, nodeID, runID string, backend agentos.BackendRef) {
+func requirePlanNodeBackend(t *testing.T, status *planStatus, nodeID, runID string, backend agentos.BackendRef) {
 	t.Helper()
 
 	node := requirePlanNode(t, status, nodeID)
@@ -500,6 +518,7 @@ func requireCapabilityTrace(t *testing.T, traces []planDebugTrace) {
 		if trace.Capability == nil {
 			continue
 		}
+
 		if trace.Capability.Backend.Kind == agentos.BackendKindNative &&
 			trace.Capability.Backend.Name == agentos.BackendNameGoAgentNative &&
 			trace.Capability.Capability == agentos.CapabilityRun {
@@ -517,6 +536,7 @@ func requireCapabilityTraceForBackend(t *testing.T, traces []planDebugTrace, bac
 		if trace.Capability == nil {
 			continue
 		}
+
 		if trace.Capability.Backend == backend && trace.Capability.Capability == agentos.CapabilityRun {
 			return
 		}

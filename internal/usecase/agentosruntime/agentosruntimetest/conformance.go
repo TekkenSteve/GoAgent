@@ -2,13 +2,17 @@ package agentosruntimetest
 
 import (
 	"context"
-	"fmt"
+	"errors"
 	"testing"
 	"time"
 
 	"github.com/TekkenSteve/GoAgent/agentos"
 	"github.com/TekkenSteve/GoAgent/internal/usecase/agentosruntime"
 )
+
+var errProbeSubscriptionClosed = errors.New("subscription already closed")
+
+const conformanceAfterSequence = 41
 
 // BackendConformanceCase describes a backend implementation under test.
 type BackendConformanceCase struct {
@@ -21,85 +25,101 @@ type BackendConformanceCase struct {
 }
 
 // RunBackendConformance verifies the shared AgentBackend contract.
-func RunBackendConformance(t *testing.T, tc BackendConformanceCase) {
+func RunBackendConformance(t *testing.T, tc *BackendConformanceCase) {
 	t.Helper()
+
 	if tc.Backend == nil {
 		t.Fatal("backend is required")
 	}
+
 	if tc.Ref.Kind == "" || tc.Ref.Name == "" {
 		t.Fatal("backend ref is required")
 	}
+
 	if tc.RunID == "" {
 		tc.RunID = "agentos-conformance-run"
 	}
+
 	if tc.StatusState == "" {
 		tc.StatusState = "running"
 	}
 
 	t.Run(tc.Name+"/start-status-signal-control-subscribe", func(t *testing.T) {
 		ctx := context.Background()
-		status, err := tc.Backend.Start(ctx, agentos.RunSpec{
-			RunID:       tc.RunID,
-			ThreadID:    "agentos-conformance-thread",
-			AccountID:   "agentos-conformance-account",
-			ProjectID:   "agentos-conformance-project",
-			UserMessage: "hello",
-			Backend:     tc.Ref,
-			Input: map[string]any{
-				"purpose": "conformance",
-			},
-		})
-		if err != nil {
-			t.Fatalf("Start: %v", err)
-		}
-		if status.RunID != tc.RunID {
-			t.Fatalf("Start status run id = %q, want %q", status.RunID, tc.RunID)
-		}
+		spec := agentos.RunSpec{RunID: tc.RunID, ThreadID: "agentos-conformance-thread", AccountID: "agentos-conformance-account", ProjectID: "agentos-conformance-project", UserMessage: "hello", Backend: tc.Ref, Input: map[string]any{"purpose": "conformance"}}
 
-		if err := tc.Backend.Signal(ctx, tc.RunID, agentos.Signal{
-			Type:           agentos.SignalUserMessage,
-			IdempotencyKey: "agentos-conformance-signal",
-			Payload: map[string]any{
-				"content": "continue",
-			},
-			SentAt: time.Date(2026, 6, 16, 12, 0, 0, 0, time.UTC),
-		}); err != nil {
-			t.Fatalf("Signal user.message: %v", err)
-		}
-
-		if err := tc.Backend.Control(ctx, tc.RunID, agentos.ControlRequest{Operation: agentos.ControlCancel}); err != nil {
-			t.Fatalf("Control cancel: %v", err)
-		}
-
-		current, err := tc.Backend.Status(ctx, tc.RunID)
-		if err != nil {
-			t.Fatalf("Status: %v", err)
-		}
-		if current.RunID != tc.RunID {
-			t.Fatalf("Status run id = %q, want %q", current.RunID, tc.RunID)
-		}
-		if current.LifecycleState != tc.StatusState {
-			t.Fatalf("Status lifecycle = %q, want %q", current.LifecycleState, tc.StatusState)
-		}
-
-		if tc.SubscriberProbe == nil {
-			return
-		}
-
-		subscription, err := tc.Backend.Subscribe(ctx, agentos.StreamScope{
-			RunID:         tc.RunID,
-			ThreadID:      "agentos-conformance-thread",
-			AfterSequence: 41,
-		})
-		if err != nil {
-			t.Fatalf("Subscribe: %v", err)
-		}
-		defer subscription.Close()
-
-		if got := tc.SubscriberProbe.LastScope(); got.RunID != tc.RunID || got.AfterSequence != 41 {
-			t.Fatalf("Subscribe scope = %#v", got)
-		}
+		assertBackendStart(ctx, t, tc.Backend, &spec, tc.RunID)
+		assertBackendSignal(ctx, t, tc.Backend, tc.RunID)
+		assertBackendControl(ctx, t, tc.Backend, tc.RunID)
+		assertBackendStatus(ctx, t, tc.Backend, tc.RunID, tc.StatusState)
+		assertBackendSubscribe(ctx, t, tc)
 	})
+}
+
+func assertBackendStart(ctx context.Context, t *testing.T, backend agentosruntime.AgentBackend, spec *agentos.RunSpec, runID string) {
+	t.Helper()
+
+	status, err := backend.Start(ctx, spec)
+	if err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+
+	if status.RunID != runID {
+		t.Fatalf("Start status run id = %q, want %q", status.RunID, runID)
+	}
+}
+
+func assertBackendSignal(ctx context.Context, t *testing.T, backend agentosruntime.AgentBackend, runID string) {
+	t.Helper()
+
+	signal := agentos.Signal{Type: agentos.SignalUserMessage, IdempotencyKey: "agentos-conformance-signal", Payload: map[string]any{"content": "continue"}, SentAt: time.Date(2026, 6, 16, 12, 0, 0, 0, time.UTC)}
+	if err := backend.Signal(ctx, runID, &signal); err != nil {
+		t.Fatalf("Signal user.message: %v", err)
+	}
+}
+
+func assertBackendControl(ctx context.Context, t *testing.T, backend agentosruntime.AgentBackend, runID string) {
+	t.Helper()
+
+	control := agentos.ControlRequest{Operation: agentos.ControlCancel}
+	if err := backend.Control(ctx, runID, &control); err != nil {
+		t.Fatalf("Control cancel: %v", err)
+	}
+}
+
+func assertBackendStatus(ctx context.Context, t *testing.T, backend agentosruntime.AgentBackend, runID, statusState string) {
+	t.Helper()
+
+	current, err := backend.Status(ctx, runID)
+	if err != nil {
+		t.Fatalf("Status: %v", err)
+	}
+
+	if current.RunID != runID {
+		t.Fatalf("Status run id = %q, want %q", current.RunID, runID)
+	}
+
+	if current.LifecycleState != statusState {
+		t.Fatalf("Status lifecycle = %q, want %q", current.LifecycleState, statusState)
+	}
+}
+
+func assertBackendSubscribe(ctx context.Context, t *testing.T, tc *BackendConformanceCase) {
+	t.Helper()
+
+	if tc.SubscriberProbe == nil {
+		return
+	}
+
+	subscription, err := tc.Backend.Subscribe(ctx, agentos.StreamScope{RunID: tc.RunID, ThreadID: "agentos-conformance-thread", AfterSequence: conformanceAfterSequence})
+	if err != nil {
+		t.Fatalf("Subscribe: %v", err)
+	}
+	defer subscription.Close()
+
+	if got := tc.SubscriberProbe.LastScope(); got.RunID != tc.RunID || got.AfterSequence != conformanceAfterSequence {
+		t.Fatalf("Subscribe scope = %#v", got)
+	}
 }
 
 // SubscriberProbe records SubscribeAgentOS calls for backend conformance tests.
@@ -130,8 +150,9 @@ func (s *probeSubscription) Events() <-chan agentos.Event {
 
 func (s *probeSubscription) Close() error {
 	if s.closed {
-		return fmt.Errorf("subscription already closed")
+		return errProbeSubscriptionClosed
 	}
+
 	s.closed = true
 	close(s.events)
 

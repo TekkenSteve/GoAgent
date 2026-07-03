@@ -38,6 +38,7 @@ func EvaluateContinuationPolicy(policy agentos.PlanPolicy, snapshot Continuation
 	if policy.ContinueAsNewEvents > 0 && snapshot.AppliedTransitions >= policy.ContinueAsNewEvents {
 		return ContinuationDecision{ShouldContinue: true, Reason: "continue_as_new_events"}
 	}
+
 	if policy.MaxHistoryEvents > 0 && snapshot.HistoryEvents >= int(policy.MaxHistoryEvents) {
 		return ContinuationDecision{ShouldContinue: true, Reason: "max_history_events"}
 	}
@@ -66,7 +67,7 @@ func BudgetExceededReason(policy agentos.PlanPolicy, usage agentos.PlanBudgetUsa
 }
 
 // PlanTimedOut reports whether the plan-level wall-clock timeout has elapsed.
-func PlanTimedOut(policy agentos.PlanPolicy, startedAt time.Time, now time.Time) bool {
+func PlanTimedOut(policy agentos.PlanPolicy, startedAt, now time.Time) bool {
 	if policy.TimeoutSeconds <= 0 || startedAt.IsZero() {
 		return false
 	}

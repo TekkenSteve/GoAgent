@@ -39,7 +39,7 @@ func (r *V1) startAgentOSPlan(ctx *fiber.Ctx) error {
 		return errorResponse(ctx, http.StatusBadRequest, "invalid request body")
 	}
 
-	status, err := r.planRuntime.StartPlan(ctx.UserContext(), spec)
+	status, err := r.planRuntime.StartPlan(ctx.UserContext(), &spec)
 	if err != nil {
 		return agentOSError(ctx, err)
 	}
@@ -59,28 +59,14 @@ func (r *V1) startAgentOSPlan(ctx *fiber.Ctx) error {
 // @Failure     500 {object} response.Error
 // @Router      /agentos/plans/{plan_id}/status [get]
 func (r *V1) statusAgentOSPlan(ctx *fiber.Ctx) error {
-	if r.planRuntime == nil {
-		return errorResponse(ctx, http.StatusNotFound, "agentos plan runtime is not configured")
-	}
+	return r.withPlanRef(ctx, func(ref agentos.PlanRef) error {
+		status, err := r.planRuntime.StatusPlan(ctx.UserContext(), ref)
+		if err != nil {
+			return agentOSError(ctx, err)
+		}
 
-	var req request.AgentOSPlanScope
-	if err := ctx.QueryParser(&req); err != nil {
-		return errorResponse(ctx, http.StatusBadRequest, "invalid plan scope")
-	}
-	if err := r.v.Struct(&req); err != nil {
-		return errorResponse(ctx, http.StatusBadRequest, err.Error())
-	}
-
-	status, err := r.planRuntime.StatusPlan(ctx.UserContext(), agentos.PlanRef{
-		PlanID:    ctx.Params("plan_id"),
-		AccountID: req.AccountID,
-		ProjectID: req.ProjectID,
+		return ctx.Status(http.StatusOK).JSON(status)
 	})
-	if err != nil {
-		return agentOSError(ctx, err)
-	}
-
-	return ctx.Status(http.StatusOK).JSON(status)
 }
 
 // @Summary     Describe AgentOS plan
@@ -98,6 +84,17 @@ func (r *V1) statusAgentOSPlan(ctx *fiber.Ctx) error {
 // @Failure     500 {object} response.Error
 // @Router      /agentos/plans/{plan_id}/description [get]
 func (r *V1) describeAgentOSPlan(ctx *fiber.Ctx) error {
+	return r.withPlanRef(ctx, func(ref agentos.PlanRef) error {
+		description, err := r.planRuntime.DescribePlan(ctx.UserContext(), ref)
+		if err != nil {
+			return agentOSError(ctx, err)
+		}
+
+		return ctx.Status(http.StatusOK).JSON(description)
+	})
+}
+
+func (r *V1) withPlanRef(ctx *fiber.Ctx, fn func(agentos.PlanRef) error) error {
 	if r.planRuntime == nil {
 		return errorResponse(ctx, http.StatusNotFound, "agentos plan runtime is not configured")
 	}
@@ -106,20 +103,37 @@ func (r *V1) describeAgentOSPlan(ctx *fiber.Ctx) error {
 	if err := ctx.QueryParser(&req); err != nil {
 		return errorResponse(ctx, http.StatusBadRequest, "invalid plan scope")
 	}
+
 	if err := r.v.Struct(&req); err != nil {
 		return errorResponse(ctx, http.StatusBadRequest, err.Error())
 	}
 
-	description, err := r.planRuntime.DescribePlan(ctx.UserContext(), agentos.PlanRef{
+	return fn(agentos.PlanRef{
 		PlanID:    ctx.Params("plan_id"),
 		AccountID: req.AccountID,
 		ProjectID: req.ProjectID,
 	})
-	if err != nil {
+}
+
+func withPlanBody[T any](r *V1, ctx *fiber.Ctx, fn func(T) error) error {
+	if r.planRuntime == nil {
+		return errorResponse(ctx, http.StatusNotFound, "agentos plan runtime is not configured")
+	}
+
+	var req T
+	if err := ctx.BodyParser(&req); err != nil {
+		return errorResponse(ctx, http.StatusBadRequest, "invalid request body")
+	}
+
+	if err := r.v.Struct(&req); err != nil {
+		return errorResponse(ctx, http.StatusBadRequest, err.Error())
+	}
+
+	if err := fn(req); err != nil {
 		return agentOSError(ctx, err)
 	}
 
-	return ctx.Status(http.StatusOK).JSON(description)
+	return ctx.SendStatus(http.StatusAccepted)
 }
 
 // @Summary     Signal AgentOS plan
@@ -136,33 +150,17 @@ func (r *V1) describeAgentOSPlan(ctx *fiber.Ctx) error {
 // @Failure     500 {object} response.Error
 // @Router      /agentos/plans/{plan_id}/signals [post]
 func (r *V1) signalAgentOSPlan(ctx *fiber.Ctx) error {
-	if r.planRuntime == nil {
-		return errorResponse(ctx, http.StatusNotFound, "agentos plan runtime is not configured")
-	}
+	return withPlanActionBody(r, ctx, func(req request.AgentOSPlanSignal, ref agentos.PlanRef) error {
+		signal := agentos.Signal{
+			Type:           req.Type,
+			IdempotencyKey: req.IdempotencyKey,
+			ActorID:        req.ActorID,
+			Payload:        req.Payload,
+			SentAt:         req.SentAt,
+		}
 
-	var req request.AgentOSPlanSignal
-	if err := ctx.BodyParser(&req); err != nil {
-		return errorResponse(ctx, http.StatusBadRequest, "invalid request body")
-	}
-	if err := r.v.Struct(&req); err != nil {
-		return errorResponse(ctx, http.StatusBadRequest, err.Error())
-	}
-
-	if err := r.planRuntime.SignalPlan(ctx.UserContext(), agentos.PlanRef{
-		PlanID:    ctx.Params("plan_id"),
-		AccountID: req.AccountID,
-		ProjectID: req.ProjectID,
-	}, agentos.Signal{
-		Type:           req.Type,
-		IdempotencyKey: req.IdempotencyKey,
-		ActorID:        req.ActorID,
-		Payload:        req.Payload,
-		SentAt:         req.SentAt,
-	}); err != nil {
-		return agentOSError(ctx, err)
-	}
-
-	return ctx.SendStatus(http.StatusAccepted)
+		return r.planRuntime.SignalPlan(ctx.UserContext(), ref, &signal)
+	})
 }
 
 // @Summary     Control AgentOS plan
@@ -179,33 +177,60 @@ func (r *V1) signalAgentOSPlan(ctx *fiber.Ctx) error {
 // @Failure     500 {object} response.Error
 // @Router      /agentos/plans/{plan_id}/control [post]
 func (r *V1) controlAgentOSPlan(ctx *fiber.Ctx) error {
+	return withPlanActionBody(r, ctx, func(req request.AgentOSPlanControl, ref agentos.PlanRef) error {
+		control := agentos.ControlRequest{
+			Operation:      req.Operation,
+			IdempotencyKey: req.IdempotencyKey,
+			RequestedAt:    req.RequestedAt,
+			ActorID:        req.ActorID,
+			Metadata:       req.Metadata,
+		}
+
+		return r.planRuntime.ControlPlan(ctx.UserContext(), ref, &control)
+	})
+}
+
+type planScopedBody interface {
+	GetAccountID() string
+	GetProjectID() string
+}
+
+func withPlanActionBody[T any, PT interface {
+	*T
+	planScopedBody
+}](r *V1, ctx *fiber.Ctx, fn func(T, agentos.PlanRef) error) error {
+	return withPlanBody(r, ctx, func(req T) error {
+		scoped := PT(&req)
+		ref := agentos.PlanRef{
+			PlanID:    ctx.Params("plan_id"),
+			AccountID: scoped.GetAccountID(),
+			ProjectID: scoped.GetProjectID(),
+		}
+
+		return fn(req, ref)
+	})
+}
+
+func withQueryScope[T any](r *V1, ctx *fiber.Ctx, scopeName string, fn func(T) (any, error)) error {
 	if r.planRuntime == nil {
 		return errorResponse(ctx, http.StatusNotFound, "agentos plan runtime is not configured")
 	}
 
-	var req request.AgentOSPlanControl
-	if err := ctx.BodyParser(&req); err != nil {
-		return errorResponse(ctx, http.StatusBadRequest, "invalid request body")
+	var req T
+	if err := ctx.QueryParser(&req); err != nil {
+		return errorResponse(ctx, http.StatusBadRequest, "invalid "+scopeName)
 	}
+
 	if err := r.v.Struct(&req); err != nil {
 		return errorResponse(ctx, http.StatusBadRequest, err.Error())
 	}
 
-	if err := r.planRuntime.ControlPlan(ctx.UserContext(), agentos.PlanRef{
-		PlanID:    ctx.Params("plan_id"),
-		AccountID: req.AccountID,
-		ProjectID: req.ProjectID,
-	}, agentos.ControlRequest{
-		Operation:      req.Operation,
-		IdempotencyKey: req.IdempotencyKey,
-		RequestedAt:    req.RequestedAt,
-		ActorID:        req.ActorID,
-		Metadata:       req.Metadata,
-	}); err != nil {
+	result, err := fn(req)
+	if err != nil {
 		return agentOSError(ctx, err)
 	}
 
-	return ctx.SendStatus(http.StatusAccepted)
+	return ctx.Status(http.StatusOK).JSON(result)
 }
 
 // @Summary     List AgentOS plan audits
@@ -227,32 +252,17 @@ func (r *V1) controlAgentOSPlan(ctx *fiber.Ctx) error {
 // @Failure     500 {object} response.Error
 // @Router      /agentos/plans/{plan_id}/audits [get]
 func (r *V1) listAgentOSPlanAudits(ctx *fiber.Ctx) error {
-	if r.planRuntime == nil {
-		return errorResponse(ctx, http.StatusNotFound, "agentos plan runtime is not configured")
-	}
-
-	var req request.AgentOSPlanAuditScope
-	if err := ctx.QueryParser(&req); err != nil {
-		return errorResponse(ctx, http.StatusBadRequest, "invalid audit scope")
-	}
-	if err := r.v.Struct(&req); err != nil {
-		return errorResponse(ctx, http.StatusBadRequest, err.Error())
-	}
-
-	records, err := r.planRuntime.ListPlanAudits(ctx.UserContext(), agentos.PlanAuditScope{
-		PlanID:    ctx.Params("plan_id"),
-		AccountID: req.AccountID,
-		ProjectID: req.ProjectID,
-		NodeID:    req.NodeID,
-		RunID:     req.RunID,
-		Action:    req.Action,
-		Limit:     req.Limit,
+	return withQueryScope(r, ctx, "audit scope", func(req request.AgentOSPlanAuditScope) (any, error) {
+		return r.planRuntime.ListPlanAudits(ctx.UserContext(), &agentos.PlanAuditScope{
+			PlanID:    ctx.Params("plan_id"),
+			AccountID: req.AccountID,
+			ProjectID: req.ProjectID,
+			NodeID:    req.NodeID,
+			RunID:     req.RunID,
+			Action:    req.Action,
+			Limit:     req.Limit,
+		})
 	})
-	if err != nil {
-		return agentOSError(ctx, err)
-	}
-
-	return ctx.Status(http.StatusOK).JSON(records)
 }
 
 // @Summary     List AgentOS plan artifacts
@@ -273,31 +283,16 @@ func (r *V1) listAgentOSPlanAudits(ctx *fiber.Ctx) error {
 // @Failure     500 {object} response.Error
 // @Router      /agentos/plans/{plan_id}/artifacts [get]
 func (r *V1) listAgentOSPlanArtifacts(ctx *fiber.Ctx) error {
-	if r.planRuntime == nil {
-		return errorResponse(ctx, http.StatusNotFound, "agentos plan runtime is not configured")
-	}
-
-	var req request.AgentOSPlanArtifactScope
-	if err := ctx.QueryParser(&req); err != nil {
-		return errorResponse(ctx, http.StatusBadRequest, "invalid artifact scope")
-	}
-	if err := r.v.Struct(&req); err != nil {
-		return errorResponse(ctx, http.StatusBadRequest, err.Error())
-	}
-
-	refs, err := r.planRuntime.ListPlanArtifacts(ctx.UserContext(), agentos.PlanArtifactScope{
-		PlanID:    ctx.Params("plan_id"),
-		AccountID: req.AccountID,
-		ProjectID: req.ProjectID,
-		NodeID:    req.NodeID,
-		RunID:     req.RunID,
-		Limit:     req.Limit,
+	return withQueryScope(r, ctx, "artifact scope", func(req request.AgentOSPlanArtifactScope) (any, error) {
+		return r.planRuntime.ListPlanArtifacts(ctx.UserContext(), &agentos.PlanArtifactScope{
+			PlanID:    ctx.Params("plan_id"),
+			AccountID: req.AccountID,
+			ProjectID: req.ProjectID,
+			NodeID:    req.NodeID,
+			RunID:     req.RunID,
+			Limit:     req.Limit,
+		})
 	})
-	if err != nil {
-		return agentOSError(ctx, err)
-	}
-
-	return ctx.Status(http.StatusOK).JSON(refs)
 }
 
 // @Summary     Get AgentOS plan artifact
@@ -316,29 +311,14 @@ func (r *V1) listAgentOSPlanArtifacts(ctx *fiber.Ctx) error {
 // @Failure     500 {object} response.Error
 // @Router      /agentos/plans/{plan_id}/artifacts/{artifact_id} [get]
 func (r *V1) getAgentOSPlanArtifact(ctx *fiber.Ctx) error {
-	if r.planRuntime == nil {
-		return errorResponse(ctx, http.StatusNotFound, "agentos plan runtime is not configured")
-	}
-
-	var req request.AgentOSPlanScope
-	if err := ctx.QueryParser(&req); err != nil {
-		return errorResponse(ctx, http.StatusBadRequest, "invalid artifact scope")
-	}
-	if err := r.v.Struct(&req); err != nil {
-		return errorResponse(ctx, http.StatusBadRequest, err.Error())
-	}
-
-	artifact, err := r.planRuntime.GetPlanArtifact(ctx.UserContext(), agentos.PlanArtifactScope{
-		PlanID:     ctx.Params("plan_id"),
-		AccountID:  req.AccountID,
-		ProjectID:  req.ProjectID,
-		ArtifactID: ctx.Params("artifact_id"),
+	return withQueryScope(r, ctx, "artifact scope", func(req request.AgentOSPlanScope) (any, error) {
+		return r.planRuntime.GetPlanArtifact(ctx.UserContext(), &agentos.PlanArtifactScope{
+			PlanID:     ctx.Params("plan_id"),
+			AccountID:  req.AccountID,
+			ProjectID:  req.ProjectID,
+			ArtifactID: ctx.Params("artifact_id"),
+		})
 	})
-	if err != nil {
-		return agentOSError(ctx, err)
-	}
-
-	return ctx.Status(http.StatusOK).JSON(artifact)
 }
 
 // @Summary     List AgentOS plan event history
@@ -360,32 +340,17 @@ func (r *V1) getAgentOSPlanArtifact(ctx *fiber.Ctx) error {
 // @Failure     500 {object} response.Error
 // @Router      /agentos/plans/{plan_id}/events/history [get]
 func (r *V1) listAgentOSPlanEvents(ctx *fiber.Ctx) error {
-	if r.planRuntime == nil {
-		return errorResponse(ctx, http.StatusNotFound, "agentos plan runtime is not configured")
-	}
-
-	var req request.AgentOSPlanEventScope
-	if err := ctx.QueryParser(&req); err != nil {
-		return errorResponse(ctx, http.StatusBadRequest, "invalid event scope")
-	}
-	if err := r.v.Struct(&req); err != nil {
-		return errorResponse(ctx, http.StatusBadRequest, err.Error())
-	}
-
-	events, err := r.planRuntime.ListPlanEvents(ctx.UserContext(), agentos.PlanEventScope{
-		PlanID:        ctx.Params("plan_id"),
-		AccountID:     req.AccountID,
-		ProjectID:     req.ProjectID,
-		NodeID:        req.NodeID,
-		RunID:         req.RunID,
-		AfterSequence: req.AfterSequence,
-		Limit:         req.Limit,
+	return withQueryScope(r, ctx, "event scope", func(req request.AgentOSPlanEventScope) (any, error) {
+		return r.planRuntime.ListPlanEvents(ctx.UserContext(), &agentos.PlanEventScope{
+			PlanID:        ctx.Params("plan_id"),
+			AccountID:     req.AccountID,
+			ProjectID:     req.ProjectID,
+			NodeID:        req.NodeID,
+			RunID:         req.RunID,
+			AfterSequence: req.AfterSequence,
+			Limit:         req.Limit,
+		})
 	})
-	if err != nil {
-		return agentOSError(ctx, err)
-	}
-
-	return ctx.Status(http.StatusOK).JSON(events)
 }
 
 // @Summary     List AgentOS plan debug traces
@@ -407,32 +372,17 @@ func (r *V1) listAgentOSPlanEvents(ctx *fiber.Ctx) error {
 // @Failure     500 {object} response.Error
 // @Router      /agentos/plans/{plan_id}/debug/traces [get]
 func (r *V1) listAgentOSPlanDebugTraces(ctx *fiber.Ctx) error {
-	if r.planRuntime == nil {
-		return errorResponse(ctx, http.StatusNotFound, "agentos plan runtime is not configured")
-	}
-
-	var req request.AgentOSPlanDebugTraceScope
-	if err := ctx.QueryParser(&req); err != nil {
-		return errorResponse(ctx, http.StatusBadRequest, "invalid debug trace scope")
-	}
-	if err := r.v.Struct(&req); err != nil {
-		return errorResponse(ctx, http.StatusBadRequest, err.Error())
-	}
-
-	traces, err := r.planRuntime.ListPlanDebugTraces(ctx.UserContext(), agentos.PlanDebugTraceScope{
-		PlanID:        ctx.Params("plan_id"),
-		AccountID:     req.AccountID,
-		ProjectID:     req.ProjectID,
-		NodeID:        req.NodeID,
-		RunID:         req.RunID,
-		AfterSequence: req.AfterSequence,
-		Limit:         req.Limit,
+	return withQueryScope(r, ctx, "debug trace scope", func(req request.AgentOSPlanDebugTraceScope) (any, error) {
+		return r.planRuntime.ListPlanDebugTraces(ctx.UserContext(), &agentos.PlanDebugTraceScope{
+			PlanID:        ctx.Params("plan_id"),
+			AccountID:     req.AccountID,
+			ProjectID:     req.ProjectID,
+			NodeID:        req.NodeID,
+			RunID:         req.RunID,
+			AfterSequence: req.AfterSequence,
+			Limit:         req.Limit,
+		})
 	})
-	if err != nil {
-		return agentOSError(ctx, err)
-	}
-
-	return ctx.Status(http.StatusOK).JSON(traces)
 }
 
 // @Summary     Stream AgentOS plan events
@@ -459,11 +409,12 @@ func (r *V1) streamAgentOSPlanEvents(ctx *fiber.Ctx) error {
 	if err := ctx.QueryParser(&req); err != nil {
 		return errorResponse(ctx, http.StatusBadRequest, "invalid stream scope")
 	}
+
 	if err := r.v.Struct(&req); err != nil {
 		return errorResponse(ctx, http.StatusBadRequest, err.Error())
 	}
 
-	sub, err := r.planRuntime.SubscribePlan(ctx.UserContext(), agentos.PlanStreamScope{
+	sub, err := r.planRuntime.SubscribePlan(ctx.UserContext(), &agentos.PlanStreamScope{
 		PlanID:        ctx.Params("plan_id"),
 		AccountID:     req.AccountID,
 		ProjectID:     req.ProjectID,
@@ -480,8 +431,9 @@ func (r *V1) streamAgentOSPlanEvents(ctx *fiber.Ctx) error {
 	ctx.Set(fiber.HeaderConnection, "keep-alive")
 	ctx.Context().SetBodyStreamWriter(func(w *bufio.Writer) {
 		defer sub.Close()
+
 		for event := range sub.Events() {
-			if !writeAgentOSEventSSE(w, event) {
+			if !writeAgentOSEventSSE(w, &event) {
 				return
 			}
 		}
@@ -490,7 +442,7 @@ func (r *V1) streamAgentOSPlanEvents(ctx *fiber.Ctx) error {
 	return nil
 }
 
-func writeAgentOSEventSSE(w *bufio.Writer, event agentos.Event) bool {
+func writeAgentOSEventSSE(w *bufio.Writer, event *agentos.Event) bool {
 	data, err := json.Marshal(event)
 	if err != nil {
 		return writeAgentOSStreamError(w, err)
@@ -518,10 +470,11 @@ func writeAgentOSStreamError(w *bufio.Writer, err error) bool {
 	return w.Flush() == nil
 }
 
-func eventSSEID(event agentos.Event) string {
+func eventSSEID(event *agentos.Event) string {
 	if event.EventID != "" {
 		return event.EventID
 	}
+
 	if event.Sequence > 0 {
 		return strconv.FormatInt(event.Sequence, 10)
 	}

@@ -7,6 +7,12 @@ import (
 	"time"
 )
 
+var (
+	errMetricsExporterRequired    = errors.New("agentos plan metrics exporter: exporter is required")
+	errMetricsExporterNegInterval = errors.New("agentos plan metrics exporter: interval must be non-negative")
+	errMetricsExporterNegLimit    = errors.New("agentos plan metrics exporter: plan ref limit must be non-negative")
+)
+
 const (
 	defaultPlanMetricsExporterInterval = time.Minute
 	defaultPlanMetricsExporterLimit    = 100
@@ -14,7 +20,7 @@ const (
 
 // PlanMetricsExporterRunner projects durable RunPlan events into a metric sink.
 type PlanMetricsExporterRunner interface {
-	Export(ctx context.Context, scope PlanRefScope) (PlanMetricsExportResult, error)
+	Export(ctx context.Context, scope *PlanRefScope) (PlanMetricsExportResult, error)
 }
 
 // PlanMetricsExporterLoopConfig controls periodic metric projection.
@@ -38,23 +44,27 @@ type PlanMetricsExporterLoop struct {
 }
 
 // StartPlanMetricsExporterLoop starts a background metric exporter loop.
-func StartPlanMetricsExporterLoop(parent context.Context, exporter PlanMetricsExporterRunner, cfg PlanMetricsExporterLoopConfig, observer PlanMetricsExporterObserver) (*PlanMetricsExporterLoop, error) {
+func StartPlanMetricsExporterLoop(parent context.Context, exporter PlanMetricsExporterRunner, cfg *PlanMetricsExporterLoopConfig, observer PlanMetricsExporterObserver) (*PlanMetricsExporterLoop, error) {
 	if exporter == nil {
-		return nil, errors.New("agentos plan metrics exporter: exporter is required")
+		return nil, errMetricsExporterRequired
 	}
+
 	if cfg.Interval < 0 {
-		return nil, errors.New("agentos plan metrics exporter: interval must be non-negative")
+		return nil, errMetricsExporterNegInterval
 	}
+
 	if cfg.Scope.Limit < 0 {
-		return nil, errors.New("agentos plan metrics exporter: plan ref limit must be non-negative")
+		return nil, errMetricsExporterNegLimit
 	}
+
 	normalized := normalizePlanMetricsExporterLoopConfig(cfg)
-	ctx, cancel := context.WithCancel(parent)
 	loop := &PlanMetricsExporterLoop{
-		cancel: cancel,
-		done:   make(chan struct{}),
+		done: make(chan struct{}),
 	}
-	go loop.run(ctx, exporter, normalized, observer)
+	ctx, cancel := context.WithCancel(parent)
+	loop.cancel = cancel
+
+	go loop.run(ctx, cancel, exporter, normalized, observer)
 
 	return loop, nil
 }
@@ -64,31 +74,35 @@ func (l *PlanMetricsExporterLoop) Stop() {
 	if l == nil {
 		return
 	}
+
 	l.once.Do(func() {
 		l.cancel()
 		<-l.done
 	})
 }
 
-func (l *PlanMetricsExporterLoop) run(ctx context.Context, exporter PlanMetricsExporterRunner, cfg PlanMetricsExporterLoopConfig, observer PlanMetricsExporterObserver) {
+func (l *PlanMetricsExporterLoop) run(ctx context.Context, cancel context.CancelFunc, exporter PlanMetricsExporterRunner, cfg *PlanMetricsExporterLoopConfig, observer PlanMetricsExporterObserver) {
 	defer close(l.done)
+	defer cancel()
+
 	if cfg.ExportImmediately {
-		runPlanMetricsExportPass(ctx, exporter, cfg.Scope, observer)
+		runPlanMetricsExportPass(ctx, exporter, &cfg.Scope, observer)
 	}
 
 	ticker := time.NewTicker(cfg.Interval)
 	defer ticker.Stop()
+
 	for {
 		select {
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
-			runPlanMetricsExportPass(ctx, exporter, cfg.Scope, observer)
+			runPlanMetricsExportPass(ctx, exporter, &cfg.Scope, observer)
 		}
 	}
 }
 
-func runPlanMetricsExportPass(ctx context.Context, exporter PlanMetricsExporterRunner, scope PlanRefScope, observer PlanMetricsExporterObserver) {
+func runPlanMetricsExportPass(ctx context.Context, exporter PlanMetricsExporterRunner, scope *PlanRefScope, observer PlanMetricsExporterObserver) {
 	result, err := exporter.Export(ctx, scope)
 	if err != nil {
 		if observer != nil {
@@ -97,18 +111,21 @@ func runPlanMetricsExportPass(ctx context.Context, exporter PlanMetricsExporterR
 
 		return
 	}
+
 	if observer != nil {
 		observer.PlanMetricsExportSucceeded(result)
 	}
 }
 
-func normalizePlanMetricsExporterLoopConfig(cfg PlanMetricsExporterLoopConfig) PlanMetricsExporterLoopConfig {
-	if cfg.Interval <= 0 {
-		cfg.Interval = defaultPlanMetricsExporterInterval
-	}
-	if cfg.Scope.Limit <= 0 {
-		cfg.Scope.Limit = defaultPlanMetricsExporterLimit
+func normalizePlanMetricsExporterLoopConfig(cfg *PlanMetricsExporterLoopConfig) *PlanMetricsExporterLoopConfig {
+	normalized := *cfg
+	if normalized.Interval <= 0 {
+		normalized.Interval = defaultPlanMetricsExporterInterval
 	}
 
-	return cfg
+	if normalized.Scope.Limit <= 0 {
+		normalized.Scope.Limit = defaultPlanMetricsExporterLimit
+	}
+
+	return &normalized
 }

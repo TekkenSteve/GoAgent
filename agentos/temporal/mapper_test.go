@@ -9,53 +9,84 @@ import (
 	"github.com/TekkenSteve/GoAgent/internal/entity"
 )
 
+const (
+	Run1    = "run-1"
+	Thread1 = "thread-1"
+	Acct1   = "acct-1"
+	Proj1   = "proj-1"
+	Hello   = "hello"
+	Idem1   = "idem-1"
+)
+
 func TestExecutionRequestFromRunSpec(t *testing.T) {
+	t.Parallel()
+
 	requestedAt := time.Date(2026, 6, 14, 12, 0, 0, 0, time.UTC)
 
-	req, err := executionRequestFromRunSpec(agentos.RunSpec{
-		RunID:          "run-1",
-		ThreadID:       "thread-1",
-		AccountID:      "acct-1",
-		ProjectID:      "proj-1",
+	spec := agentos.RunSpec{
+		RunID:          Run1,
+		ThreadID:       Thread1,
+		AccountID:      Acct1,
+		ProjectID:      Proj1,
 		AgentID:        "agent-1",
 		ModelRef:       "model-1",
 		SystemPrompt:   "system",
-		UserMessage:    "hello",
-		IdempotencyKey: "idem-1",
+		UserMessage:    Hello,
+		IdempotencyKey: Idem1,
 		RequestedAt:    requestedAt,
 		Backend:        agentos.BackendRef{Kind: agentos.BackendKindNative, Name: agentos.BackendNameGoAgentNative},
-	})
+	}
+
+	req, err := executionRequestFromRunSpec(&spec)
 	if err != nil {
 		t.Fatalf("executionRequestFromRunSpec: %v", err)
 	}
 
-	if req.RunID != "run-1" ||
-		req.ThreadID != "thread-1" ||
-		req.AccountID != "acct-1" ||
-		req.ProjectID != "proj-1" ||
-		req.AgentID != "agent-1" ||
-		req.ModelRef != "model-1" ||
-		req.SystemPrompt != "system" ||
-		req.UserMessage != "hello" ||
-		req.IdempotencyKey != "idem-1" ||
-		!req.RequestedAt.Equal(requestedAt) {
-		t.Fatalf("unexpected request mapping: %#v", req)
+	assertExecutionRequestMapped(t, req, requestedAt)
+}
+
+func assertExecutionRequestMapped(t *testing.T, req *entity.ExecuteRequest, requestedAt time.Time) {
+	t.Helper()
+
+	assertEqual(t, req.RunID, Run1, "run id")
+	assertEqual(t, req.ThreadID, Thread1, "thread id")
+	assertEqual(t, req.AccountID, Acct1, "account id")
+	assertEqual(t, req.ProjectID, Proj1, "project id")
+	assertEqual(t, req.AgentID, "agent-1", "agent id")
+	assertEqual(t, req.ModelRef, "model-1", "model ref")
+	assertEqual(t, req.SystemPrompt, "system", "system prompt")
+	assertEqual(t, req.UserMessage, Hello, "user message")
+	assertEqual(t, req.IdempotencyKey, Idem1, "idempotency key")
+
+	if !req.RequestedAt.Equal(requestedAt) {
+		t.Fatalf("requested at = %v, want %v", req.RequestedAt, requestedAt)
+	}
+}
+
+func assertEqual[T comparable](t *testing.T, got, want T, name string) {
+	t.Helper()
+
+	if got != want {
+		t.Fatalf("%s = %v, want %v", name, got, want)
 	}
 }
 
 func TestRunStatusFromEntity(t *testing.T) {
+	t.Parallel()
+
 	updatedAt := time.Date(2026, 6, 14, 12, 30, 0, 0, time.UTC)
 
-	got := runStatusFromEntity(entity.RunStatus{
-		RunID:          "run-1",
+	status := entity.RunStatus{
+		RunID:          Run1,
 		LifecycleState: "running",
 		Step:           3,
 		Reason:         "waiting",
 		UpdatedAt:      updatedAt,
-	})
+	}
+	got := runStatusFromEntity(&status)
 
 	want := agentos.RunStatus{
-		RunID:          "run-1",
+		RunID:          Run1,
 		LifecycleState: "running",
 		Progress:       &agentos.RunProgress{Current: 3},
 		Reason:         "waiting",
@@ -67,6 +98,8 @@ func TestRunStatusFromEntity(t *testing.T) {
 }
 
 func TestControlOperationToEntity(t *testing.T) {
+	t.Parallel()
+
 	tests := map[agentos.ControlOperation]entity.ControlOperation{
 		agentos.ControlPause:  entity.ControlPause,
 		agentos.ControlResume: entity.ControlResume,
@@ -78,6 +111,7 @@ func TestControlOperationToEntity(t *testing.T) {
 		if err != nil {
 			t.Fatalf("controlOperationToEntity(%q): %v", input, err)
 		}
+
 		if got != want {
 			t.Fatalf("controlOperationToEntity(%q) = %q, want %q", input, got, want)
 		}
@@ -85,7 +119,9 @@ func TestControlOperationToEntity(t *testing.T) {
 }
 
 func TestTemporalExternalConfig(t *testing.T) {
-	got := temporalExternalConfig(ExternalBackendConfig{
+	t.Parallel()
+
+	cfg := ExternalBackendConfig{
 		Name:         "langgraph-main",
 		TaskQueue:    "langgraph-queue",
 		WorkflowType: "langgraph.agent.v1",
@@ -98,7 +134,8 @@ func TestTemporalExternalConfig(t *testing.T) {
 				agentos.SignalUserMessage: "user_input",
 			},
 		},
-	})
+	}
+	got := temporalExternalConfig(&cfg)
 
 	if got.Name != "langgraph-main" ||
 		got.TaskQueue != "langgraph-queue" ||
@@ -113,7 +150,9 @@ func TestTemporalExternalConfig(t *testing.T) {
 }
 
 func TestGRPCBackendConfig(t *testing.T) {
-	got := grpcBackendConfig(GRPCBackendConfig{
+	t.Parallel()
+
+	cfg := GRPCBackendConfig{
 		Name:      "opencode",
 		Target:    "opencode-runtime:9090",
 		Authority: "agentos.example",
@@ -125,7 +164,8 @@ func TestGRPCBackendConfig(t *testing.T) {
 			Control: "ControlRun",
 			Status:  "StatusRun",
 		},
-	})
+	}
+	got := grpcBackendConfig(&cfg)
 
 	if got.Name != "opencode" ||
 		got.Target != "opencode-runtime:9090" ||

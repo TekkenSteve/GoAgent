@@ -106,12 +106,11 @@ func (m *mapIdempotency) Get(_ context.Context, key string) (Result, bool, error
 	return v, ok, nil
 }
 
-//nolint:gocritic // test helper implementing interface
-func (m *mapIdempotency) Put(_ context.Context, key string, result Result) error {
+func (m *mapIdempotency) Put(_ context.Context, key string, result *Result) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	m.data[key] = result
+	m.data[key] = *result
 
 	return nil
 }
@@ -121,12 +120,11 @@ type auditSink struct {
 	records []AuditRecord
 }
 
-//nolint:gocritic // test helper implementing interface
-func (a *auditSink) Write(_ context.Context, record AuditRecord) error {
+func (a *auditSink) Write(_ context.Context, record *AuditRecord) error {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 
-	a.records = append(a.records, record)
+	a.records = append(a.records, *record)
 
 	return nil
 }

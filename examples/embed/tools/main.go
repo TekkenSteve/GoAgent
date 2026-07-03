@@ -19,20 +19,23 @@ import (
 func main() {
 	ctx := context.Background()
 
-	rt, err := agentostemporal.NewRuntime(ctx, agentostemporal.RuntimeConfig{
+	cfg := agentostemporal.RuntimeConfig{
 		TemporalAddress:   env("AGENTFW_TEMPORAL_ADDRESS", "127.0.0.1:7233"),
 		TemporalNamespace: env("AGENTFW_TEMPORAL_NAMESPACE", "default"),
 		TemporalTaskQueue: env("AGENTFW_TEMPORAL_TASK_QUEUE", "agent-framework"),
 		PostgresURL:       os.Getenv("PG_URL"),
 		RedisURL:          os.Getenv("REDIS_URL"),
-	})
+	}
+
+	rt, err := agentostemporal.NewRuntime(ctx, &cfg)
 	if err != nil {
 		log.Fatalf("new runtime: %v", err)
 	}
 	defer rt.Close()
 
 	runID := fmt.Sprintf("embed-tools-%d", time.Now().UnixMilli())
-	status, err := rt.Start(ctx, agentos.RunSpec{
+
+	spec := agentos.RunSpec{
 		RunID:        runID,
 		ThreadID:     runID,
 		AccountID:    "demo-account",
@@ -41,9 +44,13 @@ func main() {
 		UserMessage:  "Search the web for the latest Go release and summarize it.",
 		RequestedAt:  time.Now().UTC(),
 		Backend:      agentos.BackendRef{Kind: agentos.BackendKindNative, Name: agentos.BackendNameGoAgentNative},
-	})
+	}
+
+	status, err := rt.Start(ctx, &spec)
 	if err != nil {
-		log.Fatalf("start run: %v", err)
+		log.Printf("start run: %v", err)
+
+		return
 	}
 
 	fmt.Fprintf(os.Stdout, "run started: id=%s state=%s\n", status.RunID, status.LifecycleState)

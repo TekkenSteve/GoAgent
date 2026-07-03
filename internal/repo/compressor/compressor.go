@@ -85,20 +85,22 @@ type Compressor struct {
 	minToCompress    int
 }
 
-var defaultModelWindows = map[string]int{ //nolint:gochecknoglobals // model window size lookup table
-	"gpt-4.1-mini":             gpt41ContextWindow,
-	"gpt-4.1":                  gpt41ContextWindow,
-	"gpt-4o-mini":              gpt4oContextWindow,
-	"gpt-4o":                   gpt4oContextWindow,
-	"gpt-4-turbo":              gpt4oContextWindow,
-	"gpt-4":                    gpt4ContextWindow,
-	"gpt-3.5-turbo":            gpt35TurboContextWindow,
-	"claude-sonnet-4-20250514": claudeContextWindow,
-	"claude-3-5-sonnet-latest": claudeContextWindow,
-	"claude-3-haiku":           claudeContextWindow,
-	"claude-opus-4-20250514":   claudeContextWindow,
-	"deepseek-chat":            deepseekContextWindow,
-	"deepseek-v4-flash":        deepseekContextWindow,
+func defaultModelWindows() map[string]int {
+	return map[string]int{
+		"gpt-4.1-mini":             gpt41ContextWindow,
+		"gpt-4.1":                  gpt41ContextWindow,
+		"gpt-4o-mini":              gpt4oContextWindow,
+		"gpt-4o":                   gpt4oContextWindow,
+		"gpt-4-turbo":              gpt4oContextWindow,
+		"gpt-4":                    gpt4ContextWindow,
+		"gpt-3.5-turbo":            gpt35TurboContextWindow,
+		"claude-sonnet-4-20250514": claudeContextWindow,
+		"claude-3-5-sonnet-latest": claudeContextWindow,
+		"claude-3-haiku":           claudeContextWindow,
+		"claude-opus-4-20250514":   claudeContextWindow,
+		"deepseek-chat":            deepseekContextWindow,
+		"deepseek-v4-flash":        deepseekContextWindow,
+	}
 }
 
 // New creates a Compressor. If cfg.LLM is nil, archival summarization is skipped.
@@ -117,7 +119,7 @@ func New(cfg Config) *Compressor {
 	c.minToCompress = nonZero(cfg.MinToCompress, defaultMinToCompress)
 
 	// Copy built-in defaults
-	maps.Copy(c.modelWindows, defaultModelWindows)
+	maps.Copy(c.modelWindows, defaultModelWindows())
 	// Apply user overrides
 	maps.Copy(c.modelWindows, cfg.ModelWindows)
 

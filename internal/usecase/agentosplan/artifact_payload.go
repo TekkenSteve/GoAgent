@@ -9,29 +9,36 @@ import (
 	"github.com/TekkenSteve/GoAgent/agentos"
 )
 
+// MIME types for artifact payload encoding.
+const (
+	MIMEApplicationJSON = "application/json"
+	MIMETextPlain       = "text/plain"
+)
+
 // EncodeArtifactPayload converts an artifact payload into stable bytes for
 // storage and idempotency metadata.
-func EncodeArtifactPayload(payload any, mediaType string) ([]byte, string, error) {
+func EncodeArtifactPayload(payload any, mediaType string) (data []byte, normalizedMediaType string, err error) {
 	if mediaType == "" {
-		mediaType = "application/json"
+		mediaType = MIMEApplicationJSON
 	}
+
 	switch value := payload.(type) {
 	case []byte:
-		if mediaType == "application/json" {
+		if mediaType == MIMEApplicationJSON {
 			mediaType = "application/octet-stream"
 		}
 
 		return value, mediaType, nil
 	case string:
-		if mediaType == "application/json" {
-			mediaType = "text/plain"
+		if mediaType == MIMEApplicationJSON {
+			mediaType = MIMETextPlain
 		}
 
 		return []byte(value), mediaType, nil
 	default:
-		data, err := json.Marshal(value)
+		data, err = json.Marshal(value)
 		if err != nil {
-			return nil, "", fmt.Errorf("%w: encode artifact payload: %s", agentos.ErrInvalidArtifact, err)
+			return nil, "", fmt.Errorf("%w: encode artifact payload: %w", agentos.ErrInvalidArtifact, err)
 		}
 
 		return data, mediaType, nil
@@ -42,14 +49,14 @@ func EncodeArtifactPayload(payload any, mediaType string) ([]byte, string, error
 // payload representation.
 func DecodeArtifactPayload(data []byte, mediaType string) (any, error) {
 	switch mediaType {
-	case "application/json", "":
+	case MIMEApplicationJSON, "":
 		var value any
 		if err := json.Unmarshal(data, &value); err != nil {
-			return nil, fmt.Errorf("%w: decode artifact payload: %s", agentos.ErrInvalidArtifact, err)
+			return nil, fmt.Errorf("%w: decode artifact payload: %w", agentos.ErrInvalidArtifact, err)
 		}
 
 		return value, nil
-	case "text/plain":
+	case MIMETextPlain:
 		return string(data), nil
 	default:
 		return data, nil

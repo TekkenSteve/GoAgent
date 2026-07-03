@@ -7,7 +7,11 @@ import (
 	"time"
 )
 
+var errTestRecoverFailed = errors.New("recover failed")
+
 func TestStartPlanCommandRecoveryRunsImmediatePass(t *testing.T) {
+	t.Parallel()
+
 	recoverer := &recordingPlanCommandRecoverer{
 		result: PlanCommandRecoveryResult{Scanned: 2, Delivered: 2},
 		calls:  make(chan int, 1),
@@ -15,6 +19,7 @@ func TestStartPlanCommandRecoveryRunsImmediatePass(t *testing.T) {
 	observer := &recordingPlanCommandRecoveryObserver{
 		success: make(chan PlanCommandRecoveryResult, 1),
 	}
+
 	loop, err := StartPlanCommandRecovery(t.Context(), recoverer, PlanCommandRecoveryLoopConfig{
 		Interval:           time.Hour,
 		Limit:              7,
@@ -33,6 +38,7 @@ func TestStartPlanCommandRecoveryRunsImmediatePass(t *testing.T) {
 	case <-time.After(time.Second):
 		t.Fatal("recovery pass was not called")
 	}
+
 	select {
 	case result := <-observer.success:
 		if result.Scanned != 2 || result.Delivered != 2 {
@@ -44,7 +50,9 @@ func TestStartPlanCommandRecoveryRunsImmediatePass(t *testing.T) {
 }
 
 func TestStartPlanCommandRecoveryReportsImmediateFailure(t *testing.T) {
-	recoveryErr := errors.New("recover failed")
+	t.Parallel()
+
+	recoveryErr := errTestRecoverFailed
 	recoverer := &recordingPlanCommandRecoverer{
 		err:   recoveryErr,
 		calls: make(chan int, 1),
@@ -52,6 +60,7 @@ func TestStartPlanCommandRecoveryReportsImmediateFailure(t *testing.T) {
 	observer := &recordingPlanCommandRecoveryObserver{
 		failed: make(chan error, 1),
 	}
+
 	loop, err := StartPlanCommandRecovery(t.Context(), recoverer, PlanCommandRecoveryLoopConfig{
 		Interval:           time.Hour,
 		RecoverImmediately: true,
@@ -66,6 +75,7 @@ func TestStartPlanCommandRecoveryReportsImmediateFailure(t *testing.T) {
 	case <-time.After(time.Second):
 		t.Fatal("recovery pass was not called")
 	}
+
 	select {
 	case err := <-observer.failed:
 		if !errors.Is(err, recoveryErr) {
@@ -77,6 +87,8 @@ func TestStartPlanCommandRecoveryReportsImmediateFailure(t *testing.T) {
 }
 
 func TestStartPlanCommandRecoveryRequiresRecoverer(t *testing.T) {
+	t.Parallel()
+
 	_, err := StartPlanCommandRecovery(t.Context(), nil, PlanCommandRecoveryLoopConfig{}, nil)
 	if err == nil {
 		t.Fatal("StartPlanCommandRecovery succeeded without recoverer")

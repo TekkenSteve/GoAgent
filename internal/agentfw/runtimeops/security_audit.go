@@ -46,10 +46,6 @@ func (a SecurityAuditor) Emit(ctx context.Context, event SecurityAuditEvent) err
 // DefaultRedactionPolicy masks known sensitive fields.
 type DefaultRedactionPolicy struct{}
 
-var sensitiveKeys = map[string]struct{}{ //nolint:gochecknoglobals // lookup set for sensitive field redaction
-	"token": {}, "secret": {}, "password": {}, "api_key": {}, "authorization": {},
-}
-
 // Redact masks security-sensitive values.
 func (DefaultRedactionPolicy) Redact(payload map[string]any) map[string]any {
 	return redactMap(payload)
@@ -62,7 +58,7 @@ func redactMap(payload map[string]any) map[string]any {
 
 	out := make(map[string]any, len(payload))
 	for k, v := range payload {
-		if _, sensitive := sensitiveKeys[strings.ToLower(k)]; sensitive {
+		if isSensitiveAuditKey(k) {
 			out[k] = "[REDACTED]"
 		} else if nested, ok := v.(map[string]any); ok {
 			out[k] = redactMap(nested)
@@ -72,4 +68,13 @@ func redactMap(payload map[string]any) map[string]any {
 	}
 
 	return out
+}
+
+func isSensitiveAuditKey(key string) bool {
+	switch strings.ToLower(key) {
+	case "token", "secret", "password", "api_key", "authorization":
+		return true
+	default:
+		return false
+	}
 }

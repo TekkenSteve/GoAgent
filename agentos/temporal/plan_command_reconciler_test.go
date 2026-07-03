@@ -10,58 +10,56 @@ import (
 )
 
 func TestPlanCommandReconcilerDeliversRecoverableCommands(t *testing.T) {
+	t.Parallel()
 	store, ref := newPlanRuntimeTestStore(t)
 	signal := agentos.Signal{
 		Type:           agentos.SignalPlanApprove,
 		IdempotencyKey: "approve-1",
 		ActorID:        "operator-1",
 	}
-	signalCommand, _, err := store.RecordPlanCommand(t.Context(), planCommandFromAuditRecord(planSignalAuditRecord(ref, signal)))
+
+	signalCommand, _, err := recordPlanCommandForTest(t, store, commandFromAudit(planSignalAuditRecord(ref, &signal)))
 	if err != nil {
 		t.Fatalf("RecordPlanCommand signal: %v", err)
 	}
-	if _, err := store.MarkPlanCommandFailed(t.Context(), agentosplan.PlanCommandRefFromRecord(signalCommand), "previous delivery failed"); err != nil {
+
+	if _, err := store.MarkPlanCommandFailed(t.Context(), agentosplan.PlanCommandRefFromRecord(&signalCommand), "previous delivery failed"); err != nil {
 		t.Fatalf("MarkPlanCommandFailed: %v", err)
 	}
+
 	control := agentos.ControlRequest{
 		Operation:      agentos.ControlCancel,
 		IdempotencyKey: "cancel-1",
 		ActorID:        "operator-1",
 		Metadata:       map[string]string{"reason": "operator"},
 	}
-	if _, _, err := store.RecordPlanCommand(t.Context(), planCommandFromAuditRecord(planControlAuditRecord(ref, control))); err != nil {
+	if _, _, err := recordPlanCommandForTest(t, store, commandFromAudit(planControlAuditRecord(ref, &control))); err != nil {
 		t.Fatalf("RecordPlanCommand control: %v", err)
 	}
 
 	temporalClient := &fakePlanTemporalClient{}
 	reconciler := newPlanCommandReconciler(temporalClient, "agentos-test", store, store, store)
+
 	result, err := reconciler.Recover(t.Context(), 0)
 	if err != nil {
 		t.Fatalf("Recover: %v", err)
 	}
-	if result.Scanned != 2 || result.Delivered != 2 || result.Failed != 0 {
-		t.Fatalf("result = %#v", result)
-	}
+
+	assertPlanCommandRecoveryResult(t, result, 2, 2, 0)
+
 	if temporalClient.signalCount != 2 {
 		t.Fatalf("signal count = %d, want 2", temporalClient.signalCount)
 	}
-	for _, key := range []string{signal.IdempotencyKey, control.IdempotencyKey} {
-		command, exists, err := store.GetPlanCommand(t.Context(), planCommandRef(ref, key))
-		if err != nil || !exists {
-			t.Fatalf("command %s exists=%v err=%v", key, exists, err)
-		}
-		if command.Status != agentosplan.PlanCommandDelivered {
-			t.Fatalf("command %s = %#v, want delivered", key, command)
-		}
-		if _, exists, err := store.GetAuditRecord(t.Context(), planAuditRef(ref, key)); err != nil || !exists {
-			t.Fatalf("audit %s exists=%v err=%v", key, exists, err)
-		}
-	}
+
+	assertDeliveredPlanCommands(t, store, ref, signal.IdempotencyKey, control.IdempotencyKey)
 }
 
 func TestPlanCommandReconcilerMarksInvalidPayloadFailed(t *testing.T) {
+	t.Parallel()
+
 	store, ref := newPlanRuntimeTestStore(t)
-	if _, _, err := store.RecordPlanCommand(t.Context(), agentosplan.PlanCommandRecord{
+
+	invalidCommand := agentosplan.PlanCommandRecord{
 		PlanID:         ref.PlanID,
 		AccountID:      ref.AccountID,
 		ProjectID:      ref.ProjectID,
@@ -71,32 +69,38 @@ func TestPlanCommandReconcilerMarksInvalidPayloadFailed(t *testing.T) {
 		Payload: map[string]any{
 			planCommandPayloadSignalType: 42,
 		},
-	}); err != nil {
+	}
+	if _, _, err := recordPlanCommandForTest(t, store, &invalidCommand); err != nil {
 		t.Fatalf("RecordPlanCommand: %v", err)
 	}
 
 	temporalClient := &fakePlanTemporalClient{}
 	reconciler := newPlanCommandReconciler(temporalClient, "agentos-test", store, store, store)
+
 	result, err := reconciler.Recover(t.Context(), 0)
 	if !errors.Is(err, agentos.ErrInvalidRunPlan) {
 		t.Fatalf("Recover error = %v, want ErrInvalidRunPlan", err)
 	}
-	if result.Scanned != 1 || result.Delivered != 0 || result.Failed != 1 {
-		t.Fatalf("result = %#v", result)
-	}
+
+	assertPlanCommandRecoveryResult(t, result, 1, 0, 1)
+
 	if temporalClient.signalCount != 0 {
 		t.Fatalf("signal count = %d, want 0", temporalClient.signalCount)
 	}
+
 	command, exists, lookupErr := store.GetPlanCommand(t.Context(), planCommandRef(ref, "invalid-signal-1"))
 	if lookupErr != nil || !exists {
 		t.Fatalf("command exists=%v err=%v", exists, lookupErr)
 	}
+
 	if command.Status != agentosplan.PlanCommandFailed || command.FailureReason == "" {
 		t.Fatalf("command = %#v, want failed with reason", command)
 	}
 }
 
 func TestCommandDeliveryPayloadPreservesCommandTimestamps(t *testing.T) {
+	t.Parallel()
+
 	ref := agentos.PlanRef{PlanID: "plan-1", AccountID: "acct-1", ProjectID: "proj-1"}
 	sentAt := time.Date(2026, 6, 20, 12, 0, 0, 0, time.UTC)
 	signal := agentos.Signal{
@@ -106,17 +110,15 @@ func TestCommandDeliveryPayloadPreservesCommandTimestamps(t *testing.T) {
 		Payload:        map[string]any{agentos.SignalPayloadReason: "not ready"},
 		SentAt:         sentAt,
 	}
-	signalName, payload, audit, err := commandDeliveryPayload(planCommandFromAuditRecord(planSignalAuditRecord(ref, signal)))
-	if err != nil {
-		t.Fatalf("commandDeliveryPayload signal: %v", err)
-	}
-	deliveredSignal, ok := payload.(agentos.Signal)
-	if !ok {
-		t.Fatalf("signal payload type = %T", payload)
-	}
-	if signalName != PlanSignalName || !deliveredSignal.SentAt.Equal(sentAt) || !audit.Payload[planCommandPayloadSentAt].(time.Time).Equal(sentAt) {
-		t.Fatalf("signal delivery name=%q payload=%#v audit=%#v", signalName, deliveredSignal, audit)
-	}
+	signalCommand := commandFromAudit(planSignalAuditRecord(ref, &signal))
+
+	assertCommandDeliveryTimestamp(t, signalCommand, &commandTimestampAssertion{
+		label:       "signal",
+		signalName:  PlanSignalName,
+		auditKey:    planCommandPayloadSentAt,
+		wantTime:    sentAt,
+		payloadTime: signalPayloadSentAt,
+	})
 
 	requestedAt := time.Date(2026, 6, 20, 12, 5, 0, 0, time.UTC)
 	control := agentos.ControlRequest{
@@ -126,95 +128,185 @@ func TestCommandDeliveryPayloadPreservesCommandTimestamps(t *testing.T) {
 		ActorID:        "operator-1",
 		Metadata:       map[string]string{"reason": "maintenance"},
 	}
-	signalName, payload, audit, err = commandDeliveryPayload(planCommandFromAuditRecord(planControlAuditRecord(ref, control)))
+	controlCommand := commandFromAudit(planControlAuditRecord(ref, &control))
+
+	assertCommandDeliveryTimestamp(t, controlCommand, &commandTimestampAssertion{
+		label:       "control",
+		signalName:  PlanControlSignalName,
+		auditKey:    planCommandPayloadRequestedAt,
+		wantTime:    requestedAt,
+		payloadTime: controlPayloadRequestedAt,
+	})
+}
+
+type commandTimestampAssertion struct {
+	label       string
+	signalName  string
+	auditKey    string
+	wantTime    time.Time
+	payloadTime func(any) (time.Time, bool)
+}
+
+func assertCommandDeliveryTimestamp(t *testing.T, command *agentosplan.PlanCommandRecord, assertion *commandTimestampAssertion) {
+	t.Helper()
+
+	signalName, payload, audit, err := commandDeliveryPayload(command)
 	if err != nil {
-		t.Fatalf("commandDeliveryPayload control: %v", err)
+		t.Fatalf("commandDeliveryPayload %s: %v", assertion.label, err)
 	}
-	deliveredControl, ok := payload.(agentos.ControlRequest)
+
+	deliveredAt, ok := assertion.payloadTime(payload)
 	if !ok {
-		t.Fatalf("control payload type = %T", payload)
+		t.Fatalf("%s payload type = %T", assertion.label, payload)
 	}
-	if signalName != PlanControlSignalName || !deliveredControl.RequestedAt.Equal(requestedAt) || !audit.Payload[planCommandPayloadRequestedAt].(time.Time).Equal(requestedAt) {
-		t.Fatalf("control delivery name=%q payload=%#v audit=%#v", signalName, deliveredControl, audit)
+
+	auditAt, ok := audit.Payload[assertion.auditKey].(time.Time)
+	if !ok {
+		t.Fatalf("%s audit timestamp is not a time.Time", assertion.label)
+	}
+
+	if signalName != assertion.signalName || !deliveredAt.Equal(assertion.wantTime) || !auditAt.Equal(assertion.wantTime) {
+		t.Fatalf("%s delivery name=%q payload=%#v audit=%#v", assertion.label, signalName, payload, audit)
 	}
 }
 
+func signalPayloadSentAt(payload any) (time.Time, bool) {
+	signal, ok := payload.(agentos.Signal)
+
+	return signal.SentAt, ok
+}
+
+func controlPayloadRequestedAt(payload any) (time.Time, bool) {
+	control, ok := payload.(agentos.ControlRequest)
+
+	return control.RequestedAt, ok
+}
+
 func TestWorkerKitRecoverPlanCommandsUsesReconciler(t *testing.T) {
+	t.Parallel()
 	store, ref := newPlanRuntimeTestStore(t)
+
 	signal := agentos.Signal{
 		Type:           agentos.SignalPlanApprove,
 		IdempotencyKey: "approve-1",
 		ActorID:        "operator-1",
 	}
-	if _, _, err := store.RecordPlanCommand(t.Context(), planCommandFromAuditRecord(planSignalAuditRecord(ref, signal))); err != nil {
+	if _, _, err := recordPlanCommandForTest(t, store, commandFromAudit(planSignalAuditRecord(ref, &signal))); err != nil {
 		t.Fatalf("RecordPlanCommand: %v", err)
 	}
 
 	kit := &WorkerKit{planCommandReconciler: newPlanCommandReconciler(&fakePlanTemporalClient{}, "agentos-test", store, store, store)}
+
 	result, err := kit.RecoverPlanCommands(t.Context(), 1)
 	if err != nil {
 		t.Fatalf("RecoverPlanCommands: %v", err)
 	}
-	if result.Scanned != 1 || result.Delivered != 1 || result.Failed != 0 {
-		t.Fatalf("result = %#v", result)
-	}
+
+	assertPlanCommandRecoveryResult(t, result, 1, 1, 0)
 }
 
 func TestPlanRuntimeRecoverPlanCommandsUsesReconciler(t *testing.T) {
+	t.Parallel()
 	store, ref := newPlanRuntimeTestStore(t)
+
 	signal := agentos.Signal{
 		Type:           agentos.SignalPlanApprove,
 		IdempotencyKey: "approve-runtime-1",
 		ActorID:        "operator-1",
 	}
-	if _, _, err := store.RecordPlanCommand(t.Context(), planCommandFromAuditRecord(planSignalAuditRecord(ref, signal))); err != nil {
+	if _, _, err := recordPlanCommandForTest(t, store, commandFromAudit(planSignalAuditRecord(ref, &signal))); err != nil {
 		t.Fatalf("RecordPlanCommand: %v", err)
 	}
 
 	temporalClient := &fakePlanTemporalClient{}
 	rt := &planRuntime{temporalClient: temporalClient, taskQueue: "agentos-test", commandStore: store, auditStore: store, planIndex: store}
+
 	result, err := rt.RecoverPlanCommands(t.Context(), 1)
 	if err != nil {
 		t.Fatalf("RecoverPlanCommands: %v", err)
 	}
-	if result.Scanned != 1 || result.Delivered != 1 || result.Failed != 0 {
-		t.Fatalf("result = %#v", result)
-	}
+
+	assertPlanCommandRecoveryResult(t, result, 1, 1, 0)
+
 	if temporalClient.signalCount != 1 {
 		t.Fatalf("signal count = %d, want 1", temporalClient.signalCount)
 	}
 }
 
 func TestPlanCommandReconcilerDeliversPlanStart(t *testing.T) {
+	t.Parallel()
 	store, ref := newPlanRuntimeTestStore(t)
+
 	spec, _, exists, err := store.GetPlanByRef(t.Context(), ref)
 	if err != nil || !exists {
 		t.Fatalf("GetPlanByRef exists=%v err=%v", exists, err)
 	}
-	if _, _, err := store.RecordPlanCommand(t.Context(), planCommandFromAuditRecord(planStartAuditRecord(spec))); err != nil {
+
+	if _, _, err := recordPlanCommandForTest(t, store, commandFromAudit(planStartAuditRecord(&spec))); err != nil {
 		t.Fatalf("RecordPlanCommand: %v", err)
 	}
 
 	temporalClient := &fakePlanTemporalClient{}
 	reconciler := newPlanCommandReconciler(temporalClient, "agentos-test", store, store, store)
+
 	result, err := reconciler.Recover(t.Context(), 1)
 	if err != nil {
 		t.Fatalf("Recover: %v", err)
 	}
-	if result.Scanned != 1 || result.Delivered != 1 || result.Failed != 0 {
-		t.Fatalf("result = %#v", result)
-	}
+
+	assertPlanCommandRecoveryResult(t, result, 1, 1, 0)
+
 	if temporalClient.executeCount != 1 || temporalClient.executeTaskQueue != "agentos-test" {
 		t.Fatalf("execute count=%d taskQueue=%q", temporalClient.executeCount, temporalClient.executeTaskQueue)
 	}
-	command, exists, err := store.GetPlanCommand(t.Context(), planCommandRef(ref, spec.IdempotencyKey))
-	if err != nil || !exists {
-		t.Fatalf("command exists=%v err=%v", exists, err)
+
+	assertDeliveredPlanCommands(t, store, ref, spec.IdempotencyKey)
+}
+
+func commandFromAudit(record *agentosplan.AuditRecord) *agentosplan.PlanCommandRecord {
+	command := planCommandFromAuditRecord(record)
+
+	return &command
+}
+
+func recordPlanCommandForTest(
+	t *testing.T,
+	store agentosplan.PlanCommandStore,
+	command *agentosplan.PlanCommandRecord,
+) (agentosplan.PlanCommandRecord, bool, error) {
+	t.Helper()
+
+	return store.RecordPlanCommand(t.Context(), command)
+}
+
+func assertPlanCommandRecoveryResult(t *testing.T, result PlanCommandRecoveryResult, scanned, delivered, failed int) {
+	t.Helper()
+
+	if result.Scanned != scanned || result.Delivered != delivered || result.Failed != failed {
+		t.Fatalf("result = %#v, want scanned=%d delivered=%d failed=%d", result, scanned, delivered, failed)
 	}
-	if command.Status != agentosplan.PlanCommandDelivered {
-		t.Fatalf("command = %#v, want delivered", command)
-	}
-	if _, exists, err := store.GetAuditRecord(t.Context(), planAuditRef(ref, spec.IdempotencyKey)); err != nil || !exists {
-		t.Fatalf("audit exists=%v err=%v", exists, err)
+}
+
+func assertDeliveredPlanCommands(t *testing.T, store interface {
+	agentosplan.PlanCommandStore
+	agentosplan.AuditStore
+}, ref agentos.PlanRef, keys ...string,
+) {
+	t.Helper()
+
+	for _, key := range keys {
+		command, exists, err := store.GetPlanCommand(t.Context(), planCommandRef(ref, key))
+		if err != nil || !exists {
+			t.Fatalf("command %s exists=%v err=%v", key, exists, err)
+		}
+
+		if command.Status != agentosplan.PlanCommandDelivered {
+			t.Fatalf("command %s = %#v, want delivered", key, command)
+		}
+
+		_, exists, err = store.GetAuditRecord(t.Context(), planAuditRef(ref, key))
+		if err != nil || !exists {
+			t.Fatalf("audit %s exists=%v err=%v", key, exists, err)
+		}
 	}
 }

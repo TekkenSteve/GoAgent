@@ -14,6 +14,8 @@ import (
 	"golang.org/x/sync/errgroup"
 )
 
+func errcheckIgnore(_ error) {}
+
 // ErrConnectionClosed -.
 var ErrConnectionClosed = errors.New("rmq_rpc client - Client - RemoteCall - Connection closed")
 
@@ -266,7 +268,7 @@ func (c *Client) deleteCall(corrID string) {
 }
 
 func (c *Client) ack(d *amqp.Delivery, multiple bool) {
-	d.Ack(multiple) //nolint:errcheck // we can't do anything with this error
+	errcheckIgnore(d.Ack(multiple))
 }
 
 func (c *Client) publish(corrID, handler string, request any) error {

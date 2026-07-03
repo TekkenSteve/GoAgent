@@ -43,7 +43,7 @@ type statusRequest struct {
 
 type emptyResponse struct{}
 
-func startRequestFromSpec(spec agentos.RunSpec) startRequest {
+func startRequestFromSpec(spec *agentos.RunSpec) startRequest {
 	requestedAt := spec.RequestedAt
 	if requestedAt.IsZero() {
 		requestedAt = time.Now().UTC()
@@ -66,7 +66,7 @@ func startRequestFromSpec(spec agentos.RunSpec) startRequest {
 	}
 }
 
-func signalRequestFromSignal(runID string, signal agentos.Signal) signalRequest {
+func signalRequestFromSignal(runID string, signal *agentos.Signal) signalRequest {
 	sentAt := signal.SentAt
 	if sentAt.IsZero() {
 		sentAt = time.Now().UTC()
@@ -81,7 +81,7 @@ func signalRequestFromSignal(runID string, signal agentos.Signal) signalRequest 
 	}
 }
 
-func controlRequestFromControl(runID string, control agentos.ControlRequest) controlRequest {
+func controlRequestFromControl(runID string, control *agentos.ControlRequest) controlRequest {
 	requestedAt := control.RequestedAt
 	if requestedAt.IsZero() {
 		requestedAt = time.Now().UTC()

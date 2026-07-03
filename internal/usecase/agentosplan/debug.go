@@ -10,11 +10,12 @@ import (
 // BuildPlanDebugTraces projects typed debug records from durable PlanEvents.
 func BuildPlanDebugTraces(events []agentos.PlanEvent) ([]agentos.PlanDebugTrace, error) {
 	traces := make([]agentos.PlanDebugTrace, 0, len(events))
-	for _, event := range events {
-		trace, ok, err := PlanDebugTraceFromEvent(event)
+	for i := range events {
+		trace, ok, err := PlanDebugTraceFromEvent(&events[i])
 		if err != nil {
 			return nil, err
 		}
+
 		if ok {
 			traces = append(traces, trace)
 		}
@@ -24,7 +25,7 @@ func BuildPlanDebugTraces(events []agentos.PlanEvent) ([]agentos.PlanDebugTrace,
 }
 
 // PlanDebugTraceFromEvent extracts typed debug details from one durable event.
-func PlanDebugTraceFromEvent(event agentos.PlanEvent) (agentos.PlanDebugTrace, bool, error) {
+func PlanDebugTraceFromEvent(event *agentos.PlanEvent) (agentos.PlanDebugTrace, bool, error) {
 	trace := agentos.PlanDebugTrace{
 		EventID:   event.EventID,
 		EventType: event.EventType,
@@ -37,35 +38,43 @@ func PlanDebugTraceFromEvent(event agentos.PlanEvent) (agentos.PlanDebugTrace, b
 	}
 
 	var hasDebug bool
+
 	if value, ok := event.Payload[planEventPayloadTransition]; ok {
 		transition, err := decodePlanDebugPayload[agentos.PlanStateTransition](value, planEventPayloadTransition)
 		if err != nil {
 			return agentos.PlanDebugTrace{}, false, err
 		}
+
 		trace.Transition = &transition
 		hasDebug = true
 	}
+
 	if value, ok := event.Payload[planEventPayloadCapability]; ok {
 		capability, err := decodePlanDebugPayload[agentos.PlanCapabilityTrace](value, planEventPayloadCapability)
 		if err != nil {
 			return agentos.PlanDebugTrace{}, false, err
 		}
+
 		trace.Capability = &capability
 		hasDebug = true
 	}
+
 	if value, ok := event.Payload[planEventPayloadInputResolution]; ok {
 		input, err := decodePlanDebugPayload[agentos.PlanInputResolutionTrace](value, planEventPayloadInputResolution)
 		if err != nil {
 			return agentos.PlanDebugTrace{}, false, err
 		}
+
 		trace.InputResolution = &input
 		hasDebug = true
 	}
+
 	if value, ok := event.Payload[planEventPayloadConditions]; ok {
 		conditions, err := decodePlanDebugPayload[[]agentos.PlanConditionTrace](value, planEventPayloadConditions)
 		if err != nil {
 			return agentos.PlanDebugTrace{}, false, err
 		}
+
 		trace.Conditions = conditions
 		hasDebug = true
 	}
@@ -75,12 +84,14 @@ func PlanDebugTraceFromEvent(event agentos.PlanEvent) (agentos.PlanDebugTrace, b
 
 func decodePlanDebugPayload[T any](value any, field string) (T, error) {
 	var decoded T
+
 	data, err := json.Marshal(value)
 	if err != nil {
-		return decoded, fmt.Errorf("%w: marshal debug field %q: %s", agentos.ErrInvalidPlanEvent, field, err)
+		return decoded, fmt.Errorf("%w: marshal debug field %q: %w", agentos.ErrInvalidPlanEvent, field, err)
 	}
+
 	if err := json.Unmarshal(data, &decoded); err != nil {
-		return decoded, fmt.Errorf("%w: decode debug field %q: %s", agentos.ErrInvalidPlanEvent, field, err)
+		return decoded, fmt.Errorf("%w: decode debug field %q: %w", agentos.ErrInvalidPlanEvent, field, err)
 	}
 
 	return decoded, nil

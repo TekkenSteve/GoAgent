@@ -31,8 +31,10 @@ func (s *subscription) Close() error {
 
 func newSubscription(internalSub *agentfwstream.Subscription) agentos.Subscription {
 	out := make(chan agentos.Event)
+
 	go func() {
 		defer close(out)
+
 		for stored := range internalSub.C {
 			out <- eventFromStored(stored)
 		}
@@ -48,6 +50,8 @@ func newSubscription(internalSub *agentfwstream.Subscription) agentos.Subscripti
 	}
 }
 
+var errAgentOSSubscriberNotConfigured = errors.New("agentos temporal subscriber: redis subscriber is not configured")
+
 type agentOSSubscriber struct {
 	subscriber *repostream.RedisSubscriber
 }
@@ -62,13 +66,14 @@ func newAgentOSSubscriber(subscriber *repostream.RedisSubscriber) *agentOSSubscr
 
 func (s *agentOSSubscriber) SubscribeAgentOS(ctx context.Context, scope agentos.StreamScope) (agentos.Subscription, error) {
 	if s == nil || s.subscriber == nil {
-		return nil, errors.New("agentos temporal subscriber: redis subscriber is not configured")
+		return nil, errAgentOSSubscriberNotConfigured
 	}
 
 	sessionID := scope.ThreadID
 	if sessionID == "" {
 		sessionID = scope.RunID
 	}
+
 	if sessionID == "" {
 		return nil, fmt.Errorf("%w: run id or thread id is required", agentos.ErrInvalidStreamScope)
 	}

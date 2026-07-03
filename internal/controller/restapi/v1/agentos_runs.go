@@ -30,14 +30,16 @@ func (r *V1) startAgentOSRun(ctx *fiber.Ctx) error {
 	if err := ctx.BodyParser(&req); err != nil {
 		return errorResponse(ctx, http.StatusBadRequest, "invalid request body")
 	}
+
 	if err := r.v.Struct(&req); err != nil {
 		return errorResponse(ctx, http.StatusBadRequest, err.Error())
 	}
+
 	if isNativeAgentOSBackend(req.Backend) && req.UserMessage == "" {
 		return errorResponse(ctx, http.StatusBadRequest, "user_message is required for native backend")
 	}
 
-	status, err := r.agentOSRuntime.Start(ctx.UserContext(), agentos.RunSpec{
+	spec := agentos.RunSpec{
 		RunID:          req.RunID,
 		ThreadID:       req.ThreadID,
 		AccountID:      req.AccountID,
@@ -51,7 +53,9 @@ func (r *V1) startAgentOSRun(ctx *fiber.Ctx) error {
 		Metadata:       req.Metadata,
 		Backend:        req.Backend,
 		Input:          req.Input,
-	})
+	}
+
+	status, err := r.agentOSRuntime.Start(ctx.UserContext(), &spec)
 	if err != nil {
 		return agentOSError(ctx, err)
 	}
@@ -85,17 +89,20 @@ func (r *V1) signalAgentOSRun(ctx *fiber.Ctx) error {
 	if err := ctx.BodyParser(&req); err != nil {
 		return errorResponse(ctx, http.StatusBadRequest, "invalid request body")
 	}
+
 	if err := r.v.Struct(&req); err != nil {
 		return errorResponse(ctx, http.StatusBadRequest, err.Error())
 	}
 
-	err := r.agentOSRuntime.Signal(ctx.UserContext(), ctx.Params("run_id"), agentos.Signal{
+	signal := agentos.Signal{
 		Type:           req.Type,
 		IdempotencyKey: req.IdempotencyKey,
 		ActorID:        req.ActorID,
 		Payload:        req.Payload,
 		SentAt:         req.SentAt,
-	})
+	}
+
+	err := r.agentOSRuntime.Signal(ctx.UserContext(), ctx.Params("run_id"), &signal)
 	if err != nil {
 		return agentOSError(ctx, err)
 	}
@@ -125,17 +132,19 @@ func (r *V1) controlAgentOSRun(ctx *fiber.Ctx) error {
 	if err := ctx.BodyParser(&req); err != nil {
 		return errorResponse(ctx, http.StatusBadRequest, "invalid request body")
 	}
+
 	if err := r.v.Struct(&req); err != nil {
 		return errorResponse(ctx, http.StatusBadRequest, err.Error())
 	}
 
-	if err := r.agentOSRuntime.Control(ctx.UserContext(), ctx.Params("run_id"), agentos.ControlRequest{
+	control := agentos.ControlRequest{
 		Operation:      req.Operation,
 		IdempotencyKey: req.IdempotencyKey,
 		RequestedAt:    req.RequestedAt,
 		ActorID:        req.ActorID,
 		Metadata:       req.Metadata,
-	}); err != nil {
+	}
+	if err := r.agentOSRuntime.Control(ctx.UserContext(), ctx.Params("run_id"), &control); err != nil {
 		return agentOSError(ctx, err)
 	}
 

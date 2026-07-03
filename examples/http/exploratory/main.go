@@ -55,7 +55,7 @@ func main() {
 	fmt.Fprintln(os.Stdout, "  its OnResult injects additional steps after itself.")
 	fmt.Fprintln(os.Stdout)
 
-	status, err := c.ExecuteOrchestration(ctx, client.OrchestrationRequest{
+	status, err := c.ExecuteOrchestration(ctx, &client.OrchestrationRequest{
 		RunID: runID,
 		Steps: exploratorySteps(),
 	})

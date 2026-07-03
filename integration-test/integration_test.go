@@ -48,9 +48,10 @@ func basePathV1() string {
 	return httpURL() + "/v1"
 }
 
+var errIntegrationURLNotAvailable = errors.New("integration url is not available")
+
 func errHealthCheck() error {
-	//nolint:err113 // dynamic message required to include host URL
-	return fmt.Errorf("url %s is not available", healthPath())
+	return fmt.Errorf("%w: %s", errIntegrationURLNotAvailable, healthPath())
 }
 
 // getPGURL returns the PostgreSQL connection string.

@@ -274,13 +274,11 @@ func buildAgentVersionSnapshot(agentID string, req entity.UpdateAgentRequest, cu
 // ExecuteStep runs one LLM invocation plus subsequent tool rounds.
 // It returns the messages generated, tool results, and usage statistics.
 func (uc *UseCase) ExecuteStep(ctx context.Context, req *StepRequest) (*StepResult, error) {
-	// Auto-populate tool definitions from registry if not explicitly provided
 	tools := req.Tools
 	if len(tools) == 0 && uc.toolDefs != nil {
 		tools = uc.toolDefs.Definitions()
 	}
 
-	// Phase 1: Prep — validate and initialize execution context
 	prepResult, err := uc.Prep(ctx, &PrepRequest{
 		SystemPrompt: req.SystemPrompt,
 		UserMessage:  req.Message,
@@ -295,7 +293,6 @@ func (uc *UseCase) ExecuteStep(ctx context.Context, req *StepRequest) (*StepResu
 	messages := prepResult.Messages
 	tools = prepResult.Tools
 
-	// Phase 2: Execute — LLM call + tool execution loop
 	var (
 		allToolResults []entity.ToolResult
 		finalUsage     entity.Usage

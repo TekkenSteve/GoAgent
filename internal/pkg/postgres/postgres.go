@@ -3,12 +3,19 @@ package postgres
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log"
+	"math"
 	"time"
 
 	"github.com/Masterminds/squirrel"
 	"github.com/jackc/pgx/v5/pgxpool"
+)
+
+var (
+	errMaxPoolSizeExceedsMaxInt32 = errors.New("max pool size exceeds max int32")
+	errMaxPoolSizeMustBePositive  = errors.New("max pool size must be positive")
 )
 
 const (
@@ -47,7 +54,12 @@ func New(url string, opts ...Option) (*Postgres, error) {
 		return nil, fmt.Errorf("postgres - NewPostgres - pgxpool.ParseConfig: %w", err)
 	}
 
-	poolConfig.MaxConns = int32(pg.maxPoolSize) //nolint:gosec // skip integer overflow conversion int -> int32
+	maxConns, err := checkedMaxConns(pg.maxPoolSize)
+	if err != nil {
+		return nil, fmt.Errorf("postgres - NewPostgres: %w", err)
+	}
+
+	poolConfig.MaxConns = maxConns
 
 	for pg.connAttempts > 0 {
 		pg.Pool, err = pgxpool.NewWithConfig(context.Background(), poolConfig)
@@ -67,6 +79,18 @@ func New(url string, opts ...Option) (*Postgres, error) {
 	}
 
 	return pg, nil
+}
+
+func checkedMaxConns(maxPoolSize int) (int32, error) {
+	if maxPoolSize <= 0 {
+		return 0, fmt.Errorf("%w: %d", errMaxPoolSizeMustBePositive, maxPoolSize)
+	}
+
+	if maxPoolSize > math.MaxInt32 {
+		return 0, fmt.Errorf("%w: %d", errMaxPoolSizeExceedsMaxInt32, maxPoolSize)
+	}
+
+	return int32(maxPoolSize), nil
 }
 
 // Close -.

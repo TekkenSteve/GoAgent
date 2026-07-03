@@ -52,7 +52,7 @@ func main() {
 	fmt.Fprintln(os.Stdout, "Flow: Split(reasoning paths) → Join → evaluate-best → synthesize")
 	fmt.Fprintln(os.Stdout)
 
-	status, err := c.ExecuteOrchestration(ctx, client.OrchestrationRequest{
+	status, err := c.ExecuteOrchestration(ctx, &client.OrchestrationRequest{
 		RunID: runID,
 		Steps: totLatsSteps(),
 	})

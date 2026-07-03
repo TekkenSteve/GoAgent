@@ -10,17 +10,27 @@ import (
 	"github.com/TekkenSteve/GoAgent/agentos"
 )
 
+const (
+	VERIFY        = "verify"
+	SchemaSummary = "schema:summary"
+)
+
 func TestValidatorAcceptsPlanWithCapabilityAndCEL(t *testing.T) {
+	t.Parallel()
+
 	ctx := context.Background()
+
 	compiler, err := NewCELCompiler()
 	if err != nil {
 		t.Fatalf("NewCELCompiler: %v", err)
 	}
-	ref := agentos.BackendRef{Kind: agentos.BackendKindHTTP, Name: "research"}
+
+	ref := agentos.BackendRef{Kind: agentos.BackendKindHTTP, Name: RESEARCH}
+
 	catalog, err := NewStaticCapabilityCatalog([]agentos.Capability{
 		{
 			Backend: ref,
-			Name:    "research",
+			Name:    RESEARCH,
 			InputSchema: json.RawMessage(`{
 				"type":"object",
 				"properties":{"topic":{"type":"string"}},
@@ -31,46 +41,56 @@ func TestValidatorAcceptsPlanWithCapabilityAndCEL(t *testing.T) {
 	if err != nil {
 		t.Fatalf("catalog: %v", err)
 	}
+
 	validator := Validator{Expressions: compiler, Capabilities: catalog}
 
-	plan, err := validator.Validate(ctx, samplePlan(ref))
+	plan, err := validator.Validate(ctx, samplePlanPtr(ref))
 	if err != nil {
 		t.Fatalf("Validate: %v", err)
 	}
-	if got := plan.Order; len(got) != 2 || got[0] != "research" || got[1] != "verify" {
+
+	if got := plan.Order; len(got) != 2 || got[0] != RESEARCH || got[1] != VERIFY {
 		t.Fatalf("order = %#v", got)
 	}
 }
 
 func TestValidatorRejectsCycle(t *testing.T) {
+	t.Parallel()
+
 	ref := agentos.BackendRef{Kind: agentos.BackendKindNative, Name: agentos.BackendNameGoAgentNative}
 	spec := samplePlan(ref)
 	spec.Edges = append(spec.Edges, agentos.PlanEdgeSpec{
 		EdgeID: "cycle",
 		From:   "verify",
-		To:     "research",
+		To:     RESEARCH,
 	})
 
-	_, err := Validator{Capabilities: sampleCapabilityCatalog(t, ref)}.Validate(context.Background(), spec)
+	_, err := Validator{Capabilities: sampleCapabilityCatalog(t, ref)}.Validate(context.Background(), &spec)
 	if !errors.Is(err, agentos.ErrInvalidRunPlan) {
 		t.Fatalf("error = %v, want ErrInvalidRunPlan", err)
 	}
 }
 
 func TestValidatorRejectsCapabilityWithoutCatalog(t *testing.T) {
+	t.Parallel()
+
 	ref := agentos.BackendRef{Kind: agentos.BackendKindNative, Name: agentos.BackendNameGoAgentNative}
-	_, err := Validator{}.Validate(context.Background(), samplePlan(ref))
+
+	_, err := Validator{}.Validate(context.Background(), samplePlanPtr(ref))
 	if !errors.Is(err, agentos.ErrCapabilityNotFound) {
 		t.Fatalf("error = %v, want ErrCapabilityNotFound", err)
 	}
 }
 
 func TestValidatorRejectsSchemaMismatch(t *testing.T) {
-	ref := agentos.BackendRef{Kind: agentos.BackendKindHTTP, Name: "research"}
+	t.Parallel()
+
+	ref := agentos.BackendRef{Kind: agentos.BackendKindHTTP, Name: RESEARCH}
+
 	catalog, err := NewStaticCapabilityCatalog([]agentos.Capability{
 		{
 			Backend: ref,
-			Name:    "research",
+			Name:    RESEARCH,
 			InputSchema: json.RawMessage(`{
 				"type":"object",
 				"properties":{"topic":{"type":"string"}},
@@ -81,30 +101,36 @@ func TestValidatorRejectsSchemaMismatch(t *testing.T) {
 	if err != nil {
 		t.Fatalf("catalog: %v", err)
 	}
+
 	spec := samplePlan(ref)
 	spec.Nodes[0].Run.Input = map[string]any{"topic": 42}
 
-	_, err = Validator{Capabilities: catalog}.Validate(context.Background(), spec)
+	_, err = Validator{Capabilities: catalog}.Validate(context.Background(), &spec)
 	if !errors.Is(err, agentos.ErrInvalidRunPlan) {
 		t.Fatalf("error = %v, want ErrInvalidRunPlan", err)
 	}
 }
 
 func TestValidatorRejectsArtifactSchemaRefWithoutCatalog(t *testing.T) {
+	t.Parallel()
+
 	ref := agentos.BackendRef{Kind: agentos.BackendKindNative, Name: agentos.BackendNameGoAgentNative}
 	spec := samplePlan(ref)
-	spec.Nodes[0].Outputs[0].SchemaRef = "schema:summary"
+	spec.Nodes[0].Outputs[0].SchemaRef = SchemaSummary
 
-	_, err := Validator{Capabilities: sampleCapabilityCatalog(t, ref)}.Validate(context.Background(), spec)
+	_, err := Validator{Capabilities: sampleCapabilityCatalog(t, ref)}.Validate(context.Background(), &spec)
 	if !errors.Is(err, agentos.ErrInvalidArtifact) {
 		t.Fatalf("error = %v, want ErrInvalidArtifact", err)
 	}
 }
 
 func TestValidatorAcceptsArtifactSchemaRefWithCatalog(t *testing.T) {
+	t.Parallel()
+
 	ref := agentos.BackendRef{Kind: agentos.BackendKindNative, Name: agentos.BackendNameGoAgentNative}
 	spec := samplePlan(ref)
 	spec.Nodes[0].Outputs[0].SchemaRef = "schema:summary"
+
 	schemas, err := NewStaticArtifactSchemaCatalog([]agentos.ArtifactSchema{
 		{Ref: "schema:summary", Schema: json.RawMessage(`{"type":"object"}`)},
 	})
@@ -112,66 +138,76 @@ func TestValidatorAcceptsArtifactSchemaRefWithCatalog(t *testing.T) {
 		t.Fatalf("NewStaticArtifactSchemaCatalog: %v", err)
 	}
 
-	_, err = Validator{Capabilities: sampleCapabilityCatalog(t, ref), ArtifactSchemas: schemas}.Validate(context.Background(), spec)
+	_, err = Validator{Capabilities: sampleCapabilityCatalog(t, ref), ArtifactSchemas: schemas}.Validate(context.Background(), &spec)
 	if err != nil {
 		t.Fatalf("Validate: %v", err)
 	}
 }
 
 func TestValidatorAcceptsDeclaredArtifactMappingWithDependency(t *testing.T) {
+	t.Parallel()
+
 	ref := agentos.BackendRef{Kind: agentos.BackendKindNative, Name: agentos.BackendNameGoAgentNative}
 	spec := samplePlan(ref)
 	spec.Nodes[1].Inputs = []agentos.InputMapping{
-		{Target: "summary", SourceNodeID: "research", SourceArtifact: "summary", Required: true},
+		{Target: "summary", SourceNodeID: RESEARCH, SourceArtifact: "summary", Required: true},
 	}
 
-	_, err := Validator{Capabilities: sampleCapabilityCatalog(t, ref)}.Validate(context.Background(), spec)
+	_, err := Validator{Capabilities: sampleCapabilityCatalog(t, ref)}.Validate(context.Background(), &spec)
 	if err != nil {
 		t.Fatalf("Validate: %v", err)
 	}
 }
 
 func TestValidatorRejectsArtifactMappingWithoutSourceNode(t *testing.T) {
+	t.Parallel()
+
 	ref := agentos.BackendRef{Kind: agentos.BackendKindNative, Name: agentos.BackendNameGoAgentNative}
 	spec := samplePlan(ref)
 	spec.Edges[0].InputMapping = []agentos.InputMapping{
 		{Target: "summary", SourceArtifact: "summary", Required: true},
 	}
 
-	_, err := Validator{Capabilities: sampleCapabilityCatalog(t, ref)}.Validate(context.Background(), spec)
+	_, err := Validator{Capabilities: sampleCapabilityCatalog(t, ref)}.Validate(context.Background(), &spec)
 	if !errors.Is(err, agentos.ErrInvalidArtifact) {
 		t.Fatalf("error = %v, want ErrInvalidArtifact", err)
 	}
 }
 
 func TestValidatorRejectsArtifactMappingForUndeclaredOutput(t *testing.T) {
+	t.Parallel()
+
 	ref := agentos.BackendRef{Kind: agentos.BackendKindNative, Name: agentos.BackendNameGoAgentNative}
 	spec := samplePlan(ref)
 	spec.Edges[0].InputMapping = []agentos.InputMapping{
-		{Target: "missing", SourceNodeID: "research", SourceArtifact: "missing", Required: true},
+		{Target: "missing", SourceNodeID: RESEARCH, SourceArtifact: "missing", Required: true},
 	}
 
-	_, err := Validator{Capabilities: sampleCapabilityCatalog(t, ref)}.Validate(context.Background(), spec)
+	_, err := Validator{Capabilities: sampleCapabilityCatalog(t, ref)}.Validate(context.Background(), &spec)
 	if !errors.Is(err, agentos.ErrInvalidArtifact) {
 		t.Fatalf("error = %v, want ErrInvalidArtifact", err)
 	}
 }
 
 func TestValidatorRejectsNodeArtifactMappingWithoutDependencyPath(t *testing.T) {
+	t.Parallel()
+
 	ref := agentos.BackendRef{Kind: agentos.BackendKindNative, Name: agentos.BackendNameGoAgentNative}
 	spec := samplePlan(ref)
 	spec.Edges = nil
 	spec.Nodes[1].Inputs = []agentos.InputMapping{
-		{Target: "summary", SourceNodeID: "research", SourceArtifact: "summary", Required: true},
+		{Target: "summary", SourceNodeID: RESEARCH, SourceArtifact: "summary", Required: true},
 	}
 
-	_, err := Validator{Capabilities: sampleCapabilityCatalog(t, ref)}.Validate(context.Background(), spec)
+	_, err := Validator{Capabilities: sampleCapabilityCatalog(t, ref)}.Validate(context.Background(), &spec)
 	if !errors.Is(err, agentos.ErrInvalidRunPlan) {
 		t.Fatalf("error = %v, want ErrInvalidRunPlan", err)
 	}
 }
 
 func TestValidatorRejectsContinuationThresholdAboveHistoryGuard(t *testing.T) {
+	t.Parallel()
+
 	ref := agentos.BackendRef{Kind: agentos.BackendKindNative, Name: agentos.BackendNameGoAgentNative}
 	spec := samplePlan(ref)
 	spec.Policy = agentos.PlanPolicy{
@@ -179,117 +215,153 @@ func TestValidatorRejectsContinuationThresholdAboveHistoryGuard(t *testing.T) {
 		MaxHistoryEvents:    10,
 	}
 
-	_, err := Validator{Capabilities: sampleCapabilityCatalog(t, ref)}.Validate(context.Background(), spec)
+	_, err := Validator{Capabilities: sampleCapabilityCatalog(t, ref)}.Validate(context.Background(), &spec)
 	if !errors.Is(err, agentos.ErrInvalidRunPlan) {
 		t.Fatalf("error = %v, want ErrInvalidRunPlan", err)
 	}
 }
 
 func TestSchedulerReadyNodes(t *testing.T) {
+	t.Parallel()
+
 	ctx := context.Background()
+
 	compiler, err := NewCELCompiler()
 	if err != nil {
 		t.Fatalf("NewCELCompiler: %v", err)
 	}
+
 	ref := agentos.BackendRef{Kind: agentos.BackendKindNative, Name: agentos.BackendNameGoAgentNative}
 	spec := samplePlan(ref)
-	plan, err := Validator{Expressions: compiler, Capabilities: sampleCapabilityCatalog(t, ref)}.Validate(ctx, spec)
+
+	plan, err := Validator{Expressions: compiler, Capabilities: sampleCapabilityCatalog(t, ref)}.Validate(ctx, &spec)
 	if err != nil {
 		t.Fatalf("Validate: %v", err)
 	}
-	state := NewState(spec, time.Date(2026, 6, 17, 10, 0, 0, 0, time.UTC))
-	if err := state.Apply(StateEvent{Kind: EventPlanStarted}); err != nil {
+
+	state := NewState(&spec, time.Date(2026, 6, 17, 10, 0, 0, 0, time.UTC))
+	if err := state.Apply(&StateEvent{Kind: EventPlanStarted}); err != nil {
 		t.Fatalf("plan started: %v", err)
 	}
 
-	ready, err := Scheduler{Expressions: compiler}.ReadyNodes(ctx, plan, state.Status, map[string]any{
+	ready, err := Scheduler{Expressions: compiler}.ReadyNodes(ctx, &plan, &state.Status, map[string]any{
 		"inputs": map[string]any{"enabled": true},
 	})
 	if err != nil {
 		t.Fatalf("ReadyNodes: %v", err)
 	}
-	if len(ready) != 1 || ready[0].NodeID != "research" {
-		t.Fatalf("ready = %#v", ready)
-	}
 
-	if err := state.Apply(StateEvent{Kind: EventNodeSucceeded, NodeID: "research"}); err != nil {
+	requireReadyNode(t, ready, RESEARCH)
+
+	if err := state.Apply(&StateEvent{Kind: EventNodeSucceeded, NodeID: RESEARCH}); err != nil {
 		t.Fatalf("node succeeded: %v", err)
 	}
-	ready, err = Scheduler{Expressions: compiler}.ReadyNodes(ctx, plan, state.Status, map[string]any{
+
+	ready, err = Scheduler{Expressions: compiler}.ReadyNodes(ctx, &plan, &state.Status, map[string]any{
 		"inputs": map[string]any{"enabled": true},
 	})
 	if err != nil {
 		t.Fatalf("ReadyNodes second: %v", err)
 	}
-	if len(ready) != 1 || ready[0].NodeID != "verify" {
-		t.Fatalf("ready second = %#v", ready)
-	}
+
+	requireReadyNode(t, ready, "verify")
 }
 
 func TestSchedulerDecisionIncludesConditionTraces(t *testing.T) {
+	t.Parallel()
+
 	ctx := context.Background()
+
 	compiler, err := NewCELCompiler()
 	if err != nil {
 		t.Fatalf("NewCELCompiler: %v", err)
 	}
+
 	ref := agentos.BackendRef{Kind: agentos.BackendKindNative, Name: agentos.BackendNameGoAgentNative}
 	spec := samplePlan(ref)
-	plan, err := Validator{Expressions: compiler, Capabilities: sampleCapabilityCatalog(t, ref)}.Validate(ctx, spec)
+
+	plan, err := Validator{Expressions: compiler, Capabilities: sampleCapabilityCatalog(t, ref)}.Validate(ctx, &spec)
 	if err != nil {
 		t.Fatalf("Validate: %v", err)
 	}
-	state := NewState(spec, time.Date(2026, 6, 17, 10, 0, 0, 0, time.UTC))
 
-	decision, err := Scheduler{Expressions: compiler}.Decide(ctx, plan, state.Status, map[string]any{
+	state := NewState(&spec, time.Date(2026, 6, 17, 10, 0, 0, 0, time.UTC))
+
+	decision, err := Scheduler{Expressions: compiler}.Decide(ctx, &plan, &state.Status, map[string]any{
 		"inputs": map[string]any{"enabled": true},
 	})
 	if err != nil {
 		t.Fatalf("Decide: %v", err)
 	}
-	if len(decision.Ready) != 1 || decision.Ready[0].NodeID != "research" {
-		t.Fatalf("ready = %#v", decision.Ready)
-	}
+
+	requireReadyNode(t, decision.Ready, RESEARCH)
+
 	if len(decision.ConditionTraces) != 1 {
 		t.Fatalf("condition traces = %#v", decision.ConditionTraces)
 	}
+
 	trace := decision.ConditionTraces[0]
-	if trace.Scope != "node" || trace.NodeID != "research" || trace.Expression == "" || !trace.Result {
+	requireNodeConditionTrace(t, &trace, RESEARCH)
+}
+
+func requireReadyNode(t *testing.T, ready []agentos.PlanNodeSpec, nodeID string) {
+	t.Helper()
+
+	if len(ready) != 1 || ready[0].NodeID != nodeID {
+		t.Fatalf("ready = %#v, want %s", ready, nodeID)
+	}
+}
+
+func requireNodeConditionTrace(t *testing.T, trace *ConditionEvaluationTrace, nodeID string) {
+	t.Helper()
+
+	if trace.Scope != "node" || trace.NodeID != nodeID || trace.Expression == "" || !trace.Result {
 		t.Fatalf("trace = %#v", trace)
 	}
 }
 
 func TestSchedulerSkipsNodeWhenConditionIsFalse(t *testing.T) {
+	t.Parallel()
+
 	ctx := context.Background()
+
 	compiler, err := NewCELCompiler()
 	if err != nil {
 		t.Fatalf("NewCELCompiler: %v", err)
 	}
+
 	ref := agentos.BackendRef{Kind: agentos.BackendKindNative, Name: agentos.BackendNameGoAgentNative}
 	spec := samplePlan(ref)
-	plan, err := Validator{Expressions: compiler, Capabilities: sampleCapabilityCatalog(t, ref)}.Validate(ctx, spec)
+
+	plan, err := Validator{Expressions: compiler, Capabilities: sampleCapabilityCatalog(t, ref)}.Validate(ctx, &spec)
 	if err != nil {
 		t.Fatalf("Validate: %v", err)
 	}
-	state := NewState(spec, time.Date(2026, 6, 17, 10, 0, 0, 0, time.UTC))
-	if err := state.Apply(StateEvent{Kind: EventPlanStarted}); err != nil {
+
+	state := NewState(&spec, time.Date(2026, 6, 17, 10, 0, 0, 0, time.UTC))
+	if err := state.Apply(&StateEvent{Kind: EventPlanStarted}); err != nil {
 		t.Fatalf("plan started: %v", err)
 	}
 
-	decision, err := Scheduler{Expressions: compiler}.Decide(ctx, plan, state.Status, map[string]any{
+	decision, err := Scheduler{Expressions: compiler}.Decide(ctx, &plan, &state.Status, map[string]any{
 		"inputs": map[string]any{"enabled": false},
 	})
 	if err != nil {
 		t.Fatalf("Decide: %v", err)
 	}
+
 	if len(decision.Ready) != 0 {
 		t.Fatalf("ready = %#v", decision.Ready)
 	}
-	if len(decision.Skipped) != 1 || decision.Skipped[0].NodeID != "research" {
+
+	if len(decision.Skipped) != 1 || decision.Skipped[0].NodeID != RESEARCH {
 		t.Fatalf("skipped = %#v", decision.Skipped)
 	}
 }
 
 func TestSchedulerActivatesErrorEdge(t *testing.T) {
+	t.Parallel()
+
 	ctx := context.Background()
 	ref := agentos.BackendRef{Kind: agentos.BackendKindNative, Name: agentos.BackendNameGoAgentNative}
 	spec := agentos.RunPlanSpec{
@@ -316,28 +388,34 @@ func TestSchedulerActivatesErrorEdge(t *testing.T) {
 			{EdgeID: "attempt-failed", From: "attempt", To: "recover", On: agentos.EdgeOnError},
 		},
 	}
-	plan, err := Validator{}.Validate(ctx, spec)
+
+	plan, err := Validator{}.Validate(ctx, &spec)
 	if err != nil {
 		t.Fatalf("Validate: %v", err)
 	}
-	state := NewState(spec, time.Date(2026, 6, 17, 10, 0, 0, 0, time.UTC))
-	if err := state.Apply(StateEvent{Kind: EventPlanStarted}); err != nil {
+
+	state := NewState(&spec, time.Date(2026, 6, 17, 10, 0, 0, 0, time.UTC))
+	if err := state.Apply(&StateEvent{Kind: EventPlanStarted}); err != nil {
 		t.Fatalf("plan started: %v", err)
 	}
-	if err := state.Apply(StateEvent{Kind: EventNodeFailed, NodeID: "attempt", Reason: "backend failed"}); err != nil {
+
+	if err := state.Apply(&StateEvent{Kind: EventNodeFailed, NodeID: "attempt", Reason: "backend failed"}); err != nil {
 		t.Fatalf("node failed: %v", err)
 	}
 
-	ready, err := Scheduler{}.ReadyNodes(ctx, plan, state.Status, nil)
+	ready, err := Scheduler{}.ReadyNodes(ctx, &plan, &state.Status, nil)
 	if err != nil {
 		t.Fatalf("ReadyNodes: %v", err)
 	}
+
 	if len(ready) != 1 || ready[0].NodeID != "recover" {
 		t.Fatalf("ready = %#v", ready)
 	}
 }
 
 func TestSchedulerJoinAny(t *testing.T) {
+	t.Parallel()
+
 	ctx := context.Background()
 	ref := agentos.BackendRef{Kind: agentos.BackendKindNative, Name: agentos.BackendNameGoAgentNative}
 	spec := agentos.RunPlanSpec{
@@ -358,50 +436,62 @@ func TestSchedulerJoinAny(t *testing.T) {
 			{EdgeID: "right-join", From: "right", To: "join", On: agentos.EdgeOnSuccess},
 		},
 	}
-	plan, err := Validator{}.Validate(ctx, spec)
+
+	plan, err := Validator{}.Validate(ctx, &spec)
 	if err != nil {
 		t.Fatalf("Validate: %v", err)
 	}
-	state := NewState(spec, time.Date(2026, 6, 17, 10, 0, 0, 0, time.UTC))
-	if err := state.Apply(StateEvent{Kind: EventPlanStarted}); err != nil {
+
+	state := NewState(&spec, time.Date(2026, 6, 17, 10, 0, 0, 0, time.UTC))
+	if err := state.Apply(&StateEvent{Kind: EventPlanStarted}); err != nil {
 		t.Fatalf("plan started: %v", err)
 	}
-	if err := state.Apply(StateEvent{Kind: EventNodeSucceeded, NodeID: "left"}); err != nil {
+
+	if err := state.Apply(&StateEvent{Kind: EventNodeSucceeded, NodeID: "left"}); err != nil {
 		t.Fatalf("left succeeded: %v", err)
 	}
-	if err := state.Apply(StateEvent{Kind: EventNodeStarted, NodeID: "right"}); err != nil {
+
+	if err := state.Apply(&StateEvent{Kind: EventNodeStarted, NodeID: "right"}); err != nil {
 		t.Fatalf("right started: %v", err)
 	}
 
-	ready, err := Scheduler{}.ReadyNodes(ctx, plan, state.Status, nil)
+	ready, err := Scheduler{}.ReadyNodes(ctx, &plan, &state.Status, nil)
 	if err != nil {
 		t.Fatalf("ReadyNodes: %v", err)
 	}
+
 	if len(ready) != 1 || ready[0].NodeID != "join" {
 		t.Fatalf("ready = %#v", ready)
 	}
 }
 
 func TestStateReducerTransitions(t *testing.T) {
+	t.Parallel()
+
 	ref := agentos.BackendRef{Kind: agentos.BackendKindNative, Name: agentos.BackendNameGoAgentNative}
 	spec := samplePlan(ref)
-	state := NewState(spec, time.Date(2026, 6, 17, 10, 0, 0, 0, time.UTC))
+	state := NewState(&spec, time.Date(2026, 6, 17, 10, 0, 0, 0, time.UTC))
 
-	if err := state.Apply(StateEvent{Kind: EventPlanStarted}); err != nil {
+	if err := state.Apply(&StateEvent{Kind: EventPlanStarted}); err != nil {
 		t.Fatalf("plan started: %v", err)
 	}
-	if err := state.Apply(StateEvent{Kind: EventNodeStarted, NodeID: "research", RunID: "run-research"}); err != nil {
+
+	if err := state.Apply(&StateEvent{Kind: EventNodeStarted, NodeID: RESEARCH, RunID: "run-research"}); err != nil {
 		t.Fatalf("node started: %v", err)
 	}
+
 	if state.Status.LifecycleState != agentos.PlanLifecycleRunning {
 		t.Fatalf("plan lifecycle = %q", state.Status.LifecycleState)
 	}
+
 	if len(state.Status.ActiveRunIDs) != 1 || state.Status.ActiveRunIDs[0] != "run-research" {
 		t.Fatalf("active run ids = %#v", state.Status.ActiveRunIDs)
 	}
 }
 
 func TestApplyDeltaRespectsLimits(t *testing.T) {
+	t.Parallel()
+
 	ref := agentos.BackendRef{Kind: agentos.BackendKindNative, Name: agentos.BackendNameGoAgentNative}
 	spec := samplePlan(ref)
 	spec.Policy.MaxNodes = 2
@@ -415,13 +505,15 @@ func TestApplyDeltaRespectsLimits(t *testing.T) {
 		},
 	}}
 
-	_, _, err := ApplyDelta(context.Background(), Validator{}, spec, delta, 0)
+	_, _, err := ApplyDelta(context.Background(), Validator{}, &spec, delta, 0)
 	if !errors.Is(err, agentos.ErrInvalidRunPlan) {
 		t.Fatalf("error = %v, want ErrInvalidRunPlan", err)
 	}
 }
 
 func TestCompilerYAML(t *testing.T) {
+	t.Parallel()
+
 	ref := agentos.BackendRef{Kind: agentos.BackendKindNative, Name: agentos.BackendNameGoAgentNative}
 	data := []byte(`
 plan_id: plan-yaml
@@ -435,10 +527,12 @@ nodes:
         kind: native
         name: goagent-native
 `)
+
 	plan, err := RunPlanCompiler{Validator: Validator{}}.CompileYAML(context.Background(), data)
 	if err != nil {
 		t.Fatalf("CompileYAML: %v", err)
 	}
+
 	if plan.NodeByID["only"].Run.Backend != ref {
 		t.Fatalf("backend = %#v", plan.NodeByID["only"].Run.Backend)
 	}
@@ -454,8 +548,8 @@ func samplePlan(ref agentos.BackendRef) agentos.RunPlanSpec {
 		},
 		Nodes: []agentos.PlanNodeSpec{
 			{
-				NodeID:     "research",
-				Capability: "research",
+				NodeID:     RESEARCH,
+				Capability: RESEARCH,
 				Run: agentos.RunSpec{
 					RunID:   "run-research",
 					Backend: ref,
@@ -479,7 +573,7 @@ func samplePlan(ref agentos.BackendRef) agentos.RunPlanSpec {
 		Edges: []agentos.PlanEdgeSpec{
 			{
 				EdgeID: "research-to-verify",
-				From:   "research",
+				From:   RESEARCH,
 				To:     "verify",
 				On:     agentos.EdgeOnSuccess,
 			},
@@ -487,12 +581,19 @@ func samplePlan(ref agentos.BackendRef) agentos.RunPlanSpec {
 	}
 }
 
+func samplePlanPtr(ref agentos.BackendRef) *agentos.RunPlanSpec {
+	spec := samplePlan(ref)
+
+	return &spec
+}
+
 func sampleCapabilityCatalog(t *testing.T, ref agentos.BackendRef) *StaticCapabilityCatalog {
 	t.Helper()
+
 	catalog, err := NewStaticCapabilityCatalog([]agentos.Capability{
 		{
 			Backend: ref,
-			Name:    "research",
+			Name:    RESEARCH,
 			InputSchema: json.RawMessage(`{
 				"type":"object",
 				"properties":{"topic":{"type":"string"}},

@@ -27,25 +27,20 @@ func NewRoutes(apiV1Group fiber.Router, t usecase.AgentExecutor, o usecase.Orche
 		planRuntime:    planRuntime,
 	}
 
-	// Template routes (optional — requires TemplateManager)
 	if m != nil {
 		tpl := &templateHandler{m: m, l: l}
 		tplGroup := apiV1Group.Group("/templates")
-		{
-			tplGroup.Post("/import", tpl.importYAML)
-			tplGroup.Get("/", tpl.list)
-			tplGroup.Get("/:template_id", tpl.get)
-			tplGroup.Delete("/:template_id", tpl.delete)
-		}
+		tplGroup.Post("/import", tpl.importYAML)
+		tplGroup.Get("/", tpl.list)
+		tplGroup.Get("/:template_id", tpl.get)
+		tplGroup.Delete("/:template_id", tpl.delete)
 	}
 
-	// Trigger event webhook routes (optional — requires TriggerEventHandler)
 	if eh != nil {
 		th := &triggerWebhookHandler{eh: eh, t: t, l: l}
 		apiV1Group.Post("/triggers/events", th.handleEvent)
 	}
 
-	// Orchestration route (optional — requires OrchestrationExecutor)
 	if o != nil {
 		apiV1Group.Post("/orchestration/execute", r.orchestrate)
 		apiV1Group.Get("/orchestration/status/:run_id", r.orchestrationStatus)
@@ -54,14 +49,17 @@ func NewRoutes(apiV1Group fiber.Router, t usecase.AgentExecutor, o usecase.Orche
 	if eventIngest != nil {
 		apiV1Group.Post("/agentos/runs/:run_id/events", r.ingestAgentOSEvent)
 	}
+
 	if agentOSRuntime != nil {
 		apiV1Group.Post("/agentos/runs", r.startAgentOSRun)
 		apiV1Group.Get("/agentos/runs/:run_id/status", r.statusAgentOSRun)
 		apiV1Group.Post("/agentos/runs/:run_id/signals", r.signalAgentOSRun)
 		apiV1Group.Post("/agentos/runs/:run_id/control", r.controlAgentOSRun)
 	}
+
 	apiV1Group.Get("/agentos/plans/schemas/:kind", r.agentOSPlanSchema)
 	apiV1Group.Get("/agentos/plans/author", r.agentOSPlanAuthor)
+
 	if planRuntime != nil {
 		apiV1Group.Post("/agentos/plans", r.startAgentOSPlan)
 		apiV1Group.Get("/agentos/plans/:plan_id/status", r.statusAgentOSPlan)

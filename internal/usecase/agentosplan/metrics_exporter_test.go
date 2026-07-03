@@ -9,57 +9,46 @@ import (
 	"github.com/TekkenSteve/GoAgent/agentos"
 )
 
+var errTestSinkUnavailable = errors.New("sink unavailable")
+
 func TestPlanMetricsExporterProjectsTailEventsWithCheckpointState(t *testing.T) {
+	t.Parallel()
+
 	ctx := context.Background()
 	store := NewMemoryPlanStore()
 	spec := metricsExporterPlanSpec("plan-export")
+
 	status := agentos.RunPlanStatus{
 		PlanID:         spec.PlanID,
 		LifecycleState: agentos.PlanLifecycleRunning,
 		UpdatedAt:      spec.RequestedAt,
 	}
-	if _, _, err := store.CreatePlan(ctx, spec, status); err != nil {
+
+	if _, _, err := store.CreatePlan(ctx, &spec, &status); err != nil {
 		t.Fatalf("CreatePlan: %v", err)
 	}
 
-	planStartedAt := spec.RequestedAt.Add(time.Second)
-	nodeStartedAt := spec.RequestedAt.Add(2 * time.Second)
-	if _, err := store.AppendPlanEvent(ctx, metricEvent(0, agentos.EventPlanStarted, spec.PlanID, "", "", planStartedAt, nil), "event-1"); err != nil {
-		t.Fatalf("AppendPlanEvent plan start: %v", err)
-	}
-	if _, err := store.AppendPlanEvent(ctx, metricEvent(0, agentos.EventPlanNodeStarted, spec.PlanID, "draft", "run-draft", nodeStartedAt, nil), "event-2"); err != nil {
-		t.Fatalf("AppendPlanEvent node start: %v", err)
-	}
+	appendMetricEventForTest(ctx, t, store, agentos.EventPlanStarted, spec.PlanID, "", "", spec.RequestedAt.Add(time.Second), "event-1")
+	appendMetricEventForTest(ctx, t, store, agentos.EventPlanNodeStarted, spec.PlanID, "draft", "run-draft", spec.RequestedAt.Add(2*time.Second), "event-2")
 
 	sink := &recordingPlanMetricsSink{}
 	exporter := newTestPlanMetricsExporter(t, store, sink, 2)
-	first, err := exporter.Export(ctx, PlanRefScope{AccountID: spec.AccountID, ProjectID: spec.ProjectID})
-	if err != nil {
-		t.Fatalf("Export first: %v", err)
-	}
-	if first.EventsScanned != 2 || first.CheckpointsSaved != 1 {
-		t.Fatalf("first result = %#v", first)
-	}
+
+	scope := PlanRefScope{AccountID: spec.AccountID, ProjectID: spec.ProjectID}
+	first := exportPlanMetricsForTest(ctx, t, exporter, &scope)
+	requirePlanMetricsExportResult(t, first, "first")
+
 	requireMetric(t, sink.samples, PlanMetricPlanStartedTotal, "", 1)
 	requireMetric(t, sink.samples, PlanMetricNodeStartedTotal, "draft", 1)
 
-	nodeSucceededAt := spec.RequestedAt.Add(12 * time.Second)
-	planSucceededAt := spec.RequestedAt.Add(20 * time.Second)
-	if _, err := store.AppendPlanEvent(ctx, metricEvent(0, agentos.EventPlanNodeSucceeded, spec.PlanID, "draft", "run-draft", nodeSucceededAt, nil), "event-3"); err != nil {
-		t.Fatalf("AppendPlanEvent node succeeded: %v", err)
-	}
-	if _, err := store.AppendPlanEvent(ctx, metricEvent(0, agentos.EventPlanSucceeded, spec.PlanID, "", "", planSucceededAt, nil), "event-4"); err != nil {
-		t.Fatalf("AppendPlanEvent plan succeeded: %v", err)
-	}
+	appendMetricEventForTest(ctx, t, store, agentos.EventPlanNodeSucceeded, spec.PlanID, "draft", "run-draft", spec.RequestedAt.Add(12*time.Second), "event-3")
+	appendMetricEventForTest(ctx, t, store, agentos.EventPlanSucceeded, spec.PlanID, "", "", spec.RequestedAt.Add(20*time.Second), "event-4")
 
 	sink.samples = nil
-	second, err := exporter.Export(ctx, PlanRefScope{AccountID: spec.AccountID, ProjectID: spec.ProjectID})
-	if err != nil {
-		t.Fatalf("Export second: %v", err)
-	}
-	if second.EventsScanned != 2 || second.CheckpointsSaved != 1 {
-		t.Fatalf("second result = %#v", second)
-	}
+
+	second := exportPlanMetricsForTest(ctx, t, exporter, &scope)
+	requirePlanMetricsExportResult(t, second, "second")
+
 	requireNoMetric(t, sink.samples, PlanMetricPlanStartedTotal, "")
 	requireNoMetric(t, sink.samples, PlanMetricNodeStartedTotal, "draft")
 	requireMetric(t, sink.samples, PlanMetricNodeDurationSeconds, "draft", 10)
@@ -73,32 +62,81 @@ func TestPlanMetricsExporterProjectsTailEventsWithCheckpointState(t *testing.T) 
 	if err != nil {
 		t.Fatalf("GetPlanMetricCheckpoint: %v", err)
 	}
-	if !exists || checkpoint.Sequence != 4 {
-		t.Fatalf("checkpoint = %#v exists=%v, want sequence 4", checkpoint, exists)
+
+	requireMetricsCheckpoint(t, &checkpoint, exists, 4)
+}
+
+func appendMetricEventForTest(ctx context.Context, t *testing.T, store *MemoryPlanStore, eventType agentos.EventType, planID, nodeID, runID string, at time.Time, key string) {
+	t.Helper()
+
+	if _, err := appendPlanEvent(ctx, store, metricEventPtr(eventType, planID, nodeID, runID, at), key); err != nil {
+		t.Fatalf("AppendPlanEvent %s: %v", key, err)
 	}
+}
+
+func requirePlanMetricsExportResult(t *testing.T, result PlanMetricsExportResult, label string) {
+	t.Helper()
+
+	if result.EventsScanned != 2 || result.CheckpointsSaved != 1 {
+		t.Fatalf("%s result = %#v", label, result)
+	}
+}
+
+func exportPlanMetricsForTest(
+	ctx context.Context,
+	t *testing.T,
+	exporter *PlanMetricsExporter,
+	scope *PlanRefScope,
+) PlanMetricsExportResult {
+	t.Helper()
+
+	result, err := exporter.Export(ctx, scope)
+	if err != nil {
+		t.Fatalf("Export: %v", err)
+	}
+
+	return result
+}
+
+func requireMetricsCheckpoint(t *testing.T, checkpoint *PlanMetricCheckpoint, exists bool, sequence int64) {
+	t.Helper()
+
+	if !exists || checkpoint.Sequence != sequence {
+		t.Fatalf("checkpoint = %#v exists=%v, want sequence %d", checkpoint, exists, sequence)
+	}
+
 	if !checkpoint.Projection.PlanStartedAt.IsZero() || len(checkpoint.Projection.NodeStartedAt) != 0 {
 		t.Fatalf("terminal projection = %#v, want empty", checkpoint.Projection)
 	}
 }
 
 func TestPlanMetricsExporterDoesNotAdvanceCheckpointWhenSinkFails(t *testing.T) {
+	t.Parallel()
+
 	ctx := context.Background()
 	store := NewMemoryPlanStore()
+
 	spec := metricsExporterPlanSpec("plan-export-fail")
-	if _, _, err := store.CreatePlan(ctx, spec, agentos.RunPlanStatus{
+
+	status := agentos.RunPlanStatus{
 		PlanID:         spec.PlanID,
 		LifecycleState: agentos.PlanLifecycleRunning,
 		UpdatedAt:      spec.RequestedAt,
-	}); err != nil {
+	}
+	if _, _, err := store.CreatePlan(ctx, &spec, &status); err != nil {
 		t.Fatalf("CreatePlan: %v", err)
 	}
-	if _, err := store.AppendPlanEvent(ctx, metricEvent(0, agentos.EventPlanStarted, spec.PlanID, "", "", spec.RequestedAt.Add(time.Second), nil), "event-1"); err != nil {
+
+	if _, err := appendPlanEvent(ctx, store, metricEventPtr(agentos.EventPlanStarted, spec.PlanID, "", "", spec.RequestedAt.Add(time.Second)), "event-1"); err != nil {
 		t.Fatalf("AppendPlanEvent: %v", err)
 	}
 
-	sinkErr := errors.New("sink unavailable")
+	sinkErr := errTestSinkUnavailable
 	exporter := newTestPlanMetricsExporter(t, store, &recordingPlanMetricsSink{err: sinkErr}, 10)
-	_, err := exporter.Export(ctx, PlanRefScope{AccountID: spec.AccountID, ProjectID: spec.ProjectID})
+
+	scope := PlanRefScope{AccountID: spec.AccountID, ProjectID: spec.ProjectID}
+	_, err := exporter.Export(ctx, &scope)
+
 	if !errors.Is(err, sinkErr) {
 		t.Fatalf("Export error = %v, want sink error", err)
 	}
@@ -111,6 +149,7 @@ func TestPlanMetricsExporterDoesNotAdvanceCheckpointWhenSinkFails(t *testing.T) 
 	if err != nil {
 		t.Fatalf("GetPlanMetricCheckpoint: %v", err)
 	}
+
 	if exists {
 		t.Fatalf("checkpoint advanced after sink failure")
 	}
@@ -118,7 +157,8 @@ func TestPlanMetricsExporterDoesNotAdvanceCheckpointWhenSinkFails(t *testing.T) 
 
 func newTestPlanMetricsExporter(t *testing.T, store *MemoryPlanStore, sink PlanMetricsSink, batchSize int) *PlanMetricsExporter {
 	t.Helper()
-	exporter, err := NewPlanMetricsExporter(PlanMetricsExporterConfig{
+
+	exporter, err := NewPlanMetricsExporter(&PlanMetricsExporterConfig{
 		ExporterID:  "test-exporter",
 		PlanRefs:    store,
 		Plans:       store,
@@ -160,11 +200,12 @@ type recordingPlanMetricsSink struct {
 	err     error
 }
 
-func (s *recordingPlanMetricsSink) RecordPlanMetric(_ context.Context, sample PlanMetricSample) error {
+func (s *recordingPlanMetricsSink) RecordPlanMetric(_ context.Context, sample *PlanMetricSample) error {
 	if s.err != nil {
 		return s.err
 	}
-	s.samples = append(s.samples, sample)
+
+	s.samples = append(s.samples, *sample)
 
 	return nil
 }

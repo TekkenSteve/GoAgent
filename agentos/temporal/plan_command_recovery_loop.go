@@ -7,6 +7,8 @@ import (
 	"time"
 )
 
+var errPlanCommandRecoveryRecovererRequired = errors.New("agentos temporal plan command recovery: recoverer is required")
+
 const (
 	defaultPlanCommandRecoveryInterval = time.Minute
 	defaultPlanCommandRecoveryLimit    = 100
@@ -41,15 +43,17 @@ type PlanCommandRecoveryLoop struct {
 // StartPlanCommandRecovery starts a background recovery loop.
 func StartPlanCommandRecovery(parent context.Context, recoverer PlanCommandRecoverer, cfg PlanCommandRecoveryLoopConfig, observer PlanCommandRecoveryObserver) (*PlanCommandRecoveryLoop, error) {
 	if recoverer == nil {
-		return nil, errors.New("agentos temporal plan command recovery: recoverer is required")
+		return nil, errPlanCommandRecoveryRecovererRequired
 	}
+
 	normalized := normalizePlanCommandRecoveryLoopConfig(cfg)
-	ctx, cancel := context.WithCancel(parent)
 	loop := &PlanCommandRecoveryLoop{
-		cancel: cancel,
-		done:   make(chan struct{}),
+		done: make(chan struct{}),
 	}
-	go loop.run(ctx, recoverer, normalized, observer)
+	ctx, cancel := context.WithCancel(parent)
+	loop.cancel = cancel
+
+	go loop.run(ctx, cancel, recoverer, normalized, observer)
 
 	return loop, nil
 }
@@ -59,20 +63,24 @@ func (l *PlanCommandRecoveryLoop) Stop() {
 	if l == nil {
 		return
 	}
+
 	l.once.Do(func() {
 		l.cancel()
 		<-l.done
 	})
 }
 
-func (l *PlanCommandRecoveryLoop) run(ctx context.Context, recoverer PlanCommandRecoverer, cfg PlanCommandRecoveryLoopConfig, observer PlanCommandRecoveryObserver) {
+func (l *PlanCommandRecoveryLoop) run(ctx context.Context, cancel context.CancelFunc, recoverer PlanCommandRecoverer, cfg PlanCommandRecoveryLoopConfig, observer PlanCommandRecoveryObserver) {
 	defer close(l.done)
+	defer cancel()
+
 	if cfg.RecoverImmediately {
 		runPlanCommandRecoveryPass(ctx, recoverer, cfg.Limit, observer)
 	}
 
 	ticker := time.NewTicker(cfg.Interval)
 	defer ticker.Stop()
+
 	for {
 		select {
 		case <-ctx.Done():
@@ -92,6 +100,7 @@ func runPlanCommandRecoveryPass(ctx context.Context, recoverer PlanCommandRecove
 
 		return
 	}
+
 	if observer != nil {
 		observer.PlanCommandRecoverySucceeded(result)
 	}
@@ -101,6 +110,7 @@ func normalizePlanCommandRecoveryLoopConfig(cfg PlanCommandRecoveryLoopConfig) P
 	if cfg.Interval <= 0 {
 		cfg.Interval = defaultPlanCommandRecoveryInterval
 	}
+
 	if cfg.Limit <= 0 {
 		cfg.Limit = defaultPlanCommandRecoveryLimit
 	}

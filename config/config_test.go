@@ -7,6 +7,8 @@ import (
 )
 
 func TestAgentOSArtifactStoreConfig(t *testing.T) {
+	t.Parallel()
+
 	cfg := AgentOS{
 		ArtifactStoreBackend:          "s3",
 		ArtifactStoreS3Bucket:         "agentos-artifacts",
@@ -32,7 +34,9 @@ func TestAgentOSArtifactStoreConfig(t *testing.T) {
 }
 
 func TestTemporalExternalBackends(t *testing.T) {
-	backends, err := AgentFW{
+	t.Parallel()
+
+	cfg := AgentFW{
 		TemporalExternalBackendsJSON: `[
 			{
 				"name":"langgraph-main",
@@ -50,7 +54,9 @@ func TestTemporalExternalBackends(t *testing.T) {
 				}
 			}
 		]`,
-	}.TemporalExternalBackends()
+	}
+
+	backends, err := cfg.TemporalExternalBackends()
 	if err != nil {
 		t.Fatalf("TemporalExternalBackends: %v", err)
 	}
@@ -59,7 +65,12 @@ func TestTemporalExternalBackends(t *testing.T) {
 		t.Fatalf("backend count = %d", len(backends))
 	}
 
-	got := backends[0]
+	assertTemporalExternalBackend(t, &backends[0])
+}
+
+func assertTemporalExternalBackend(t *testing.T, got *TemporalExternalBackend) {
+	t.Helper()
+
 	if got.Name != "langgraph-main" ||
 		got.TaskQueue != "langgraph-agent-queue" ||
 		got.WorkflowType != "langgraph.agent.v1" ||
@@ -74,7 +85,9 @@ func TestTemporalExternalBackends(t *testing.T) {
 }
 
 func TestHTTPBackends(t *testing.T) {
-	backends, err := AgentFW{
+	t.Parallel()
+
+	cfg := AgentFW{
 		HTTPBackendsJSON: `[
 			{
 				"name":"claude-code",
@@ -82,7 +95,9 @@ func TestHTTPBackends(t *testing.T) {
 				"headers":{"Authorization":"Bearer token"}
 			}
 		]`,
-	}.HTTPBackends()
+	}
+
+	backends, err := cfg.HTTPBackends()
 	if err != nil {
 		t.Fatalf("HTTPBackends: %v", err)
 	}
@@ -100,7 +115,9 @@ func TestHTTPBackends(t *testing.T) {
 }
 
 func TestGRPCBackends(t *testing.T) {
-	backends, err := AgentFW{
+	t.Parallel()
+
+	cfg := AgentFW{
 		GRPCBackendsJSON: `[
 			{
 				"name":"opencode",
@@ -115,7 +132,9 @@ func TestGRPCBackends(t *testing.T) {
 				}
 			}
 		]`,
-	}.GRPCBackends()
+	}
+
+	backends, err := cfg.GRPCBackends()
 	if err != nil {
 		t.Fatalf("GRPCBackends: %v", err)
 	}
@@ -124,7 +143,12 @@ func TestGRPCBackends(t *testing.T) {
 		t.Fatalf("backend count = %d", len(backends))
 	}
 
-	got := backends[0]
+	assertGRPCBackend(t, &backends[0])
+}
+
+func assertGRPCBackend(t *testing.T, got *GRPCBackend) {
+	t.Helper()
+
 	if got.Name != "opencode" ||
 		got.Target != "opencode-runtime:9090" ||
 		!got.Insecure ||
@@ -138,7 +162,9 @@ func TestGRPCBackends(t *testing.T) {
 }
 
 func TestBackendSelectionRules(t *testing.T) {
-	rules, err := AgentFW{
+	t.Parallel()
+
+	cfg := AgentFW{
 		BackendSelectionRulesJSON: `[
 			{
 				"name":"research-report",
@@ -147,7 +173,9 @@ func TestBackendSelectionRules(t *testing.T) {
 				"metadata":{"domain":"research"}
 			}
 		]`,
-	}.BackendSelectionRules()
+	}
+
+	rules, err := cfg.BackendSelectionRules()
 	if err != nil {
 		t.Fatalf("BackendSelectionRules: %v", err)
 	}
@@ -167,7 +195,9 @@ func TestBackendSelectionRules(t *testing.T) {
 }
 
 func TestAgentOSCapabilities(t *testing.T) {
-	capabilities, err := AgentOS{
+	t.Parallel()
+
+	cfg := AgentOS{
 		CapabilitiesJSON: `[
 			{
 				"backend":{"kind":"http","name":"research-http"},
@@ -179,10 +209,13 @@ func TestAgentOSCapabilities(t *testing.T) {
 				"controls":["cancel"]
 			}
 		]`,
-	}.Capabilities()
+	}
+
+	capabilities, err := cfg.Capabilities()
 	if err != nil {
 		t.Fatalf("Capabilities: %v", err)
 	}
+
 	if len(capabilities) != 1 {
 		t.Fatalf("capability count = %d", len(capabilities))
 	}
@@ -198,7 +231,9 @@ func TestAgentOSCapabilities(t *testing.T) {
 }
 
 func TestAgentOSArtifactSchemas(t *testing.T) {
-	schemas, err := AgentOS{
+	t.Parallel()
+
+	cfg := AgentOS{
 		ArtifactSchemasJSON: `[
 			{
 				"ref":"schema:summary",
@@ -206,10 +241,13 @@ func TestAgentOSArtifactSchemas(t *testing.T) {
 				"schema":{"type":"object","required":["summary"]}
 			}
 		]`,
-	}.ArtifactSchemas()
+	}
+
+	schemas, err := cfg.ArtifactSchemas()
 	if err != nil {
 		t.Fatalf("ArtifactSchemas: %v", err)
 	}
+
 	if len(schemas) != 1 {
 		t.Fatalf("schema count = %d", len(schemas))
 	}

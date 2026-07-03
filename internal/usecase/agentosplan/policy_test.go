@@ -8,6 +8,8 @@ import (
 )
 
 func TestEvaluateContinuationPolicy(t *testing.T) {
+	t.Parallel()
+
 	decision := EvaluateContinuationPolicy(agentos.PlanPolicy{
 		ContinueAsNewEvents: 3,
 		MaxHistoryEvents:    10,
@@ -32,6 +34,8 @@ func TestEvaluateContinuationPolicy(t *testing.T) {
 }
 
 func TestEvaluateIterationPolicy(t *testing.T) {
+	t.Parallel()
+
 	decision := EvaluateIterationPolicy(agentos.PlanPolicy{
 		MaxIterations: 2,
 	}, IterationSnapshot{Iterations: 3})
@@ -48,27 +52,36 @@ func TestEvaluateIterationPolicy(t *testing.T) {
 }
 
 func TestBudgetExceeded(t *testing.T) {
+	t.Parallel()
+
 	policy := agentos.PlanPolicy{BudgetCents: 100}
 	if BudgetExceeded(policy, agentos.PlanBudgetUsage{SpentCents: 100}) {
 		t.Fatal("budget should not be exceeded at the exact limit")
 	}
+
 	if !BudgetExceeded(policy, agentos.PlanBudgetUsage{SpentCents: 101}) {
 		t.Fatal("budget should be exceeded above the limit")
 	}
 }
 
 func TestPlanTimedOut(t *testing.T) {
+	t.Parallel()
+
 	startedAt := time.Date(2026, 6, 20, 12, 0, 0, 0, time.UTC)
+
 	policy := agentos.PlanPolicy{TimeoutSeconds: 10}
 	if PlanTimedOut(policy, startedAt, startedAt.Add(9*time.Second)) {
 		t.Fatal("plan should not time out before the configured deadline")
 	}
+
 	if !PlanTimedOut(policy, startedAt, startedAt.Add(10*time.Second)) {
 		t.Fatal("plan should time out at the configured deadline")
 	}
+
 	if PlanTimedOut(agentos.PlanPolicy{}, startedAt, startedAt.Add(time.Hour)) {
 		t.Fatal("plan without timeout policy timed out")
 	}
+
 	if PlanTimedOut(policy, time.Time{}, startedAt.Add(time.Hour)) {
 		t.Fatal("plan without start time timed out")
 	}

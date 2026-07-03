@@ -19,12 +19,18 @@ const subscriberChannelBufferSize = 256
 // It maintains one pump goroutine per stream via StreamHub, so multiple
 // subscribers to the same session share a single XREAD connection.
 type RedisSubscriber struct {
-	hub *redis.StreamHub
+	hub   *redis.StreamHub
+	codec entity.EventCodec
 }
 
 // NewRedisSubscriber creates a RedisSubscriber.
 func NewRedisSubscriber(hub *redis.StreamHub) *RedisSubscriber {
-	return &RedisSubscriber{hub: hub}
+	return NewRedisSubscriberWithCodec(hub, entity.NewEventCodec(nil))
+}
+
+// NewRedisSubscriberWithCodec creates a RedisSubscriber with an explicit event codec.
+func NewRedisSubscriberWithCodec(hub *redis.StreamHub, codec entity.EventCodec) *RedisSubscriber {
+	return &RedisSubscriber{hub: hub, codec: codec}
 }
 
 // Subscribe starts receiving events for a session.
@@ -54,7 +60,7 @@ func (s *RedisSubscriber) Subscribe(_ context.Context, sessionID string, afterSe
 				continue
 			}
 
-			event, err := entity.UnmarshalEvent([]byte(data))
+			event, err := s.codec.UnmarshalEvent([]byte(data))
 			if err != nil {
 				continue // skip corrupt events
 			}

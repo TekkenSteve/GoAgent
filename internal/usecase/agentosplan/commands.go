@@ -8,28 +8,31 @@ import (
 
 // RecoverablePlanCommandStatuses validates a command query scope and returns
 // the statuses that a command reconciler may redeliver.
-func RecoverablePlanCommandStatuses(scope PlanCommandScope) ([]PlanCommandStatus, error) {
+func RecoverablePlanCommandStatuses(scope *PlanCommandScope) ([]PlanCommandStatus, error) {
 	if scope.Limit < 0 {
 		return nil, fmt.Errorf("%w: command limit must be non-negative", agentos.ErrInvalidRunPlan)
 	}
+
 	if (scope.AccountID == "") != (scope.ProjectID == "") {
 		return nil, fmt.Errorf("%w: command account_id and project_id must be provided together", agentos.ErrInvalidPlanScope)
 	}
+
 	if len(scope.Statuses) == 0 {
 		return []PlanCommandStatus{PlanCommandPending, PlanCommandFailed}, nil
 	}
 
 	statuses := make([]PlanCommandStatus, 0, len(scope.Statuses))
+
 	seen := make(map[PlanCommandStatus]struct{}, len(scope.Statuses))
 	for _, status := range scope.Statuses {
-		switch status {
-		case PlanCommandPending, PlanCommandFailed:
-		default:
+		if status != PlanCommandPending && status != PlanCommandFailed {
 			return nil, fmt.Errorf("%w: command status %q is not recoverable", agentos.ErrInvalidRunPlan, status)
 		}
+
 		if _, ok := seen[status]; ok {
 			continue
 		}
+
 		seen[status] = struct{}{}
 		statuses = append(statuses, status)
 	}
@@ -44,6 +47,7 @@ func NormalizeNewPlanCommandStatus(status PlanCommandStatus) (PlanCommandStatus,
 	if status == "" {
 		return PlanCommandPending, nil
 	}
+
 	if status != PlanCommandPending {
 		return "", fmt.Errorf("%w: new command status must be %q, got %q", agentos.ErrInvalidRunPlan, PlanCommandPending, status)
 	}
@@ -58,15 +62,19 @@ func ValidatePlanCommandStatusTransition(current, next PlanCommandStatus) error 
 	if err := validatePlanCommandStatus(current); err != nil {
 		return err
 	}
+
 	if err := validatePlanCommandStatus(next); err != nil {
 		return err
 	}
+
 	if current == next {
 		return nil
 	}
+
 	if current == PlanCommandDelivered {
 		return fmt.Errorf("%w: delivered command is terminal", agentos.ErrInvalidRunPlan)
 	}
+
 	if next == PlanCommandPending {
 		return fmt.Errorf("%w: command status cannot move back to %q", agentos.ErrInvalidRunPlan, PlanCommandPending)
 	}
@@ -87,6 +95,7 @@ func ValidatePlanCommandRef(ref PlanCommandRef) error {
 	if err := ValidatePlanRef(agentos.PlanRef{PlanID: ref.PlanID, AccountID: ref.AccountID, ProjectID: ref.ProjectID}); err != nil {
 		return err
 	}
+
 	if ref.IdempotencyKey == "" {
 		return fmt.Errorf("%w: command idempotency key is required", agentos.ErrInvalidRunPlan)
 	}
@@ -97,7 +106,7 @@ func ValidatePlanCommandRef(ref PlanCommandRef) error {
 // AuditRecordFromPlanCommand returns the durable audit record that must exist
 // before a command may become delivered. Delivered commands are terminal, so
 // this keeps the control-plane outbox and audit trail in lockstep.
-func AuditRecordFromPlanCommand(command PlanCommandRecord) AuditRecord {
+func AuditRecordFromPlanCommand(command *PlanCommandRecord) AuditRecord {
 	return AuditRecord{
 		PlanID:         command.PlanID,
 		AccountID:      command.AccountID,
@@ -111,14 +120,17 @@ func AuditRecordFromPlanCommand(command PlanCommandRecord) AuditRecord {
 
 // ValidatePlanCommandDeliveredAudit verifies that the audit record for a
 // delivered command matches the original command envelope.
-func ValidatePlanCommandDeliveredAudit(command PlanCommandRecord, audit AuditRecord) error {
-	return ValidateAuditIdempotency(audit, AuditRecordFromPlanCommand(command))
+func ValidatePlanCommandDeliveredAudit(command *PlanCommandRecord, audit *AuditRecord) error {
+	record := AuditRecordFromPlanCommand(command)
+
+	return ValidateAuditIdempotency(audit, &record)
 }
 
 func ValidateAuditRef(ref AuditRef) error {
 	if err := ValidatePlanRef(agentos.PlanRef{PlanID: ref.PlanID, AccountID: ref.AccountID, ProjectID: ref.ProjectID}); err != nil {
 		return err
 	}
+
 	if ref.IdempotencyKey == "" {
 		return fmt.Errorf("%w: audit idempotency key is required", agentos.ErrInvalidRunPlan)
 	}

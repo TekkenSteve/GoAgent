@@ -3,6 +3,7 @@ package v1
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"html/template"
 	"net/http"
@@ -16,6 +17,11 @@ import (
 	"github.com/gofiber/fiber/v2"
 )
 
+var (
+	errPlanConsoleLimitNonNegative = errors.New("must be non-negative")
+	errPlanConsoleLimitExceeded    = errors.New("must be less than or equal to")
+)
+
 const (
 	agentOSPlanConsoleDefaultEventLimit    = 100
 	agentOSPlanConsoleDefaultAuditLimit    = 50
@@ -23,9 +29,8 @@ const (
 	agentOSPlanConsoleMaxEventLimit        = 500
 	agentOSPlanConsoleMaxAuditLimit        = 200
 	agentOSPlanConsoleMaxArtifactLimit     = 200
+	inputResolutionParts                   = 3
 )
-
-var agentOSPlanConsoleTemplate = template.Must(template.New("agentos_plan_console").Parse(agentOSPlanConsoleHTML))
 
 // @Summary     AgentOS plan console
 // @Description Render an operator console for one AgentOS RunPlan.
@@ -53,6 +58,7 @@ func (r *V1) agentOSPlanConsole(ctx *fiber.Ctx) error {
 	if err := ctx.QueryParser(&req); err != nil {
 		return errorResponse(ctx, http.StatusBadRequest, "invalid console scope")
 	}
+
 	if err := r.v.Struct(&req); err != nil {
 		return errorResponse(ctx, http.StatusBadRequest, err.Error())
 	}
@@ -61,10 +67,12 @@ func (r *V1) agentOSPlanConsole(ctx *fiber.Ctx) error {
 	if err != nil {
 		return errorResponse(ctx, http.StatusBadRequest, err.Error())
 	}
+
 	auditLimit, err := agentOSPlanConsoleLimit("audit_limit", req.AuditLimit, agentOSPlanConsoleDefaultAuditLimit, agentOSPlanConsoleMaxAuditLimit)
 	if err != nil {
 		return errorResponse(ctx, http.StatusBadRequest, err.Error())
 	}
+
 	artifactLimit, err := agentOSPlanConsoleLimit("artifact_limit", req.ArtifactLimit, agentOSPlanConsoleDefaultArtifactLimit, agentOSPlanConsoleMaxArtifactLimit)
 	if err != nil {
 		return errorResponse(ctx, http.StatusBadRequest, err.Error())
@@ -75,64 +83,93 @@ func (r *V1) agentOSPlanConsole(ctx *fiber.Ctx) error {
 		AccountID: req.AccountID,
 		ProjectID: req.ProjectID,
 	}
-	description, err := r.planRuntime.DescribePlan(ctx.UserContext(), ref)
-	if err != nil {
-		return agentOSError(ctx, err)
-	}
-	events, err := r.planRuntime.ListPlanEvents(ctx.UserContext(), agentos.PlanEventScope{
-		PlanID:    ref.PlanID,
-		AccountID: ref.AccountID,
-		ProjectID: ref.ProjectID,
-		Limit:     eventLimit,
-	})
-	if err != nil {
-		return agentOSError(ctx, err)
-	}
-	debugTraces, err := r.planRuntime.ListPlanDebugTraces(ctx.UserContext(), agentos.PlanDebugTraceScope{
-		PlanID:    ref.PlanID,
-		AccountID: ref.AccountID,
-		ProjectID: ref.ProjectID,
-		Limit:     eventLimit,
-	})
-	if err != nil {
-		return agentOSError(ctx, err)
-	}
-	artifacts, err := r.planRuntime.ListPlanArtifacts(ctx.UserContext(), agentos.PlanArtifactScope{
-		PlanID:    ref.PlanID,
-		AccountID: ref.AccountID,
-		ProjectID: ref.ProjectID,
-		Limit:     artifactLimit,
-	})
-	if err != nil {
-		return agentOSError(ctx, err)
-	}
-	audits, err := r.planRuntime.ListPlanAudits(ctx.UserContext(), agentos.PlanAuditScope{
-		PlanID:    ref.PlanID,
-		AccountID: ref.AccountID,
-		ProjectID: ref.ProjectID,
-		Limit:     auditLimit,
-	})
+
+	data, err := r.collectPlanConsoleData(ctx, ref, eventLimit, auditLimit, artifactLimit)
 	if err != nil {
 		return agentOSError(ctx, err)
 	}
 
-	view := newAgentOSPlanConsoleView(ref, description, events, debugTraces, artifacts, audits)
-	var body bytes.Buffer
-	if err := agentOSPlanConsoleTemplate.Execute(&body, view); err != nil {
-		return errorResponse(ctx, http.StatusInternalServerError, fmt.Sprintf("render plan console: %v", err))
+	view := newAgentOSPlanConsoleView(&ref, &data.description, data.events, data.debugTraces, data.artifacts, data.audits)
+
+	html, err := renderAgentOSPlanConsoleHTML(&view)
+	if err != nil {
+		return errorResponse(ctx, http.StatusInternalServerError, err.Error())
 	}
 
 	ctx.Set(fiber.HeaderContentType, fiber.MIMETextHTMLCharsetUTF8)
-	return ctx.Status(http.StatusOK).Send(body.Bytes())
+
+	return ctx.Status(http.StatusOK).Send(html)
+}
+
+func renderAgentOSPlanConsoleHTML(view *agentOSPlanConsoleView) ([]byte, error) {
+	var body bytes.Buffer
+
+	tmpl, err := template.New("agentos_plan_console").Parse(agentOSPlanConsoleHTML)
+	if err != nil {
+		return nil, fmt.Errorf("parse plan console template: %w", err)
+	}
+
+	if err := tmpl.Execute(&body, view); err != nil {
+		return nil, fmt.Errorf("render plan console: %w", err)
+	}
+
+	return body.Bytes(), nil
+}
+
+type planConsoleData struct {
+	description agentos.RunPlanDescription
+	events      []agentos.PlanEvent
+	debugTraces []agentos.PlanDebugTrace
+	artifacts   []agentos.ArtifactRef
+	audits      []agentos.PlanAuditRecord
+}
+
+func (r *V1) collectPlanConsoleData(ctx *fiber.Ctx, ref agentos.PlanRef, eventLimit, auditLimit, artifactLimit int) (planConsoleData, error) {
+	description, err := r.planRuntime.DescribePlan(ctx.UserContext(), ref)
+	if err != nil {
+		return planConsoleData{}, err
+	}
+
+	events, err := r.planRuntime.ListPlanEvents(ctx.UserContext(), &agentos.PlanEventScope{
+		PlanID: ref.PlanID, AccountID: ref.AccountID, ProjectID: ref.ProjectID, Limit: eventLimit,
+	})
+	if err != nil {
+		return planConsoleData{}, err
+	}
+
+	debugTraces, err := r.planRuntime.ListPlanDebugTraces(ctx.UserContext(), &agentos.PlanDebugTraceScope{
+		PlanID: ref.PlanID, AccountID: ref.AccountID, ProjectID: ref.ProjectID, Limit: eventLimit,
+	})
+	if err != nil {
+		return planConsoleData{}, err
+	}
+
+	artifacts, err := r.planRuntime.ListPlanArtifacts(ctx.UserContext(), &agentos.PlanArtifactScope{
+		PlanID: ref.PlanID, AccountID: ref.AccountID, ProjectID: ref.ProjectID, Limit: artifactLimit,
+	})
+	if err != nil {
+		return planConsoleData{}, err
+	}
+
+	audits, err := r.planRuntime.ListPlanAudits(ctx.UserContext(), &agentos.PlanAuditScope{
+		PlanID: ref.PlanID, AccountID: ref.AccountID, ProjectID: ref.ProjectID, Limit: auditLimit,
+	})
+	if err != nil {
+		return planConsoleData{}, err
+	}
+
+	return planConsoleData{description: description, events: events, debugTraces: debugTraces, artifacts: artifacts, audits: audits}, nil
 }
 
 func agentOSPlanConsoleLimit(name string, requested, defaultValue, maxValue int) (int, error) {
 	if requested < 0 {
-		return 0, fmt.Errorf("%s must be non-negative", name)
+		return 0, fmt.Errorf("%w: %s", errPlanConsoleLimitNonNegative, name)
 	}
+
 	if requested > maxValue {
-		return 0, fmt.Errorf("%s must be less than or equal to %d", name, maxValue)
+		return 0, fmt.Errorf("%w: %s must be less than or equal to %d", errPlanConsoleLimitExceeded, name, maxValue)
 	}
+
 	if requested == 0 {
 		return defaultValue, nil
 	}
@@ -265,7 +302,7 @@ type agentOSPlanConsoleSignalAction struct {
 	Class      string
 }
 
-func newAgentOSPlanConsoleView(ref agentos.PlanRef, description agentos.RunPlanDescription, events []agentos.PlanEvent, debugTraces []agentos.PlanDebugTrace, artifacts []agentos.ArtifactRef, audits []agentos.PlanAuditRecord) agentOSPlanConsoleView {
+func newAgentOSPlanConsoleView(ref *agentos.PlanRef, description *agentos.RunPlanDescription, events []agentos.PlanEvent, debugTraces []agentos.PlanDebugTrace, artifacts []agentos.ArtifactRef, audits []agentos.PlanAuditRecord) agentOSPlanConsoleView {
 	scopeQuery := agentOSPlanConsoleScopeQuery(ref)
 	status := description.Status
 
@@ -273,7 +310,7 @@ func newAgentOSPlanConsoleView(ref agentos.PlanRef, description agentos.RunPlanD
 		PlanID:              ref.PlanID,
 		AccountID:           ref.AccountID,
 		ProjectID:           ref.ProjectID,
-		Status:              newAgentOSPlanConsoleStatusView(status),
+		Status:              newAgentOSPlanConsoleStatusView(&status),
 		Nodes:               newAgentOSPlanConsoleNodeViews(description.Topology.Nodes),
 		GraphEdges:          newAgentOSPlanConsoleEdgeViews(description.Topology.Edges),
 		ActiveRunIDs:        append([]string(nil), status.ActiveRunIDs...),
@@ -293,7 +330,7 @@ func newAgentOSPlanConsoleView(ref agentos.PlanRef, description agentos.RunPlanD
 		PayloadNodeIDKey:    agentos.SignalPayloadNodeID,
 		PayloadReasonKey:    agentos.SignalPayloadReason,
 		Controls: []agentOSPlanConsoleControlAction{
-			{Label: "Pause", Title: "Pause plan", Operation: agentos.ControlPause, Class: "neutral"},
+			{Label: "Pause", Title: "Pause plan", Operation: agentos.ControlPause, Class: NEUTRAL},
 			{Label: "Resume", Title: "Resume plan", Operation: agentos.ControlResume, Class: "primary"},
 			{Label: "Cancel", Title: "Cancel plan", Operation: agentos.ControlCancel, Class: "danger"},
 		},
@@ -304,7 +341,7 @@ func newAgentOSPlanConsoleView(ref agentos.PlanRef, description agentos.RunPlanD
 	}
 }
 
-func newAgentOSPlanConsoleStatusView(status agentos.RunPlanStatus) agentOSPlanConsoleStatusView {
+func newAgentOSPlanConsoleStatusView(status *agentos.RunPlanStatus) agentOSPlanConsoleStatusView {
 	return agentOSPlanConsoleStatusView{
 		LifecycleState: status.LifecycleState,
 		StateClass:     agentOSPlanConsoleStateClass(status.LifecycleState),
@@ -319,7 +356,8 @@ func newAgentOSPlanConsoleStatusView(status agentos.RunPlanStatus) agentOSPlanCo
 
 func newAgentOSPlanConsoleNodeViews(nodes []agentos.PlanTopologyNode) []agentOSPlanConsoleNodeView {
 	views := make([]agentOSPlanConsoleNodeView, 0, len(nodes))
-	for _, node := range nodes {
+	for i := range nodes {
+		node := nodes[i]
 		status := node.Status
 		views = append(views, agentOSPlanConsoleNodeView{
 			NodeID:         node.NodeID,
@@ -358,10 +396,13 @@ func newAgentOSPlanConsoleEdgeViews(edges []agentos.PlanTopologyEdge) []agentOSP
 	return views
 }
 
-func newAgentOSPlanConsoleArtifactViews(ref agentos.PlanRef, artifacts []agentos.ArtifactRef) []agentOSPlanConsoleArtifactView {
+func newAgentOSPlanConsoleArtifactViews(ref *agentos.PlanRef, artifacts []agentos.ArtifactRef) []agentOSPlanConsoleArtifactView {
 	views := make([]agentOSPlanConsoleArtifactView, 0, len(artifacts))
+
 	scopeQuery := agentOSPlanConsoleScopeQuery(ref)
-	for _, artifact := range artifacts {
+
+	for i := range artifacts {
+		artifact := artifacts[i]
 		views = append(views, agentOSPlanConsoleArtifactView{
 			ArtifactID: artifact.ArtifactID,
 			NodeID:     artifact.NodeID,
@@ -382,7 +423,8 @@ func newAgentOSPlanConsoleArtifactViews(ref agentos.PlanRef, artifacts []agentos
 
 func newAgentOSPlanConsoleEventViews(events []agentos.PlanEvent) []agentOSPlanConsoleEventView {
 	views := make([]agentOSPlanConsoleEventView, 0, len(events))
-	for _, event := range events {
+	for i := range events {
+		event := events[i]
 		views = append(views, agentOSPlanConsoleEventView{
 			Sequence:  strconv.FormatInt(event.Sequence, 10),
 			EventID:   event.EventID,
@@ -400,7 +442,8 @@ func newAgentOSPlanConsoleEventViews(events []agentos.PlanEvent) []agentOSPlanCo
 
 func newAgentOSPlanConsoleDebugTraceViews(traces []agentos.PlanDebugTrace) []agentOSPlanConsoleDebugTraceView {
 	views := make([]agentOSPlanConsoleDebugTraceView, 0, len(traces))
-	for _, trace := range traces {
+	for i := range traces {
+		trace := traces[i]
 		views = append(views, agentOSPlanConsoleDebugTraceView{
 			Sequence:        strconv.FormatInt(trace.Sequence, 10),
 			EventType:       string(trace.EventType),
@@ -420,9 +463,11 @@ func agentOSPlanConsoleTransition(transition *agentos.PlanStateTransition) strin
 	if transition == nil {
 		return ""
 	}
+
 	if transition.PreviousLifecycleState == "" {
 		return transition.NextLifecycleState
 	}
+
 	if transition.NextLifecycleState == "" {
 		return transition.PreviousLifecycleState
 	}
@@ -434,16 +479,20 @@ func agentOSPlanConsoleCapability(capability *agentos.PlanCapabilityTrace) strin
 	if capability == nil {
 		return ""
 	}
+
 	parts := []string{agentOSPlanConsoleBackend(capability.Backend), capability.Capability}
 	if len(capability.Controls) > 0 {
 		parts = append(parts, "controls:"+strconv.Itoa(len(capability.Controls)))
 	}
+
 	if len(capability.Signals) > 0 {
 		parts = append(parts, "signals:"+strconv.Itoa(len(capability.Signals)))
 	}
+
 	if capability.HasInputSchema {
 		parts = append(parts, "input-schema")
 	}
+
 	if capability.HasOutputSchema {
 		parts = append(parts, "output-schema")
 	}
@@ -455,13 +504,16 @@ func agentOSPlanConsoleInputResolution(input *agentos.PlanInputResolutionTrace) 
 	if input == nil {
 		return ""
 	}
-	parts := make([]string, 0, 3)
+
+	parts := make([]string, 0, inputResolutionParts)
 	if input.InputDigest != "" {
 		parts = append(parts, "digest:"+input.InputDigest)
 	}
+
 	if len(input.InputKeys) > 0 {
 		parts = append(parts, "keys:"+strings.Join(input.InputKeys, ","))
 	}
+
 	parts = append(parts, "mappings:"+strconv.Itoa(input.MappingCount))
 
 	return strings.Join(parts, " ")
@@ -471,8 +523,10 @@ func agentOSPlanConsoleConditions(conditions []agentos.PlanConditionTrace) strin
 	if len(conditions) == 0 {
 		return ""
 	}
+
 	items := make([]string, 0, len(conditions))
-	for _, condition := range conditions {
+	for i := range conditions {
+		condition := conditions[i]
 		items = append(items, condition.Expression+"="+strconv.FormatBool(condition.Result))
 	}
 
@@ -481,7 +535,8 @@ func agentOSPlanConsoleConditions(conditions []agentos.PlanConditionTrace) strin
 
 func newAgentOSPlanConsoleAuditViews(audits []agentos.PlanAuditRecord) []agentOSPlanConsoleAuditView {
 	views := make([]agentOSPlanConsoleAuditView, 0, len(audits))
-	for _, audit := range audits {
+	for i := range audits {
+		audit := audits[i]
 		views = append(views, agentOSPlanConsoleAuditView{
 			AuditID:        audit.AuditID,
 			Action:         string(audit.Action),
@@ -497,9 +552,10 @@ func newAgentOSPlanConsoleAuditViews(audits []agentos.PlanAuditRecord) []agentOS
 	return views
 }
 
-func agentOSPlanConsoleScopeQuery(ref agentos.PlanRef) string {
+func agentOSPlanConsoleScopeQuery(ref *agentos.PlanRef) string {
 	values := url.Values{}
 	values.Set("account_id", ref.AccountID)
+
 	if ref.ProjectID != "" {
 		values.Set("project_id", ref.ProjectID)
 	}
@@ -511,6 +567,7 @@ func agentOSPlanConsoleBackend(ref agentos.BackendRef) string {
 	if ref.Name == "" {
 		return string(ref.Kind)
 	}
+
 	if ref.Kind == "" {
 		return ref.Name
 	}
@@ -531,9 +588,9 @@ func agentOSPlanConsoleStateClass(state string) string {
 	case agentos.PlanLifecycleRunning, agentos.PlanNodeReady:
 		return "active"
 	case agentos.PlanLifecyclePending, agentos.PlanNodeSkipped:
-		return "neutral"
+		return NEUTRAL
 	default:
-		return "neutral"
+		return NEUTRAL
 	}
 }
 
@@ -549,6 +606,7 @@ func agentOSPlanConsoleJSON(value any) string {
 	if value == nil {
 		return ""
 	}
+
 	data, err := json.MarshalIndent(value, "", "  ")
 	if err != nil {
 		return fmt.Sprintf("%v", value)
@@ -561,6 +619,7 @@ func agentOSPlanConsoleBytes(size int64) string {
 	if size <= 0 {
 		return ""
 	}
+
 	const (
 		kib = 1024
 		mib = kib * 1024
@@ -578,7 +637,9 @@ func agentOSPlanConsoleBytes(size int64) string {
 	}
 }
 
-const agentOSPlanConsoleHTML = `<!doctype html>
+const (
+	NEUTRAL                = "neutral"
+	agentOSPlanConsoleHTML = `<!doctype html>
 <html lang="en">
 <head>
 <meta charset="utf-8">
@@ -1243,3 +1304,4 @@ pre {
 </body>
 </html>
 `
+)

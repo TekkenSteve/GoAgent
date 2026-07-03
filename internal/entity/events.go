@@ -1,5 +1,7 @@
 package entity
 
+import "slices"
+
 type AgentOSEventType string
 
 const (
@@ -24,41 +26,32 @@ const (
 	AgentOSEventCheckpointCreated     AgentOSEventType = "checkpoint.created"
 )
 
-var agentOSStandardEventTypes = map[AgentOSEventType]struct{}{ //nolint:gochecknoglobals // immutable standard event registry
-	AgentOSEventRunStarted:            {},
-	AgentOSEventRunCompleted:          {},
-	AgentOSEventRunFailed:             {},
-	AgentOSEventRunCancelled:          {},
-	AgentOSEventRunPaused:             {},
-	AgentOSEventRunResumed:            {},
-	AgentOSEventAgentStepStarted:      {},
-	AgentOSEventAgentStepCompleted:    {},
-	AgentOSEventAgentStepFailed:       {},
-	AgentOSEventAgentMessageDelta:     {},
-	AgentOSEventAgentMessageCompleted: {},
-	AgentOSEventToolCallStarted:       {},
-	AgentOSEventToolCallDelta:         {},
-	AgentOSEventToolCallCompleted:     {},
-	AgentOSEventToolCallFailed:        {},
-	AgentOSEventApprovalRequested:     {},
-	AgentOSEventApprovalResolved:      {},
-	AgentOSEventUsageReported:         {},
-	AgentOSEventCheckpointCreated:     {},
-}
-
 func IsAgentOSStandardEventType(eventType string) bool {
-	_, ok := agentOSStandardEventTypes[AgentOSEventType(eventType)]
-
-	return ok
+	return slices.Contains(AgentOSStandardEventTypes(), AgentOSEventType(eventType))
 }
 
 func AgentOSStandardEventTypes() []AgentOSEventType {
-	types := make([]AgentOSEventType, 0, len(agentOSStandardEventTypes))
-	for eventType := range agentOSStandardEventTypes {
-		types = append(types, eventType)
+	return []AgentOSEventType{
+		AgentOSEventRunStarted,
+		AgentOSEventRunCompleted,
+		AgentOSEventRunFailed,
+		AgentOSEventRunCancelled,
+		AgentOSEventRunPaused,
+		AgentOSEventRunResumed,
+		AgentOSEventAgentStepStarted,
+		AgentOSEventAgentStepCompleted,
+		AgentOSEventAgentStepFailed,
+		AgentOSEventAgentMessageDelta,
+		AgentOSEventAgentMessageCompleted,
+		AgentOSEventToolCallStarted,
+		AgentOSEventToolCallDelta,
+		AgentOSEventToolCallCompleted,
+		AgentOSEventToolCallFailed,
+		AgentOSEventApprovalRequested,
+		AgentOSEventApprovalResolved,
+		AgentOSEventUsageReported,
+		AgentOSEventCheckpointCreated,
 	}
-
-	return types
 }
 
 // ——— LLM Event ———
@@ -69,16 +62,16 @@ type TextDeltaEvent struct {
 	Index   int    `json:"index"` // content block serial number, used when multiple blocks are interleaved
 }
 
-func (e TextDeltaEvent) Base() BaseEvent   { return e.BaseEvent }      //nolint:gocritic // gocritic complains about struct-embedding pattern
-func (e TextDeltaEvent) EventType() string { return "llm.text.delta" } //nolint:gocritic // gocritic complains about struct-embedding pattern
+func (e *TextDeltaEvent) Base() BaseEvent   { return e.BaseEvent }
+func (e *TextDeltaEvent) EventType() string { return "llm.text.delta" }
 
 type ReasoningDeltaEvent struct {
 	BaseEvent
 	Reasoning string `json:"reasoning"`
 }
 
-func (e ReasoningDeltaEvent) Base() BaseEvent   { return e.BaseEvent }           //nolint:gocritic // gocritic complains about struct-embedding pattern
-func (e ReasoningDeltaEvent) EventType() string { return "llm.reasoning.delta" } //nolint:gocritic // gocritic complains about struct-embedding pattern
+func (e *ReasoningDeltaEvent) Base() BaseEvent   { return e.BaseEvent }
+func (e *ReasoningDeltaEvent) EventType() string { return "llm.reasoning.delta" }
 
 type ToolCallStartEvent struct {
 	BaseEvent
@@ -87,8 +80,8 @@ type ToolCallStartEvent struct {
 	ToolName      string `json:"tool_name"`
 }
 
-func (e ToolCallStartEvent) Base() BaseEvent   { return e.BaseEvent }           //nolint:gocritic // gocritic complains about struct-embedding pattern
-func (e ToolCallStartEvent) EventType() string { return "llm.tool_call.start" } //nolint:gocritic // gocritic complains about struct-embedding pattern
+func (e *ToolCallStartEvent) Base() BaseEvent   { return e.BaseEvent }
+func (e *ToolCallStartEvent) EventType() string { return "llm.tool_call.start" }
 
 type ToolCallDeltaEvent struct {
 	BaseEvent
@@ -96,8 +89,8 @@ type ToolCallDeltaEvent struct {
 	ArgumentsDelta string `json:"arguments_delta"`
 }
 
-func (e ToolCallDeltaEvent) Base() BaseEvent   { return e.BaseEvent }           //nolint:gocritic // gocritic complains about struct-embedding pattern
-func (e ToolCallDeltaEvent) EventType() string { return "llm.tool_call.delta" } //nolint:gocritic // gocritic complains about struct-embedding pattern
+func (e *ToolCallDeltaEvent) Base() BaseEvent   { return e.BaseEvent }
+func (e *ToolCallDeltaEvent) EventType() string { return "llm.tool_call.delta" }
 
 type ToolCallFinishEvent struct {
 	BaseEvent
@@ -107,8 +100,8 @@ type ToolCallFinishEvent struct {
 	RawArguments string `json:"raw_arguments,omitempty"`
 }
 
-func (e ToolCallFinishEvent) Base() BaseEvent   { return e.BaseEvent }            //nolint:gocritic // gocritic complains about struct-embedding pattern
-func (e ToolCallFinishEvent) EventType() string { return "llm.tool_call.finish" } //nolint:gocritic // gocritic complains about struct-embedding pattern
+func (e *ToolCallFinishEvent) Base() BaseEvent   { return e.BaseEvent }
+func (e *ToolCallFinishEvent) EventType() string { return "llm.tool_call.finish" }
 
 type UsageFinishEvent struct {
 	BaseEvent
@@ -116,8 +109,8 @@ type UsageFinishEvent struct {
 	Model string `json:"model"`
 }
 
-func (e UsageFinishEvent) Base() BaseEvent   { return e.BaseEvent }        //nolint:gocritic // gocritic complains about struct-embedding pattern
-func (e UsageFinishEvent) EventType() string { return "llm.usage.finish" } //nolint:gocritic // gocritic complains about struct-embedding pattern
+func (e *UsageFinishEvent) Base() BaseEvent   { return e.BaseEvent }
+func (e *UsageFinishEvent) EventType() string { return "llm.usage.finish" }
 
 // ——— Tool execution event ———
 
@@ -127,8 +120,8 @@ type ToolExecStartEvent struct {
 	ToolName   string `json:"tool_name"`
 }
 
-func (e ToolExecStartEvent) Base() BaseEvent   { return e.BaseEvent }            //nolint:gocritic // gocritic complains about struct-embedding pattern
-func (e ToolExecStartEvent) EventType() string { return "tool.execution.start" } //nolint:gocritic // gocritic complains about struct-embedding pattern
+func (e *ToolExecStartEvent) Base() BaseEvent   { return e.BaseEvent }
+func (e *ToolExecStartEvent) EventType() string { return "tool.execution.start" }
 
 type ToolExecStdoutEvent struct {
 	BaseEvent
@@ -136,8 +129,8 @@ type ToolExecStdoutEvent struct {
 	StdoutDelta string `json:"stdout_delta"`
 }
 
-func (e ToolExecStdoutEvent) Base() BaseEvent   { return e.BaseEvent }             //nolint:gocritic // gocritic complains about struct-embedding pattern
-func (e ToolExecStdoutEvent) EventType() string { return "tool.execution.stdout" } //nolint:gocritic // gocritic complains about struct-embedding pattern
+func (e *ToolExecStdoutEvent) Base() BaseEvent   { return e.BaseEvent }
+func (e *ToolExecStdoutEvent) EventType() string { return "tool.execution.stdout" }
 
 type ToolExecStderrEvent struct {
 	BaseEvent
@@ -145,8 +138,8 @@ type ToolExecStderrEvent struct {
 	StderrDelta string `json:"stderr_delta"`
 }
 
-func (e ToolExecStderrEvent) Base() BaseEvent   { return e.BaseEvent }             //nolint:gocritic // gocritic complains about struct-embedding pattern
-func (e ToolExecStderrEvent) EventType() string { return "tool.execution.stderr" } //nolint:gocritic // gocritic complains about struct-embedding pattern
+func (e *ToolExecStderrEvent) Base() BaseEvent   { return e.BaseEvent }
+func (e *ToolExecStderrEvent) EventType() string { return "tool.execution.stderr" }
 
 type ToolExecFinishEvent struct {
 	BaseEvent
@@ -158,8 +151,8 @@ type ToolExecFinishEvent struct {
 	DurationMs int64  `json:"duration_ms,omitempty"`
 }
 
-func (e ToolExecFinishEvent) Base() BaseEvent   { return e.BaseEvent }             //nolint:gocritic // gocritic complains about struct-embedding pattern
-func (e ToolExecFinishEvent) EventType() string { return "tool.execution.finish" } //nolint:gocritic // gocritic complains about struct-embedding pattern
+func (e *ToolExecFinishEvent) Base() BaseEvent   { return e.BaseEvent }
+func (e *ToolExecFinishEvent) EventType() string { return "tool.execution.finish" }
 
 // ——— Agent Event ———
 
@@ -169,8 +162,8 @@ type AgentRunStartEvent struct {
 	InputSummary string `json:"input_summary,omitempty"`
 }
 
-func (e AgentRunStartEvent) Base() BaseEvent   { return e.BaseEvent }       //nolint:gocritic // gocritic complains about struct-embedding pattern
-func (e AgentRunStartEvent) EventType() string { return "agent.run.start" } //nolint:gocritic // gocritic complains about struct-embedding pattern
+func (e *AgentRunStartEvent) Base() BaseEvent   { return e.BaseEvent }
+func (e *AgentRunStartEvent) EventType() string { return "agent.run.start" }
 
 type AgentRunFinishEvent struct {
 	BaseEvent
@@ -178,8 +171,8 @@ type AgentRunFinishEvent struct {
 	Usage        *Usage `json:"usage,omitempty"`
 }
 
-func (e AgentRunFinishEvent) Base() BaseEvent   { return e.BaseEvent }        //nolint:gocritic // gocritic complains about struct-embedding pattern
-func (e AgentRunFinishEvent) EventType() string { return "agent.run.finish" } //nolint:gocritic // gocritic complains about struct-embedding pattern
+func (e *AgentRunFinishEvent) Base() BaseEvent   { return e.BaseEvent }
+func (e *AgentRunFinishEvent) EventType() string { return "agent.run.finish" }
 
 // ——— System event ———
 
@@ -189,8 +182,8 @@ type PrepStageEvent struct {
 	Progress int    `json:"progress"` // 0-100
 }
 
-func (e PrepStageEvent) Base() BaseEvent   { return e.BaseEvent }               //nolint:gocritic // gocritic complains about struct-embedding pattern
-func (e PrepStageEvent) EventType() string { return "system.prep_stage.delta" } //nolint:gocritic // gocritic complains about struct-embedding pattern
+func (e *PrepStageEvent) Base() BaseEvent   { return e.BaseEvent }
+func (e *PrepStageEvent) EventType() string { return "system.prep_stage.delta" }
 
 type ContextUsageEvent struct {
 	BaseEvent
@@ -200,8 +193,8 @@ type ContextUsageEvent struct {
 	Compressed     *bool `json:"compressed,omitempty"`
 }
 
-func (e ContextUsageEvent) Base() BaseEvent   { return e.BaseEvent }                  //nolint:gocritic // gocritic complains about struct-embedding pattern
-func (e ContextUsageEvent) EventType() string { return "system.context_usage.delta" } //nolint:gocritic // gocritic complains about struct-embedding pattern
+func (e *ContextUsageEvent) Base() BaseEvent   { return e.BaseEvent }
+func (e *ContextUsageEvent) EventType() string { return "system.context_usage.delta" }
 
 type StateDeltaEvent struct {
 	BaseEvent
@@ -209,8 +202,8 @@ type StateDeltaEvent struct {
 	Value any    `json:"value"`
 }
 
-func (e StateDeltaEvent) Base() BaseEvent   { return e.BaseEvent }          //nolint:gocritic // gocritic complains about struct-embedding pattern
-func (e StateDeltaEvent) EventType() string { return "system.state.delta" } //nolint:gocritic // gocritic complains about struct-embedding pattern
+func (e *StateDeltaEvent) Base() BaseEvent   { return e.BaseEvent }
+func (e *StateDeltaEvent) EventType() string { return "system.state.delta" }
 
 type InterruptEvent struct {
 	BaseEvent
@@ -218,8 +211,8 @@ type InterruptEvent struct {
 	InterruptedEventID string `json:"interrupted_event_id,omitempty"`
 }
 
-func (e InterruptEvent) Base() BaseEvent   { return e.BaseEvent }        //nolint:gocritic // gocritic complains about struct-embedding pattern
-func (e InterruptEvent) EventType() string { return "system.interrupt" } //nolint:gocritic // gocritic complains about struct-embedding pattern
+func (e *InterruptEvent) Base() BaseEvent   { return e.BaseEvent }
+func (e *InterruptEvent) EventType() string { return "system.interrupt" }
 
 type AgentErrorEvent struct {
 	BaseEvent
@@ -228,8 +221,8 @@ type AgentErrorEvent struct {
 	Recoverable  bool   `json:"recoverable"`
 }
 
-func (e AgentErrorEvent) Base() BaseEvent   { return e.BaseEvent }    //nolint:gocritic // gocritic complains about struct-embedding pattern
-func (e AgentErrorEvent) EventType() string { return "system.error" } //nolint:gocritic // gocritic complains about struct-embedding pattern
+func (e *AgentErrorEvent) Base() BaseEvent   { return e.BaseEvent }
+func (e *AgentErrorEvent) EventType() string { return "system.error" }
 
 // ——— User Event (Reserved for Two-Way Communication) ———
 
@@ -239,8 +232,8 @@ type UserCommandEvent struct {
 	Payload map[string]any `json:"payload,omitempty"`
 }
 
-func (e UserCommandEvent) Base() BaseEvent   { return e.BaseEvent }    //nolint:gocritic // gocritic complains about struct-embedding pattern
-func (e UserCommandEvent) EventType() string { return "user.command" } //nolint:gocritic // gocritic complains about struct-embedding pattern
+func (e *UserCommandEvent) Base() BaseEvent   { return e.BaseEvent }
+func (e *UserCommandEvent) EventType() string { return "user.command" }
 
 type UserFeedbackEvent struct {
 	BaseEvent
@@ -249,8 +242,8 @@ type UserFeedbackEvent struct {
 	Payload       any    `json:"payload,omitempty"`
 }
 
-func (e UserFeedbackEvent) Base() BaseEvent   { return e.BaseEvent }     //nolint:gocritic // gocritic complains about struct-embedding pattern
-func (e UserFeedbackEvent) EventType() string { return "user.feedback" } //nolint:gocritic // gocritic complains about struct-embedding pattern
+func (e *UserFeedbackEvent) Base() BaseEvent   { return e.BaseEvent }
+func (e *UserFeedbackEvent) EventType() string { return "user.feedback" }
 
 // AgentOSEvent is the canonical event envelope accepted from external AgentOS backends.
 type AgentOSEvent struct {
@@ -258,5 +251,5 @@ type AgentOSEvent struct {
 	Payload map[string]any `json:"payload,omitempty"`
 }
 
-func (e AgentOSEvent) Base() BaseEvent   { return e.BaseEvent }           //nolint:gocritic // gocritic complains about struct-embedding pattern
-func (e AgentOSEvent) EventType() string { return e.BaseEvent.EventType } //nolint:gocritic // gocritic complains about struct-embedding pattern
+func (e *AgentOSEvent) Base() BaseEvent   { return e.BaseEvent }
+func (e *AgentOSEvent) EventType() string { return e.BaseEvent.EventType }

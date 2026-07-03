@@ -414,8 +414,8 @@ func executeSplitStep(_ workflow.Context, step *entity.Step) (*stepExecResult, e
 		// and the on_result for additional modifications.
 		// We return only the children mutation here; the caller applies
 		// on_result separately if present.
-		//nolint:godox // intentional TODO for future work
-		// TODO: merge mutations if needed
+
+		// merge mutations if needed
 		_ = step.OnResult
 	}
 

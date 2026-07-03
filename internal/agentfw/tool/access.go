@@ -23,7 +23,7 @@ type AuditRecord struct {
 
 // AuditSink writes audit records.
 type AuditSink interface {
-	Write(ctx context.Context, record AuditRecord) error
+	Write(ctx context.Context, record *AuditRecord) error
 }
 
 // TierAuthorizer enforces subscription-tier access and writes audit logs.
@@ -42,7 +42,7 @@ func (a TierAuthorizer) Authorize(ctx context.Context, req *Request) error {
 	}
 
 	if a.Audit != nil {
-		if err := a.Audit.Write(ctx, AuditRecord{
+		if err := a.Audit.Write(ctx, &AuditRecord{
 			RunID:      req.RunID,
 			AccountID:  req.AccountID,
 			ProjectID:  req.ProjectID,

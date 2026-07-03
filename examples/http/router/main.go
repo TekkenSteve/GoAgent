@@ -53,7 +53,7 @@ func main() {
 	fmt.Fprintln(os.Stdout, "The eval step dynamically appends branch-specific steps via OnResult.")
 	fmt.Fprintln(os.Stdout)
 
-	status, err := c.ExecuteOrchestration(ctx, client.OrchestrationRequest{
+	status, err := c.ExecuteOrchestration(ctx, &client.OrchestrationRequest{
 		RunID: runID,
 		Steps: routerSteps(),
 	})

@@ -17,7 +17,7 @@ type AgentOSStart struct {
 	SystemPrompt   string             `json:"system_prompt,omitempty"`
 	UserMessage    string             `json:"user_message,omitempty"`
 	IdempotencyKey string             `json:"idempotency_key,omitempty"`
-	RequestedAt    time.Time          `json:"requested_at,omitempty"`
+	RequestedAt    time.Time          `json:"requested_at,omitzero"`
 	Metadata       map[string]string  `json:"metadata,omitempty"`
 	Backend        agentos.BackendRef `json:"backend" validate:"required"`
 	Input          map[string]any     `json:"input,omitempty"`
@@ -29,14 +29,14 @@ type AgentOSSignal struct {
 	IdempotencyKey string             `json:"idempotency_key,omitempty"`
 	ActorID        string             `json:"actor_id,omitempty"`
 	Payload        map[string]any     `json:"payload,omitempty"`
-	SentAt         time.Time          `json:"sent_at,omitempty"`
+	SentAt         time.Time          `json:"sent_at,omitzero"`
 }
 
 // AgentOSControl sends a lifecycle control operation to a generic AgentOS run.
 type AgentOSControl struct {
 	Operation      agentos.ControlOperation `json:"operation" validate:"required"`
 	IdempotencyKey string                   `json:"idempotency_key,omitempty"`
-	RequestedAt    time.Time                `json:"requested_at,omitempty"`
+	RequestedAt    time.Time                `json:"requested_at,omitzero"`
 	ActorID        string                   `json:"actor_id,omitempty"`
 	Metadata       map[string]string        `json:"metadata,omitempty"`
 }
@@ -49,7 +49,15 @@ type AgentOSPlanSignal struct {
 	IdempotencyKey string             `json:"idempotency_key,omitempty"`
 	ActorID        string             `json:"actor_id,omitempty"`
 	Payload        map[string]any     `json:"payload,omitempty"`
-	SentAt         time.Time          `json:"sent_at,omitempty"`
+	SentAt         time.Time          `json:"sent_at,omitzero"`
+}
+
+func (r *AgentOSPlanSignal) GetAccountID() string {
+	return r.AccountID
+}
+
+func (r *AgentOSPlanSignal) GetProjectID() string {
+	return r.ProjectID
 }
 
 // AgentOSPlanControl sends a lifecycle control operation to a RunPlan inside tenant scope.
@@ -58,9 +66,17 @@ type AgentOSPlanControl struct {
 	AccountID      string                   `json:"account_id" validate:"required"`
 	ProjectID      string                   `json:"project_id" validate:"required"`
 	IdempotencyKey string                   `json:"idempotency_key,omitempty"`
-	RequestedAt    time.Time                `json:"requested_at,omitempty"`
+	RequestedAt    time.Time                `json:"requested_at,omitzero"`
 	ActorID        string                   `json:"actor_id,omitempty"`
 	Metadata       map[string]string        `json:"metadata,omitempty"`
+}
+
+func (r *AgentOSPlanControl) GetAccountID() string {
+	return r.AccountID
+}
+
+func (r *AgentOSPlanControl) GetProjectID() string {
+	return r.ProjectID
 }
 
 // AgentOSPlanStreamScope selects plan events for REST streaming.
@@ -134,7 +150,7 @@ type AgentOSEvent struct {
 	Sequence  int64             `json:"sequence,omitempty"`
 	EventType agentos.EventType `json:"event_type" validate:"required"`
 	Source    string            `json:"source" validate:"required"`
-	Timestamp time.Time         `json:"timestamp,omitempty"`
+	Timestamp time.Time         `json:"timestamp"`
 	TraceID   string            `json:"trace_id,omitempty"`
 	Tags      map[string]string `json:"tags,omitempty"`
 	Payload   map[string]any    `json:"payload,omitempty"`

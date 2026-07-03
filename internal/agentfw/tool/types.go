@@ -96,7 +96,7 @@ type PolicyProvider interface {
 // IdempotencyStore records and resolves idempotency results.
 type IdempotencyStore interface {
 	Get(ctx context.Context, key string) (Result, bool, error)
-	Put(ctx context.Context, key string, result Result) error
+	Put(ctx context.Context, key string, result *Result) error
 }
 
 // ErrValidation indicates the request payload is invalid.

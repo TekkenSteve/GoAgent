@@ -9,62 +9,74 @@ import (
 )
 
 func TestValidateRunBackendIndexIdempotencyAcceptsSameOwnership(t *testing.T) {
+	t.Parallel()
+
 	record := testRunBackendIndexRecord()
-	if err := ValidateRunBackendIndexIdempotency(record, record); err != nil {
+	if err := ValidateRunBackendIndexIdempotency(&record, &record); err != nil {
 		t.Fatalf("ValidateRunBackendIndexIdempotency: %v", err)
 	}
 }
 
 func TestValidateRunBackendIndexIdempotencyRejectsDifferentRun(t *testing.T) {
+	t.Parallel()
+
 	existing := testRunBackendIndexRecord()
 	requested := existing
 	requested.RunID = "run-2"
 
-	err := ValidateRunBackendIndexIdempotency(existing, requested)
+	err := ValidateRunBackendIndexIdempotency(&existing, &requested)
 	if !errors.Is(err, agentos.ErrInvalidRunSpec) {
 		t.Fatalf("error = %v, want ErrInvalidRunSpec", err)
 	}
 }
 
 func TestValidateRunBackendIndexIdempotencyRejectsDifferentPlanNode(t *testing.T) {
+	t.Parallel()
+
 	existing := testRunBackendIndexRecord()
 	requested := existing
 	requested.NodeID = "node-2"
 
-	err := ValidateRunBackendIndexIdempotency(existing, requested)
+	err := ValidateRunBackendIndexIdempotency(&existing, &requested)
 	if !errors.Is(err, agentos.ErrInvalidRunPlan) {
 		t.Fatalf("error = %v, want ErrInvalidRunPlan", err)
 	}
 }
 
 func TestValidateRunBackendIndexIdempotencyRejectsDifferentScope(t *testing.T) {
+	t.Parallel()
+
 	existing := testRunBackendIndexRecord()
 	requested := existing
 	requested.AccountID = "account-2"
 
-	err := ValidateRunBackendIndexIdempotency(existing, requested)
+	err := ValidateRunBackendIndexIdempotency(&existing, &requested)
 	if !errors.Is(err, agentos.ErrInvalidRunSpec) {
 		t.Fatalf("error = %v, want ErrInvalidRunSpec", err)
 	}
 }
 
 func TestValidateRunBackendIndexIdempotencyRejectsDifferentBackend(t *testing.T) {
+	t.Parallel()
+
 	existing := testRunBackendIndexRecord()
 	requested := existing
 	requested.BackendName = "other"
 
-	err := ValidateRunBackendIndexIdempotency(existing, requested)
+	err := ValidateRunBackendIndexIdempotency(&existing, &requested)
 	if !errors.Is(err, agentos.ErrInvalidBackendRef) {
 		t.Fatalf("error = %v, want ErrInvalidBackendRef", err)
 	}
 }
 
 func TestValidateRunBackendIndexIdempotencyRejectsDifferentKey(t *testing.T) {
+	t.Parallel()
+
 	existing := testRunBackendIndexRecord()
 	requested := existing
 	requested.IdempotencyKey = "other-key"
 
-	err := ValidateRunBackendIndexIdempotency(existing, requested)
+	err := ValidateRunBackendIndexIdempotency(&existing, &requested)
 	if !errors.Is(err, agentos.ErrInvalidRunSpec) {
 		t.Fatalf("error = %v, want ErrInvalidRunSpec", err)
 	}

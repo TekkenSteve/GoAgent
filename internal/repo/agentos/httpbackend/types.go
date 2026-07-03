@@ -35,7 +35,7 @@ type controlRequest struct {
 	RequestedAt    time.Time                `json:"requested_at"`
 }
 
-func startRequestFromSpec(spec agentos.RunSpec) startRequest {
+func startRequestFromSpec(spec *agentos.RunSpec) startRequest {
 	requestedAt := spec.RequestedAt
 	if requestedAt.IsZero() {
 		requestedAt = time.Now().UTC()
@@ -58,7 +58,7 @@ func startRequestFromSpec(spec agentos.RunSpec) startRequest {
 	}
 }
 
-func signalRequestFromSignal(signal agentos.Signal) signalRequest {
+func signalRequestFromSignal(signal *agentos.Signal) signalRequest {
 	sentAt := signal.SentAt
 	if sentAt.IsZero() {
 		sentAt = time.Now().UTC()
@@ -72,7 +72,7 @@ func signalRequestFromSignal(signal agentos.Signal) signalRequest {
 	}
 }
 
-func controlRequestFromControl(control agentos.ControlRequest) controlRequest {
+func controlRequestFromControl(control *agentos.ControlRequest) controlRequest {
 	requestedAt := control.RequestedAt
 	if requestedAt.IsZero() {
 		requestedAt = time.Now().UTC()

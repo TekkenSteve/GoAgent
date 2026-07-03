@@ -127,7 +127,6 @@ func (s *ScrapeWebpage) Execute(ctx context.Context, args map[string]any) (any, 
 	}
 
 	ch := make(chan scrapeOut, len(urlList))
-
 	for i, u := range urlList {
 		go func(idx int, url string) {
 			r := s.scrape(ctx, url)

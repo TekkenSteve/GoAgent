@@ -13,6 +13,11 @@ import (
 	agentosruntime "github.com/TekkenSteve/GoAgent/internal/usecase/agentosruntime"
 )
 
+var (
+	errHTTPBackendSubscriberNotConfigured = errors.New("http backend: event subscriber is not configured")
+	errHTTPBackendUnexpectedStatus        = errors.New("http backend: unexpected status")
+)
+
 // Backend adapts a remote HTTP agent runtime to AgentOS.
 type Backend struct {
 	client     *http.Client
@@ -25,6 +30,7 @@ func NewBackend(client *http.Client, subscriber agentosruntime.EventSubscriber, 
 	if err := config.validate(); err != nil {
 		return nil, err
 	}
+
 	if client == nil {
 		client = http.DefaultClient
 	}
@@ -37,12 +43,18 @@ func NewBackend(client *http.Client, subscriber agentosruntime.EventSubscriber, 
 }
 
 // Start starts a remote HTTP agent run.
-func (b *Backend) Start(ctx context.Context, spec agentos.RunSpec) (agentos.RunStatus, error) {
+func (b *Backend) Start(ctx context.Context, spec *agentos.RunSpec) (agentos.RunStatus, error) {
+	if spec == nil {
+		return agentos.RunStatus{}, fmt.Errorf("%w: run spec is required", agentos.ErrInvalidRunSpec)
+	}
+
 	if spec.RunID == "" {
 		return agentos.RunStatus{}, fmt.Errorf("%w: run id is required", agentos.ErrInvalidRunSpec)
 	}
+
 	if spec.Backend != b.config.Ref() {
-		return agentos.RunStatus{}, fmt.Errorf("%w: run backend %s/%s does not match http backend %s/%s",
+		return agentos.RunStatus{}, fmt.Errorf(
+			"%w: run backend %s/%s does not match http backend %s/%s",
 			agentos.ErrInvalidBackendRef,
 			spec.Backend.Kind,
 			spec.Backend.Name,
@@ -55,6 +67,7 @@ func (b *Backend) Start(ctx context.Context, spec agentos.RunSpec) (agentos.RunS
 	if err := b.doJSON(ctx, http.MethodPost, "/runs", startRequestFromSpec(spec), &status); err != nil {
 		return agentos.RunStatus{}, fmt.Errorf("http backend - start: %w", err)
 	}
+
 	if status.RunID == "" {
 		status.RunID = spec.RunID
 	}
@@ -63,10 +76,15 @@ func (b *Backend) Start(ctx context.Context, spec agentos.RunSpec) (agentos.RunS
 }
 
 // Signal sends a business signal to a remote HTTP agent run.
-func (b *Backend) Signal(ctx context.Context, runID string, signal agentos.Signal) error {
+func (b *Backend) Signal(ctx context.Context, runID string, signal *agentos.Signal) error {
 	if runID == "" {
 		return fmt.Errorf("%w: run id is required", agentos.ErrInvalidRunSpec)
 	}
+
+	if signal == nil {
+		return fmt.Errorf("%w: signal is required", agentos.ErrInvalidSignal)
+	}
+
 	if signal.Type == "" {
 		return fmt.Errorf("%w: type is required", agentos.ErrInvalidSignal)
 	}
@@ -79,10 +97,11 @@ func (b *Backend) Signal(ctx context.Context, runID string, signal agentos.Signa
 }
 
 // Control sends a lifecycle control operation to a remote HTTP agent run.
-func (b *Backend) Control(ctx context.Context, runID string, control agentos.ControlRequest) error {
+func (b *Backend) Control(ctx context.Context, runID string, control *agentos.ControlRequest) error {
 	if runID == "" {
 		return fmt.Errorf("%w: run id is required", agentos.ErrInvalidRunSpec)
 	}
+
 	if err := agentos.ValidateControlRequest(control); err != nil {
 		return err
 	}
@@ -104,6 +123,7 @@ func (b *Backend) Status(ctx context.Context, runID string) (agentos.RunStatus, 
 	if err := b.doJSON(ctx, http.MethodGet, "/runs/"+runID+"/status", nil, &status); err != nil {
 		return agentos.RunStatus{}, fmt.Errorf("http backend - status: %w", err)
 	}
+
 	if status.RunID == "" {
 		status.RunID = runID
 	}
@@ -114,7 +134,7 @@ func (b *Backend) Status(ctx context.Context, runID string) (agentos.RunStatus, 
 // Subscribe returns the shared AgentOS event stream for the run.
 func (b *Backend) Subscribe(ctx context.Context, scope agentos.StreamScope) (agentos.Subscription, error) {
 	if b.subscriber == nil {
-		return nil, errors.New("http backend: event subscriber is not configured")
+		return nil, errHTTPBackendSubscriberNotConfigured
 	}
 
 	return b.subscriber.SubscribeAgentOS(ctx, scope)
@@ -132,27 +152,33 @@ func (b *Backend) Capabilities() agentosruntime.BackendCapabilities {
 	}
 }
 
-func (b *Backend) doJSON(ctx context.Context, method, path string, input any, output any) error {
-	var body io.Reader
-	if input != nil {
-		data, err := json.Marshal(input)
-		if err != nil {
-			return fmt.Errorf("marshal request: %w", err)
-		}
-		body = bytes.NewReader(data)
+const maxResponseBodySize = 4096
+
+func checkHTTPResponse(resp *http.Response) error {
+	if resp.StatusCode >= http.StatusOK && resp.StatusCode < http.StatusMultipleChoices {
+		return nil
+	}
+
+	data, err := io.ReadAll(io.LimitReader(resp.Body, maxResponseBodySize))
+	if err != nil {
+		return fmt.Errorf("read response body: %w", err)
+	}
+
+	return fmt.Errorf("%w: status %d: %s", errHTTPBackendUnexpectedStatus, resp.StatusCode, string(data))
+}
+
+func (b *Backend) doJSON(ctx context.Context, method, path string, input, output any) error {
+	body, err := jsonBody(input)
+	if err != nil {
+		return err
 	}
 
 	req, err := http.NewRequestWithContext(ctx, method, b.config.endpoint(path), body)
 	if err != nil {
 		return fmt.Errorf("build request: %w", err)
 	}
-	req.Header.Set("Accept", "application/json")
-	if input != nil {
-		req.Header.Set("Content-Type", "application/json")
-	}
-	for key, value := range b.config.Headers {
-		req.Header.Set(key, value)
-	}
+
+	applyJSONHeaders(req, input != nil, b.config.Headers)
 
 	resp, err := b.client.Do(req)
 	if err != nil {
@@ -160,11 +186,39 @@ func (b *Backend) doJSON(ctx context.Context, method, path string, input any, ou
 	}
 	defer resp.Body.Close()
 
-	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
-		data, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
-
-		return fmt.Errorf("unexpected status %d: %s", resp.StatusCode, string(data))
+	if err := checkHTTPResponse(resp); err != nil {
+		return err
 	}
+
+	return decodeJSONResponse(resp, output)
+}
+
+func jsonBody(input any) (io.Reader, error) {
+	if input == nil {
+		return nil, nil
+	}
+
+	data, err := json.Marshal(input)
+	if err != nil {
+		return nil, fmt.Errorf("marshal request: %w", err)
+	}
+
+	return bytes.NewReader(data), nil
+}
+
+func applyJSONHeaders(req *http.Request, hasInput bool, headers map[string]string) {
+	req.Header.Set("Accept", "application/json")
+
+	if hasInput {
+		req.Header.Set("Content-Type", "application/json")
+	}
+
+	for key, value := range headers {
+		req.Header.Set(key, value)
+	}
+}
+
+func decodeJSONResponse(resp *http.Response, output any) error {
 	if output == nil || resp.StatusCode == http.StatusNoContent {
 		return nil
 	}

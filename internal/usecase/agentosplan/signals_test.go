@@ -7,8 +7,31 @@ import (
 	"github.com/TekkenSteve/GoAgent/agentos"
 )
 
+func TestValidatePlanSignalRejectsNilSignal(t *testing.T) {
+	t.Parallel()
+
+	err := ValidatePlanSignal(nil)
+	if !errors.Is(err, agentos.ErrInvalidSignal) {
+		t.Fatalf("error = %v, want ErrInvalidSignal", err)
+	}
+}
+
+func TestPlanSignalHelpersHandleNilSignal(t *testing.T) {
+	t.Parallel()
+
+	if _, err := PlanSignalNodeID(nil); !errors.Is(err, agentos.ErrInvalidSignal) {
+		t.Fatalf("PlanSignalNodeID nil error = %v, want ErrInvalidSignal", err)
+	}
+
+	if reason := PlanSignalReason(nil); reason != "" {
+		t.Fatalf("PlanSignalReason nil = %q, want empty", reason)
+	}
+}
+
 func TestValidatePlanSignalRequiresRetryNodeID(t *testing.T) {
-	err := ValidatePlanSignal(agentos.Signal{
+	t.Parallel()
+
+	err := ValidatePlanSignal(&agentos.Signal{
 		Type:           agentos.SignalPlanNodeRetry,
 		IdempotencyKey: "retry-1",
 		ActorID:        "operator-1",
@@ -19,6 +42,8 @@ func TestValidatePlanSignalRequiresRetryNodeID(t *testing.T) {
 }
 
 func TestValidatePlanSignalAcceptsPlanSignals(t *testing.T) {
+	t.Parallel()
+
 	signals := []agentos.Signal{
 		{
 			Type:           agentos.SignalPlanNodeRetry,
@@ -30,14 +55,16 @@ func TestValidatePlanSignalAcceptsPlanSignals(t *testing.T) {
 		{Type: agentos.SignalPlanReject, IdempotencyKey: "reject-1", ActorID: "operator-1"},
 	}
 	for _, signal := range signals {
-		if err := ValidatePlanSignal(signal); err != nil {
+		if err := ValidatePlanSignal(&signal); err != nil {
 			t.Fatalf("ValidatePlanSignal(%s): %v", signal.Type, err)
 		}
 	}
 }
 
 func TestValidatePlanSignalRejectsUnsupportedSignal(t *testing.T) {
-	err := ValidatePlanSignal(agentos.Signal{
+	t.Parallel()
+
+	err := ValidatePlanSignal(&agentos.Signal{
 		Type:           agentos.SignalUserMessage,
 		IdempotencyKey: "message-1",
 		ActorID:        "operator-1",

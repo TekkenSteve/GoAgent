@@ -24,23 +24,34 @@ type SignalNames struct {
 }
 
 // Ref returns the public AgentOS backend reference for this backend.
-func (c Config) Ref() agentos.BackendRef {
+func (c *Config) Ref() agentos.BackendRef {
+	if c == nil {
+		return agentos.BackendRef{}
+	}
+
 	return agentos.BackendRef{
 		Kind: agentos.BackendKindTemporalExternal,
 		Name: c.Name,
 	}
 }
 
-func (c Config) validate() error {
+func (c *Config) validate() error {
+	if c == nil {
+		return fmt.Errorf("%w: temporal external backend config is required", agentos.ErrInvalidBackendRef)
+	}
+
 	if c.Name == "" {
 		return fmt.Errorf("%w: temporal external backend name is required", agentos.ErrInvalidBackendRef)
 	}
+
 	if c.TaskQueue == "" {
 		return fmt.Errorf("%w: temporal external task queue is required", agentos.ErrInvalidBackendRef)
 	}
+
 	if c.WorkflowType == "" {
 		return fmt.Errorf("%w: temporal external workflow type is required", agentos.ErrInvalidBackendRef)
 	}
+
 	if c.QueryType == "" {
 		return fmt.Errorf("%w: temporal external status query type is required", agentos.ErrInvalidBackendRef)
 	}

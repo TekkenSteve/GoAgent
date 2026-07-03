@@ -54,7 +54,7 @@ func main() {
 	fmt.Fprintln(os.Stdout, "Flow: discover → Split(impacts, solutions, policy) → Join → synthesize → review (HITL)")
 	fmt.Fprintln(os.Stdout)
 
-	status, err := c.ExecuteOrchestration(ctx, client.OrchestrationRequest{
+	status, err := c.ExecuteOrchestration(ctx, &client.OrchestrationRequest{
 		RunID: runID,
 		Steps: researchSteps(),
 	})

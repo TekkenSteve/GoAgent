@@ -12,6 +12,8 @@ import (
 	"github.com/goccy/go-json"
 )
 
+const waitingInput = "waiting_input"
+
 // runStatus is the JSON response from /v1/agentos/runs endpoints.
 type runStatus struct {
 	RunID          string `json:"run_id"`
@@ -70,7 +72,7 @@ func waitForRunCompletion(t *testing.T, runID string) runStatus {
 
 		resp.Body.Close()
 
-		if status.LifecycleState == "waiting_input" ||
+		if status.LifecycleState == waitingInput ||
 			status.LifecycleState == string(entity.LifecycleCompleted) ||
 			status.LifecycleState == string(entity.LifecycleFailed) ||
 			status.LifecycleState == string(entity.LifecycleCancelled) {
@@ -87,6 +89,8 @@ func waitForRunCompletion(t *testing.T, runID string) runStatus {
 
 // HTTP POST: /v1/agentos/runs.
 func TestHTTPAgentOSStartV1(t *testing.T) {
+	t.Parallel()
+
 	runID := fmt.Sprintf("e2e-exec-%d", time.Now().UnixNano())
 
 	tests := []struct {
@@ -128,6 +132,7 @@ func TestHTTPAgentOSStartV1(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.description, func(t *testing.T) {
+			t.Parallel()
 			testExecuteAgentRequest(t, tt.runID, tt.accountID, tt.message, tt.expected)
 		})
 	}
@@ -167,6 +172,8 @@ func testExecuteAgentRequest(t *testing.T, runID, accountID, message string, exp
 
 // HTTP GET: /v1/agentos/runs/{run_id}/status.
 func TestHTTPAgentOSStatusV1(t *testing.T) {
+	t.Parallel()
+
 	runID := fmt.Sprintf("e2e-status-%d", time.Now().UnixNano())
 
 	status := executeAgentRun(t, runID, "e2e-test-account")
@@ -176,7 +183,7 @@ func TestHTTPAgentOSStatusV1(t *testing.T) {
 
 	status = waitForRunCompletion(t, runID)
 
-	if status.LifecycleState != "waiting_input" {
+	if status.LifecycleState != waitingInput {
 		t.Errorf("Expected lifecycle_state waiting_input, got %q", status.LifecycleState)
 	}
 
@@ -228,7 +235,7 @@ func signalAgentOSUserMessage(t *testing.T, runID, content string) {
 func controlAgentOSRun(t *testing.T, runID, operation string) {
 	t.Helper()
 
-	body := fmt.Sprintf(`{"operation": "%s"}`, operation)
+	body := fmt.Sprintf(`{"operation": %q}`, operation)
 
 	ctx, cancel := context.WithTimeout(t.Context(), requestTimeout)
 	defer cancel()

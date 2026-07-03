@@ -52,7 +52,7 @@ func main() {
 	fmt.Fprintln(os.Stdout, "The 'review' step blocks until 'expert-approval' signal or 7-day timeout.")
 	fmt.Fprintln(os.Stdout)
 
-	status, err := c.ExecuteOrchestration(ctx, client.OrchestrationRequest{
+	status, err := c.ExecuteOrchestration(ctx, &client.OrchestrationRequest{
 		RunID: runID,
 		Steps: scientificSteps(),
 	})

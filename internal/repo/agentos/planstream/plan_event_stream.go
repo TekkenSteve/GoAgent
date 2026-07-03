@@ -48,16 +48,11 @@ func newRedisPlanEventStream(rdb planEventRedisClient, hub *redis.StreamHub) *Re
 }
 
 // PublishPlanEvent writes a sequenced PlanEvent to the live Redis stream.
-func (s *RedisPlanEventStream) PublishPlanEvent(ctx context.Context, event agentos.PlanEvent) error {
-	if s == nil || s.rdb == nil {
-		return fmt.Errorf("%w: redis plan event stream is not configured", agentos.ErrInvalidPlanEvent)
+func (s *RedisPlanEventStream) PublishPlanEvent(ctx context.Context, event *agentos.PlanEvent) error {
+	if err := validateRedisPlanEventStream(s, event); err != nil {
+		return err
 	}
-	if event.PlanID == "" {
-		return fmt.Errorf("%w: plan id is required", agentos.ErrInvalidPlanEvent)
-	}
-	if event.Sequence <= 0 {
-		return fmt.Errorf("%w: plan event sequence is required", agentos.ErrInvalidPlanEvent)
-	}
+
 	data, err := agentos.MarshalPlanEvent(event)
 	if err != nil {
 		return err
@@ -65,12 +60,34 @@ func (s *RedisPlanEventStream) PublishPlanEvent(ctx context.Context, event agent
 
 	streamKey := planEventStreamKey(planEventRef(event))
 	entryID := planEventEntryID(event.Sequence)
+
+	return s.publishPlanEventEntry(ctx, streamKey, entryID, event, data)
+}
+
+func validateRedisPlanEventStream(stream *RedisPlanEventStream, event *agentos.PlanEvent) error {
+	if stream == nil || stream.rdb == nil {
+		return fmt.Errorf("%w: redis plan event stream is not configured", agentos.ErrInvalidPlanEvent)
+	}
+
+	if event.PlanID == "" {
+		return fmt.Errorf("%w: plan id is required", agentos.ErrInvalidPlanEvent)
+	}
+
+	if event.Sequence <= 0 {
+		return fmt.Errorf("%w: plan event sequence is required", agentos.ErrInvalidPlanEvent)
+	}
+
+	return nil
+}
+
+func (s *RedisPlanEventStream) publishPlanEventEntry(ctx context.Context, streamKey, entryID string, event *agentos.PlanEvent, data []byte) error {
 	existing, exists, err := s.planEventAt(ctx, streamKey, entryID)
 	if err != nil {
 		return err
 	}
+
 	if exists {
-		return ensureSamePlanEvent(existing, event)
+		return ensureSamePlanEvent(&existing, event)
 	}
 
 	_, err = s.rdb.StreamAddWithID(ctx, streamKey, entryID, map[string]any{
@@ -83,12 +100,14 @@ func (s *RedisPlanEventStream) PublishPlanEvent(ctx context.Context, event agent
 		if lookupErr != nil {
 			return lookupErr
 		}
+
 		if exists {
-			return ensureSamePlanEvent(existing, event)
+			return ensureSamePlanEvent(&existing, event)
 		}
 
 		return fmt.Errorf("plan_event_stream: publish: %w", err)
 	}
+
 	if _, err := s.rdb.Expire(ctx, streamKey, planEventStreamTTL); err != nil {
 		return fmt.Errorf("plan_event_stream: expire: %w", err)
 	}
@@ -98,21 +117,24 @@ func (s *RedisPlanEventStream) PublishPlanEvent(ctx context.Context, event agent
 
 // SubscribePlanEvents subscribes to live PlanEvents. Durable replay and
 // catch-up are owned by the Postgres PlanEventStore.
-func (s *RedisPlanEventStream) SubscribePlanEvents(_ context.Context, scope agentos.PlanStreamScope) (agentosplan.PlanEventSubscription, error) {
+func (s *RedisPlanEventStream) SubscribePlanEvents(_ context.Context, scope *agentos.PlanStreamScope) (agentosplan.PlanEventSubscription, error) {
 	if err := agentosplan.ValidatePlanStreamScope(scope); err != nil {
 		return nil, err
 	}
+
 	if s == nil || s.hub == nil {
 		return nil, fmt.Errorf("%w: redis plan event subscriber is not configured", agentos.ErrInvalidStreamScope)
 	}
 
-	hubSub := s.hub.Subscribe(planEventStreamKey(planStreamRef(scope)), planEventSubscriptionStartID(scope))
+	hubSub := s.hub.Subscribe(planEventStreamKey(planStreamRef(scope)), planEventSubscriptionStartID(*scope))
 	out := make(chan agentos.PlanEvent, subscriberBufferSize)
+
 	go func() {
 		defer close(out)
+
 		for entry := range hubSub.C {
 			planEvent, err := planEventFromStreamEntry(entry)
-			if err != nil || !planEventMatchesScope(planEvent, scope) {
+			if err != nil || !planEventMatchesScope(&planEvent, scope) {
 				continue
 			}
 
@@ -134,14 +156,16 @@ func planEventSubscriptionStartID(agentos.PlanStreamScope) string {
 	return livePlanEventStartID
 }
 
-func (s *RedisPlanEventStream) planEventAt(ctx context.Context, streamKey string, entryID string) (agentos.PlanEvent, bool, error) {
+func (s *RedisPlanEventStream) planEventAt(ctx context.Context, streamKey, entryID string) (agentos.PlanEvent, bool, error) {
 	entries, err := s.rdb.StreamRange(ctx, streamKey, entryID, entryID, 1)
 	if err != nil {
 		return agentos.PlanEvent{}, false, fmt.Errorf("plan_event_stream: lookup: %w", err)
 	}
+
 	if len(entries) == 0 {
 		return agentos.PlanEvent{}, false, nil
 	}
+
 	event, err := planEventFromValues(entries[0].Values)
 	if err != nil {
 		return agentos.PlanEvent{}, false, err
@@ -200,22 +224,27 @@ func decodePlanEventStreamValue(value any) (agentos.PlanEvent, error) {
 	}
 }
 
-func planEventMatchesScope(event agentos.PlanEvent, scope agentos.PlanStreamScope) bool {
+func planEventMatchesScope(event *agentos.PlanEvent, scope *agentos.PlanStreamScope) bool {
 	if event.PlanID != scope.PlanID {
 		return false
 	}
+
 	if event.AccountID != scope.AccountID {
 		return false
 	}
+
 	if event.ProjectID != scope.ProjectID {
 		return false
 	}
+
 	if scope.NodeID != "" && event.NodeID != scope.NodeID {
 		return false
 	}
+
 	if scope.RunID != "" && event.RunID != scope.RunID {
 		return false
 	}
+
 	if event.Sequence <= scope.AfterSequence {
 		return false
 	}
@@ -223,8 +252,9 @@ func planEventMatchesScope(event agentos.PlanEvent, scope agentos.PlanStreamScop
 	return true
 }
 
-func ensureSamePlanEvent(existing agentos.PlanEvent, expected agentos.PlanEvent) error {
+func ensureSamePlanEvent(existing, expected *agentos.PlanEvent) error {
 	existingData, existingErr := agentos.MarshalPlanEvent(existing)
+
 	expectedData, expectedErr := agentos.MarshalPlanEvent(expected)
 	if existingErr == nil && expectedErr == nil && bytes.Equal(existingData, expectedData) {
 		return nil
@@ -240,7 +270,7 @@ func planEventStreamKey(ref agentos.PlanRef) string {
 		url.PathEscape(ref.PlanID)
 }
 
-func planEventRef(event agentos.PlanEvent) agentos.PlanRef {
+func planEventRef(event *agentos.PlanEvent) agentos.PlanRef {
 	return agentos.PlanRef{
 		PlanID:    event.PlanID,
 		AccountID: event.AccountID,
@@ -248,7 +278,7 @@ func planEventRef(event agentos.PlanEvent) agentos.PlanRef {
 	}
 }
 
-func planStreamRef(scope agentos.PlanStreamScope) agentos.PlanRef {
+func planStreamRef(scope *agentos.PlanStreamScope) agentos.PlanRef {
 	return agentos.PlanRef{
 		PlanID:    scope.PlanID,
 		AccountID: scope.AccountID,

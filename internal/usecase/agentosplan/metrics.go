@@ -2,6 +2,7 @@ package agentosplan
 
 import (
 	"context"
+	"maps"
 	"sort"
 	"time"
 
@@ -31,10 +32,12 @@ const (
 )
 
 const (
-	metricUnitCount   = "count"
-	metricUnitSeconds = "seconds"
-	metricUnitBytes   = "bytes"
-	metricUnitCents   = "cents"
+	metricSampleInitialCapacity = 2
+	metricLabelInitialCapacity  = 2
+	metricUnitCount             = "count"
+	metricUnitSeconds           = "seconds"
+	metricUnitBytes             = "bytes"
+	metricUnitCents             = "cents"
 )
 
 const planMetricSampleTimestampPrecision = time.Microsecond
@@ -71,7 +74,7 @@ type PlanMetricSampleKey struct {
 }
 
 // Key returns the durable idempotency identity for this sample.
-func (s PlanMetricSample) Key() PlanMetricSampleKey {
+func (s *PlanMetricSample) Key() PlanMetricSampleKey {
 	return PlanMetricSampleKey{
 		Name:     s.Name,
 		PlanID:   s.PlanID,
@@ -86,7 +89,7 @@ func (s PlanMetricSample) Key() PlanMetricSampleKey {
 // projection from a per-plan event checkpoint without rereading the full event
 // history.
 type PlanMetricProjectionState struct {
-	PlanStartedAt time.Time                  `json:"plan_started_at,omitempty"`
+	PlanStartedAt time.Time                  `json:"plan_started_at"`
 	NodeStartedAt []PlanMetricNodeStartState `json:"node_started_at,omitempty"`
 }
 
@@ -102,14 +105,14 @@ type PlanMetricNodeStartState struct {
 // BuildPlanMetricSamples projects operational metrics from a durable RunPlan
 // event history. Samples keep event identity so downstream exporters can
 // de-duplicate on EventID/Sequence.
-func BuildPlanMetricSamples(ctx context.Context, spec agentos.RunPlanSpec, events []agentos.PlanEvent) ([]PlanMetricSample, error) {
+func BuildPlanMetricSamples(ctx context.Context, spec *agentos.RunPlanSpec, events []agentos.PlanEvent) ([]PlanMetricSample, error) {
 	return BuildPlanMetricSamplesAfter(ctx, spec, events, 0)
 }
 
 // BuildPlanMetricSamplesAfter projects metrics for events after a durable
 // checkpoint while still reading earlier history to reconstruct durations and
 // other stateful measurements.
-func BuildPlanMetricSamplesAfter(ctx context.Context, spec agentos.RunPlanSpec, events []agentos.PlanEvent, afterSequence int64) ([]PlanMetricSample, error) {
+func BuildPlanMetricSamplesAfter(ctx context.Context, spec *agentos.RunPlanSpec, events []agentos.PlanEvent, afterSequence int64) ([]PlanMetricSample, error) {
 	samples, _, err := projectPlanMetricSamples(ctx, spec, PlanMetricProjectionState{}, events, afterSequence)
 
 	return samples, err
@@ -117,99 +120,189 @@ func BuildPlanMetricSamplesAfter(ctx context.Context, spec agentos.RunPlanSpec, 
 
 // BuildPlanMetricSamplesFromState projects metrics from an incremental event
 // batch and returns the next durable projection state.
-func BuildPlanMetricSamplesFromState(ctx context.Context, spec agentos.RunPlanSpec, state PlanMetricProjectionState, events []agentos.PlanEvent) ([]PlanMetricSample, PlanMetricProjectionState, error) {
+func BuildPlanMetricSamplesFromState(ctx context.Context, spec *agentos.RunPlanSpec, state PlanMetricProjectionState, events []agentos.PlanEvent) ([]PlanMetricSample, PlanMetricProjectionState, error) {
 	return projectPlanMetricSamples(ctx, spec, state, events, 0)
 }
 
-func projectPlanMetricSamples(_ context.Context, spec agentos.RunPlanSpec, state PlanMetricProjectionState, events []agentos.PlanEvent, afterSequence int64) ([]PlanMetricSample, PlanMetricProjectionState, error) {
+func projectPlanMetricSamples(_ context.Context, spec *agentos.RunPlanSpec, state PlanMetricProjectionState, events []agentos.PlanEvent, afterSequence int64) ([]PlanMetricSample, PlanMetricProjectionState, error) {
 	ordered := orderedPlanEvents(events)
-	nodeByID := planNodeByID(spec)
-	planStart := state.PlanStartedAt
-	nodeStarts := nodeStartsFromMetricProjectionState(state)
-	samples := make([]PlanMetricSample, 0, len(ordered))
+	projection := newMetricProjection(spec, state, len(ordered))
 
-	for _, event := range ordered {
+	for i := range ordered {
+		event := &ordered[i]
 		emit := shouldEmitMetricSample(event, afterSequence)
-		switch event.EventType {
-		case agentos.EventPlanStarted:
-			planStart = event.Timestamp
-			if emit {
-				samples = append(samples, metricSample(spec, event, PlanMetricPlanStartedTotal, 1, metricUnitCount, nil))
-			}
-			if emit && !spec.RequestedAt.IsZero() && !event.Timestamp.IsZero() {
-				samples = append(samples, metricSample(spec, event, PlanMetricPlanQueueLatencySeconds, secondsBetween(spec.RequestedAt, event.Timestamp), metricUnitSeconds, nil))
-			}
-		case agentos.EventPlanSucceeded, agentos.EventPlanFailed, agentos.EventPlanCanceled:
-			if !emit {
-				continue
-			}
-			labels := map[string]string{"lifecycle_state": planLifecycleForEvent(event.EventType)}
-			samples = append(samples, metricSample(spec, event, PlanMetricPlanCompletedTotal, 1, metricUnitCount, labels))
-			if !planStart.IsZero() && !event.Timestamp.IsZero() {
-				samples = append(samples, metricSample(spec, event, PlanMetricPlanDurationSeconds, secondsBetween(planStart, event.Timestamp), metricUnitSeconds, labels))
-			}
-			planStart = time.Time{}
-		case agentos.EventPlanNodeStarted:
-			nodeStarts[nodeMetricKey(event.NodeID, event.RunID)] = event.Timestamp
-			if !emit {
-				continue
-			}
-			labels := backendLabels(nodeByID[event.NodeID])
-			samples = append(samples, metricSample(spec, event, PlanMetricNodeStartedTotal, 1, metricUnitCount, labels))
-			if requestedAt := nodeRequestedAt(spec, nodeByID[event.NodeID]); !requestedAt.IsZero() && !event.Timestamp.IsZero() {
-				samples = append(samples, metricSample(spec, event, PlanMetricNodeQueueLatencySeconds, secondsBetween(requestedAt, event.Timestamp), metricUnitSeconds, labels))
-			}
-		case agentos.EventPlanNodeSucceeded, agentos.EventPlanNodeFailed, agentos.EventPlanNodeCanceled, agentos.EventPlanNodeSkipped:
-			if !emit {
-				continue
-			}
-			labels := mergeLabels(backendLabels(nodeByID[event.NodeID]), map[string]string{"lifecycle_state": nodeLifecycleForEvent(event.EventType)})
-			samples = append(samples, metricSample(spec, event, PlanMetricNodeCompletedTotal, 1, metricUnitCount, labels))
-			key := nodeMetricKey(event.NodeID, event.RunID)
-			if start := nodeStarts[key]; !start.IsZero() && !event.Timestamp.IsZero() {
-				samples = append(samples, metricSample(spec, event, PlanMetricNodeDurationSeconds, secondsBetween(start, event.Timestamp), metricUnitSeconds, labels))
-			}
-			delete(nodeStarts, key)
-			if event.EventType == agentos.EventPlanNodeFailed {
-				samples = append(samples, metricSample(spec, event, PlanMetricBackendErrorsTotal, 1, metricUnitCount, backendLabels(nodeByID[event.NodeID])))
-			}
-		case agentos.EventNodeOutputPublished:
-			if !emit {
-				continue
-			}
-			artifactSamples, err := artifactMetricSamples(spec, event)
-			if err != nil {
-				return nil, PlanMetricProjectionState{}, err
-			}
-			samples = append(samples, artifactSamples...)
-		case agentos.EventUsageReported:
-			if !emit {
-				continue
-			}
-			budgetSamples, err := budgetMetricSamples(spec, event)
-			if err != nil {
-				return nil, PlanMetricProjectionState{}, err
-			}
-			samples = append(samples, budgetSamples...)
-		case agentos.EventPlanExpanded:
-			if !emit {
-				continue
-			}
-			samples = append(samples, metricSample(spec, event, PlanMetricDynamicExpansionsTotal, 1, metricUnitCount, nil))
-		case agentos.EventPlanNodeRetryScheduled:
-			if !emit {
-				continue
-			}
-			samples = append(samples, metricSample(spec, event, PlanMetricNodeRetryScheduledTotal, 1, metricUnitCount, backendLabels(nodeByID[event.NodeID])))
+
+		if err := projection.apply(event, emit); err != nil {
+			return nil, PlanMetricProjectionState{}, err
 		}
 	}
 
-	nextState := metricProjectionStateFromStarts(planStart, nodeStarts)
+	nextState := metricProjectionStateFromStarts(projection.planStart, projection.nodeStarts)
 
-	return samples, nextState, nil
+	return projection.samples, nextState, nil
 }
 
-func shouldEmitMetricSample(event agentos.PlanEvent, afterSequence int64) bool {
+type metricProjection struct {
+	spec       *agentos.RunPlanSpec
+	nodeByID   map[string]*agentos.PlanNodeSpec
+	planStart  time.Time
+	nodeStarts map[planMetricNodeKey]time.Time
+	samples    []PlanMetricSample
+}
+
+func newMetricProjection(spec *agentos.RunPlanSpec, state PlanMetricProjectionState, capacity int) metricProjection {
+	return metricProjection{
+		spec:       spec,
+		nodeByID:   planNodeByID(spec),
+		planStart:  state.PlanStartedAt,
+		nodeStarts: nodeStartsFromMetricProjectionState(state),
+		samples:    make([]PlanMetricSample, 0, capacity),
+	}
+}
+
+func (p *metricProjection) apply(event *agentos.PlanEvent, emit bool) error {
+	switch event.EventType {
+	case agentos.EventPlanStarted:
+		p.recordPlanStarted(event, emit)
+	case agentos.EventPlanSucceeded, agentos.EventPlanFailed, agentos.EventPlanCanceled:
+		p.recordPlanCompleted(event, emit)
+	case agentos.EventPlanNodeStarted:
+		p.recordNodeStarted(event, emit)
+	case agentos.EventPlanNodeSucceeded, agentos.EventPlanNodeFailed, agentos.EventPlanNodeCanceled, agentos.EventPlanNodeSkipped:
+		p.recordNodeCompleted(event, emit)
+	case agentos.EventNodeOutputPublished:
+		return p.recordArtifactPublished(event, emit)
+	case agentos.EventUsageReported:
+		return p.recordUsageReported(event, emit)
+	case agentos.EventPlanExpanded:
+		p.recordPlanExpanded(event, emit)
+	case agentos.EventPlanNodeRetryScheduled:
+		p.recordNodeRetryScheduled(event, emit)
+	case agentos.EventRunStarted, agentos.EventRunCompleted, agentos.EventRunFailed,
+		agentos.EventRunCancelled, agentos.EventRunPaused, agentos.EventRunResumed,
+		agentos.EventAgentStepStarted, agentos.EventAgentStepCompleted, agentos.EventAgentStepFailed,
+		agentos.EventAgentMessageDelta, agentos.EventAgentMessageCompleted,
+		agentos.EventToolCallStarted, agentos.EventToolCallDelta, agentos.EventToolCallCompleted,
+		agentos.EventToolCallFailed,
+		agentos.EventApprovalRequested, agentos.EventApprovalResolved,
+		agentos.EventCheckpointCreated, agentos.EventArtifactCreated,
+		agentos.EventNodeInputResolved, agentos.EventCapabilitySelected, agentos.EventConditionEvaluated,
+		agentos.EventPlanBlocked, agentos.EventPlanApproved, agentos.EventPlanRejected,
+		agentos.EventPlanNodeReady:
+		return nil
+	}
+
+	return nil
+}
+
+func (p *metricProjection) recordPlanStarted(event *agentos.PlanEvent, emit bool) {
+	p.planStart = event.Timestamp
+
+	if !emit {
+		return
+	}
+
+	p.samples = append(p.samples, metricSample(p.spec, event, PlanMetricPlanStartedTotal, 1, metricUnitCount, nil))
+	if !p.spec.RequestedAt.IsZero() && !event.Timestamp.IsZero() {
+		p.samples = append(p.samples, metricSample(p.spec, event, PlanMetricPlanQueueLatencySeconds, secondsBetween(p.spec.RequestedAt, event.Timestamp), metricUnitSeconds, nil))
+	}
+}
+
+func (p *metricProjection) recordPlanCompleted(event *agentos.PlanEvent, emit bool) {
+	if !emit {
+		return
+	}
+
+	labels := map[string]string{"lifecycle_state": planLifecycleForEvent(event.EventType)}
+	p.samples = append(p.samples, metricSample(p.spec, event, PlanMetricPlanCompletedTotal, 1, metricUnitCount, labels))
+
+	if !p.planStart.IsZero() && !event.Timestamp.IsZero() {
+		p.samples = append(p.samples, metricSample(p.spec, event, PlanMetricPlanDurationSeconds, secondsBetween(p.planStart, event.Timestamp), metricUnitSeconds, labels))
+	}
+
+	p.planStart = time.Time{}
+}
+
+func (p *metricProjection) recordNodeStarted(event *agentos.PlanEvent, emit bool) {
+	p.nodeStarts[nodeMetricKey(event.NodeID, event.RunID)] = event.Timestamp
+
+	if !emit {
+		return
+	}
+
+	node := p.nodeByID[event.NodeID]
+	labels := backendLabels(node)
+	p.samples = append(p.samples, metricSample(p.spec, event, PlanMetricNodeStartedTotal, 1, metricUnitCount, labels))
+
+	if requestedAt := nodeRequestedAt(p.spec, node); !requestedAt.IsZero() && !event.Timestamp.IsZero() {
+		p.samples = append(p.samples, metricSample(p.spec, event, PlanMetricNodeQueueLatencySeconds, secondsBetween(requestedAt, event.Timestamp), metricUnitSeconds, labels))
+	}
+}
+
+func (p *metricProjection) recordNodeCompleted(event *agentos.PlanEvent, emit bool) {
+	if !emit {
+		return
+	}
+
+	node := p.nodeByID[event.NodeID]
+	labels := mergeLabels(backendLabels(node), map[string]string{"lifecycle_state": nodeLifecycleForEvent(event.EventType)})
+	p.samples = append(p.samples, metricSample(p.spec, event, PlanMetricNodeCompletedTotal, 1, metricUnitCount, labels))
+
+	key := nodeMetricKey(event.NodeID, event.RunID)
+	if start := p.nodeStarts[key]; !start.IsZero() && !event.Timestamp.IsZero() {
+		p.samples = append(p.samples, metricSample(p.spec, event, PlanMetricNodeDurationSeconds, secondsBetween(start, event.Timestamp), metricUnitSeconds, labels))
+	}
+
+	delete(p.nodeStarts, key)
+
+	if event.EventType == agentos.EventPlanNodeFailed {
+		p.samples = append(p.samples, metricSample(p.spec, event, PlanMetricBackendErrorsTotal, 1, metricUnitCount, backendLabels(node)))
+	}
+}
+
+func (p *metricProjection) recordArtifactPublished(event *agentos.PlanEvent, emit bool) error {
+	if !emit {
+		return nil
+	}
+
+	samples, err := artifactMetricSamples(p.spec, event)
+	if err != nil {
+		return err
+	}
+
+	p.samples = append(p.samples, samples...)
+
+	return nil
+}
+
+func (p *metricProjection) recordUsageReported(event *agentos.PlanEvent, emit bool) error {
+	if !emit {
+		return nil
+	}
+
+	samples, err := budgetMetricSamples(p.spec, event)
+	if err != nil {
+		return err
+	}
+
+	p.samples = append(p.samples, samples...)
+
+	return nil
+}
+
+func (p *metricProjection) recordPlanExpanded(event *agentos.PlanEvent, emit bool) {
+	if emit {
+		p.samples = append(p.samples, metricSample(p.spec, event, PlanMetricDynamicExpansionsTotal, 1, metricUnitCount, nil))
+	}
+}
+
+func (p *metricProjection) recordNodeRetryScheduled(event *agentos.PlanEvent, emit bool) {
+	if emit {
+		p.samples = append(p.samples, metricSample(p.spec, event, PlanMetricNodeRetryScheduledTotal, 1, metricUnitCount, backendLabels(p.nodeByID[event.NodeID])))
+	}
+}
+
+func shouldEmitMetricSample(event *agentos.PlanEvent, afterSequence int64) bool {
 	return afterSequence == 0 || event.Sequence > afterSequence
 }
 
@@ -219,6 +312,7 @@ func nodeStartsFromMetricProjectionState(state PlanMetricProjectionState) map[pl
 		if start.NodeID == "" || start.StartedAt.IsZero() {
 			continue
 		}
+
 		starts[nodeMetricKey(start.NodeID, start.RunID)] = start.StartedAt
 	}
 
@@ -239,6 +333,7 @@ func metricProjectionStateFromStarts(planStart time.Time, nodeStarts map[planMet
 			StartedAt: startedAt,
 		})
 	}
+
 	sort.SliceStable(starts, func(i, j int) bool {
 		if starts[i].NodeID != starts[j].NodeID {
 			return starts[i].NodeID < starts[j].NodeID
@@ -251,17 +346,21 @@ func metricProjectionStateFromStarts(planStart time.Time, nodeStarts map[planMet
 	return state
 }
 
-func artifactMetricSamples(spec agentos.RunPlanSpec, event agentos.PlanEvent) ([]PlanMetricSample, error) {
+func artifactMetricSamples(spec *agentos.RunPlanSpec, event *agentos.PlanEvent) ([]PlanMetricSample, error) {
 	value, ok := event.Payload[planEventPayloadArtifacts]
 	if !ok {
 		return nil, nil
 	}
+
 	artifacts, err := decodePlanDebugPayload[[]agentos.ArtifactRef](value, planEventPayloadArtifacts)
 	if err != nil {
 		return nil, err
 	}
+
 	samples := make([]PlanMetricSample, 0, len(artifacts))
-	for _, artifact := range artifacts {
+	for i := range artifacts {
+		artifact := &artifacts[i]
+
 		sample := metricSample(spec, event, PlanMetricArtifactPublishedBytes, float64(artifact.SizeBytes), metricUnitBytes, map[string]string{
 			"artifact_kind": string(artifact.Kind),
 		})
@@ -273,27 +372,31 @@ func artifactMetricSamples(spec agentos.RunPlanSpec, event agentos.PlanEvent) ([
 	return samples, nil
 }
 
-func budgetMetricSamples(spec agentos.RunPlanSpec, event agentos.PlanEvent) ([]PlanMetricSample, error) {
-	samples := make([]PlanMetricSample, 0, 2)
+func budgetMetricSamples(spec *agentos.RunPlanSpec, event *agentos.PlanEvent) ([]PlanMetricSample, error) {
+	samples := make([]PlanMetricSample, 0, metricSampleInitialCapacity)
+
 	if value, ok := event.Payload[planEventPayloadBudgetDelta]; ok {
 		delta, err := decodePlanDebugPayload[agentos.PlanBudgetUsage](value, planEventPayloadBudgetDelta)
 		if err != nil {
 			return nil, err
 		}
+
 		samples = append(samples, metricSample(spec, event, PlanMetricBudgetDeltaCents, float64(delta.SpentCents), metricUnitCents, nil))
 	}
+
 	if value, ok := event.Payload[planEventPayloadBudgetUsage]; ok {
 		usage, err := decodePlanDebugPayload[agentos.PlanBudgetUsage](value, planEventPayloadBudgetUsage)
 		if err != nil {
 			return nil, err
 		}
+
 		samples = append(samples, metricSample(spec, event, PlanMetricBudgetSpentCents, float64(usage.SpentCents), metricUnitCents, nil))
 	}
 
 	return samples, nil
 }
 
-func metricSample(spec agentos.RunPlanSpec, event agentos.PlanEvent, name PlanMetricName, value float64, unit string, labels map[string]string) PlanMetricSample {
+func metricSample(spec *agentos.RunPlanSpec, event *agentos.PlanEvent, name PlanMetricName, value float64, unit string, labels map[string]string) PlanMetricSample {
 	return PlanMetricSample{
 		Name:      name,
 		Value:     value,
@@ -323,16 +426,17 @@ func orderedPlanEvents(events []agentos.PlanEvent) []agentos.PlanEvent {
 	return ordered
 }
 
-func planNodeByID(spec agentos.RunPlanSpec) map[string]agentos.PlanNodeSpec {
-	nodes := make(map[string]agentos.PlanNodeSpec, len(spec.Nodes))
-	for _, node := range spec.Nodes {
+func planNodeByID(spec *agentos.RunPlanSpec) map[string]*agentos.PlanNodeSpec {
+	nodes := make(map[string]*agentos.PlanNodeSpec, len(spec.Nodes))
+	for i := range spec.Nodes {
+		node := &spec.Nodes[i]
 		nodes[node.NodeID] = node
 	}
 
 	return nodes
 }
 
-func nodeRequestedAt(spec agentos.RunPlanSpec, node agentos.PlanNodeSpec) time.Time {
+func nodeRequestedAt(spec *agentos.RunPlanSpec, node *agentos.PlanNodeSpec) time.Time {
 	if !node.Run.RequestedAt.IsZero() {
 		return node.Run.RequestedAt
 	}
@@ -345,19 +449,24 @@ type planMetricNodeKey struct {
 	RunID  string
 }
 
-func nodeMetricKey(nodeID string, runID string) planMetricNodeKey {
+func nodeMetricKey(nodeID, runID string) planMetricNodeKey {
 	return planMetricNodeKey{NodeID: nodeID, RunID: runID}
 }
 
-func secondsBetween(start time.Time, end time.Time) float64 {
+func secondsBetween(start, end time.Time) float64 {
 	return end.Sub(start).Seconds()
 }
 
-func backendLabels(node agentos.PlanNodeSpec) map[string]string {
-	labels := make(map[string]string, 2)
+func backendLabels(node *agentos.PlanNodeSpec) map[string]string {
+	if node == nil {
+		return nil
+	}
+
+	labels := make(map[string]string, metricLabelInitialCapacity)
 	if node.Run.Backend.Kind != "" {
 		labels["backend_kind"] = string(node.Run.Backend.Kind)
 	}
+
 	if node.Run.Backend.Name != "" {
 		labels["backend_name"] = node.Run.Backend.Name
 	}
@@ -365,11 +474,9 @@ func backendLabels(node agentos.PlanNodeSpec) map[string]string {
 	return labels
 }
 
-func mergeLabels(left map[string]string, right map[string]string) map[string]string {
+func mergeLabels(left, right map[string]string) map[string]string {
 	merged := cloneMetricLabels(left)
-	for key, value := range right {
-		merged[key] = value
-	}
+	maps.Copy(merged, right)
 
 	return merged
 }
@@ -378,10 +485,9 @@ func cloneMetricLabels(input map[string]string) map[string]string {
 	if len(input) == 0 {
 		return nil
 	}
+
 	output := make(map[string]string, len(input))
-	for key, value := range input {
-		output[key] = value
-	}
+	maps.Copy(output, input)
 
 	return output
 }
@@ -394,6 +500,22 @@ func planLifecycleForEvent(eventType agentos.EventType) string {
 		return agentos.PlanLifecycleFailed
 	case agentos.EventPlanCanceled:
 		return agentos.PlanLifecycleCanceled
+	case agentos.EventRunStarted, agentos.EventRunCompleted, agentos.EventRunFailed,
+		agentos.EventRunCancelled, agentos.EventRunPaused, agentos.EventRunResumed,
+		agentos.EventAgentStepStarted, agentos.EventAgentStepCompleted, agentos.EventAgentStepFailed,
+		agentos.EventAgentMessageDelta, agentos.EventAgentMessageCompleted,
+		agentos.EventToolCallStarted, agentos.EventToolCallDelta, agentos.EventToolCallCompleted,
+		agentos.EventToolCallFailed, agentos.EventApprovalRequested, agentos.EventApprovalResolved,
+		agentos.EventUsageReported, agentos.EventCheckpointCreated, agentos.EventArtifactCreated,
+		agentos.EventNodeInputResolved, agentos.EventNodeOutputPublished,
+		agentos.EventCapabilitySelected, agentos.EventConditionEvaluated,
+		agentos.EventPlanStarted, agentos.EventPlanBlocked, agentos.EventPlanExpanded,
+		agentos.EventPlanApproved, agentos.EventPlanRejected,
+		agentos.EventPlanNodeReady, agentos.EventPlanNodeStarted,
+		agentos.EventPlanNodeSucceeded, agentos.EventPlanNodeFailed,
+		agentos.EventPlanNodeRetryScheduled, agentos.EventPlanNodeSkipped,
+		agentos.EventPlanNodeCanceled:
+		return ""
 	default:
 		return ""
 	}
@@ -409,6 +531,21 @@ func nodeLifecycleForEvent(eventType agentos.EventType) string {
 		return agentos.PlanNodeCanceled
 	case agentos.EventPlanNodeSkipped:
 		return agentos.PlanNodeSkipped
+	case agentos.EventRunStarted, agentos.EventRunCompleted, agentos.EventRunFailed,
+		agentos.EventRunCancelled, agentos.EventRunPaused, agentos.EventRunResumed,
+		agentos.EventAgentStepStarted, agentos.EventAgentStepCompleted, agentos.EventAgentStepFailed,
+		agentos.EventAgentMessageDelta, agentos.EventAgentMessageCompleted,
+		agentos.EventToolCallStarted, agentos.EventToolCallDelta, agentos.EventToolCallCompleted,
+		agentos.EventToolCallFailed, agentos.EventApprovalRequested, agentos.EventApprovalResolved,
+		agentos.EventUsageReported, agentos.EventCheckpointCreated, agentos.EventArtifactCreated,
+		agentos.EventNodeInputResolved, agentos.EventNodeOutputPublished,
+		agentos.EventCapabilitySelected, agentos.EventConditionEvaluated,
+		agentos.EventPlanStarted, agentos.EventPlanBlocked, agentos.EventPlanExpanded,
+		agentos.EventPlanApproved, agentos.EventPlanRejected,
+		agentos.EventPlanSucceeded, agentos.EventPlanFailed, agentos.EventPlanCanceled,
+		agentos.EventPlanNodeReady, agentos.EventPlanNodeStarted,
+		agentos.EventPlanNodeRetryScheduled:
+		return ""
 	default:
 		return ""
 	}

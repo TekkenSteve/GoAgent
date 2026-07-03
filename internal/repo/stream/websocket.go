@@ -43,12 +43,19 @@ func (c *wsClient) writeMessage(messageType int, data []byte) error {
 type WebSocketHub struct {
 	mu       sync.RWMutex
 	sessions map[string]map[*wsClient]struct{}
+	codec    entity.EventCodec
 }
 
 // NewWebSocketHub creates an empty WebSocketHub.
 func NewWebSocketHub() *WebSocketHub {
+	return NewWebSocketHubWithCodec(entity.NewEventCodec(nil))
+}
+
+// NewWebSocketHubWithCodec creates an empty WebSocketHub with an explicit event codec.
+func NewWebSocketHubWithCodec(codec entity.EventCodec) *WebSocketHub {
 	return &WebSocketHub{
 		sessions: make(map[string]map[*wsClient]struct{}),
+		codec:    codec,
 	}
 }
 
@@ -72,7 +79,7 @@ func (h *WebSocketHub) Add(sessionID string, conn *websocket.Conn) func() {
 // Errors on individual connections are silently dropped — a single slow or
 // broken client must not block other clients or the event producer.
 func (h *WebSocketHub) Broadcast(sessionID string, event entity.StreamEvent) {
-	data, err := entity.MarshalEvent(event)
+	data, err := h.codec.MarshalEvent(event)
 	if err != nil {
 		return
 	}

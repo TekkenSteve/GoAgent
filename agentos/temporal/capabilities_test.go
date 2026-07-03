@@ -1,12 +1,15 @@
 package temporal
 
 import (
+	"slices"
 	"testing"
 
 	"github.com/TekkenSteve/GoAgent/agentos"
 )
 
 func TestDefaultCapabilitiesDeclareNativeRun(t *testing.T) {
+	t.Parallel()
+
 	capabilities := DefaultCapabilities()
 	if len(capabilities) != 1 {
 		t.Fatalf("capability count = %d", len(capabilities))
@@ -18,9 +21,11 @@ func TestDefaultCapabilitiesDeclareNativeRun(t *testing.T) {
 		got.Name != agentos.CapabilityRun {
 		t.Fatalf("unexpected native run capability: %#v", got)
 	}
+
 	if !containsSignal(got.Signals, agentos.SignalUserMessage) {
 		t.Fatalf("native run signals = %#v, want %q", got.Signals, agentos.SignalUserMessage)
 	}
+
 	for _, control := range []agentos.ControlOperation{
 		agentos.ControlPause,
 		agentos.ControlResume,
@@ -33,6 +38,8 @@ func TestDefaultCapabilitiesDeclareNativeRun(t *testing.T) {
 }
 
 func TestCapabilitiesWithDefaultsPreservesConfiguredCapabilities(t *testing.T) {
+	t.Parallel()
+
 	configured := []agentos.Capability{
 		{
 			Backend: agentos.BackendRef{Kind: agentos.BackendKindHTTP, Name: "research-http"},
@@ -44,6 +51,7 @@ func TestCapabilitiesWithDefaultsPreservesConfiguredCapabilities(t *testing.T) {
 	if len(capabilities) != 2 {
 		t.Fatalf("capability count = %d", len(capabilities))
 	}
+
 	if capabilities[0].Backend.Kind != agentos.BackendKindNative ||
 		capabilities[0].Name != agentos.CapabilityRun ||
 		capabilities[1].Backend.Name != "research-http" ||
@@ -53,21 +61,9 @@ func TestCapabilitiesWithDefaultsPreservesConfiguredCapabilities(t *testing.T) {
 }
 
 func containsSignal(signals []agentos.SignalType, want agentos.SignalType) bool {
-	for _, signal := range signals {
-		if signal == want {
-			return true
-		}
-	}
-
-	return false
+	return slices.Contains(signals, want)
 }
 
 func containsControl(controls []agentos.ControlOperation, want agentos.ControlOperation) bool {
-	for _, control := range controls {
-		if control == want {
-			return true
-		}
-	}
-
-	return false
+	return slices.Contains(controls, want)
 }

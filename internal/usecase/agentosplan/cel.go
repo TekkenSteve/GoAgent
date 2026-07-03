@@ -46,6 +46,7 @@ func (c *CELCompiler) Compile(expression string) (Expression, error) {
 	if expression == "" {
 		return alwaysTrueExpression{}, nil
 	}
+
 	valueExpression, err := c.CompileValue(expression)
 	if err != nil {
 		return nil, err
@@ -58,11 +59,12 @@ func (c *CELCompiler) Compile(expression string) (Expression, error) {
 func (c *CELCompiler) CompileValue(expression string) (ValueExpression, error) {
 	ast, issues := c.env.Compile(expression)
 	if issues != nil && issues.Err() != nil {
-		return nil, fmt.Errorf("%w: %s", agentos.ErrInvalidExpression, issues.Err())
+		return nil, fmt.Errorf("%w: %w", agentos.ErrInvalidExpression, issues.Err())
 	}
+
 	program, err := c.env.Program(ast)
 	if err != nil {
-		return nil, fmt.Errorf("%w: %s", agentos.ErrInvalidExpression, err)
+		return nil, fmt.Errorf("%w: %w", agentos.ErrInvalidExpression, err)
 	}
 
 	return celExpression{program: program}, nil
@@ -78,6 +80,7 @@ func (e boolExpression) Evaluate(ctx context.Context, vars map[string]any) (bool
 	if err != nil {
 		return false, err
 	}
+
 	result, ok := value.(bool)
 	if !ok {
 		return false, fmt.Errorf("%w: expression result must be bool", agentos.ErrInvalidExpression)
@@ -94,7 +97,7 @@ type celExpression struct {
 func (e celExpression) EvaluateValue(_ context.Context, vars map[string]any) (any, error) {
 	value, _, err := e.program.Eval(vars)
 	if err != nil {
-		return nil, fmt.Errorf("%w: %s", agentos.ErrInvalidExpression, err)
+		return nil, fmt.Errorf("%w: %w", agentos.ErrInvalidExpression, err)
 	}
 
 	return value.Value(), nil

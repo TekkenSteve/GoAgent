@@ -197,7 +197,7 @@ func (p *Pipeline) cacheResultIfNeeded(ctx context.Context, req *Request, result
 	}
 
 	if policy.EnableIdempotent && req.IdempotencyKey != "" && p.Idempotency != nil {
-		if err := p.Idempotency.Put(ctx, req.IdempotencyKey, *result); err != nil {
+		if err := p.Idempotency.Put(ctx, req.IdempotencyKey, result); err != nil {
 			return err
 		}
 	}

@@ -9,15 +9,19 @@ import (
 )
 
 func TestPlanStreamDoesNotDependOnNativeStreamEvent(t *testing.T) {
+	t.Parallel()
+
 	file, err := parser.ParseFile(token.NewFileSet(), "plan_stream.go", nil, parser.ImportsOnly)
 	if err != nil {
 		t.Fatalf("parse plan_stream.go imports: %v", err)
 	}
+
 	for _, imported := range file.Imports {
 		path, err := strconv.Unquote(imported.Path.Value)
 		if err != nil {
 			t.Fatalf("unquote import path: %v", err)
 		}
+
 		switch path {
 		case "github.com/TekkenSteve/GoAgent/internal/entity",
 			"github.com/TekkenSteve/GoAgent/internal/agentfw/stream":
@@ -29,6 +33,7 @@ func TestPlanStreamDoesNotDependOnNativeStreamEvent(t *testing.T) {
 	if err != nil {
 		t.Fatalf("parse plan_stream.go: %v", err)
 	}
+
 	ast.Inspect(file, func(node ast.Node) bool {
 		selector, ok := node.(*ast.SelectorExpr)
 		if ok && selector.Sel.Name == "StreamEvent" {

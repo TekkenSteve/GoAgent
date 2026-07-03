@@ -114,6 +114,7 @@ func TestAgentWorkflowV2_UserMessageSignalContinuesRun(t *testing.T) {
 	t.Parallel()
 
 	var callCount int
+
 	env := newWorkflowTestEnv()
 	env.RegisterActivityWithOptions(func(_ context.Context, input *LLMStepInput) (*LLMStepOutput, error) {
 		callCount++
@@ -122,6 +123,7 @@ func TestAgentWorkflowV2_UserMessageSignalContinuesRun(t *testing.T) {
 				{Role: entity.RoleUser, Content: "Hello"},
 			}, input.Messages)
 		}
+
 		if callCount == 2 {
 			require.Equal(t, []entity.Message{
 				{Role: entity.RoleUser, Content: "Hello"},

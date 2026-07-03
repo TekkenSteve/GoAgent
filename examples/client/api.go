@@ -8,10 +8,11 @@ import (
 
 // StartRun starts an AgentOS run.
 // POST /v1/agentos/runs.
-func (c *Client) StartRun(ctx context.Context, req AgentOSRunRequest) (*RunStatus, error) {
+func (c *Client) StartRun(ctx context.Context, req *AgentOSRunRequest) (*RunStatus, error) {
 	if req.AccountID == "" {
 		req.AccountID = c.accountID
 	}
+
 	if req.Backend.Kind == "" && req.Backend.Name == "" {
 		req.Backend = BackendRef{Kind: "native", Name: "goagent-native"}
 	}
@@ -57,7 +58,7 @@ func (c *Client) ControlRun(ctx context.Context, runID string, req AgentOSContro
 
 // ExecuteOrchestration starts an orchestration workflow from a TeamSpec or step queue.
 // POST /v1/orchestration/execute.
-func (c *Client) ExecuteOrchestration(ctx context.Context, req OrchestrationRequest) (*RunStatus, error) {
+func (c *Client) ExecuteOrchestration(ctx context.Context, req *OrchestrationRequest) (*RunStatus, error) {
 	if req.AccountID == "" {
 		req.AccountID = c.accountID
 	}

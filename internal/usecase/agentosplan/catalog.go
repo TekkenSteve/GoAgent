@@ -23,8 +23,9 @@ type capabilityKey struct {
 // NewStaticCapabilityCatalog creates a catalog from capabilities.
 func NewStaticCapabilityCatalog(capabilities []agentos.Capability) (*StaticCapabilityCatalog, error) {
 	catalog := &StaticCapabilityCatalog{capabilities: make(map[capabilityKey]agentos.Capability)}
-	for _, capability := range capabilities {
-		if _, _, err := catalog.RegisterCapability(context.Background(), capability, ""); err != nil {
+	for i := range capabilities {
+		capability := capabilities[i]
+		if _, _, err := catalog.RegisterCapability(context.Background(), &capability, ""); err != nil {
 			return nil, err
 		}
 	}
@@ -33,19 +34,21 @@ func NewStaticCapabilityCatalog(capabilities []agentos.Capability) (*StaticCapab
 }
 
 // RegisterCapability adds or replaces one capability.
-func (c *StaticCapabilityCatalog) RegisterCapability(_ context.Context, capability agentos.Capability, _ string) (agentos.Capability, bool, error) {
+func (c *StaticCapabilityCatalog) RegisterCapability(_ context.Context, capability *agentos.Capability, _ string) (agentos.Capability, bool, error) {
 	if c == nil {
 		return agentos.Capability{}, false, fmt.Errorf("%w: capability catalog is nil", agentos.ErrCapabilityNotFound)
 	}
+
 	if err := ValidateCapability(capability); err != nil {
 		return agentos.Capability{}, false, err
 	}
 
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	c.capabilities[capabilityKey{backend: capability.Backend, name: capability.Name}] = capability
 
-	return capability, true, nil
+	c.capabilities[capabilityKey{backend: capability.Backend, name: capability.Name}] = *capability
+
+	return *capability, true, nil
 }
 
 // GetCapability returns a registered capability.
@@ -53,6 +56,7 @@ func (c *StaticCapabilityCatalog) GetCapability(_ context.Context, backend agent
 	if c == nil {
 		return agentos.Capability{}, false, nil
 	}
+
 	c.mu.RLock()
 	defer c.mu.RUnlock()
 

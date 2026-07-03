@@ -3,13 +3,21 @@ package grpcbackend
 import (
 	"encoding/json"
 
+	"google.golang.org/grpc"
 	"google.golang.org/grpc/encoding"
 )
 
 const jsonCodecName = "json"
 
-func init() {
+var _ = func() bool {
 	encoding.RegisterCodec(jsonCodec{})
+
+	return true
+}()
+
+// JSONServerCodecOption configures a gRPC server to use the AgentOS JSON codec.
+func JSONServerCodecOption() grpc.ServerOption {
+	return grpc.ForceServerCodec(jsonCodec{})
 }
 
 type jsonCodec struct{}

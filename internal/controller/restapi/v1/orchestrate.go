@@ -36,7 +36,7 @@ func (r *V1) orchestrate(ctx *fiber.Ctx) error {
 		return errorResponse(ctx, http.StatusBadRequest, err.Error())
 	}
 
-	input, err := nativeOrchestrationInput(req)
+	input, err := nativeOrchestrationInput(&req)
 	if err != nil {
 		r.l.Error(err, "restapi - v1 - orchestrate - native decode")
 
@@ -53,15 +53,17 @@ func (r *V1) orchestrate(ctx *fiber.Ctx) error {
 	return ctx.Status(http.StatusOK).JSON(response.NewRunStatus(&status))
 }
 
-func nativeOrchestrationInput(req request.Orchestrate) (*entity.OrchestrationInput, error) {
+func nativeOrchestrationInput(req *request.Orchestrate) (*entity.OrchestrationInput, error) {
 	teamSpec, err := decodeNativeTeamSpec(req.TeamSpec)
 	if err != nil {
 		return nil, err
 	}
+
 	steps, err := decodeNativeSteps(req.Steps)
 	if err != nil {
 		return nil, err
 	}
+
 	continuePolicy, err := decodeNativeContinuePolicy(req.ContinuePolicy)
 	if err != nil {
 		return nil, err

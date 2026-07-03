@@ -731,10 +731,8 @@ func testTriggerDeleteEventTrigger(t *testing.T) {
 }
 
 // -- Fire --
-
 func TestTriggerFire(t *testing.T) {
 	t.Parallel()
-
 	t.Run("success", func(t *testing.T) {
 		t.Parallel()
 
@@ -765,7 +763,6 @@ func TestTriggerFire(t *testing.T) {
 			t.Error("expected RecordFired to be called")
 		}
 	})
-
 	t.Run("not found", func(t *testing.T) {
 		t.Parallel()
 
@@ -774,13 +771,12 @@ func TestTriggerFire(t *testing.T) {
 				return entity.TriggerSpec{}, false, nil
 			},
 		}
-		uc := newTriggerUC(t, repo, &mockTriggerScheduler{})
 
+		uc := newTriggerUC(t, repo, &mockTriggerScheduler{})
 		if _, err := uc.Fire(context.Background(), "missing"); err == nil {
 			t.Fatal("expected error for not found")
 		}
 	})
-
 	t.Run("record fired error", func(t *testing.T) {
 		t.Parallel()
 
@@ -803,7 +799,6 @@ func TestTriggerFire(t *testing.T) {
 
 func TestTriggerToggle(t *testing.T) {
 	t.Parallel()
-
 	t.Run("disable active schedule trigger", func(t *testing.T) {
 		t.Parallel()
 
@@ -839,7 +834,6 @@ func TestTriggerToggle(t *testing.T) {
 			t.Error("expected Unschedule when disabling active schedule trigger")
 		}
 	})
-
 	t.Run("enable inactive schedule trigger", func(t *testing.T) {
 		t.Parallel()
 

@@ -3,13 +3,19 @@ package planstream
 import (
 	"encoding/json"
 	"os/exec"
-	"path/filepath"
-	"runtime"
 	"testing"
 )
 
 func TestPlanEventStreamPackageDoesNotDependOnNativeStreamTypes(t *testing.T) {
-	cmd := exec.Command(filepath.Join(runtime.GOROOT(), "bin", "go"), "list", "-json", ".")
+	t.Parallel()
+
+	goBinary, err := exec.LookPath("go")
+	if err != nil {
+		t.Fatalf("lookup go binary: %v", err)
+	}
+
+	cmd := exec.CommandContext(t.Context(), goBinary, "list", "-json", ".")
+
 	out, err := cmd.Output()
 	if err != nil {
 		t.Fatalf("go list planstream package: %v", err)

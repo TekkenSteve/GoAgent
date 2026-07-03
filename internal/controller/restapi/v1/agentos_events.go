@@ -35,18 +35,21 @@ func (r *V1) ingestAgentOSEvent(c *fiber.Ctx) error {
 	}
 
 	runID := c.Params("run_id")
+
 	var req request.AgentOSEvent
 	if err := c.BodyParser(&req); err != nil {
 		return errorResponse(c, fiber.StatusBadRequest, "invalid event body")
 	}
+
 	if req.RunID == "" {
 		req.RunID = runID
 	}
+
 	if req.RunID != runID {
 		return errorResponse(c, fiber.StatusBadRequest, "run_id in path and body must match")
 	}
 
-	result, err := r.eventIngest.Ingest(c.UserContext(), eventing.IngestEvent{
+	input := eventing.IngestEvent{
 		EventID:   req.EventID,
 		RunID:     req.RunID,
 		ThreadID:  req.ThreadID,
@@ -57,7 +60,9 @@ func (r *V1) ingestAgentOSEvent(c *fiber.Ctx) error {
 		TraceID:   req.TraceID,
 		Tags:      req.Tags,
 		Payload:   req.Payload,
-	})
+	}
+
+	result, err := r.eventIngest.Ingest(c.UserContext(), &input)
 	if err != nil {
 		if errors.Is(err, eventing.ErrInvalidEvent) {
 			return errorResponse(c, fiber.StatusBadRequest, err.Error())

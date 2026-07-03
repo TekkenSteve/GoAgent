@@ -13,6 +13,8 @@ import (
 )
 
 func TestNewS3BlobStoreRequiresExplicitConfig(t *testing.T) {
+	t.Parallel()
+
 	tests := []struct {
 		name string
 		cfg  S3Config
@@ -26,7 +28,9 @@ func TestNewS3BlobStoreRequiresExplicitConfig(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			_, err := NewS3BlobStore(context.Background(), tt.cfg)
+			t.Parallel()
+
+			_, err := NewS3BlobStore(context.Background(), &tt.cfg)
 			if !errors.Is(err, tt.want) {
 				t.Fatalf("NewS3BlobStore error = %v, want %v", err, tt.want)
 			}
@@ -35,23 +39,30 @@ func TestNewS3BlobStoreRequiresExplicitConfig(t *testing.T) {
 }
 
 func TestS3BlobStorePutGet(t *testing.T) {
+	t.Parallel()
+
 	client := newFakeS3Client()
+
 	store, err := NewS3BlobStoreWithClient(client, "artifacts")
 	if err != nil {
 		t.Fatalf("NewS3BlobStoreWithClient: %v", err)
 	}
 
 	payload := []byte(`{"ok":true}`)
+
 	object, err := store.Put(context.Background(), "plan-1/artifact-1", payload)
 	if err != nil {
 		t.Fatalf("Put: %v", err)
 	}
+
 	if object.URI != "s3://artifacts/plan-1/artifact-1" {
 		t.Fatalf("URI = %q", object.URI)
 	}
+
 	if object.SizeBytes != int64(len(payload)) {
 		t.Fatalf("SizeBytes = %d", object.SizeBytes)
 	}
+
 	if !strings.HasPrefix(object.Digest, "sha256:") {
 		t.Fatalf("Digest = %q", object.Digest)
 	}
@@ -60,12 +71,15 @@ func TestS3BlobStorePutGet(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Get: %v", err)
 	}
+
 	if !bytes.Equal(got, payload) {
 		t.Fatalf("payload = %q, want %q", got, payload)
 	}
 }
 
 func TestS3BlobStoreRejectsInvalidKeys(t *testing.T) {
+	t.Parallel()
+
 	store, err := NewS3BlobStoreWithClient(newFakeS3Client(), "artifacts")
 	if err != nil {
 		t.Fatalf("NewS3BlobStoreWithClient: %v", err)
@@ -79,6 +93,8 @@ func TestS3BlobStoreRejectsInvalidKeys(t *testing.T) {
 }
 
 func TestS3BlobStoreRejectsWrongBucketURI(t *testing.T) {
+	t.Parallel()
+
 	store, err := NewS3BlobStoreWithClient(newFakeS3Client(), "artifacts")
 	if err != nil {
 		t.Fatalf("NewS3BlobStoreWithClient: %v", err)
@@ -93,18 +109,26 @@ type fakeS3Client struct {
 	objects map[string][]byte
 }
 
+var (
+	errFakeS3InvalidPut     = errors.New("invalid put input")
+	errFakeS3InvalidGet     = errors.New("invalid get input")
+	errFakeS3ObjectNotFound = errors.New("object not found")
+)
+
 func newFakeS3Client() *fakeS3Client {
 	return &fakeS3Client{objects: map[string][]byte{}}
 }
 
 func (c *fakeS3Client) PutObject(_ context.Context, input *s3.PutObjectInput, _ ...func(*s3.Options)) (*s3.PutObjectOutput, error) {
 	if input == nil || input.Bucket == nil || input.Key == nil || input.Body == nil {
-		return nil, errors.New("invalid put input")
+		return nil, errFakeS3InvalidPut
 	}
+
 	payload, err := io.ReadAll(input.Body)
 	if err != nil {
 		return nil, err
 	}
+
 	c.objects[aws.ToString(input.Bucket)+"/"+aws.ToString(input.Key)] = payload
 
 	return &s3.PutObjectOutput{}, nil
@@ -112,11 +136,12 @@ func (c *fakeS3Client) PutObject(_ context.Context, input *s3.PutObjectInput, _ 
 
 func (c *fakeS3Client) GetObject(_ context.Context, input *s3.GetObjectInput, _ ...func(*s3.Options)) (*s3.GetObjectOutput, error) {
 	if input == nil || input.Bucket == nil || input.Key == nil {
-		return nil, errors.New("invalid get input")
+		return nil, errFakeS3InvalidGet
 	}
+
 	payload, ok := c.objects[aws.ToString(input.Bucket)+"/"+aws.ToString(input.Key)]
 	if !ok {
-		return nil, errors.New("object not found")
+		return nil, errFakeS3ObjectNotFound
 	}
 
 	return &s3.GetObjectOutput{Body: io.NopCloser(bytes.NewReader(payload))}, nil

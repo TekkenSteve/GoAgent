@@ -31,7 +31,7 @@ type SignalInput struct {
 	SentAt         time.Time          `json:"sent_at"`
 }
 
-func startInputFromSpec(spec agentos.RunSpec) StartInput {
+func startInputFromSpec(spec *agentos.RunSpec) StartInput {
 	requestedAt := spec.RequestedAt
 	if requestedAt.IsZero() {
 		requestedAt = time.Now().UTC()
@@ -54,7 +54,7 @@ func startInputFromSpec(spec agentos.RunSpec) StartInput {
 	}
 }
 
-func signalInputFromSignal(signal agentos.Signal) SignalInput {
+func signalInputFromSignal(signal *agentos.Signal) SignalInput {
 	sentAt := signal.SentAt
 	if sentAt.IsZero() {
 		sentAt = time.Now().UTC()

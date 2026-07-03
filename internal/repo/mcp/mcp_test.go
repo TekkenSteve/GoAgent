@@ -15,51 +15,15 @@ func TestServerConfig_Validate(t *testing.T) {
 		cfg     mcp.ServerConfig
 		wantErr bool
 	}{
-		{
-			name:    "empty name",
-			cfg:     mcp.ServerConfig{Transport: "stdio", Command: "/bin/echo"},
-			wantErr: true,
-		},
-		{
-			name:    "valid stdio",
-			cfg:     mcp.ServerConfig{Name: "test", Transport: "stdio", Command: "/bin/echo"},
-			wantErr: false,
-		},
-		{
-			name:    "stdio missing command",
-			cfg:     mcp.ServerConfig{Name: "test", Transport: "stdio"},
-			wantErr: true,
-		},
-		{
-			name:    "valid sse",
-			cfg:     mcp.ServerConfig{Name: "test", Transport: "sse", URL: "http://localhost:8080/mcp"},
-			wantErr: false,
-		},
-		{
-			name:    "sse missing url",
-			cfg:     mcp.ServerConfig{Name: "test", Transport: "sse"},
-			wantErr: true,
-		},
-		{
-			name:    "valid streamable-http",
-			cfg:     mcp.ServerConfig{Name: "test", Transport: "streamable-http", URL: "http://localhost:8080/mcp"},
-			wantErr: false,
-		},
-		{
-			name:    "streamable-http missing url",
-			cfg:     mcp.ServerConfig{Name: "test", Transport: "streamable-http"},
-			wantErr: true,
-		},
-		{
-			name:    "invalid transport",
-			cfg:     mcp.ServerConfig{Name: "test", Transport: "foo"},
-			wantErr: true,
-		},
-		{
-			name:    "empty transport",
-			cfg:     mcp.ServerConfig{Name: "test"},
-			wantErr: true,
-		},
+		{name: "empty name", cfg: mcp.ServerConfig{Transport: "stdio", Command: "/bin/echo"}, wantErr: true},
+		{name: "valid stdio", cfg: mcp.ServerConfig{Name: "test", Transport: "stdio", Command: "/bin/echo"}, wantErr: false},
+		{name: "stdio missing command", cfg: mcp.ServerConfig{Name: "test", Transport: "stdio"}, wantErr: true},
+		{name: "valid sse", cfg: mcp.ServerConfig{Name: "test", Transport: "sse", URL: "http://localhost:8080/mcp"}, wantErr: false},
+		{name: "sse missing url", cfg: mcp.ServerConfig{Name: "test", Transport: "sse"}, wantErr: true},
+		{name: "valid streamable-http", cfg: mcp.ServerConfig{Name: "test", Transport: "streamable-http", URL: "http://localhost:8080/mcp"}, wantErr: false},
+		{name: "streamable-http missing url", cfg: mcp.ServerConfig{Name: "test", Transport: "streamable-http"}, wantErr: true},
+		{name: "invalid transport", cfg: mcp.ServerConfig{Name: "test", Transport: "foo"}, wantErr: true},
+		{name: "empty transport", cfg: mcp.ServerConfig{Name: "test"}, wantErr: true},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

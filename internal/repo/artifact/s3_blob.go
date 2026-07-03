@@ -10,6 +10,7 @@ import (
 	"io"
 	"net/url"
 	"path"
+	"slices"
 	"strings"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
@@ -24,6 +25,13 @@ var (
 	ErrS3RegionRequired          = errors.New("artifact s3 blob store: region is required")
 	ErrS3AccessKeyIDRequired     = errors.New("artifact s3 blob store: access key id is required")
 	ErrS3SecretAccessKeyRequired = errors.New("artifact s3 blob store: secret access key is required")
+
+	errS3BlobStoreClientRequired = errors.New("artifact s3 blob store: client is required")
+	errS3BlobStoreUnsupportedURI = errors.New("artifact s3 blob store: unsupported uri")
+	errS3BlobStoreURIBucket      = errors.New("artifact s3 blob store: uri bucket does not match configured bucket")
+	errS3BlobStoreURIKeyRequired = errors.New("artifact s3 blob store: uri key is required")
+	errS3BlobStoreKeyRequired    = errors.New("artifact s3 blob store: key is required")
+	errS3BlobStoreInvalidKey     = errors.New("artifact s3 blob store: invalid key")
 )
 
 type S3Config struct {
@@ -47,16 +55,19 @@ type S3BlobStore struct {
 	bucket string
 }
 
-func NewS3BlobStore(_ context.Context, cfg S3Config) (*S3BlobStore, error) {
+func NewS3BlobStore(_ context.Context, cfg *S3Config) (*S3BlobStore, error) {
 	if cfg.Bucket == "" {
 		return nil, ErrS3BucketRequired
 	}
+
 	if cfg.Region == "" {
 		return nil, ErrS3RegionRequired
 	}
+
 	if cfg.AccessKeyID == "" {
 		return nil, ErrS3AccessKeyIDRequired
 	}
+
 	if cfg.SecretAccessKey == "" {
 		return nil, ErrS3SecretAccessKeyRequired
 	}
@@ -72,6 +83,7 @@ func NewS3BlobStore(_ context.Context, cfg S3Config) (*S3BlobStore, error) {
 	if cfg.Endpoint != "" {
 		awsCfg.BaseEndpoint = aws.String(cfg.Endpoint)
 	}
+
 	client := s3.NewFromConfig(awsCfg, func(options *s3.Options) {
 		options.UsePathStyle = cfg.ForcePathStyle
 	})
@@ -81,8 +93,9 @@ func NewS3BlobStore(_ context.Context, cfg S3Config) (*S3BlobStore, error) {
 
 func NewS3BlobStoreWithClient(client s3ObjectClient, bucket string) (*S3BlobStore, error) {
 	if client == nil {
-		return nil, errors.New("artifact s3 blob store: client is required")
+		return nil, errS3BlobStoreClientRequired
 	}
+
 	if bucket == "" {
 		return nil, ErrS3BucketRequired
 	}
@@ -95,6 +108,7 @@ func (s *S3BlobStore) Put(ctx context.Context, key string, payload []byte) (Blob
 	if err != nil {
 		return BlobObject{}, err
 	}
+
 	if _, err := s.client.PutObject(ctx, &s3.PutObjectInput{
 		Bucket: aws.String(s.bucket),
 		Key:    aws.String(objectKey),
@@ -102,6 +116,7 @@ func (s *S3BlobStore) Put(ctx context.Context, key string, payload []byte) (Blob
 	}); err != nil {
 		return BlobObject{}, fmt.Errorf("artifact s3 blob store: put object: %w", err)
 	}
+
 	sum := sha256.Sum256(payload)
 
 	return BlobObject{
@@ -116,6 +131,7 @@ func (s *S3BlobStore) Get(ctx context.Context, rawURI string) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
+
 	output, err := s.client.GetObject(ctx, &s3.GetObjectInput{
 		Bucket: aws.String(s.bucket),
 		Key:    aws.String(objectKey),
@@ -142,16 +158,20 @@ func keyFromS3URI(rawURI, expectedBucket string) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("artifact s3 blob store: parse uri: %w", err)
 	}
+
 	if parsed.Scheme != s3Scheme {
-		return "", fmt.Errorf("artifact s3 blob store: unsupported uri %q", rawURI)
+		return "", fmt.Errorf("%w: %q", errS3BlobStoreUnsupportedURI, rawURI)
 	}
+
 	if parsed.Host != expectedBucket {
-		return "", fmt.Errorf("artifact s3 blob store: uri bucket %q does not match configured bucket %q", parsed.Host, expectedBucket)
+		return "", fmt.Errorf("%w: uri bucket %q does not match configured bucket %q", errS3BlobStoreURIBucket, parsed.Host, expectedBucket)
 	}
+
 	key := strings.TrimPrefix(parsed.EscapedPath(), "/")
 	if key == "" {
-		return "", fmt.Errorf("artifact s3 blob store: uri key is required")
+		return "", errS3BlobStoreURIKeyRequired
 	}
+
 	unescaped, err := url.PathUnescape(key)
 	if err != nil {
 		return "", fmt.Errorf("artifact s3 blob store: uri key: %w", err)
@@ -162,22 +182,17 @@ func keyFromS3URI(rawURI, expectedBucket string) (string, error) {
 
 func cleanS3Key(key string) (string, error) {
 	if key == "" {
-		return "", fmt.Errorf("artifact s3 blob store: key is required")
+		return "", errS3BlobStoreKeyRequired
 	}
+
 	clean := path.Clean(key)
 	if clean == "." || path.IsAbs(clean) || hasParentPathSegment(key) {
-		return "", fmt.Errorf("artifact s3 blob store: invalid key %q", key)
+		return "", fmt.Errorf("%w: %q", errS3BlobStoreInvalidKey, key)
 	}
 
 	return clean, nil
 }
 
 func hasParentPathSegment(key string) bool {
-	for _, segment := range strings.Split(key, "/") {
-		if segment == ".." {
-			return true
-		}
-	}
-
-	return false
+	return slices.Contains(strings.Split(key, "/"), "..")
 }
