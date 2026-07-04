@@ -51,6 +51,8 @@ services:
       AGENTFW_TEMPORAL_ADDRESS: "temporal:7233"
       AGENTFW_TEMPORAL_PLAN_CONTROL_TASK_QUEUE: "agentos-plan-control"
       AGENTFW_TEMPORAL_PLAN_ACTIVITY_TASK_QUEUE: "agentos-plan-activity"
+      AGENTFW_TEMPORAL_PROCESS_CONTROL_TASK_QUEUE: "agentos-process-control"
+      AGENTFW_TEMPORAL_PROCESS_ACTIVITY_TASK_QUEUE: "agentos-process-activity"
       AGENTFW_TEMPORAL_NATIVE_CONTROL_TASK_QUEUE: "agentfw-native-control"
       AGENTFW_TEMPORAL_NATIVE_LLM_TASK_QUEUE: "agentfw-native-llm"
       AGENTFW_TEMPORAL_NATIVE_TOOL_TASK_QUEUE: "agentfw-native-tool"

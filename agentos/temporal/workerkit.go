@@ -27,13 +27,15 @@ var (
 
 // WorkerSet contains one Temporal worker per workload class.
 type WorkerSet struct {
-	PlanControl   worker.Worker
-	PlanActivity  worker.Worker
-	NativeControl worker.Worker
-	NativeLLM     worker.Worker
-	NativeTool    worker.Worker
-	Stream        worker.Worker
-	Trigger       worker.Worker
+	PlanControl     worker.Worker
+	PlanActivity    worker.Worker
+	ProcessControl  worker.Worker
+	ProcessActivity worker.Worker
+	NativeControl   worker.Worker
+	NativeLLM       worker.Worker
+	NativeTool      worker.Worker
+	Stream          worker.Worker
+	Trigger         worker.Worker
 }
 
 // RegisterPlanWorkflow installs the AgentOS RunPlan workflow into an existing worker.

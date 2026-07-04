@@ -15,13 +15,15 @@ func FromAppConfig(cfg *appconfig.Config) Config {
 	base.Temporal.Address = cfg.AgentFW.TemporalAddress
 	base.Temporal.Namespace = cfg.AgentFW.TemporalNamespace
 	base.Temporal.TaskQueues = TaskQueues{
-		PlanControl:   cfg.AgentFW.TemporalPlanControlTaskQueue,
-		PlanActivity:  cfg.AgentFW.TemporalPlanActivityTaskQueue,
-		NativeControl: cfg.AgentFW.TemporalNativeControlTaskQueue,
-		NativeLLM:     cfg.AgentFW.TemporalNativeLLMTaskQueue,
-		NativeTool:    cfg.AgentFW.TemporalNativeToolTaskQueue,
-		Stream:        cfg.AgentFW.TemporalStreamTaskQueue,
-		Trigger:       cfg.AgentFW.TemporalTriggerTaskQueue,
+		PlanControl:     cfg.AgentFW.TemporalPlanControlTaskQueue,
+		PlanActivity:    cfg.AgentFW.TemporalPlanActivityTaskQueue,
+		ProcessControl:  cfg.AgentFW.TemporalProcessControlTaskQueue,
+		ProcessActivity: cfg.AgentFW.TemporalProcessActivityTaskQueue,
+		NativeControl:   cfg.AgentFW.TemporalNativeControlTaskQueue,
+		NativeLLM:       cfg.AgentFW.TemporalNativeLLMTaskQueue,
+		NativeTool:      cfg.AgentFW.TemporalNativeToolTaskQueue,
+		Stream:          cfg.AgentFW.TemporalStreamTaskQueue,
+		Trigger:         cfg.AgentFW.TemporalTriggerTaskQueue,
 	}
 	base.Temporal.MaxConcurrentWorkflowTaskPollers = cfg.AgentFW.MaxConcurrentWorkflowTaskPollers
 	base.Temporal.MaxConcurrentActivityTaskPollers = cfg.AgentFW.MaxConcurrentActivityTaskPollers

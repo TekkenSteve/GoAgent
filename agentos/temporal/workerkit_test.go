@@ -237,35 +237,41 @@ func (w *fakeWorker) activityRegistered(name string) bool {
 }
 
 type fakeWorkers struct {
-	planControl   *fakeWorker
-	planActivity  *fakeWorker
-	nativeControl *fakeWorker
-	nativeLLM     *fakeWorker
-	nativeTool    *fakeWorker
-	stream        *fakeWorker
-	trigger       *fakeWorker
+	planControl     *fakeWorker
+	planActivity    *fakeWorker
+	processControl  *fakeWorker
+	processActivity *fakeWorker
+	nativeControl   *fakeWorker
+	nativeLLM       *fakeWorker
+	nativeTool      *fakeWorker
+	stream          *fakeWorker
+	trigger         *fakeWorker
 }
 
 func fakeWorkerSet() fakeWorkers {
 	return fakeWorkers{
-		planControl:   &fakeWorker{},
-		planActivity:  &fakeWorker{},
-		nativeControl: &fakeWorker{},
-		nativeLLM:     &fakeWorker{},
-		nativeTool:    &fakeWorker{},
-		stream:        &fakeWorker{},
-		trigger:       &fakeWorker{},
+		planControl:     &fakeWorker{},
+		planActivity:    &fakeWorker{},
+		processControl:  &fakeWorker{},
+		processActivity: &fakeWorker{},
+		nativeControl:   &fakeWorker{},
+		nativeLLM:       &fakeWorker{},
+		nativeTool:      &fakeWorker{},
+		stream:          &fakeWorker{},
+		trigger:         &fakeWorker{},
 	}
 }
 
 func (w fakeWorkers) workerSet() *WorkerSet {
 	return &WorkerSet{
-		PlanControl:   w.planControl,
-		PlanActivity:  w.planActivity,
-		NativeControl: w.nativeControl,
-		NativeLLM:     w.nativeLLM,
-		NativeTool:    w.nativeTool,
-		Stream:        w.stream,
-		Trigger:       w.trigger,
+		PlanControl:     w.planControl,
+		PlanActivity:    w.planActivity,
+		ProcessControl:  w.processControl,
+		ProcessActivity: w.processActivity,
+		NativeControl:   w.nativeControl,
+		NativeLLM:       w.nativeLLM,
+		NativeTool:      w.nativeTool,
+		Stream:          w.stream,
+		Trigger:         w.trigger,
 	}
 }

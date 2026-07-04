@@ -555,13 +555,15 @@ func closeAgentOSPlanRuntime(planRuntime agentos.PlanRuntime) func() error {
 
 func agentOSTemporalTaskQueues(taskQueues *agentfwconfig.TaskQueues) agentostemporal.TaskQueues {
 	return agentostemporal.TaskQueues{
-		PlanControl:   taskQueues.PlanControl,
-		PlanActivity:  taskQueues.PlanActivity,
-		NativeControl: taskQueues.NativeControl,
-		NativeLLM:     taskQueues.NativeLLM,
-		NativeTool:    taskQueues.NativeTool,
-		Stream:        taskQueues.Stream,
-		Trigger:       taskQueues.Trigger,
+		PlanControl:     taskQueues.PlanControl,
+		PlanActivity:    taskQueues.PlanActivity,
+		ProcessControl:  taskQueues.ProcessControl,
+		ProcessActivity: taskQueues.ProcessActivity,
+		NativeControl:   taskQueues.NativeControl,
+		NativeLLM:       taskQueues.NativeLLM,
+		NativeTool:      taskQueues.NativeTool,
+		Stream:          taskQueues.Stream,
+		Trigger:         taskQueues.Trigger,
 	}
 }
 

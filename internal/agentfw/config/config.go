@@ -39,13 +39,15 @@ type Temporal struct {
 
 // TaskQueues names the Temporal queues used by each workload class.
 type TaskQueues struct {
-	PlanControl   string
-	PlanActivity  string
-	NativeControl string
-	NativeLLM     string
-	NativeTool    string
-	Stream        string
-	Trigger       string
+	PlanControl     string
+	PlanActivity    string
+	ProcessControl  string
+	ProcessActivity string
+	NativeControl   string
+	NativeLLM       string
+	NativeTool      string
+	Stream          string
+	Trigger         string
 }
 
 var ErrTemporalTaskQueuesInvalid = errors.New("agentfw temporal task queues: invalid")
@@ -53,13 +55,15 @@ var ErrTemporalTaskQueuesInvalid = errors.New("agentfw temporal task queues: inv
 // DefaultTaskQueues returns the production-oriented AgentOS queue split.
 func DefaultTaskQueues() TaskQueues {
 	return TaskQueues{
-		PlanControl:   "agentos-plan-control",
-		PlanActivity:  "agentos-plan-activity",
-		NativeControl: "agentfw-native-control",
-		NativeLLM:     "agentfw-native-llm",
-		NativeTool:    "agentfw-native-tool",
-		Stream:        "agentfw-stream",
-		Trigger:       "agentfw-trigger",
+		PlanControl:     "agentos-plan-control",
+		PlanActivity:    "agentos-plan-activity",
+		ProcessControl:  "agentos-process-control",
+		ProcessActivity: "agentos-process-activity",
+		NativeControl:   "agentfw-native-control",
+		NativeLLM:       "agentfw-native-llm",
+		NativeTool:      "agentfw-native-tool",
+		Stream:          "agentfw-stream",
+		Trigger:         "agentfw-trigger",
 	}
 }
 
@@ -72,6 +76,8 @@ func (q *TaskQueues) QueueNames() []string {
 	ordered := []string{
 		q.PlanControl,
 		q.PlanActivity,
+		q.ProcessControl,
+		q.ProcessActivity,
 		q.NativeControl,
 		q.NativeLLM,
 		q.NativeTool,
@@ -110,6 +116,8 @@ func (q *TaskQueues) Validate() error {
 	}{
 		{label: "plan control", value: q.PlanControl},
 		{label: "plan activity", value: q.PlanActivity},
+		{label: "process control", value: q.ProcessControl},
+		{label: "process activity", value: q.ProcessActivity},
 		{label: "native control", value: q.NativeControl},
 		{label: "native llm", value: q.NativeLLM},
 		{label: "native tool", value: q.NativeTool},
