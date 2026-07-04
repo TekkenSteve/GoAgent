@@ -156,6 +156,7 @@ func (r *workerResources) close() {
 
 func configureWorkerPlanRuntime(kit *WorkerKit, cfg *WorkerConfig, resources *workerResources, batchWriter *pipelinepkg.BatchWriter, infra *workerPlanRuntime) {
 	kit.planActivities = infra.planActivities
+	kit.processActivities = infra.processActivities
 	kit.planCommandReconciler = newPlanCommandReconciler(newPlanTemporalClient(resources.temporalClient), &cfg.TemporalTaskQueues, infra.planStore, infra.planStore, infra.planStore)
 	kit.closeFns = append(
 		kit.closeFns,
@@ -186,9 +187,10 @@ func configureWorkerPlanRuntime(kit *WorkerKit, cfg *WorkerConfig, resources *wo
 }
 
 type workerPlanRuntime struct {
-	planActivities *PlanActivities
-	planClose      func() error
-	planStore      *temporalrepo.AgentOSPlanRepo
+	planActivities    *PlanActivities
+	processActivities *ProcessActivities
+	planClose         func() error
+	planStore         *temporalrepo.AgentOSPlanRepo
 }
 
 func initWorkerPlanRuntime(ctx context.Context, cfg *WorkerConfig, pg *postgres.Postgres, rdb *goredis.Redis, temporalClient client.Client) (*workerPlanRuntime, error) {
@@ -214,6 +216,7 @@ func initWorkerPlanRuntime(ctx context.Context, cfg *WorkerConfig, pg *postgres.
 	}
 
 	planEventStream := planstream.NewRedisPlanEventStream(rdb)
+	processStore := temporalrepo.NewAgentOSProcessRepo(pg)
 
 	planRuntime, err := NewRuntimeWithClient(ctx, &RuntimeConfig{
 		TemporalAddress:          cfg.TemporalAddress,
@@ -235,10 +238,18 @@ func initWorkerPlanRuntime(ctx context.Context, cfg *WorkerConfig, pg *postgres.
 		return nil, fmt.Errorf("agentos temporal worker - plan activities: %w", err)
 	}
 
+	processActivities, err := NewProcessActivities(processStore, processStore)
+	if err != nil {
+		planRuntime.Close()
+
+		return nil, fmt.Errorf("agentos temporal worker - process activities: %w", err)
+	}
+
 	return &workerPlanRuntime{
-		planActivities: planActivities,
-		planClose:      planRuntime.Close,
-		planStore:      planStore,
+		planActivities:    planActivities,
+		processActivities: processActivities,
+		planClose:         planRuntime.Close,
+		planStore:         planStore,
 	}, nil
 }
 

@@ -51,6 +51,7 @@ var (
 	errAppRunAgentOSRuntimeRequired          = errors.New("app - Run - agentos runtime is required for agent execution")
 	errAppRunPlanCmdRecoveryNoImplementation = errors.New("app - Run - agentos plan command recovery: plan runtime does not implement recovery")
 	errAppRunPlanWorkerQueueUnconfigured     = errors.New("app - Run - agentos plan worker task queue is not configured")
+	errAppProcessWorkerQueueUnconfigured     = errors.New("app - Run - agentos process worker task queue is not configured")
 )
 
 type appInfrastructure struct {
@@ -308,6 +309,13 @@ func setupPlanRuntime(agentOSRuntime agentos.Runtime, planStore *temporalrepo.Ag
 		l.Fatal(fmt.Errorf("app - Run - agentos plan activities: %w", err))
 	}
 
+	processStore := temporalrepo.NewAgentOSProcessRepo(planStore.Postgres)
+
+	processActivities, err := agentostemporal.NewProcessActivities(processStore, processStore)
+	if err != nil {
+		l.Fatal(fmt.Errorf("app - Run - agentos process activities: %w", err))
+	}
+
 	planRuntimeCfg := cfg.AgentOS.ArtifactStoreConfig()
 	planRuntimeConfig := agentostemporal.RuntimeConfig{
 		TemporalAddress:    fwCfg.Temporal.Address,
@@ -325,8 +333,9 @@ func setupPlanRuntime(agentOSRuntime agentos.Runtime, planStore *temporalrepo.Ag
 	}
 
 	registrar := agentOSRegistrar{
-		base:           agentfwruntime.NewDefaultRegistrar(comp.activities),
-		planActivities: planActivities,
+		base:              agentfwruntime.NewDefaultRegistrar(comp.activities),
+		planActivities:    planActivities,
+		processActivities: processActivities,
 	}
 	if err := agentfwruntime.StartWorker(runtime, registrar); err != nil {
 		l.Fatal(fmt.Errorf("app - Run - agentfw.StartWorker: %w", err))
@@ -512,8 +521,9 @@ func (l planCommandRecoveryLogger) PlanCommandRecoveryFailed(err error) {
 }
 
 type agentOSRegistrar struct {
-	base           agentfwruntime.DefaultRegistrar
-	planActivities *agentostemporal.PlanActivities
+	base              agentfwruntime.DefaultRegistrar
+	planActivities    *agentostemporal.PlanActivities
+	processActivities *agentostemporal.ProcessActivities
 }
 
 func (r agentOSRegistrar) RegisterWorkflows(rt *agentfwruntime.TemporalRuntime) error {
@@ -526,7 +536,16 @@ func (r agentOSRegistrar) RegisterWorkflows(rt *agentfwruntime.TemporalRuntime) 
 		return fmt.Errorf("%w: plan control task queue %q", errAppRunPlanWorkerQueueUnconfigured, rt.TaskQueues.PlanControl)
 	}
 
-	return agentostemporal.RegisterPlanWorkflow(planWorker)
+	if err := agentostemporal.RegisterPlanWorkflow(planWorker); err != nil {
+		return err
+	}
+
+	processWorker, ok := rt.WorkerFor(rt.TaskQueues.ProcessControl)
+	if !ok || processWorker == nil {
+		return fmt.Errorf("%w: process control task queue %q", errAppProcessWorkerQueueUnconfigured, rt.TaskQueues.ProcessControl)
+	}
+
+	return agentostemporal.RegisterProcessWorkflow(processWorker)
 }
 
 func (r agentOSRegistrar) RegisterActivities(rt *agentfwruntime.TemporalRuntime) error {
@@ -539,7 +558,16 @@ func (r agentOSRegistrar) RegisterActivities(rt *agentfwruntime.TemporalRuntime)
 		return fmt.Errorf("%w: plan activity task queue %q", errAppRunPlanWorkerQueueUnconfigured, rt.TaskQueues.PlanActivity)
 	}
 
-	return agentostemporal.RegisterPlanActivities(planWorker, r.planActivities)
+	if err := agentostemporal.RegisterPlanActivities(planWorker, r.planActivities); err != nil {
+		return err
+	}
+
+	processWorker, ok := rt.WorkerFor(rt.TaskQueues.ProcessActivity)
+	if !ok || processWorker == nil {
+		return fmt.Errorf("%w: process activity task queue %q", errAppProcessWorkerQueueUnconfigured, rt.TaskQueues.ProcessActivity)
+	}
+
+	return agentostemporal.RegisterProcessActivities(processWorker, r.processActivities)
 }
 
 func closeAgentOSPlanRuntime(planRuntime agentos.PlanRuntime) func() error {

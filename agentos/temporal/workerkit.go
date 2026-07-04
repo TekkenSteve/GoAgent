@@ -14,6 +14,7 @@ import (
 type WorkerKit struct {
 	activities            *orchestration.AgentActivities
 	planActivities        *PlanActivities
+	processActivities     *ProcessActivities
 	planCommandReconciler *planCommandReconciler
 	closeFns              []func() error
 }
@@ -22,6 +23,7 @@ var (
 	errWorkerKitNilWorker                          = errors.New("agentos temporal workerkit: nil worker")
 	errWorkerKitWorkersRequired                    = errors.New("agentos temporal workerkit: worker set is required")
 	errWorkerKitPlanActivitiesRequired             = errors.New("agentos temporal workerkit: plan activities are required")
+	errWorkerKitProcessActivitiesRequired          = errors.New("agentos temporal workerkit: process activities are required")
 	errWorkerKitPlanCommandReconcilerNotConfigured = errors.New("agentos temporal workerkit: plan command reconciler is not configured")
 )
 
@@ -89,6 +91,45 @@ func RegisterPlanActivities(w worker.Worker, activities *PlanActivities) error {
 	return nil
 }
 
+// RegisterProcessWorkflow installs the AgentOS process workflow into an existing worker.
+func RegisterProcessWorkflow(w worker.Worker) error {
+	if w == nil {
+		return errWorkerKitNilWorker
+	}
+
+	w.RegisterWorkflowWithOptions(ProcessWorkflow, workflow.RegisterOptions{
+		Name: ProcessWorkflowName,
+	})
+
+	return nil
+}
+
+// RegisterProcessActivities installs AgentOS process activities into an existing worker.
+func RegisterProcessActivities(w worker.Worker, activities *ProcessActivities) error {
+	if w == nil {
+		return errWorkerKitNilWorker
+	}
+
+	if activities == nil {
+		return errWorkerKitProcessActivitiesRequired
+	}
+
+	w.RegisterActivityWithOptions(activities.StartProcessActivity, activity.RegisterOptions{
+		Name: StartProcessActivityName,
+	})
+	w.RegisterActivityWithOptions(activities.SignalProcessActivity, activity.RegisterOptions{
+		Name: SignalProcessActivityName,
+	})
+	w.RegisterActivityWithOptions(activities.ControlProcessActivity, activity.RegisterOptions{
+		Name: ControlProcessActivityName,
+	})
+	w.RegisterActivityWithOptions(activities.FireProcessTimerActivity, activity.RegisterOptions{
+		Name: FireProcessTimerActivityName,
+	})
+
+	return nil
+}
+
 // NewWorkerKit creates a worker registration kit backed by the default
 // Temporal/Postgres/Redis/Bifrost implementation.
 func NewWorkerKit(ctx context.Context, cfg *WorkerConfig) (*WorkerKit, error) {
@@ -101,11 +142,27 @@ func (k *WorkerKit) Register(workers *WorkerSet) error {
 		return err
 	}
 
+	if err := k.registerProcessWorkloads(workers); err != nil {
+		return err
+	}
+
 	if k.activities == nil {
 		return nil
 	}
 
 	return k.registerNativeWorkloads(workers)
+}
+
+func (k *WorkerKit) registerProcessWorkloads(workers *WorkerSet) error {
+	if workers == nil || workers.ProcessControl == nil || workers.ProcessActivity == nil {
+		return errWorkerKitWorkersRequired
+	}
+
+	if err := RegisterProcessWorkflow(workers.ProcessControl); err != nil {
+		return err
+	}
+
+	return RegisterProcessActivities(workers.ProcessActivity, k.processActivities)
 }
 
 func (k *WorkerKit) registerPlanWorkloads(workers *WorkerSet) error {

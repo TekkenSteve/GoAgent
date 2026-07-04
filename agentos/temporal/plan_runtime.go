@@ -100,10 +100,7 @@ func NewPlanRuntime(ctx context.Context, cfg *RuntimeConfig) (agentos.PlanRuntim
 
 	fwTemporal := temporalConfig(cfg)
 
-	c, err := client.Dial(client.Options{
-		HostPort:  fwTemporal.Address,
-		Namespace: fwTemporal.Namespace,
-	})
+	c, err := dialTemporalClient(&fwTemporal)
 	if err != nil {
 		return nil, fmt.Errorf("agentos temporal plan runtime client: %w", err)
 	}

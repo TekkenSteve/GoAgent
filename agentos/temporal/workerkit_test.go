@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/TekkenSteve/GoAgent/internal/agentfw/orchestration"
+	"github.com/TekkenSteve/GoAgent/internal/usecase/agentosprocess"
 	"github.com/nexus-rpc/sdk-go/nexus"
 	"go.temporal.io/sdk/activity"
 	"go.temporal.io/sdk/workflow"
@@ -89,7 +90,10 @@ func TestNewWorkerKitRequiresS3ArtifactStoreBucket(t *testing.T) {
 
 func TestWorkerKitRegistersPlanWorkflowAndActivities(t *testing.T) {
 	t.Parallel()
-	kit := &WorkerKit{planActivities: newTestPlanActivities(t, &fakePlanRuntime{})}
+	kit := &WorkerKit{
+		planActivities:    newTestPlanActivities(t, &fakePlanRuntime{}),
+		processActivities: newTestProcessActivities(t),
+	}
 	workers := fakeWorkerSet()
 
 	if err := kit.Register(workers.workerSet()); err != nil {
@@ -124,12 +128,42 @@ func TestWorkerKitRegistersPlanWorkflowAndActivities(t *testing.T) {
 	}
 }
 
+func TestWorkerKitRegistersProcessWorkflowAndActivities(t *testing.T) {
+	t.Parallel()
+
+	kit := &WorkerKit{
+		planActivities:    newTestPlanActivities(t, &fakePlanRuntime{}),
+		processActivities: newTestProcessActivities(t),
+	}
+	workers := fakeWorkerSet()
+
+	if err := kit.Register(workers.workerSet()); err != nil {
+		t.Fatalf("Register: %v", err)
+	}
+
+	if !workers.processControl.workflowRegistered(ProcessWorkflowName) {
+		t.Fatalf("process workflow was not registered on process control; got %#v", workers.processControl.workflows)
+	}
+
+	for _, name := range []string{
+		StartProcessActivityName,
+		SignalProcessActivityName,
+		ControlProcessActivityName,
+		FireProcessTimerActivityName,
+	} {
+		if !workers.processActivity.activityRegistered(name) {
+			t.Fatalf("process activity %q was not registered on process activity; got %#v", name, workers.processActivity.activities)
+		}
+	}
+}
+
 func TestWorkerKitRegistersNativeWorkloadsOnDedicatedWorkers(t *testing.T) {
 	t.Parallel()
 
 	kit := &WorkerKit{
-		activities:     &orchestration.AgentActivities{},
-		planActivities: newTestPlanActivities(t, &fakePlanRuntime{}),
+		activities:        &orchestration.AgentActivities{},
+		planActivities:    newTestPlanActivities(t, &fakePlanRuntime{}),
+		processActivities: newTestProcessActivities(t),
 	}
 	workers := fakeWorkerSet()
 
@@ -201,6 +235,19 @@ func assertTriggerRegistrations(t *testing.T, worker *fakeWorker) {
 	if !worker.activityRegistered(orchestration.FireTriggerActivityName) {
 		t.Fatalf("trigger activity was not isolated on trigger worker; got %#v", worker.activities)
 	}
+}
+
+func newTestProcessActivities(t *testing.T) *ProcessActivities {
+	t.Helper()
+
+	store := agentosprocess.NewMemoryStore()
+
+	activities, err := NewProcessActivities(store, store)
+	if err != nil {
+		t.Fatalf("NewProcessActivities: %v", err)
+	}
+
+	return activities
 }
 
 type fakeWorker struct {
