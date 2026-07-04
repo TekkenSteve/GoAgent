@@ -22,4 +22,6 @@ var (
 	ErrInvalidArtifact         = errors.New("agentos: invalid artifact")
 	ErrInvalidExpression       = errors.New("agentos: invalid expression")
 	ErrInvalidPlanEvent        = errors.New("agentos: invalid plan event")
+	ErrInvalidLedgerEntry      = errors.New("agentos: invalid ledger entry")
+	ErrInvalidLedgerScope      = errors.New("agentos: invalid ledger scope")
 )

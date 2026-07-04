@@ -41,6 +41,13 @@ type ProcessRuntime interface {
 	ListProcessEvents(ctx context.Context, scope *ProcessEventScope) ([]ProcessEvent, error)
 }
 
+// LedgerRuntime records append-only decisions, evidence, prompts, responses,
+// action references, and artifacts for generic AgentOS processes and resources.
+type LedgerRuntime interface {
+	AppendLedgerEntry(ctx context.Context, spec *LedgerEntrySpec) (LedgerEntry, error)
+	ListLedgerEntries(ctx context.Context, scope *LedgerScope) ([]LedgerEntry, error)
+}
+
 // Subscription is a stream of run events.
 type Subscription interface {
 	Events() <-chan Event
