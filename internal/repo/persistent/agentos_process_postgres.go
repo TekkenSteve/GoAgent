@@ -1,0 +1,738 @@
+package persistent
+
+import (
+	"context"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"time"
+
+	sq "github.com/Masterminds/squirrel"
+	"github.com/TekkenSteve/GoAgent/agentos"
+	"github.com/TekkenSteve/GoAgent/internal/pkg/postgres"
+	"github.com/TekkenSteve/GoAgent/internal/usecase/agentosprocess"
+	"github.com/jackc/pgx/v5"
+)
+
+// AgentOSProcessRepo persists generic AgentOS process projections and events.
+type AgentOSProcessRepo struct {
+	*postgres.Postgres
+}
+
+// NewAgentOSProcessRepo creates a Postgres-backed process repository.
+func NewAgentOSProcessRepo(pg *postgres.Postgres) *AgentOSProcessRepo {
+	return &AgentOSProcessRepo{pg}
+}
+
+func (r *AgentOSProcessRepo) CreateProcess(ctx context.Context, spec *agentos.ProcessSpec, status *agentos.ProcessStatus) (agentos.ProcessStatus, bool, error) {
+	if err := agentos.ValidateProcessSpec(spec); err != nil {
+		return agentos.ProcessStatus{}, false, err
+	}
+
+	normalizedStatus := normalizePostgresProcessStatus(spec, status)
+
+	existingSpec, existingStatus, exists, err := r.processForCreate(ctx, spec)
+	if err != nil {
+		return agentos.ProcessStatus{}, false, err
+	}
+
+	if exists {
+		return existingStatus, false, agentosprocess.ValidateProcessStartIdempotency(&existingSpec, spec)
+	}
+
+	if err := r.insertProcess(ctx, spec, &normalizedStatus); err != nil {
+		existing, lookupErr := r.resolveProcessCreateConflict(ctx, spec, err)
+		if lookupErr != nil {
+			return agentos.ProcessStatus{}, false, lookupErr
+		}
+
+		if existing != nil {
+			return *existing, false, nil
+		}
+
+		return agentos.ProcessStatus{}, false, err
+	}
+
+	return normalizedStatus, true, nil
+}
+
+func (r *AgentOSProcessRepo) GetProcessByRef(ctx context.Context, ref agentos.ProcessRef) (agentos.ProcessSpec, agentos.ProcessStatus, bool, error) {
+	if err := agentos.ValidateProcessRef(ref); err != nil {
+		return agentos.ProcessSpec{}, agentos.ProcessStatus{}, false, err
+	}
+
+	return r.loadProcess(ctx, sq.Eq{
+		"process_id": ref.ProcessID,
+		"account_id": ref.AccountID,
+		"project_id": ref.ProjectID,
+	}, "GetProcessByRef")
+}
+
+func (r *AgentOSProcessRepo) UpdateProcessStatus(
+	ctx context.Context,
+	status *agentos.ProcessStatus,
+	idempotencyKey string,
+) (agentos.ProcessStatus, error) {
+	if err := validatePostgresProcessStatusUpdate(status, idempotencyKey); err != nil {
+		return agentos.ProcessStatus{}, err
+	}
+
+	spec, _, exists, err := r.GetProcessByRef(ctx, agentos.ProcessRef{
+		ProcessID: status.ProcessID,
+		AccountID: status.AccountID,
+		ProjectID: status.ProjectID,
+	})
+	if err != nil || !exists {
+		return agentos.ProcessStatus{}, err
+	}
+
+	normalized := normalizePostgresProcessStatus(&spec, status)
+
+	statusJSON, err := json.Marshal(normalized)
+	if err != nil {
+		return agentos.ProcessStatus{}, fmt.Errorf("AgentOSProcessRepo - UpdateProcessStatus - marshal status: %w", err)
+	}
+
+	existingStatus, exists, err := r.processStatusByIdempotencyKey(ctx, status.ProcessID, status.AccountID, status.ProjectID, idempotencyKey)
+	if err != nil {
+		return agentos.ProcessStatus{}, err
+	}
+
+	if exists {
+		return existingStatus, nil
+	}
+
+	return r.applyProcessStatusUpdate(ctx, &spec, &normalized, idempotencyKey, statusJSON)
+}
+
+func (r *AgentOSProcessRepo) applyProcessStatusUpdate(
+	ctx context.Context,
+	spec *agentos.ProcessSpec,
+	status *agentos.ProcessStatus,
+	idempotencyKey string,
+	statusJSON []byte,
+) (agentos.ProcessStatus, error) {
+	tx, err := r.Pool.Begin(ctx)
+	if err != nil {
+		return agentos.ProcessStatus{}, fmt.Errorf("AgentOSProcessRepo - UpdateProcessStatus - begin: %w", err)
+	}
+
+	defer func() {
+		errcheckIgnore(tx.Rollback(ctx))
+	}()
+
+	query, args, err := r.Builder.
+		Update("processes").
+		Set("lifecycle_state", status.LifecycleState).
+		Set("reason", status.Reason).
+		Set("status_json", statusJSON).
+		Set("updated_at", status.UpdatedAt).
+		Where(sq.Eq{
+			"process_id": spec.ProcessID,
+			"account_id": spec.AccountID,
+			"project_id": spec.ProjectID,
+		}).
+		ToSql()
+	if err != nil {
+		return agentos.ProcessStatus{}, fmt.Errorf("AgentOSProcessRepo - UpdateProcessStatus - builder: %w", err)
+	}
+
+	tag, err := tx.Exec(ctx, query, args...)
+	if err != nil {
+		return agentos.ProcessStatus{}, fmt.Errorf("AgentOSProcessRepo - UpdateProcessStatus - exec: %w", err)
+	}
+
+	if tag.RowsAffected() == 0 {
+		return agentos.ProcessStatus{}, fmt.Errorf("%w: process %q not found", agentos.ErrProcessRouteNotFound, spec.ProcessID)
+	}
+
+	if err := r.insertProcessStatusUpdate(ctx, tx, status, idempotencyKey, statusJSON); err != nil {
+		return agentos.ProcessStatus{}, err
+	}
+
+	if err := tx.Commit(ctx); err != nil {
+		return agentos.ProcessStatus{}, fmt.Errorf("AgentOSProcessRepo - UpdateProcessStatus - commit: %w", err)
+	}
+
+	return *status, nil
+}
+
+func (r *AgentOSProcessRepo) AppendProcessEvent(
+	ctx context.Context,
+	event *agentos.ProcessEvent,
+	idempotencyKey string,
+) (agentos.ProcessEvent, error) {
+	if err := validatePostgresProcessEvent(event, idempotencyKey); err != nil {
+		return agentos.ProcessEvent{}, err
+	}
+
+	existing, exists, err := r.processEventByIdempotencyKey(ctx, event.ProcessID, event.AccountID, event.ProjectID, idempotencyKey)
+	if err != nil {
+		return agentos.ProcessEvent{}, err
+	}
+
+	if exists {
+		requested := normalizePostgresProcessEventReplay(event, &existing)
+		if err := agentosprocess.ValidateProcessEventIdempotency(&existing, &requested); err != nil {
+			return agentos.ProcessEvent{}, err
+		}
+
+		return existing, nil
+	}
+
+	tx, err := r.Pool.Begin(ctx)
+	if err != nil {
+		return agentos.ProcessEvent{}, fmt.Errorf("AgentOSProcessRepo - AppendProcessEvent - begin: %w", err)
+	}
+
+	defer func() {
+		errcheckIgnore(tx.Rollback(ctx))
+	}()
+
+	scope, err := r.lockProcessEventScope(ctx, tx, event)
+	if err != nil {
+		return agentos.ProcessEvent{}, err
+	}
+
+	prepared := normalizePostgresProcessEvent(event, &scope)
+	if err := r.insertProcessEvent(ctx, tx, &prepared, idempotencyKey); err != nil {
+		return agentos.ProcessEvent{}, err
+	}
+
+	if err := tx.Commit(ctx); err != nil {
+		return agentos.ProcessEvent{}, fmt.Errorf("AgentOSProcessRepo - AppendProcessEvent - commit: %w", err)
+	}
+
+	return prepared, nil
+}
+
+func (r *AgentOSProcessRepo) ListProcessEvents(ctx context.Context, scope *agentos.ProcessEventScope) ([]agentos.ProcessEvent, error) {
+	if err := agentos.ValidateProcessEventScope(scope); err != nil {
+		return nil, err
+	}
+
+	_, _, exists, err := r.GetProcessByRef(ctx, agentos.ProcessRef{
+		ProcessID: scope.ProcessID,
+		AccountID: scope.AccountID,
+		ProjectID: scope.ProjectID,
+	})
+	if err != nil || !exists {
+		return nil, err
+	}
+
+	builder := r.Builder.
+		Select(processEventColumns()...).
+		From("process_events").
+		Where(sq.Eq{
+			"process_id": scope.ProcessID,
+			"account_id": scope.AccountID,
+			"project_id": scope.ProjectID,
+		}).
+		Where(sq.Gt{"sequence": scope.AfterSequence}).
+		OrderBy("sequence ASC")
+	if scope.Limit > 0 {
+		builder = builder.Limit(uint64(scope.Limit))
+	}
+
+	query, args, err := builder.ToSql()
+	if err != nil {
+		return nil, fmt.Errorf("AgentOSProcessRepo - ListProcessEvents - builder: %w", err)
+	}
+
+	rows, err := r.Pool.Query(ctx, query, args...)
+	if err != nil {
+		return nil, fmt.Errorf("AgentOSProcessRepo - ListProcessEvents - query: %w", err)
+	}
+	defer rows.Close()
+
+	var events []agentos.ProcessEvent
+
+	for rows.Next() {
+		event, err := scanProcessEvent(rows)
+		if err != nil {
+			return nil, err
+		}
+
+		events = append(events, event)
+	}
+
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("AgentOSProcessRepo - ListProcessEvents - rows: %w", err)
+	}
+
+	return events, nil
+}
+
+func (r *AgentOSProcessRepo) processForCreate(ctx context.Context, spec *agentos.ProcessSpec) (agentos.ProcessSpec, agentos.ProcessStatus, bool, error) {
+	existingSpec, existingStatus, exists, err := r.loadProcess(ctx, sq.Eq{
+		"account_id":      spec.AccountID,
+		"project_id":      spec.ProjectID,
+		"idempotency_key": spec.IdempotencyKey,
+	}, "processForCreateByKey")
+	if err != nil || exists {
+		return existingSpec, existingStatus, exists, err
+	}
+
+	return r.loadProcess(ctx, sq.Eq{
+		"process_id": spec.ProcessID,
+		"account_id": spec.AccountID,
+		"project_id": spec.ProjectID,
+	}, "processForCreateByRef")
+}
+
+func (r *AgentOSProcessRepo) insertProcess(ctx context.Context, spec *agentos.ProcessSpec, status *agentos.ProcessStatus) error {
+	specJSON, err := json.Marshal(spec)
+	if err != nil {
+		return fmt.Errorf("AgentOSProcessRepo - insertProcess - marshal spec: %w", err)
+	}
+
+	statusJSON, err := json.Marshal(status)
+	if err != nil {
+		return fmt.Errorf("AgentOSProcessRepo - insertProcess - marshal status: %w", err)
+	}
+
+	query, args, err := r.Builder.
+		Insert("processes").
+		Columns(
+			"process_id",
+			"kind",
+			"account_id",
+			"project_id",
+			"resource_kind",
+			"resource_id",
+			"idempotency_key",
+			"lifecycle_state",
+			"reason",
+			"spec_json",
+			"status_json",
+			"requested_at",
+			"updated_at",
+		).
+		Values(
+			spec.ProcessID,
+			string(spec.Kind),
+			spec.AccountID,
+			spec.ProjectID,
+			string(spec.Resource.Kind),
+			spec.Resource.ResourceID,
+			spec.IdempotencyKey,
+			status.LifecycleState,
+			status.Reason,
+			specJSON,
+			statusJSON,
+			nullableTime(spec.RequestedAt),
+			status.UpdatedAt,
+		).
+		ToSql()
+	if err != nil {
+		return fmt.Errorf("AgentOSProcessRepo - insertProcess - builder: %w", err)
+	}
+
+	if _, err := r.Pool.Exec(ctx, query, args...); err != nil {
+		return fmt.Errorf("AgentOSProcessRepo - insertProcess - exec: %w", err)
+	}
+
+	return nil
+}
+
+func (r *AgentOSProcessRepo) resolveProcessCreateConflict(ctx context.Context, spec *agentos.ProcessSpec, err error) (*agentos.ProcessStatus, error) {
+	if !isPostgresUniqueViolation(err) {
+		return nil, nil
+	}
+
+	existingSpec, existingStatus, exists, lookupErr := r.processForCreate(ctx, spec)
+	if lookupErr != nil {
+		return nil, lookupErr
+	}
+
+	if !exists {
+		return nil, nil
+	}
+
+	if validateErr := agentosprocess.ValidateProcessStartIdempotency(&existingSpec, spec); validateErr != nil {
+		return nil, validateErr
+	}
+
+	return &existingStatus, nil
+}
+
+func (r *AgentOSProcessRepo) loadProcess(ctx context.Context, where sq.Eq, op string) (agentos.ProcessSpec, agentos.ProcessStatus, bool, error) {
+	query, args, err := r.Builder.
+		Select("spec_json", "status_json").
+		From("processes").
+		Where(where).
+		ToSql()
+	if err != nil {
+		return agentos.ProcessSpec{}, agentos.ProcessStatus{}, false, fmt.Errorf("AgentOSProcessRepo - %s - builder: %w", op, err)
+	}
+
+	var specJSON, statusJSON []byte
+	if err := r.Pool.QueryRow(ctx, query, args...).Scan(&specJSON, &statusJSON); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return agentos.ProcessSpec{}, agentos.ProcessStatus{}, false, nil
+		}
+
+		return agentos.ProcessSpec{}, agentos.ProcessStatus{}, false, fmt.Errorf("AgentOSProcessRepo - %s - query: %w", op, err)
+	}
+
+	var spec agentos.ProcessSpec
+	if err := json.Unmarshal(specJSON, &spec); err != nil {
+		return agentos.ProcessSpec{}, agentos.ProcessStatus{}, false, fmt.Errorf("AgentOSProcessRepo - %s - decode spec: %w", op, err)
+	}
+
+	var status agentos.ProcessStatus
+	if err := json.Unmarshal(statusJSON, &status); err != nil {
+		return agentos.ProcessSpec{}, agentos.ProcessStatus{}, false, fmt.Errorf("AgentOSProcessRepo - %s - decode status: %w", op, err)
+	}
+
+	return spec, status, true, nil
+}
+
+type processEventScope struct {
+	ProcessID    string
+	AccountID    string
+	ProjectID    string
+	ResourceKind string
+	ResourceID   string
+	Sequence     int64
+}
+
+func (r *AgentOSProcessRepo) lockProcessEventScope(ctx context.Context, tx pgx.Tx, event *agentos.ProcessEvent) (processEventScope, error) {
+	query, args, err := r.Builder.
+		Select("process_id", "account_id", "project_id", "resource_kind", "resource_id", "event_sequence").
+		From("processes").
+		Where(sq.Eq{
+			"process_id": event.ProcessID,
+			"account_id": event.AccountID,
+			"project_id": event.ProjectID,
+		}).
+		Suffix("FOR UPDATE").
+		ToSql()
+	if err != nil {
+		return processEventScope{}, fmt.Errorf("AgentOSProcessRepo - AppendProcessEvent - lock builder: %w", err)
+	}
+
+	var scope processEventScope
+	if err := tx.QueryRow(ctx, query, args...).Scan(
+		&scope.ProcessID,
+		&scope.AccountID,
+		&scope.ProjectID,
+		&scope.ResourceKind,
+		&scope.ResourceID,
+		&scope.Sequence,
+	); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return processEventScope{}, fmt.Errorf("%w: process %q not found", agentos.ErrProcessRouteNotFound, event.ProcessID)
+		}
+
+		return processEventScope{}, fmt.Errorf("AgentOSProcessRepo - AppendProcessEvent - lock query: %w", err)
+	}
+
+	nextSequence := scope.Sequence + 1
+
+	updateQuery, updateArgs, err := r.Builder.
+		Update("processes").
+		Set("event_sequence", nextSequence).
+		Where(sq.Eq{
+			"process_id": scope.ProcessID,
+			"account_id": scope.AccountID,
+			"project_id": scope.ProjectID,
+		}).
+		ToSql()
+	if err != nil {
+		return processEventScope{}, fmt.Errorf("AgentOSProcessRepo - AppendProcessEvent - sequence builder: %w", err)
+	}
+
+	if _, err := tx.Exec(ctx, updateQuery, updateArgs...); err != nil {
+		return processEventScope{}, fmt.Errorf("AgentOSProcessRepo - AppendProcessEvent - sequence update: %w", err)
+	}
+
+	scope.Sequence = nextSequence
+
+	return scope, nil
+}
+
+func (r *AgentOSProcessRepo) insertProcessEvent(ctx context.Context, tx pgx.Tx, event *agentos.ProcessEvent, idempotencyKey string) error {
+	payloadJSON, err := json.Marshal(event.Payload)
+	if err != nil {
+		return fmt.Errorf("AgentOSProcessRepo - insertProcessEvent - marshal payload: %w", err)
+	}
+
+	eventJSON, err := json.Marshal(event)
+	if err != nil {
+		return fmt.Errorf("AgentOSProcessRepo - insertProcessEvent - marshal event: %w", err)
+	}
+
+	query, args, err := r.Builder.
+		Insert("process_events").
+		Columns(
+			"event_id",
+			"process_id",
+			"account_id",
+			"project_id",
+			"resource_kind",
+			"resource_id",
+			"event_type",
+			"sequence",
+			"idempotency_key",
+			"payload_json",
+			"event_json",
+			"timestamp",
+		).
+		Values(
+			event.EventID,
+			event.ProcessID,
+			event.AccountID,
+			event.ProjectID,
+			string(event.Resource.Kind),
+			event.Resource.ResourceID,
+			string(event.EventType),
+			event.Sequence,
+			idempotencyKey,
+			payloadJSON,
+			eventJSON,
+			event.Timestamp,
+		).
+		ToSql()
+	if err != nil {
+		return fmt.Errorf("AgentOSProcessRepo - insertProcessEvent - builder: %w", err)
+	}
+
+	if _, err := tx.Exec(ctx, query, args...); err != nil {
+		return fmt.Errorf("AgentOSProcessRepo - insertProcessEvent - exec: %w", err)
+	}
+
+	return nil
+}
+
+func (r *AgentOSProcessRepo) processEventByIdempotencyKey(ctx context.Context, processID, accountID, projectID, idempotencyKey string) (agentos.ProcessEvent, bool, error) {
+	query, args, err := r.Builder.
+		Select(processEventColumns()...).
+		From("process_events").
+		Where(sq.Eq{
+			"process_id":      processID,
+			"account_id":      accountID,
+			"project_id":      projectID,
+			"idempotency_key": idempotencyKey,
+		}).
+		ToSql()
+	if err != nil {
+		return agentos.ProcessEvent{}, false, fmt.Errorf("AgentOSProcessRepo - processEventByIdempotencyKey - builder: %w", err)
+	}
+
+	event, err := scanProcessEvent(r.Pool.QueryRow(ctx, query, args...))
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return agentos.ProcessEvent{}, false, nil
+		}
+
+		return agentos.ProcessEvent{}, false, err
+	}
+
+	return event, true, nil
+}
+
+func (r *AgentOSProcessRepo) processStatusByIdempotencyKey(ctx context.Context, processID, accountID, projectID, idempotencyKey string) (agentos.ProcessStatus, bool, error) {
+	query, args, err := r.Builder.
+		Select("status_json").
+		From("process_status_updates").
+		Where(sq.Eq{
+			"process_id":      processID,
+			"account_id":      accountID,
+			"project_id":      projectID,
+			"idempotency_key": idempotencyKey,
+		}).
+		ToSql()
+	if err != nil {
+		return agentos.ProcessStatus{}, false, fmt.Errorf("AgentOSProcessRepo - processStatusByIdempotencyKey - builder: %w", err)
+	}
+
+	var statusJSON []byte
+	if err := r.Pool.QueryRow(ctx, query, args...).Scan(&statusJSON); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return agentos.ProcessStatus{}, false, nil
+		}
+
+		return agentos.ProcessStatus{}, false, fmt.Errorf("AgentOSProcessRepo - processStatusByIdempotencyKey - query: %w", err)
+	}
+
+	var status agentos.ProcessStatus
+	if err := json.Unmarshal(statusJSON, &status); err != nil {
+		return agentos.ProcessStatus{}, false, fmt.Errorf("AgentOSProcessRepo - processStatusByIdempotencyKey - decode status: %w", err)
+	}
+
+	return status, true, nil
+}
+
+func (r *AgentOSProcessRepo) insertProcessStatusUpdate(ctx context.Context, tx pgx.Tx, status *agentos.ProcessStatus, idempotencyKey string, statusJSON []byte) error {
+	query, args, err := r.Builder.
+		Insert("process_status_updates").
+		Columns(
+			"process_id",
+			"account_id",
+			"project_id",
+			"idempotency_key",
+			"status_json",
+		).
+		Values(
+			status.ProcessID,
+			status.AccountID,
+			status.ProjectID,
+			idempotencyKey,
+			statusJSON,
+		).
+		ToSql()
+	if err != nil {
+		return fmt.Errorf("AgentOSProcessRepo - insertProcessStatusUpdate - builder: %w", err)
+	}
+
+	if _, err := tx.Exec(ctx, query, args...); err != nil {
+		return fmt.Errorf("AgentOSProcessRepo - insertProcessStatusUpdate - exec: %w", err)
+	}
+
+	return nil
+}
+
+func normalizePostgresProcessStatus(spec *agentos.ProcessSpec, status *agentos.ProcessStatus) agentos.ProcessStatus {
+	var out agentos.ProcessStatus
+	if status != nil {
+		out = *status
+	}
+
+	out.ProcessID = spec.ProcessID
+	out.Kind = spec.Kind
+	out.AccountID = spec.AccountID
+	out.ProjectID = spec.ProjectID
+	out.Resource = spec.Resource
+
+	if out.LifecycleState == "" {
+		out.LifecycleState = agentos.ProcessRunning
+	}
+
+	now := time.Now().UTC()
+
+	if out.StartedAt.IsZero() {
+		if spec.RequestedAt.IsZero() {
+			out.StartedAt = now
+		} else {
+			out.StartedAt = spec.RequestedAt
+		}
+	}
+
+	if out.UpdatedAt.IsZero() {
+		out.UpdatedAt = out.StartedAt
+	}
+
+	return out
+}
+
+func validatePostgresProcessStatusUpdate(status *agentos.ProcessStatus, idempotencyKey string) error {
+	if status == nil {
+		return fmt.Errorf("%w: process status is required", agentos.ErrInvalidProcess)
+	}
+
+	if idempotencyKey == "" {
+		return fmt.Errorf("%w: process status idempotency key is required", agentos.ErrInvalidProcess)
+	}
+
+	return nil
+}
+
+func validatePostgresProcessEvent(event *agentos.ProcessEvent, idempotencyKey string) error {
+	if event == nil {
+		return fmt.Errorf("%w: process event is required", agentos.ErrInvalidProcess)
+	}
+
+	if idempotencyKey == "" {
+		return fmt.Errorf("%w: process event idempotency key is required", agentos.ErrInvalidProcess)
+	}
+
+	if event.ProcessID == "" {
+		return fmt.Errorf("%w: process id is required", agentos.ErrInvalidProcess)
+	}
+
+	if event.AccountID == "" {
+		return fmt.Errorf("%w: account id is required", agentos.ErrInvalidProcess)
+	}
+
+	if event.ProjectID == "" {
+		return fmt.Errorf("%w: project id is required", agentos.ErrInvalidProcess)
+	}
+
+	if event.EventType == "" {
+		return fmt.Errorf("%w: process event type is required", agentos.ErrInvalidProcess)
+	}
+
+	return nil
+}
+
+func normalizePostgresProcessEvent(event *agentos.ProcessEvent, scope *processEventScope) agentos.ProcessEvent {
+	out := *event
+	out.ProcessID = scope.ProcessID
+	out.AccountID = scope.AccountID
+	out.ProjectID = scope.ProjectID
+	out.Resource = agentos.ResourceRef{
+		Kind:       agentos.ResourceKind(scope.ResourceKind),
+		ResourceID: scope.ResourceID,
+		AccountID:  scope.AccountID,
+		ProjectID:  scope.ProjectID,
+	}
+	out.ProcessID = scope.ProcessID
+	out.Sequence = scope.Sequence
+
+	if out.EventID == "" {
+		out.EventID = fmt.Sprintf("%s-%d", scope.ProcessID, scope.Sequence)
+	}
+
+	if out.Timestamp.IsZero() {
+		out.Timestamp = time.Now().UTC()
+	}
+
+	if out.Payload == nil {
+		out.Payload = map[string]any{}
+	}
+
+	return out
+}
+
+func normalizePostgresProcessEventReplay(event, existing *agentos.ProcessEvent) agentos.ProcessEvent {
+	out := *event
+	out.EventID = existing.EventID
+	out.ProcessID = existing.ProcessID
+	out.AccountID = existing.AccountID
+	out.ProjectID = existing.ProjectID
+	out.Resource = existing.Resource
+	out.Sequence = existing.Sequence
+	out.ProcessID = existing.ProcessID
+
+	if out.Timestamp.IsZero() {
+		out.Timestamp = existing.Timestamp
+	}
+
+	return out
+}
+
+func processEventColumns() []string {
+	return []string{
+		"event_json",
+	}
+}
+
+func scanProcessEvent(scanner interface{ Scan(dest ...any) error }) (agentos.ProcessEvent, error) {
+	var eventJSON []byte
+	if err := scanner.Scan(&eventJSON); err != nil {
+		return agentos.ProcessEvent{}, err
+	}
+
+	var event agentos.ProcessEvent
+	if err := json.Unmarshal(eventJSON, &event); err != nil {
+		return agentos.ProcessEvent{}, fmt.Errorf("AgentOSProcessRepo - scanProcessEvent - decode event: %w", err)
+	}
+
+	return event, nil
+}
+
+var (
+	_ agentosprocess.ProcessIndex      = (*AgentOSProcessRepo)(nil)
+	_ agentosprocess.ProcessEventStore = (*AgentOSProcessRepo)(nil)
+)
