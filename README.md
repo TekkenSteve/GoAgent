@@ -101,8 +101,11 @@ GoAgent is structured around a small public **AgentOS SDK boundary** plus an app
 
 | Package | Layer | Description |
 |---------|-------|-------------|
-| `agentos/` | Public SDK | Stable runtime and plan interfaces, run specs, RunPlan specs, statuses, events, artifacts, capabilities, messages, and tool definitions |
-| `agentos/temporal/` | Public implementation | Default Temporal/Redis runtime, PlanRuntime, and worker registration kit |
+| `agentos/core/` | Public SDK core | Shared signals, controls, events, artifacts, messages, tools, subscriptions, and public errors |
+| `agentos/control/` | Agent control plane | RunRuntime, PlanRuntime, run specs, RunPlan specs, capabilities, backend refs, plan schemas |
+| `agentos/process/` | Durable process platform | ResourceRef, Runtime, LedgerRuntime, GovernedActionRuntime, BatchRuntime, worksets |
+| `agentos/platform/` | Public facade | Combined platform runtime interface for applications that need both control and process layers |
+| `agentos/temporal/` | Public adapter | Default Temporal/Postgres/Redis implementation and worker registration kit |
 | `config/` | Outer | Application configuration (env-based) |
 | `pkg/` | Generic utilities | Infrastructure wrappers that are not GoAgent implementation contracts |
 
@@ -147,7 +150,7 @@ The `examples/http/` directory contains AgentOS REST examples:
 
 | Example | File | What It Shows |
 |---------|------|---------------|
-| [RunPlan](examples/http/runplan/) | `examples/http/runplan/main.go` | Start a durable AgentOS RunPlan over REST using public `agentos` types |
+| [RunPlan](examples/http/runplan/) | `examples/http/runplan/main.go` | Start a durable AgentOS RunPlan over REST using public `agentos/control` types |
 
 ### Library Embedding Examples (Mode 2 — AgentOS Runtime)
 
@@ -155,31 +158,31 @@ The `examples/embed/` directory shows how to embed GoAgent through the public Ag
 
 | Example | File | What It Shows |
 |---------|------|---------------|
-| [ReAct](examples/embed/react/) | `examples/embed/react/main.go` | Start a generic run with `agentos.Runtime` |
+| [ReAct](examples/embed/react/) | `examples/embed/react/main.go` | Start a generic run with `control.Runtime` |
 | [Conversation](examples/embed/conversation/) | `examples/embed/conversation/main.go` | Start a conversational run through `agentos/temporal` |
 | [Tools](examples/embed/tools/) | `examples/embed/tools/main.go` | Start a tool-capable prompt through the runtime boundary |
-| [RunPlan](examples/embed/plan/) | `examples/embed/plan/main.go` | Start a durable cross-backend plan with `agentos.PlanRuntime` |
+| [RunPlan](examples/embed/plan/) | `examples/embed/plan/main.go` | Start a durable cross-backend plan with `control.PlanRuntime` |
 
 ### Type-Only Usage (Mode 3)
 
-The `examples/types/` directory shows importing only `agentos/` for shared public type definitions.
+The `examples/types/` directory shows importing only `agentos/core` and `agentos/control` for shared public type definitions.
 
 ### Cross-Backend Plans (AgentOS RunPlan)
 
-AgentOS supports durable cross-backend orchestration through `agentos.PlanRuntime`.
+AgentOS supports durable cross-backend orchestration through `control.PlanRuntime`.
 
-`RunPlan` is the public control-plane model for coordinating backend-owned child runs. A `PlanNodeSpec` is a full `agentos.RunSpec` plus backend, capability, input, output, condition, and policy contracts. It is not a native GoAgent step, not a Temporal activity, and not a LangGraph node.
+`RunPlan` is the public control-plane model for coordinating backend-owned child runs. A `PlanNodeSpec` is a full `control.RunSpec` plus backend, capability, input, output, condition, and policy contracts. It is not a native GoAgent step, not a Temporal activity, and not a LangGraph node.
 
 Native GoAgent `entity.Step` remains an internal detail of the GoAgent native backend. Backend-specific step, graph, loop, and tool execution details should be emitted through events or artifacts, not promoted into the public AgentOS API.
 
 Plan runtime query APIs are durable: status comes from the plan index, event history comes from the plan event store, audits come from the audit store, and artifact payloads come from the artifact store. SSE is only the live streaming transport layered on top of the durable event history.
 
-`agentos.PlanJSONSchema` and `GET /v1/agentos/plans/schemas/{kind}` expose the
+`control.PlanJSONSchema` and `GET /v1/agentos/plans/schemas/{kind}` expose the
 public authoring schemas for editors and CI. `cmd/agentos-plan` is the RunPlan
 DSL/compiler tool. It validates JSON/YAML
 `RunPlanSpec`, generates JSON Schema, validates bounded `PlanDelta` expansion,
 and imports/exports Serverless Workflow as an edge interoperability format. The
-typed `agentos.RunPlanSpec` remains the source of truth.
+typed `control.RunPlanSpec` remains the source of truth.
 
 ```bash
 go run ./cmd/agentos-plan schema --kind run-plan --out docs/schemas/run_plan.schema.json
@@ -195,7 +198,10 @@ External Go projects should import only:
 
 ```go
 import (
-    "github.com/TekkenSteve/GoAgent/agentos"
+    "github.com/TekkenSteve/GoAgent/agentos/control"
+    "github.com/TekkenSteve/GoAgent/agentos/core"
+    "github.com/TekkenSteve/GoAgent/agentos/process"
+    "github.com/TekkenSteve/GoAgent/agentos/platform"
     agentostemporal "github.com/TekkenSteve/GoAgent/agentos/temporal"
 )
 ```
@@ -216,7 +222,7 @@ import (
     "encoding/json"
     "net/http"
 
-    "github.com/TekkenSteve/GoAgent/agentos"
+    agentos "github.com/TekkenSteve/GoAgent/agentos/control"
 )
 
 body, _ := json.Marshal(agentos.RunSpec{
@@ -238,11 +244,11 @@ defer resp.Body.Close()
 
 ### Mode 2 — Library Embedding
 
-Import the stable AgentOS runtime boundary into your Go application. Use `agentos/temporal` for the default Temporal/Postgres/Redis implementation.
+Import the stable AgentOS control-plane boundary into your Go application. Use `agentos/temporal` for the default Temporal/Postgres/Redis implementation.
 
 ```go
 import (
-    "github.com/TekkenSteve/GoAgent/agentos"
+    agentos "github.com/TekkenSteve/GoAgent/agentos/control"
     agentostemporal "github.com/TekkenSteve/GoAgent/agentos/temporal"
 )
 
@@ -265,14 +271,18 @@ status, _ := rt.Start(ctx, agentos.RunSpec{
 
 ### Mode 3 — Type-Only
 
-Import only `agentos/` to share public AgentOS type definitions across microservices.
+Import only the public AgentOS packages needed by the service. Use `agentos/core` for shared messages/tools/events and `agentos/control` for run/plan contracts.
 
 ```go
-import "github.com/TekkenSteve/GoAgent/agentos"
+import (
+    "github.com/TekkenSteve/GoAgent/agentos/core"
+    "github.com/TekkenSteve/GoAgent/agentos/control"
+)
 
 type MyService struct {
-    messages []agentos.Message
-    tools    []agentos.ToolDef
+    messages []core.Message
+    tools    []core.ToolDef
+    plans    []control.RunPlanSpec
 }
 ```
 
@@ -282,7 +292,7 @@ type MyService struct {
 
 This project follows the [go-clean-template](https://github.com/evrone/go-clean-template) architecture pattern:
 
-1. **Public SDK boundary** (`agentos/`) — stable external contract for embedded callers
+1. **Public SDK boundary** (`agentos/core`, `agentos/control`, `agentos/process`, `agentos/platform`) — stable external contract for embedded callers
 2. **Internal ports** (`internal/usecase/contracts.go`, `internal/repo/contracts.go`) — implementation contracts hidden from downstream projects
 3. **Dependency direction**: outer layers import inner layers, never the reverse
 4. **Testability**: interface isolation enables easy unit testing with mocks
@@ -291,8 +301,9 @@ This project follows the [go-clean-template](https://github.com/evrone/go-clean-
 
 ```
 ┌──────────────────────────────────────────────┐
-│  agentos/                                      │  Public SDK
-│  agentos/temporal/                             │  Default implementation
+│  agentos/core/       agentos/control/         │  Public SDK
+│  agentos/process/    agentos/platform/        │
+│  agentos/temporal/                            │  Default adapter
 ├──────────────────────────────────────────────┤
 │  internal/entity/   │  internal/state/       │  Inner Layer
 │  ──────────┼──────────                        │  (zero external deps,
@@ -308,7 +319,7 @@ This project follows the [go-clean-template](https://github.com/evrone/go-clean-
 └──────────────────────────────────────────────┘
 ```
 
-- **Public layer** (`agentos/`, `agentos/temporal/`) is the only supported embedded import contract
+- **Public layer** (`agentos/core`, `agentos/control`, `agentos/process`, `agentos/platform`, `agentos/temporal`) is the only supported embedded import contract
 - **Inner layer** (`internal/entity/`, `internal/state/`, `internal/usecase/`, `internal/repo/contracts.go`) is implementation-only
 - **Outer layer** (`internal/repo/*/`, `internal/controller/`, `internal/app/`, `pkg/`) implements interfaces defined by the inner layer
 

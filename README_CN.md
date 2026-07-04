@@ -93,8 +93,11 @@ GoAgent 围绕小而稳定的 **AgentOS SDK 边界** 和应用壳组织。实现
 
 | 包 | 层 | 说明 |
 |---------|-------|-------------|
-| `agentos/` | 公共 SDK | 稳定的运行时接口、运行规格、状态、事件、消息和工具定义 |
-| `agentos/temporal/` | 公共实现 | 默认 Temporal/Redis 运行时和 worker 注册工具 |
+| `agentos/core/` | 公共 SDK 核心 | 共享 signal、control、event、artifact、message、tool、subscription 和公共错误 |
+| `agentos/control/` | Agent 控制面 | RunRuntime、PlanRuntime、run spec、RunPlan spec、capability、backend ref、plan schema |
+| `agentos/process/` | Durable process 平台 | ResourceRef、Runtime、LedgerRuntime、GovernedActionRuntime、BatchRuntime、workset |
+| `agentos/platform/` | 公共门面 | 组合 control 与 process 的应用侧 platform runtime 接口 |
+| `agentos/temporal/` | 公共适配器 | 默认 Temporal/Postgres/Redis 实现和 worker 注册工具 |
 | `config/` | 外层 | 应用配置（基于环境变量） |
 | `pkg/` | 通用工具 | 不作为 GoAgent 实现契约的基础设施包装 |
 
@@ -139,7 +142,7 @@ native step 队列、team expansion 和 backend 内部 graph 逻辑都是实现�
 
 | 示例 | 文件 | 展示内容 |
 |---------|------|---------------|
-| [RunPlan](examples/http/runplan/) | `examples/http/runplan/main.go` | 使用公共 `agentos` 类型通过 REST 启动 durable AgentOS RunPlan |
+| [RunPlan](examples/http/runplan/) | `examples/http/runplan/main.go` | 使用公共 `agentos/control` 类型通过 REST 启动 durable AgentOS RunPlan |
 
 ### 库嵌入示例（方式二 — AgentOS Runtime）
 
@@ -147,14 +150,14 @@ native step 队列、team expansion 和 backend 内部 graph 逻辑都是实现�
 
 | 示例 | 文件 | 展示内容 |
 |---------|------|---------------|
-| [ReAct](examples/embed/react/) | `examples/embed/react/main.go` | 使用 `agentos.Runtime` 启动通用运行 |
+| [ReAct](examples/embed/react/) | `examples/embed/react/main.go` | 使用 `control.Runtime` 启动通用运行 |
 | [对话](examples/embed/conversation/) | `examples/embed/conversation/main.go` | 通过 `agentos/temporal` 启动对话运行 |
 | [工具](examples/embed/tools/) | `examples/embed/tools/main.go` | 通过运行时边界启动可使用工具的提示 |
-| [RunPlan](examples/embed/plan/) | `examples/embed/plan/main.go` | 使用 `agentos.PlanRuntime` 启动 durable 跨 backend plan |
+| [RunPlan](examples/embed/plan/) | `examples/embed/plan/main.go` | 使用 `control.PlanRuntime` 启动 durable 跨 backend plan |
 
 ### 仅使用类型（方式三）
 
-`examples/types/` 目录展示仅导入 `agentos/` 来共享公共类型定义。
+`examples/types/` 目录展示仅导入 `agentos/core` 和 `agentos/control` 来共享公共类型定义。
 
 ## 三种使用方式
 
@@ -170,7 +173,7 @@ import (
     "encoding/json"
     "net/http"
 
-    "github.com/TekkenSteve/GoAgent/agentos"
+    agentos "github.com/TekkenSteve/GoAgent/agentos/control"
 )
 
 body, _ := json.Marshal(agentos.RunSpec{
@@ -192,11 +195,11 @@ defer resp.Body.Close()
 
 ### 方式二 — 库嵌入
 
-将稳定的 AgentOS 运行时边界导入你的 Go 应用。默认 Temporal/Postgres/Redis 实现位于 `agentos/temporal`。
+将稳定的 AgentOS 控制面边界导入你的 Go 应用。默认 Temporal/Postgres/Redis 实现位于 `agentos/temporal`。
 
 ```go
 import (
-    "github.com/TekkenSteve/GoAgent/agentos"
+    agentos "github.com/TekkenSteve/GoAgent/agentos/control"
     agentostemporal "github.com/TekkenSteve/GoAgent/agentos/temporal"
 )
 
@@ -219,14 +222,18 @@ status, _ := rt.Start(ctx, agentos.RunSpec{
 
 ### 方式三 — 仅使用类型
 
-仅导入 `agentos/` 跨微服务共享公共 AgentOS 类型定义。
+仅导入服务需要的公共 AgentOS 包。`agentos/core` 放共享 message/tool/event，`agentos/control` 放 run/plan 契约。
 
 ```go
-import "github.com/TekkenSteve/GoAgent/agentos"
+import (
+    "github.com/TekkenSteve/GoAgent/agentos/core"
+    "github.com/TekkenSteve/GoAgent/agentos/control"
+)
 
 type MyService struct {
-    messages []agentos.Message
-    tools    []agentos.ToolDef
+    messages []core.Message
+    tools    []core.ToolDef
+    plans    []control.RunPlanSpec
 }
 ```
 
@@ -236,7 +243,7 @@ type MyService struct {
 
 本项目遵循 [go-clean-template](https://github.com/evrone/go-clean-template) 架构模式：
 
-1. **公共 SDK 边界**（`agentos/`）——面向外部嵌入调用方的稳定契约
+1. **公共 SDK 边界**（`agentos/core`、`agentos/control`、`agentos/process`、`agentos/platform`）——面向外部嵌入调用方的稳定契约
 2. **内部端口**（`internal/usecase/contracts.go`、`internal/repo/contracts.go`）——对下游项目隐藏的实现契约
 3. **依赖方向**：外层导入内层，绝不反向
 4. **可测试性**：接口隔离，便于使用 mock 进行单元测试
@@ -245,8 +252,9 @@ type MyService struct {
 
 ```
 ┌──────────────────────────────────────────────┐
-│  agentos/                                      │  公共 SDK
-│  agentos/temporal/                             │  默认实现
+│  agentos/core/      agentos/control/          │  公共 SDK
+│  agentos/process/   agentos/platform/         │
+│  agentos/temporal/                            │  默认适配器
 ├──────────────────────────────────────────────┤
 │  internal/entity/ │  internal/state/         │  内层
 │  ──────────┼──────────                        │  （零外部依赖，
@@ -262,7 +270,7 @@ type MyService struct {
 └──────────────────────────────────────────────┘
 ```
 
-- **公共层**（`agentos/`、`agentos/temporal/`）是唯一支持的嵌入式导入契约
+- **公共层**（`agentos/core`、`agentos/control`、`agentos/process`、`agentos/platform`、`agentos/temporal`）是唯一支持的嵌入式导入契约
 - **内层**（`internal/entity/`、`internal/state/`、`internal/usecase/`、`internal/repo/contracts.go`）仅作为实现细节
 - **外层**（`internal/repo/*/`、`internal/controller/`、`internal/app/`、`pkg/`）实现内层定义的接口
 

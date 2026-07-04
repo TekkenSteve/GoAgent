@@ -8,13 +8,38 @@ AgentOS is the generic intelligent work OS layer above that kernel. It provides 
 
 AiSOC is a reference distribution, not a core domain model. Concepts such as alerts, cases, incidents, detection rules, investigations, and hunts belong in examples or domain packages that use AgentOS public interfaces. They must not become required AgentOS core types.
 
+## Package Layers
+
+AgentOS keeps the agent control plane and durable process platform separate at the package boundary:
+
+```text
+application distributions
+  -> agentos/platform
+      -> agentos/process
+      -> agentos/control
+          -> agentos/core
+
+agentos/temporal
+  -> agentos/process
+  -> agentos/control
+  -> agentos/core
+```
+
+- `agentos/core` contains only shared OS primitives: signals, controls, events, artifacts, messages, tools, subscriptions, and public errors.
+- `agentos/control` owns agent execution contracts: runs, plans, capabilities, backend refs, plan schemas, and backend-owned child run orchestration.
+- `agentos/process` owns durable process contracts: resources, processes, ledgers, governed actions, worksets, and batch progress.
+- `agentos/platform` is a facade for applications that intentionally compose both layers.
+- `agentos/temporal` is an adapter for the public ports. It does not define application domain models.
+
+The dependency direction is enforced by tests. `control` must not import `process`; `process` must not import `control`; neither may import `temporal` or `internal`. Backend adapters may use `control` and `core`, but must not import the process layer.
+
 ## Boundaries
 
 AgentOS core uses generic OS primitives:
 
 - `RunPlan`: coarse-grained orchestration of backend-owned runs.
 - `ResourceRef`: a stable reference to domain resources such as cases, tickets, orders, incidents, or code changes.
-- `ProcessSpec`: durable lifecycle logic for a long-running business object.
+- `Spec`: durable lifecycle logic for a long-running business object.
 - `LedgerRuntime`: append-only decision, evidence, action, and artifact records.
 - `GovernedAction`: dry-run, risk evaluation, approval, execution, cancellation, and compensation.
 - `Workset` / `BatchRuntime`: coarse-grained batch work with chunking, throttling, retry, and progress projection.
@@ -65,13 +90,29 @@ Add workset and batch primitives for large workloads. AgentOS controls chunking,
 Build `examples/aisoc` as a reference distribution that uses only generic AgentOS primitives:
 
 - alert/resource ingestion maps to `ResourceRef`.
-- case handling maps to `ProcessSpec`.
+- case handling maps to `Spec`.
 - investigation maps to `RunPlan`.
 - analyst and agent decisions map to ledger records.
 - response actions map to governed actions.
 - hunt and enrichment workloads map to worksets and batch runs.
 
 The same platform shape should support future CodeAgent, DevOps, CustomerOps, and other intelligent work distributions without adding their domain nouns to AgentOS core.
+
+## AiSOC-On-AgentOS Shape
+
+An AiSOC distribution should map its domain objects onto generic AgentOS primitives:
+
+```text
+AiSOC Alert/Case/Rule/Hunt
+  -> agentos/process ResourceRef and Spec
+      -> agentos/control RunPlanSpec for investigation runs
+          -> LangGraph/OpenCode/native backend-owned run
+      -> LedgerRuntime for evidence, rationale, artifact refs
+      -> GovernedActionRuntime for containment/remediation
+      -> BatchRuntime for hunts and backfills
+```
+
+LangGraph graph nodes, OpenCode steps, tool calls, LLM calls, and individual lake records remain inside their owning backend or data plane. AgentOS coordinates durable process state and references, not backend internals.
 
 ## Design Rules
 
