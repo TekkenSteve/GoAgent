@@ -26,4 +26,6 @@ var (
 	ErrInvalidLedgerScope         = errors.New("agentos: invalid ledger scope")
 	ErrInvalidGovernedAction      = errors.New("agentos: invalid governed action")
 	ErrInvalidGovernedActionScope = errors.New("agentos: invalid governed action scope")
+	ErrInvalidWorkset             = errors.New("agentos: invalid workset")
+	ErrInvalidWorksetScope        = errors.New("agentos: invalid workset scope")
 )

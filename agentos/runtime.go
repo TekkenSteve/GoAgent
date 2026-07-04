@@ -60,6 +60,16 @@ type GovernedActionRuntime interface {
 	CancelAction(ctx context.Context, ref ActionRef, req *ActionCancelRequest) (GovernedActionStatus, error)
 }
 
+// BatchRuntime coordinates coarse-grained batch worksets and chunk progress
+// without modeling each data record as a workflow.
+type BatchRuntime interface {
+	StartWorkset(ctx context.Context, spec *WorksetSpec) (WorksetStatus, error)
+	StatusWorkset(ctx context.Context, ref WorksetRef) (WorksetStatus, error)
+	ListWorksets(ctx context.Context, scope *WorksetScope) ([]WorksetStatus, error)
+	RecordWorksetChunk(ctx context.Context, ref WorksetRef, result *WorksetChunkResult) (WorksetStatus, error)
+	CancelWorkset(ctx context.Context, ref WorksetRef, control *ControlRequest) (WorksetStatus, error)
+}
+
 // Subscription is a stream of run events.
 type Subscription interface {
 	Events() <-chan Event
