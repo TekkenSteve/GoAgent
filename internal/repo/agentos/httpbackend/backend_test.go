@@ -29,7 +29,7 @@ func TestBackendConformance(t *testing.T) {
 	}))
 	defer server.Close()
 
-	backend, err := NewBackend(http.DefaultClient, probe, Config{
+	backend, err := NewBackend(server.Client(), probe, Config{
 		Name:     "http-conformance",
 		Endpoint: server.URL,
 	})
@@ -103,7 +103,7 @@ func TestBackendStartPostsRunEnvelope(t *testing.T) {
 	}))
 	defer server.Close()
 
-	backend := newTestBackend(t, server.URL)
+	backend := newTestBackend(t, server)
 
 	spec := agentos.RunSpec{
 		RunID:    Run1,
@@ -181,7 +181,7 @@ func TestBackendSignalPostsSignal(t *testing.T) {
 	}))
 	defer server.Close()
 
-	backend := newTestBackend(t, server.URL)
+	backend := newTestBackend(t, server)
 
 	signal := agentos.Signal{
 		Type: agentos.SignalUserMessage,
@@ -218,7 +218,7 @@ func TestBackendControlPostsOperation(t *testing.T) {
 	}))
 	defer server.Close()
 
-	backend := newTestBackend(t, server.URL)
+	backend := newTestBackend(t, server)
 	control := agentos.ControlRequest{Operation: agentos.ControlCancel, IdempotencyKey: "control-1"}
 
 	if err := backend.Control(context.Background(), Run1, &control); err != nil {
@@ -268,7 +268,7 @@ func TestBackendStatusGetsRunStatus(t *testing.T) {
 	}))
 	defer server.Close()
 
-	backend := newTestBackend(t, server.URL)
+	backend := newTestBackend(t, server)
 
 	status, err := backend.Status(context.Background(), Run1)
 	if err != nil {
@@ -288,18 +288,18 @@ func TestBackendRejectsErrorStatus(t *testing.T) {
 	}))
 	defer server.Close()
 
-	backend := newTestBackend(t, server.URL)
+	backend := newTestBackend(t, server)
 	if _, err := backend.Status(context.Background(), Run1); err == nil {
 		t.Fatal("expected error")
 	}
 }
 
-func newTestBackend(t *testing.T, endpoint string) *Backend {
+func newTestBackend(t *testing.T, server *httptest.Server) *Backend {
 	t.Helper()
 
-	backend, err := NewBackend(http.DefaultClient, nil, Config{
+	backend, err := NewBackend(server.Client(), nil, Config{
 		Name:     "claude-code",
-		Endpoint: endpoint,
+		Endpoint: server.URL,
 		Headers: map[string]string{
 			"X-AgentOS-Test": "yes",
 		},
