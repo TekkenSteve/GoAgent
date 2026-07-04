@@ -191,7 +191,8 @@ func (p *metricProjection) apply(event *agentos.PlanEvent, emit bool) error {
 		agentos.EventPlanNodeReady,
 		agentos.EventProcessStarted, agentos.EventProcessWaiting, agentos.EventProcessBlocked,
 		agentos.EventProcessSucceeded, agentos.EventProcessFailed, agentos.EventProcessCanceled,
-		agentos.EventProcessTimerScheduled, agentos.EventProcessTimerFired:
+		agentos.EventProcessTimerScheduled, agentos.EventProcessTimerFired,
+		agentos.EventProcessSignalReceived, agentos.EventProcessControlReceived:
 		return nil
 	}
 
@@ -505,7 +506,8 @@ func planLifecycleForEvent(eventType agentos.EventType) string {
 		return agentos.PlanLifecycleCanceled
 	case agentos.EventProcessStarted, agentos.EventProcessWaiting, agentos.EventProcessBlocked,
 		agentos.EventProcessSucceeded, agentos.EventProcessFailed, agentos.EventProcessCanceled,
-		agentos.EventProcessTimerScheduled, agentos.EventProcessTimerFired:
+		agentos.EventProcessTimerScheduled, agentos.EventProcessTimerFired,
+		agentos.EventProcessSignalReceived, agentos.EventProcessControlReceived:
 		return ""
 	case agentos.EventRunStarted, agentos.EventRunCompleted, agentos.EventRunFailed,
 		agentos.EventRunCancelled, agentos.EventRunPaused, agentos.EventRunResumed,
@@ -540,7 +542,8 @@ func nodeLifecycleForEvent(eventType agentos.EventType) string {
 		return agentos.PlanNodeSkipped
 	case agentos.EventProcessStarted, agentos.EventProcessWaiting, agentos.EventProcessBlocked,
 		agentos.EventProcessSucceeded, agentos.EventProcessFailed, agentos.EventProcessCanceled,
-		agentos.EventProcessTimerScheduled, agentos.EventProcessTimerFired:
+		agentos.EventProcessTimerScheduled, agentos.EventProcessTimerFired,
+		agentos.EventProcessSignalReceived, agentos.EventProcessControlReceived:
 		return ""
 	case agentos.EventRunStarted, agentos.EventRunCompleted, agentos.EventRunFailed,
 		agentos.EventRunCancelled, agentos.EventRunPaused, agentos.EventRunResumed,

@@ -1499,7 +1499,9 @@ const docTemplate = `{
                 "process.failed",
                 "process.canceled",
                 "process.timer.scheduled",
-                "process.timer.fired"
+                "process.timer.fired",
+                "process.signal.received",
+                "process.control.received"
             ],
             "x-enum-varnames": [
                 "EventRunStarted",
@@ -1548,7 +1550,9 @@ const docTemplate = `{
                 "EventProcessFailed",
                 "EventProcessCanceled",
                 "EventProcessTimerScheduled",
-                "EventProcessTimerFired"
+                "EventProcessTimerFired",
+                "EventProcessSignalReceived",
+                "EventProcessControlReceived"
             ]
         },
         "agentos.InputMapping": {

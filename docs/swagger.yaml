@@ -156,6 +156,8 @@ definitions:
     - process.canceled
     - process.timer.scheduled
     - process.timer.fired
+    - process.signal.received
+    - process.control.received
     type: string
     x-enum-varnames:
     - EventRunStarted
@@ -205,6 +207,8 @@ definitions:
     - EventProcessCanceled
     - EventProcessTimerScheduled
     - EventProcessTimerFired
+    - EventProcessSignalReceived
+    - EventProcessControlReceived
   agentos.InputMapping:
     properties:
       expression:

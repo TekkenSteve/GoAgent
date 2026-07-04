@@ -2,6 +2,7 @@ package agentos
 
 import (
 	"fmt"
+	"maps"
 	"time"
 )
 
@@ -116,6 +117,31 @@ type ProcessEvent struct {
 	AccountID string      `json:"account_id"`
 	ProjectID string      `json:"project_id"`
 	Resource  ResourceRef `json:"resource,omitzero" schema:"optional"`
+}
+
+const processEventExtraFields = 5
+
+// ToEvent projects the process-scoped event into the generic stream envelope
+// used by Subscription.
+func (event *ProcessEvent) ToEvent() Event {
+	if event == nil {
+		return Event{}
+	}
+
+	generic := event.Event
+	payload := make(map[string]any, len(generic.Payload)+processEventExtraFields)
+	maps.Copy(payload, generic.Payload)
+
+	payload["process_id"] = event.ProcessID
+	payload["account_id"] = event.AccountID
+	payload["project_id"] = event.ProjectID
+	payload["resource_kind"] = string(event.Resource.Kind)
+	payload["resource_id"] = event.Resource.ResourceID
+
+	generic.ProcessID = event.ProcessID
+	generic.Payload = payload
+
+	return generic
 }
 
 // Process lifecycle constants.

@@ -146,6 +146,8 @@ const (
 	EventProcessCanceled        EventType = "process.canceled"
 	EventProcessTimerScheduled  EventType = "process.timer.scheduled"
 	EventProcessTimerFired      EventType = "process.timer.fired"
+	EventProcessSignalReceived  EventType = "process.signal.received"
+	EventProcessControlReceived EventType = "process.control.received"
 )
 
 // Message is a public conversation message.
