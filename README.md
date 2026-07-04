@@ -103,7 +103,7 @@ GoAgent is structured around a small public **AgentOS SDK boundary** plus an app
 |---------|-------|-------------|
 | `agentos/core/` | Public SDK core | Shared signals, controls, events, artifacts, messages, tools, subscriptions, and public errors |
 | `agentos/control/` | Agent control plane | RunRuntime, PlanRuntime, run specs, RunPlan specs, capabilities, backend refs, plan schemas |
-| `agentos/process/` | Durable process platform | ResourceRef, Runtime, LedgerRuntime, GovernedActionRuntime, BatchRuntime, worksets |
+| `agentos/process/` | Durable process platform | ResourceRef, Runtime, LedgerRuntime, GovernedActionRuntime, BatchRuntime, ProjectionRuntime, worksets |
 | `agentos/platform/` | Public facade | Combined platform runtime interface for applications that need both control and process layers |
 | `agentos/temporal/` | Public adapter | Default Temporal/Postgres/Redis implementation and worker registration kit |
 | `config/` | Outer | Application configuration (env-based) |
@@ -175,7 +175,11 @@ AgentOS supports durable cross-backend orchestration through `control.PlanRuntim
 
 Native GoAgent `entity.Step` remains an internal detail of the GoAgent native backend. Backend-specific step, graph, loop, and tool execution details should be emitted through events or artifacts, not promoted into the public AgentOS API.
 
+Capabilities are coarse-grained backend contracts. `control.CapabilityRun` starts one backend-owned run. `control.CapabilityRunBatch` starts one backend-owned batch run and validates bounded batch input through capability limits; AgentOS does not expand batch items into plan nodes.
+
 Plan runtime query APIs are durable: status comes from the plan index, event history comes from the plan event store, audits come from the audit store, and artifact payloads come from the artifact store. SSE is only the live streaming transport layered on top of the durable event history.
+
+The durable process layer exposes `process.ProjectionRuntime` for REST, MCP, UI, and operator read models. Projection reads come from durable process, ledger, governed action, and workset stores, not from high-frequency Temporal Workflow Query calls.
 
 `control.PlanJSONSchema` and `GET /v1/agentos/plans/schemas/{kind}` expose the
 public authoring schemas for editors and CI. `cmd/agentos-plan` is the RunPlan

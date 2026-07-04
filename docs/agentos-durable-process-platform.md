@@ -45,7 +45,7 @@ AgentOS core uses generic OS primitives:
 - `Workset` / `BatchRuntime`: coarse-grained batch work with chunking, throttling, retry, and progress projection.
 - `ProjectionRuntime`: query-optimized state for REST, MCP, UI, and operators.
 
-AgentOS core must not model backend internals as control-plane nodes. Do not turn each LangGraph node, OpenCode step, tool call, LLM call, or data record into an AgentOS `PlanNode`. A `PlanNode` represents a backend-owned run or batch run. The backend runtime owns its internal graph, tools, state transitions, and low-level execution details.
+AgentOS core must not model backend internals as control-plane nodes. Do not turn each LangGraph node, OpenCode step, tool call, LLM call, or data record into an AgentOS `PlanNode`. A `PlanNode` represents one backend-owned run. When a backend supports batch execution, the node uses a batch capability such as `run.batch`; the backend owns chunking and item-level execution. The backend runtime owns its internal graph, tools, state transitions, and low-level execution details.
 
 Temporal must not become the high-volume data plane. Large prompts, responses, evidence blobs, tool I/O payloads, artifacts, graph data, search indexes, and lake data stay in external storage. Temporal history stores compact commands, references, durable process state, and deterministic control flow.
 
@@ -77,13 +77,13 @@ A long-lived business object maps to a coarse-grained process workflow. Signals 
 
 Add an append-only ledger for decision records, evidence references, prompt and response references, tool I/O references, artifact references, rationale, actor, timestamp, and policy context.
 
-The ledger stores references to large payloads instead of embedding them in Temporal history. Projection rebuilds process, resource, and ledger read models for REST, MCP, UI, and operational dashboards.
+The ledger stores references to large payloads instead of embedding them in Temporal history. `ProjectionRuntime` reads durable process, ledger, governed action, and workset projections for REST, MCP, UI, and operational dashboards. These read paths must not depend on high-frequency Temporal Workflow Query calls.
 
 ### Phase 4: Governed Action And Batch
 
 Add governed action primitives for dry-run, risk evaluation, approval gates, execution, cancellation, and compensation references. Actions should be idempotent and auditable.
 
-Add workset and batch primitives for large workloads. AgentOS controls chunking, limits, retries, and progress projection. A batch should be represented as one coarse-grained process or backend-owned run, not one workflow per record.
+Add workset and batch primitives for large workloads. AgentOS controls chunking, limits, retries, and progress projection. A batch should be represented as one coarse-grained process or backend-owned `run.batch` capability, not one workflow per record.
 
 ### Phase 5: Reference Distributions
 

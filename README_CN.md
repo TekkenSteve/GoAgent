@@ -95,7 +95,7 @@ GoAgent 围绕小而稳定的 **AgentOS SDK 边界** 和应用壳组织。实现
 |---------|-------|-------------|
 | `agentos/core/` | 公共 SDK 核心 | 共享 signal、control、event、artifact、message、tool、subscription 和公共错误 |
 | `agentos/control/` | Agent 控制面 | RunRuntime、PlanRuntime、run spec、RunPlan spec、capability、backend ref、plan schema |
-| `agentos/process/` | Durable process 平台 | ResourceRef、Runtime、LedgerRuntime、GovernedActionRuntime、BatchRuntime、workset |
+| `agentos/process/` | Durable process 平台 | ResourceRef、Runtime、LedgerRuntime、GovernedActionRuntime、BatchRuntime、ProjectionRuntime、workset |
 | `agentos/platform/` | 公共门面 | 组合 control 与 process 的应用侧 platform runtime 接口 |
 | `agentos/temporal/` | 公共适配器 | 默认 Temporal/Postgres/Redis 实现和 worker 注册工具 |
 | `config/` | 外层 | 应用配置（基于环境变量） |
@@ -135,6 +135,12 @@ GoAgent native backend 由以下部分组成：
 4. **Temporal Worker Kit** — 为 durable native execution 注册 workflow/activity
 
 native step 队列、team expansion 和 backend 内部 graph 逻辑都是实现细节。外部控制面调用方应该使用 AgentOS `RunSpec` 和 `RunPlanSpec` 描述跨框架编排，而不是 native step payload。
+
+`RunPlan` 用来协调 backend-owned child runs。`PlanNodeSpec` 是一个完整的 `control.RunSpec` 加 backend、capability、input、output、condition、policy 契约；它不是 native GoAgent step、Temporal activity，也不是 LangGraph node。
+
+Capability 是粗粒度 backend 契约。`control.CapabilityRun` 启动一个 backend-owned run；`control.CapabilityRunBatch` 启动一个 backend-owned batch run，并通过 capability limits 校验有界 batch input。AgentOS 不会把 batch item 展开成大量 plan node。
+
+Durable process 层提供 `process.ProjectionRuntime` 给 REST、MCP、UI 和运维读模型使用。Projection 从 durable process、ledger、governed action、workset store 读取，不依赖高频 Temporal Workflow Query。
 
 ### REST 示例
 
