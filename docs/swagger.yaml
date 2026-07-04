@@ -148,6 +148,14 @@ definitions:
     - plan.node.retry_scheduled
     - plan.node.skipped
     - plan.node.canceled
+    - process.started
+    - process.waiting
+    - process.blocked
+    - process.succeeded
+    - process.failed
+    - process.canceled
+    - process.timer.scheduled
+    - process.timer.fired
     type: string
     x-enum-varnames:
     - EventRunStarted
@@ -189,6 +197,14 @@ definitions:
     - EventPlanNodeRetryScheduled
     - EventPlanNodeSkipped
     - EventPlanNodeCanceled
+    - EventProcessStarted
+    - EventProcessWaiting
+    - EventProcessBlocked
+    - EventProcessSucceeded
+    - EventProcessFailed
+    - EventProcessCanceled
+    - EventProcessTimerScheduled
+    - EventProcessTimerFired
   agentos.InputMapping:
     properties:
       expression:
@@ -354,6 +370,8 @@ definitions:
         additionalProperties: {}
         type: object
       plan_id:
+        type: string
+      process_id:
         type: string
       project_id:
         type: string

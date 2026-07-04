@@ -188,7 +188,10 @@ func (p *metricProjection) apply(event *agentos.PlanEvent, emit bool) error {
 		agentos.EventCheckpointCreated, agentos.EventArtifactCreated,
 		agentos.EventNodeInputResolved, agentos.EventCapabilitySelected, agentos.EventConditionEvaluated,
 		agentos.EventPlanBlocked, agentos.EventPlanApproved, agentos.EventPlanRejected,
-		agentos.EventPlanNodeReady:
+		agentos.EventPlanNodeReady,
+		agentos.EventProcessStarted, agentos.EventProcessWaiting, agentos.EventProcessBlocked,
+		agentos.EventProcessSucceeded, agentos.EventProcessFailed, agentos.EventProcessCanceled,
+		agentos.EventProcessTimerScheduled, agentos.EventProcessTimerFired:
 		return nil
 	}
 
@@ -500,6 +503,10 @@ func planLifecycleForEvent(eventType agentos.EventType) string {
 		return agentos.PlanLifecycleFailed
 	case agentos.EventPlanCanceled:
 		return agentos.PlanLifecycleCanceled
+	case agentos.EventProcessStarted, agentos.EventProcessWaiting, agentos.EventProcessBlocked,
+		agentos.EventProcessSucceeded, agentos.EventProcessFailed, agentos.EventProcessCanceled,
+		agentos.EventProcessTimerScheduled, agentos.EventProcessTimerFired:
+		return ""
 	case agentos.EventRunStarted, agentos.EventRunCompleted, agentos.EventRunFailed,
 		agentos.EventRunCancelled, agentos.EventRunPaused, agentos.EventRunResumed,
 		agentos.EventAgentStepStarted, agentos.EventAgentStepCompleted, agentos.EventAgentStepFailed,
@@ -531,6 +538,10 @@ func nodeLifecycleForEvent(eventType agentos.EventType) string {
 		return agentos.PlanNodeCanceled
 	case agentos.EventPlanNodeSkipped:
 		return agentos.PlanNodeSkipped
+	case agentos.EventProcessStarted, agentos.EventProcessWaiting, agentos.EventProcessBlocked,
+		agentos.EventProcessSucceeded, agentos.EventProcessFailed, agentos.EventProcessCanceled,
+		agentos.EventProcessTimerScheduled, agentos.EventProcessTimerFired:
+		return ""
 	case agentos.EventRunStarted, agentos.EventRunCompleted, agentos.EventRunFailed,
 		agentos.EventRunCancelled, agentos.EventRunPaused, agentos.EventRunResumed,
 		agentos.EventAgentStepStarted, agentos.EventAgentStepCompleted, agentos.EventAgentStepFailed,

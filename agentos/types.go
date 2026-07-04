@@ -87,6 +87,7 @@ type Event struct {
 	EventID   string         `json:"event_id"`
 	EventType EventType      `json:"event_type"`
 	RunID     string         `json:"run_id,omitempty"`
+	ProcessID string         `json:"process_id,omitempty"`
 	ThreadID  string         `json:"thread_id,omitempty"`
 	Sequence  int64          `json:"sequence,omitempty"`
 	Timestamp time.Time      `json:"timestamp"`
@@ -137,6 +138,14 @@ const (
 	EventPlanNodeRetryScheduled EventType = "plan.node.retry_scheduled"
 	EventPlanNodeSkipped        EventType = "plan.node.skipped"
 	EventPlanNodeCanceled       EventType = "plan.node.canceled"
+	EventProcessStarted         EventType = "process.started"
+	EventProcessWaiting         EventType = "process.waiting"
+	EventProcessBlocked         EventType = "process.blocked"
+	EventProcessSucceeded       EventType = "process.succeeded"
+	EventProcessFailed          EventType = "process.failed"
+	EventProcessCanceled        EventType = "process.canceled"
+	EventProcessTimerScheduled  EventType = "process.timer.scheduled"
+	EventProcessTimerFired      EventType = "process.timer.fired"
 )
 
 // Message is a public conversation message.

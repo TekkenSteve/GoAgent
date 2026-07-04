@@ -1491,7 +1491,15 @@ const docTemplate = `{
                 "plan.node.failed",
                 "plan.node.retry_scheduled",
                 "plan.node.skipped",
-                "plan.node.canceled"
+                "plan.node.canceled",
+                "process.started",
+                "process.waiting",
+                "process.blocked",
+                "process.succeeded",
+                "process.failed",
+                "process.canceled",
+                "process.timer.scheduled",
+                "process.timer.fired"
             ],
             "x-enum-varnames": [
                 "EventRunStarted",
@@ -1532,7 +1540,15 @@ const docTemplate = `{
                 "EventPlanNodeFailed",
                 "EventPlanNodeRetryScheduled",
                 "EventPlanNodeSkipped",
-                "EventPlanNodeCanceled"
+                "EventPlanNodeCanceled",
+                "EventProcessStarted",
+                "EventProcessWaiting",
+                "EventProcessBlocked",
+                "EventProcessSucceeded",
+                "EventProcessFailed",
+                "EventProcessCanceled",
+                "EventProcessTimerScheduled",
+                "EventProcessTimerFired"
             ]
         },
         "agentos.InputMapping": {
@@ -1783,6 +1799,9 @@ const docTemplate = `{
                     "additionalProperties": {}
                 },
                 "plan_id": {
+                    "type": "string"
+                },
+                "process_id": {
                     "type": "string"
                 },
                 "project_id": {

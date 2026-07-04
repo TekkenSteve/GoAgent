@@ -27,6 +27,20 @@ type PlanRuntime interface {
 	ListPlanAudits(ctx context.Context, scope *PlanAuditScope) ([]PlanAuditRecord, error)
 }
 
+// ProcessRuntime is the durable business-process boundary for generic domain
+// resources. Implementations should map one long-lived domain object to one
+// coarse-grained process workflow instead of modeling backend internals or
+// individual data records as AgentOS nodes.
+type ProcessRuntime interface {
+	StartProcess(ctx context.Context, spec *ProcessSpec) (ProcessStatus, error)
+	StatusProcess(ctx context.Context, ref ProcessRef) (ProcessStatus, error)
+	DescribeProcess(ctx context.Context, ref ProcessRef) (ProcessDescription, error)
+	SignalProcess(ctx context.Context, ref ProcessRef, signal *Signal) error
+	ControlProcess(ctx context.Context, ref ProcessRef, control *ControlRequest) error
+	SubscribeProcess(ctx context.Context, scope *ProcessStreamScope) (Subscription, error)
+	ListProcessEvents(ctx context.Context, scope *ProcessEventScope) ([]ProcessEvent, error)
+}
+
 // Subscription is a stream of run events.
 type Subscription interface {
 	Events() <-chan Event
