@@ -60,6 +60,20 @@ func TestProcessWorkflowRequiresActivityTaskQueue(t *testing.T) {
 	require.Error(t, env.GetWorkflowError())
 }
 
+func TestProcessWorkflowRequiresCurrentWorkflowVersion(t *testing.T) {
+	t.Parallel()
+
+	spec := processWorkflowTestSpec("process-version-required")
+	env := newProcessWorkflowTestEnv(t)
+	input := processWorkflowInputForTest(&spec)
+	input.WorkflowVersion = currentProcessWorkflowVersion + 1
+
+	env.ExecuteWorkflow(ProcessWorkflow, input)
+
+	require.True(t, env.IsWorkflowCompleted())
+	require.Error(t, env.GetWorkflowError())
+}
+
 func newProcessWorkflowTestEnv(t *testing.T) *testsuite.TestWorkflowEnvironment {
 	t.Helper()
 
@@ -96,7 +110,8 @@ func processWorkflowTestSpec(processID string) agentosproc.Spec {
 
 func processWorkflowInputForTest(spec *agentosproc.Spec) *processWorkflowInput {
 	return &processWorkflowInput{
-		Spec: *spec,
+		Spec:            *spec,
+		WorkflowVersion: currentProcessWorkflowVersion,
 		TaskQueues: processTaskQueues{
 			ProcessActivity: DefaultTaskQueues().ProcessActivity,
 		},

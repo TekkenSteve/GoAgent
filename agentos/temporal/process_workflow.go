@@ -22,8 +22,9 @@ const (
 )
 
 type processWorkflowInput struct {
-	Spec       agentosproc.Spec  `json:"spec"`
-	TaskQueues processTaskQueues `json:"task_queues"`
+	Spec            agentosproc.Spec  `json:"spec"`
+	TaskQueues      processTaskQueues `json:"task_queues"`
+	WorkflowVersion int               `json:"workflow_version"`
 }
 
 type processTaskQueues struct {
@@ -39,6 +40,10 @@ func ProcessWorkflow(ctx workflow.Context, input *processWorkflowInput) (agentos
 
 	if input.TaskQueues.ProcessActivity == "" {
 		return agentosproc.Status{}, temporal.NewNonRetryableApplicationError("ProcessWorkflow process activity task queue is required", "validation", nil)
+	}
+
+	if err := validateProcessWorkflowVersion(input.WorkflowVersion); err != nil {
+		return agentosproc.Status{}, temporal.NewNonRetryableApplicationError(err.Error(), "validation", err)
 	}
 
 	activityCtx := newProcessWorkflowActivityContext(ctx, input.TaskQueues.ProcessActivity)

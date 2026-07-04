@@ -132,6 +132,33 @@ func TestPlanWorkflowFailsNodeWhenRequiredInputArtifactIsMissing(t *testing.T) {
 	require.Contains(t, verify.Reason, "required artifact")
 }
 
+func TestPlanWorkflowRequiresCurrentWorkflowVersion(t *testing.T) {
+	t.Parallel()
+
+	spec := agentos.RunPlanSpec{
+		PlanID:         "plan-version-required",
+		IdempotencyKey: "plan-version-required-key",
+		Nodes: []agentos.PlanNodeSpec{
+			{
+				NodeID: "node",
+				Run: agentos.RunSpec{
+					RunID:   "run-version-required",
+					Backend: agentos.BackendRef{Kind: agentos.BackendKindNative, Name: agentos.BackendNameGoAgentNative},
+				},
+			},
+		},
+	}
+	planWorkflowTestSpec(&spec)
+	env := newPlanWorkflowTestEnv(t, &planWorkflowMocks{}, &spec)
+
+	input := planWorkflowInputForTest(&spec)
+	input.WorkflowVersion = currentPlanWorkflowVersion + 1
+	env.ExecuteWorkflow(PlanWorkflow, input)
+
+	require.True(t, env.IsWorkflowCompleted())
+	require.Error(t, env.GetWorkflowError())
+}
+
 func TestPlanWorkflowPublishesDebugTraceEvents(t *testing.T) {
 	t.Parallel()
 
@@ -875,9 +902,10 @@ func TestPlanWorkflowContinuedInputRestoresSnapshotStatus(t *testing.T) {
 	}
 
 	input := planWorkflowInput{
-		Spec:      spec,
-		Status:    status,
-		Continued: true,
+		Spec:            spec,
+		Status:          status,
+		WorkflowVersion: currentPlanWorkflowVersion,
+		Continued:       true,
 	}
 	state, err := initialPlanWorkflowState(&input, time.Date(2026, 6, 19, 12, 0, 0, 0, time.UTC))
 	require.NoError(t, err)
@@ -907,6 +935,7 @@ func TestPlanWorkflowContinuationCarriesProcessedSignalAndControlKeys(t *testing
 	input := planWorkflowInput{
 		Spec:              spec,
 		Status:            status,
+		WorkflowVersion:   currentPlanWorkflowVersion,
 		Continued:         true,
 		ContinuationCount: 2,
 	}
@@ -930,6 +959,7 @@ func TestPlanWorkflowContinuationCarriesProcessedSignalAndControlKeys(t *testing
 
 	require.True(t, next.Continued)
 	require.Equal(t, int32(3), next.ContinuationCount)
+	require.Equal(t, currentPlanWorkflowVersion, next.WorkflowVersion)
 	require.Equal(t, int32(4), next.ExpansionCount)
 	require.Equal(t, int32(9), next.IterationCount)
 	require.Equal(t, []string{"control-1", "control-2", "control-3"}, next.ProcessedControls)
@@ -1017,7 +1047,8 @@ func newPlanWorkflowTestEnvWithCapabilities(t *testing.T, mocks *planWorkflowMoc
 
 func planWorkflowInputForTest(spec *agentos.RunPlanSpec) *planWorkflowInput {
 	return &planWorkflowInput{
-		Spec: *spec,
+		Spec:            *spec,
+		WorkflowVersion: currentPlanWorkflowVersion,
 		TaskQueues: agentfwTaskQueues{
 			PlanActivity: DefaultTaskQueues().PlanActivity,
 		},

@@ -718,7 +718,8 @@ func executePlanWorkflow(ctx context.Context, temporalClient planTemporalClient,
 	}
 
 	_, err := temporalClient.ExecuteWorkflow(ctx, &options, PlanWorkflowName, &planWorkflowInput{
-		Spec: *spec,
+		Spec:            *spec,
+		WorkflowVersion: currentPlanWorkflowVersion,
 		TaskQueues: agentfwTaskQueues{
 			PlanActivity: taskQueues.PlanActivity,
 		},

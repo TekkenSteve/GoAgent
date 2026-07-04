@@ -225,7 +225,8 @@ func (r *processRuntime) executeProcessWorkflow(ctx context.Context, spec *agent
 	}
 
 	_, err := r.temporalClient.ExecuteWorkflow(ctx, &options, ProcessWorkflowName, &processWorkflowInput{
-		Spec: *spec,
+		Spec:            *spec,
+		WorkflowVersion: currentProcessWorkflowVersion,
 		TaskQueues: processTaskQueues{
 			ProcessActivity: r.taskQueues.ProcessActivity,
 		},

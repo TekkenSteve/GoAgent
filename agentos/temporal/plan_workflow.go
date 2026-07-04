@@ -43,6 +43,7 @@ type planWorkflowInput struct {
 	Spec              agentos.RunPlanSpec   `json:"spec"`
 	Status            agentos.RunPlanStatus `json:"status"`
 	TaskQueues        agentfwTaskQueues     `json:"task_queues"`
+	WorkflowVersion   int                   `json:"workflow_version"`
 	Continued         bool                  `json:"continued,omitempty"`
 	ContinuationCount int32                 `json:"continuation_count,omitempty"`
 	IterationCount    int32                 `json:"iteration_count,omitempty"`
@@ -126,6 +127,10 @@ func newPlanWorkflowSetup(ctx workflow.Context, input *planWorkflowInput) (planW
 
 	if input.TaskQueues.PlanActivity == "" {
 		return planWorkflowSetup{}, temporal.NewNonRetryableApplicationError("PlanWorkflow plan activity task queue is required", "validation", nil)
+	}
+
+	if err := validatePlanWorkflowVersion(input.WorkflowVersion); err != nil {
+		return planWorkflowSetup{}, temporal.NewNonRetryableApplicationError(err.Error(), "validation", err)
 	}
 
 	state, err := initialPlanWorkflowState(input, workflow.Now(ctx))
