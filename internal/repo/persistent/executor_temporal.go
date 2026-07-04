@@ -2,6 +2,7 @@ package persistent
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
 
@@ -11,26 +12,44 @@ import (
 	"go.temporal.io/sdk/client"
 )
 
+var errExecutorTemporalConfigRequired = errors.New("ExecutorTemporal - config is required")
+
 type ExecutorTemporal struct {
 	client client.Client
 	opts   options
 }
 
 type options struct {
-	taskQueue        string
-	workflowName     string
-	workflowIDPrefix string
+	workflowName       string
+	workflowIDPrefix   string
+	workflowTaskQueues *orchestration.WorkflowTaskQueues
 }
 
-func NewExecutorTemporal(c client.Client, cfg config.Temporal) *ExecutorTemporal {
+func NewExecutorTemporal(c client.Client, cfg *config.Temporal) (*ExecutorTemporal, error) {
+	if cfg == nil {
+		return nil, errExecutorTemporalConfigRequired
+	}
+
+	if err := cfg.TaskQueues.Validate(); err != nil {
+		return nil, err
+	}
+
+	taskQueues := orchestration.WorkflowTaskQueues{
+		NativeControl: cfg.TaskQueues.NativeControl,
+		NativeLLM:     cfg.TaskQueues.NativeLLM,
+		NativeTool:    cfg.TaskQueues.NativeTool,
+		Stream:        cfg.TaskQueues.Stream,
+		Trigger:       cfg.TaskQueues.Trigger,
+	}
+
 	return &ExecutorTemporal{
 		client: c,
 		opts: options{
-			taskQueue:        cfg.TaskQueue,
-			workflowName:     orchestration.AgentWorkflowName,
-			workflowIDPrefix: "agentfw-run-",
+			workflowName:       orchestration.AgentWorkflowName,
+			workflowIDPrefix:   "agentfw-run-",
+			workflowTaskQueues: &taskQueues,
 		},
-	}
+	}, nil
 }
 
 func (r *ExecutorTemporal) StartExecution(ctx context.Context, req *entity.ExecuteRequest) (entity.RunStatus, error) {
@@ -44,11 +63,12 @@ func (r *ExecutorTemporal) StartExecution(ctx context.Context, req *entity.Execu
 		Config:           entity.LLMConfig{Model: req.ModelRef},
 		MCPServerConfigs: req.MCPServerConfigs,
 		AwaitUserInput:   req.AwaitUserInput,
+		TaskQueues:       *r.opts.workflowTaskQueues,
 	}
 
 	opts := client.StartWorkflowOptions{
 		ID:        workflowID,
-		TaskQueue: r.opts.taskQueue,
+		TaskQueue: r.opts.workflowTaskQueues.NativeControl,
 	}
 
 	_, err := r.client.ExecuteWorkflow(ctx, opts, r.opts.workflowName, &input)
@@ -93,10 +113,13 @@ func (r *ExecutorTemporal) StartOrchestration(ctx context.Context, input *entity
 
 	opts := client.StartWorkflowOptions{
 		ID:        workflowID,
-		TaskQueue: r.opts.taskQueue,
+		TaskQueue: r.opts.workflowTaskQueues.NativeControl,
 	}
 
-	_, err := r.client.ExecuteWorkflow(ctx, opts, orchestration.OrchestrationWorkflowName, input)
+	_, err := r.client.ExecuteWorkflow(ctx, opts, orchestration.OrchestrationWorkflowName, &orchestration.WorkflowInput{
+		Input:      *input,
+		TaskQueues: *r.opts.workflowTaskQueues,
+	})
 	if err != nil {
 		return entity.RunStatus{}, fmt.Errorf("ExecutorTemporal - StartOrchestration - r.client.ExecuteWorkflow: %w", err)
 	}

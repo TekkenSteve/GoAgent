@@ -90,6 +90,10 @@ func openWorkerResources(ctx context.Context, cfg *WorkerConfig) (*workerResourc
 		return nil, ErrWorkerRedisURLRequired
 	}
 
+	if err := cfg.TemporalTaskQueues.Validate(); err != nil {
+		return nil, err
+	}
+
 	if err := validateWorkerArtifactStore(&cfg.ArtifactStore); err != nil {
 		return nil, err
 	}
@@ -109,9 +113,9 @@ func openWorkerResources(ctx context.Context, cfg *WorkerConfig) (*workerResourc
 	}
 
 	fwTemporal := temporalConfig(&RuntimeConfig{
-		TemporalAddress:   cfg.TemporalAddress,
-		TemporalNamespace: cfg.TemporalNamespace,
-		TemporalTaskQueue: cfg.TemporalTaskQueue,
+		TemporalAddress:    cfg.TemporalAddress,
+		TemporalNamespace:  cfg.TemporalNamespace,
+		TemporalTaskQueues: cfg.TemporalTaskQueues,
 	})
 
 	temporalClient, err := client.Dial(client.Options{
@@ -152,7 +156,7 @@ func (r *workerResources) close() {
 
 func configureWorkerPlanRuntime(kit *WorkerKit, cfg *WorkerConfig, resources *workerResources, batchWriter *pipelinepkg.BatchWriter, infra *workerPlanRuntime) {
 	kit.planActivities = infra.planActivities
-	kit.planCommandReconciler = newPlanCommandReconciler(newPlanTemporalClient(resources.temporalClient), cfg.TemporalTaskQueue, infra.planStore, infra.planStore, infra.planStore)
+	kit.planCommandReconciler = newPlanCommandReconciler(newPlanTemporalClient(resources.temporalClient), &cfg.TemporalTaskQueues, infra.planStore, infra.planStore, infra.planStore)
 	kit.closeFns = append(
 		kit.closeFns,
 		func() error {
@@ -214,7 +218,7 @@ func initWorkerPlanRuntime(ctx context.Context, cfg *WorkerConfig, pg *postgres.
 	planRuntime, err := NewRuntimeWithClient(ctx, &RuntimeConfig{
 		TemporalAddress:          cfg.TemporalAddress,
 		TemporalNamespace:        cfg.TemporalNamespace,
-		TemporalTaskQueue:        cfg.TemporalTaskQueue,
+		TemporalTaskQueues:       cfg.TemporalTaskQueues,
 		TemporalExternalBackends: cfg.TemporalExternalBackends,
 		HTTPBackends:             cfg.HTTPBackends,
 		GRPCBackends:             cfg.GRPCBackends,
@@ -320,12 +324,14 @@ func buildWorkerKit(ctx context.Context, deps *workerDependencies) (*WorkerKit, 
 
 	agentUC := agent.New(llmProvider, toolExecutor, wal, agentCompressor, toolRegistry, agentRepo)
 	agentUC.SetLogger(deps.logger)
-	fwTemporal := temporalConfig(&RuntimeConfig{
-		TemporalAddress:   deps.cfg.TemporalAddress,
-		TemporalNamespace: deps.cfg.TemporalNamespace,
-		TemporalTaskQueue: deps.cfg.TemporalTaskQueue,
-	})
-	triggerScheduler := temporalrepo.NewTemporalTriggerScheduler(deps.temporalClient, fwTemporal.TaskQueue)
+	workflowTaskQueues := orchestration.WorkflowTaskQueues{
+		NativeControl: deps.cfg.TemporalTaskQueues.NativeControl,
+		NativeLLM:     deps.cfg.TemporalTaskQueues.NativeLLM,
+		NativeTool:    deps.cfg.TemporalTaskQueues.NativeTool,
+		Stream:        deps.cfg.TemporalTaskQueues.Stream,
+		Trigger:       deps.cfg.TemporalTaskQueues.Trigger,
+	}
+	triggerScheduler := temporalrepo.NewTemporalTriggerScheduler(deps.temporalClient, deps.cfg.TemporalTaskQueues.Trigger, &workflowTaskQueues)
 	triggerUC := triggerpkg.New(triggerRepo, triggerScheduler, templateRepo)
 	mcpManager := mcpRepo.NewManager()
 	mcpManager.SetRegistry(toolRegistry)

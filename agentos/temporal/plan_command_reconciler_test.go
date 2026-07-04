@@ -38,7 +38,7 @@ func TestPlanCommandReconcilerDeliversRecoverableCommands(t *testing.T) {
 	}
 
 	temporalClient := &fakePlanTemporalClient{}
-	reconciler := newPlanCommandReconciler(temporalClient, "agentos-test", store, store, store)
+	reconciler := newPlanCommandReconciler(temporalClient, testPlanTaskQueues(), store, store, store)
 
 	result, err := reconciler.Recover(t.Context(), 0)
 	if err != nil {
@@ -75,7 +75,7 @@ func TestPlanCommandReconcilerMarksInvalidPayloadFailed(t *testing.T) {
 	}
 
 	temporalClient := &fakePlanTemporalClient{}
-	reconciler := newPlanCommandReconciler(temporalClient, "agentos-test", store, store, store)
+	reconciler := newPlanCommandReconciler(temporalClient, testPlanTaskQueues(), store, store, store)
 
 	result, err := reconciler.Recover(t.Context(), 0)
 	if !errors.Is(err, agentos.ErrInvalidRunPlan) {
@@ -195,7 +195,7 @@ func TestWorkerKitRecoverPlanCommandsUsesReconciler(t *testing.T) {
 		t.Fatalf("RecordPlanCommand: %v", err)
 	}
 
-	kit := &WorkerKit{planCommandReconciler: newPlanCommandReconciler(&fakePlanTemporalClient{}, "agentos-test", store, store, store)}
+	kit := &WorkerKit{planCommandReconciler: newPlanCommandReconciler(&fakePlanTemporalClient{}, testPlanTaskQueues(), store, store, store)}
 
 	result, err := kit.RecoverPlanCommands(t.Context(), 1)
 	if err != nil {
@@ -219,7 +219,15 @@ func TestPlanRuntimeRecoverPlanCommandsUsesReconciler(t *testing.T) {
 	}
 
 	temporalClient := &fakePlanTemporalClient{}
-	rt := &planRuntime{temporalClient: temporalClient, taskQueue: "agentos-test", commandStore: store, auditStore: store, planIndex: store}
+	taskQueues := testPlanTaskQueues()
+	rt := &planRuntime{
+		temporalClient: temporalClient,
+		taskQueue:      taskQueues.PlanControl,
+		taskQueues:     taskQueues,
+		commandStore:   store,
+		auditStore:     store,
+		planIndex:      store,
+	}
 
 	result, err := rt.RecoverPlanCommands(t.Context(), 1)
 	if err != nil {
@@ -247,7 +255,8 @@ func TestPlanCommandReconcilerDeliversPlanStart(t *testing.T) {
 	}
 
 	temporalClient := &fakePlanTemporalClient{}
-	reconciler := newPlanCommandReconciler(temporalClient, "agentos-test", store, store, store)
+	taskQueues := testPlanTaskQueues()
+	reconciler := newPlanCommandReconciler(temporalClient, taskQueues, store, store, store)
 
 	result, err := reconciler.Recover(t.Context(), 1)
 	if err != nil {
@@ -256,11 +265,17 @@ func TestPlanCommandReconcilerDeliversPlanStart(t *testing.T) {
 
 	assertPlanCommandRecoveryResult(t, result, 1, 1, 0)
 
-	if temporalClient.executeCount != 1 || temporalClient.executeTaskQueue != "agentos-test" {
+	if temporalClient.executeCount != 1 || temporalClient.executeTaskQueue != taskQueues.PlanControl {
 		t.Fatalf("execute count=%d taskQueue=%q", temporalClient.executeCount, temporalClient.executeTaskQueue)
 	}
 
 	assertDeliveredPlanCommands(t, store, ref, spec.IdempotencyKey)
+}
+
+func testPlanTaskQueues() *TaskQueues {
+	taskQueues := DefaultTaskQueues()
+
+	return &taskQueues
 }
 
 func commandFromAudit(record *agentosplan.AuditRecord) *agentosplan.PlanCommandRecord {

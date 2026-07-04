@@ -63,6 +63,9 @@ func NewRuntime(ctx context.Context, cfg *RuntimeConfig, options ...RuntimeOptio
 	}
 
 	fwTemporal := temporalConfig(cfg)
+	if err := fwTemporal.TaskQueues.Validate(); err != nil {
+		return nil, err
+	}
 
 	c, err := client.Dial(client.Options{
 		HostPort:  fwTemporal.Address,
@@ -98,7 +101,14 @@ func NewRuntime(ctx context.Context, cfg *RuntimeConfig, options ...RuntimeOptio
 		return nil, err
 	}
 
-	if err := r.configureRouter(c, cfg, runtimeOpts, temporalrepo.NewExecutorTemporal(c, fwTemporal), subscriber); err != nil {
+	executor, err := temporalrepo.NewExecutorTemporal(c, &fwTemporal)
+	if err != nil {
+		_ = r.Close()
+
+		return nil, err
+	}
+
+	if err := r.configureRouter(c, cfg, runtimeOpts, executor, subscriber); err != nil {
 		_ = r.Close()
 
 		return nil, err
@@ -120,6 +130,10 @@ func NewRuntimeWithClient(ctx context.Context, cfg *RuntimeConfig, c client.Clie
 	}
 
 	fwTemporal := temporalConfig(cfg)
+	if err := fwTemporal.TaskQueues.Validate(); err != nil {
+		return nil, err
+	}
+
 	r := &runtime{
 		temporalClient: c,
 	}
@@ -143,7 +157,14 @@ func NewRuntimeWithClient(ctx context.Context, cfg *RuntimeConfig, c client.Clie
 		return nil, err
 	}
 
-	if err := r.configureRouter(c, cfg, runtimeOpts, temporalrepo.NewExecutorTemporal(c, fwTemporal), subscriber); err != nil {
+	executor, err := temporalrepo.NewExecutorTemporal(c, &fwTemporal)
+	if err != nil {
+		_ = r.Close()
+
+		return nil, err
+	}
+
+	if err := r.configureRouter(c, cfg, runtimeOpts, executor, subscriber); err != nil {
 		_ = r.Close()
 
 		return nil, err

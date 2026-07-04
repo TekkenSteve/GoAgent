@@ -37,7 +37,7 @@ func TestRuntimeOptionsWithDefaultRunBackendIndexUsesPostgresConfig(t *testing.T
 	rt := &runtime{}
 
 	opts, err := rt.runtimeOptionsWithDefaultRunBackendIndex(
-		&RuntimeConfig{PostgresURL: "postgres://agentos"},
+		&RuntimeConfig{PostgresURL: "postgres://agentos", TemporalTaskQueues: DefaultTaskQueues()},
 		runtimeOptions{runBackendIndexFactory: func(cfg *RuntimeConfig) (RunBackendIndex, func() error, error) {
 			called = true
 
@@ -84,7 +84,7 @@ func TestRuntimeOptionsWithDefaultRunBackendIndexKeepsExplicitIndex(t *testing.T
 	rt := &runtime{}
 
 	opts, err := rt.runtimeOptionsWithDefaultRunBackendIndex(
-		&RuntimeConfig{PostgresURL: "postgres://agentos"},
+		&RuntimeConfig{PostgresURL: "postgres://agentos", TemporalTaskQueues: DefaultTaskQueues()},
 		runtimeOptions{
 			runBackendIndex: wantIndex,
 			runBackendIndexFactory: func(*RuntimeConfig) (RunBackendIndex, func() error, error) {
@@ -114,7 +114,7 @@ func TestRuntimeOptionsWithDefaultRunBackendIndexPropagatesFactoryError(t *testi
 	rt := &runtime{}
 
 	_, err := rt.runtimeOptionsWithDefaultRunBackendIndex(
-		&RuntimeConfig{PostgresURL: "postgres://agentos"},
+		&RuntimeConfig{PostgresURL: "postgres://agentos", TemporalTaskQueues: DefaultTaskQueues()},
 		runtimeOptions{runBackendIndexFactory: func(*RuntimeConfig) (RunBackendIndex, func() error, error) {
 			return nil, nil, wantErr
 		}},
@@ -134,7 +134,7 @@ func TestRuntimeOptionsWithDefaultRunBackendIndexRequiresPostgresURL(t *testing.
 	rt := &runtime{}
 
 	_, err := rt.runtimeOptionsWithDefaultRunBackendIndex(
-		&RuntimeConfig{},
+		&RuntimeConfig{TemporalTaskQueues: DefaultTaskQueues()},
 		runtimeOptions{runBackendIndexFactory: runtimeRunBackendIndexFromPostgres},
 	)
 	if !errors.Is(err, ErrRuntimePostgresURLRequired) {

@@ -6,7 +6,6 @@ import (
 	"time"
 
 	"github.com/TekkenSteve/GoAgent/internal/entity"
-	"go.temporal.io/sdk/temporal"
 	"go.temporal.io/sdk/workflow"
 )
 
@@ -19,6 +18,8 @@ var (
 	ErrSplitChildrenRequired = errors.New("split step: 'children' in Input is required")
 	ErrSplitChildrenType     = errors.New("split step: 'children' must be []Step")
 	ErrJoinGroupRequired     = errors.New("join step: '_join_group' in Input is required")
+	ErrTeamSpecNotExpanded   = errors.New("TeamSpec must be expanded before starting Workflow; use ExpandSteps")
+	ErrWorkflowInputRequired = errors.New("WorkflowInput is required")
 )
 
 // ——— Signal & query names ———
@@ -44,10 +45,7 @@ func setupSignalChannels(ctx workflow.Context) (cmdCh, modifyCh, eventCh workflo
 func initSteps(input *entity.OrchestrationInput) ([]entity.Step, error) {
 	steps := input.Steps
 	if len(steps) == 0 && input.TeamSpec != nil {
-		return nil, temporal.NewApplicationError(
-			"TeamSpec must be expanded before starting Workflow; use ExpandSteps",
-			"validation",
-		)
+		return nil, nonRetryableWorkflowValidationError(ErrTeamSpecNotExpanded)
 	}
 
 	if len(steps) == 0 {
@@ -78,21 +76,30 @@ func initSteps(input *entity.OrchestrationInput) ([]entity.Step, error) {
 //
 // Query:
 //   - query-run-status: returns Status
-func Workflow(ctx workflow.Context, input *entity.OrchestrationInput) (*entity.OrchestrationResult, error) {
+func Workflow(ctx workflow.Context, input *WorkflowInput) (*entity.OrchestrationResult, error) {
+	if input == nil {
+		return nil, nonRetryableWorkflowValidationError(ErrWorkflowInputRequired)
+	}
+
+	if err := input.TaskQueues.ValidateNativeAgent(); err != nil {
+		return nil, nonRetryableWorkflowValidationError(err)
+	}
+
 	cmdCh, modifyCh, eventCh := setupSignalChannels(ctx)
+	orchestrationInput := &input.Input
 
 	ao := workflow.ActivityOptions{
 		StartToCloseTimeout: activityStartToCloseTimeout,
 	}
 	ctx = workflow.WithActivityOptions(ctx, ao)
 
-	steps, err := initSteps(input)
+	steps, err := initSteps(orchestrationInput)
 	if err != nil {
 		return nil, err
 	}
 
 	status := Status{
-		RunID: input.RunID,
+		RunID: orchestrationInput.RunID,
 		Round: 0,
 		State: "running",
 	}
@@ -104,8 +111,8 @@ func Workflow(ctx workflow.Context, input *entity.OrchestrationInput) (*entity.O
 	}
 
 	maxRounds := 1000
-	if input.ContinuePolicy.MaxRounds > 0 {
-		maxRounds = input.ContinuePolicy.MaxRounds
+	if orchestrationInput.ContinuePolicy.MaxRounds > 0 {
+		maxRounds = orchestrationInput.ContinuePolicy.MaxRounds
 	}
 
 	for round := 0; round < maxRounds; round++ {
@@ -113,13 +120,13 @@ func Workflow(ctx workflow.Context, input *entity.OrchestrationInput) (*entity.O
 
 		var canceled, done bool
 
-		steps, canceled, done, err = processWorkflowRound(ctx, steps, cmdCh, modifyCh, eventCh)
+		steps, canceled, done, err = processWorkflowRound(ctx, &input.TaskQueues, steps, cmdCh, modifyCh, eventCh)
 		if err != nil {
 			return nil, err
 		}
 
 		if canceled {
-			return buildResult(input.RunID, steps, "canceled"), nil
+			return buildResult(orchestrationInput.RunID, steps, "canceled"), nil
 		}
 
 		if done {
@@ -127,7 +134,7 @@ func Workflow(ctx workflow.Context, input *entity.OrchestrationInput) (*entity.O
 		}
 	}
 
-	return buildResult(input.RunID, steps, "completed"), nil
+	return buildResult(orchestrationInput.RunID, steps, "completed"), nil
 }
 
 // processSignals checks for step-modify and external-event signals and applies them.
@@ -147,7 +154,7 @@ func processSignals(steps []entity.Step, modifyCh, eventCh workflow.ReceiveChann
 
 // tryExecuteReadyStep finds and executes the next ready step.
 // Returns the updated steps and whether a step was executed.
-func tryExecuteReadyStep(ctx workflow.Context, steps []entity.Step, cmdCh, eventCh workflow.ReceiveChannel) ([]entity.Step, bool) {
+func tryExecuteReadyStep(ctx workflow.Context, queues *WorkflowTaskQueues, steps []entity.Step, cmdCh, eventCh workflow.ReceiveChannel) ([]entity.Step, bool) {
 	idx := findReadyStepIndex(steps)
 	if idx < 0 {
 		return steps, false
@@ -155,7 +162,7 @@ func tryExecuteReadyStep(ctx workflow.Context, steps []entity.Step, cmdCh, event
 
 	step := &steps[idx]
 
-	result, err := executeStep(ctx, step, cmdCh, eventCh)
+	result, err := executeStep(ctx, queues, step, cmdCh, eventCh)
 	if err != nil {
 		step.Status = entity.StepFailed
 		step.Error = err.Error()
@@ -177,7 +184,7 @@ func tryExecuteReadyStep(ctx workflow.Context, steps []entity.Step, cmdCh, event
 // processWorkflowRound handles one iteration of the main workflow loop.
 // Returns the updated steps, whether the workflow was canceled,
 // whether all work is done, and any error.
-func processWorkflowRound(ctx workflow.Context, steps []entity.Step, cmdCh, modifyCh, eventCh workflow.ReceiveChannel) (outSteps []entity.Step, canceled, done bool, err error) {
+func processWorkflowRound(ctx workflow.Context, queues *WorkflowTaskQueues, steps []entity.Step, cmdCh, modifyCh, eventCh workflow.ReceiveChannel) (outSteps []entity.Step, canceled, done bool, err error) {
 	if handleControlSignal(cmdCh, ctx) {
 		outSteps = steps
 		canceled = true
@@ -189,7 +196,7 @@ func processWorkflowRound(ctx workflow.Context, steps []entity.Step, cmdCh, modi
 
 	var executed bool
 
-	steps, executed = tryExecuteReadyStep(ctx, steps, cmdCh, eventCh)
+	steps, executed = tryExecuteReadyStep(ctx, queues, steps, cmdCh, eventCh)
 
 	if !executed {
 		if allStepsTerminal(steps) {
@@ -232,15 +239,16 @@ type stepExecResult struct {
 
 func executeStep(
 	ctx workflow.Context,
+	queues *WorkflowTaskQueues,
 	step *entity.Step,
 	_ workflow.ReceiveChannel,
 	eventCh workflow.ReceiveChannel,
 ) (*stepExecResult, error) {
 	switch step.Type {
 	case entity.StepAgent:
-		return executeAgentStep(ctx, step)
+		return executeAgentStep(ctx, queues, step)
 	case entity.StepTool:
-		return executeToolStep(ctx, step)
+		return executeToolStep(ctx, queues, step)
 	case entity.StepWait:
 		return executeWaitStep(ctx, step, eventCh)
 	case entity.StepSplit:
@@ -254,7 +262,7 @@ func executeStep(
 	}
 }
 
-func executeAgentStep(ctx workflow.Context, step *entity.Step) (*stepExecResult, error) {
+func executeAgentStep(ctx workflow.Context, queues *WorkflowTaskQueues, step *entity.Step) (*stepExecResult, error) {
 	msg, ok := step.Input["message"].(string)
 	if !ok {
 		msg = ""
@@ -265,9 +273,12 @@ func executeAgentStep(ctx workflow.Context, step *entity.Step) (*stepExecResult,
 		systemPrompt = ""
 	}
 
-	childCtx := workflow.WithChildOptions(ctx, workflow.ChildWorkflowOptions{
+	childOptions := workflow.ChildWorkflowOptions{
 		WorkflowID: fmt.Sprintf("agentfw-orch-%s-%s", step.ID, workflow.GetInfo(ctx).WorkflowExecution.RunID),
-	})
+		TaskQueue:  queues.NativeControl,
+	}
+
+	childCtx := workflow.WithChildOptions(ctx, childOptions)
 
 	var result WorkflowResult
 
@@ -275,6 +286,7 @@ func executeAgentStep(ctx workflow.Context, step *entity.Step) (*stepExecResult,
 		RunID:        step.ID,
 		Message:      msg,
 		SystemPrompt: systemPrompt,
+		TaskQueues:   *queues,
 	}).Get(ctx, &result)
 	if err != nil {
 		return nil, fmt.Errorf("agent step %q: %w", step.ID, err)
@@ -292,7 +304,7 @@ func executeAgentStep(ctx workflow.Context, step *entity.Step) (*stepExecResult,
 	return &stepExecResult{Data: out, Mutation: mutation}, nil
 }
 
-func executeToolStep(ctx workflow.Context, step *entity.Step) (*stepExecResult, error) {
+func executeToolStep(ctx workflow.Context, queues *WorkflowTaskQueues, step *entity.Step) (*stepExecResult, error) {
 	toolName := step.Tool
 	if toolName == "" {
 		return nil, fmt.Errorf("%w: %q", ErrToolNameRequired, step.ID)
@@ -300,7 +312,9 @@ func executeToolStep(ctx workflow.Context, step *entity.Step) (*stepExecResult, 
 
 	var toolResult ToolOutput
 
-	err := workflow.ExecuteActivity(ctx, ToolExecActivityName, ToolInput{
+	toolCtx := withRequiredActivityTaskQueue(ctx, queues.NativeTool)
+
+	err := workflow.ExecuteActivity(toolCtx, ToolExecActivityName, ToolInput{
 		RunID:      step.ID,
 		ToolCallID: step.ID,
 		ToolName:   toolName,

@@ -1,6 +1,10 @@
 package config
 
-import "time"
+import (
+	"errors"
+	"fmt"
+	"time"
+)
 
 const (
 	defaultMaxConcurrentWorkflowTaskPollers = 2
@@ -24,13 +28,109 @@ type Config struct {
 
 // Temporal config controls SDK client/worker bootstrap settings.
 type Temporal struct {
-	Address   string
-	Namespace string
-	TaskQueue string
+	Address    string
+	Namespace  string
+	TaskQueues TaskQueues
 
 	MaxConcurrentWorkflowTaskPollers int
 	MaxConcurrentActivityTaskPollers int
 	MaxConcurrentActivityExecution   int
+}
+
+// TaskQueues names the Temporal queues used by each workload class.
+type TaskQueues struct {
+	PlanControl   string
+	PlanActivity  string
+	NativeControl string
+	NativeLLM     string
+	NativeTool    string
+	Stream        string
+	Trigger       string
+}
+
+var ErrTemporalTaskQueuesInvalid = errors.New("agentfw temporal task queues: invalid")
+
+// DefaultTaskQueues returns the production-oriented AgentOS queue split.
+func DefaultTaskQueues() TaskQueues {
+	return TaskQueues{
+		PlanControl:   "agentos-plan-control",
+		PlanActivity:  "agentos-plan-activity",
+		NativeControl: "agentfw-native-control",
+		NativeLLM:     "agentfw-native-llm",
+		NativeTool:    "agentfw-native-tool",
+		Stream:        "agentfw-stream",
+		Trigger:       "agentfw-trigger",
+	}
+}
+
+// QueueNames returns unique queue names in a stable worker startup order.
+func (q *TaskQueues) QueueNames() []string {
+	if q == nil {
+		return nil
+	}
+
+	ordered := []string{
+		q.PlanControl,
+		q.PlanActivity,
+		q.NativeControl,
+		q.NativeLLM,
+		q.NativeTool,
+		q.Stream,
+		q.Trigger,
+	}
+
+	seen := make(map[string]struct{}, len(ordered))
+
+	names := make([]string, 0, len(ordered))
+	for _, name := range ordered {
+		if name == "" {
+			continue
+		}
+
+		if _, ok := seen[name]; ok {
+			continue
+		}
+
+		seen[name] = struct{}{}
+		names = append(names, name)
+	}
+
+	return names
+}
+
+// Validate ensures every workload class has an explicit, distinct queue.
+func (q *TaskQueues) Validate() error {
+	if q == nil {
+		return fmt.Errorf("%w: task queues are required", ErrTemporalTaskQueuesInvalid)
+	}
+
+	fields := []struct {
+		label string
+		value string
+	}{
+		{label: "plan control", value: q.PlanControl},
+		{label: "plan activity", value: q.PlanActivity},
+		{label: "native control", value: q.NativeControl},
+		{label: "native llm", value: q.NativeLLM},
+		{label: "native tool", value: q.NativeTool},
+		{label: "stream", value: q.Stream},
+		{label: "trigger", value: q.Trigger},
+	}
+
+	seen := make(map[string]string, len(fields))
+	for _, field := range fields {
+		if field.value == "" {
+			return fmt.Errorf("%w: %s task queue is required", ErrTemporalTaskQueuesInvalid, field.label)
+		}
+
+		if existing, ok := seen[field.value]; ok {
+			return fmt.Errorf("%w: %s and %s use the same task queue %q", ErrTemporalTaskQueuesInvalid, existing, field.label, field.value)
+		}
+
+		seen[field.value] = field.label
+	}
+
+	return nil
 }
 
 // Runtime config controls orchestration behavior outside Temporal server settings.
@@ -57,9 +157,9 @@ func Default() Config {
 	return Config{
 		Enabled: false,
 		Temporal: Temporal{
-			Address:   "127.0.0.1:7233",
-			Namespace: "default",
-			TaskQueue: "agent-framework",
+			Address:    "127.0.0.1:7233",
+			Namespace:  "default",
+			TaskQueues: DefaultTaskQueues(),
 
 			MaxConcurrentWorkflowTaskPollers: defaultMaxConcurrentWorkflowTaskPollers,
 			MaxConcurrentActivityTaskPollers: defaultMaxConcurrentActivityTaskPollers,

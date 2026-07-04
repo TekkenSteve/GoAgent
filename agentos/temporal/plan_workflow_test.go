@@ -56,7 +56,7 @@ func TestPlanWorkflowExecutesSuccessEdgeAndPublishesArtifacts(t *testing.T) {
 	planWorkflowTestSpec(&spec)
 	env := newPlanWorkflowTestEnv(t, mocks, &spec)
 
-	env.ExecuteWorkflow(PlanWorkflow, &planWorkflowInput{Spec: spec})
+	env.ExecuteWorkflow(PlanWorkflow, planWorkflowInputForTest(&spec))
 
 	require.True(t, env.IsWorkflowCompleted())
 	require.NoError(t, env.GetWorkflowError())
@@ -114,7 +114,7 @@ func TestPlanWorkflowFailsNodeWhenRequiredInputArtifactIsMissing(t *testing.T) {
 	planWorkflowTestSpec(&spec)
 	env := newPlanWorkflowTestEnv(t, mocks, &spec)
 
-	env.ExecuteWorkflow(PlanWorkflow, &planWorkflowInput{Spec: spec})
+	env.ExecuteWorkflow(PlanWorkflow, planWorkflowInputForTest(&spec))
 
 	require.True(t, env.IsWorkflowCompleted())
 	require.NoError(t, env.GetWorkflowError())
@@ -164,7 +164,7 @@ func TestPlanWorkflowPublishesDebugTraceEvents(t *testing.T) {
 
 	planWorkflowTestSpec(&spec)
 	env := newPlanWorkflowTestEnvWithStores(t, mocks, []agentos.Capability{{Backend: ref, Name: "run", Controls: []agentos.ControlOperation{agentos.ControlCancel}}}, store, agentosplan.NewMemoryArtifactStore(), &spec)
-	env.ExecuteWorkflow(PlanWorkflow, &planWorkflowInput{Spec: spec})
+	env.ExecuteWorkflow(PlanWorkflow, planWorkflowInputForTest(&spec))
 	require.True(t, env.IsWorkflowCompleted())
 	require.NoError(t, env.GetWorkflowError())
 	require.Len(t, mocks.startedInputs, 1)
@@ -213,7 +213,7 @@ func TestPlanWorkflowErrorEdgeRunsRecoveryButPlanRemainsFailed(t *testing.T) {
 	planWorkflowTestSpec(&spec)
 	env := newPlanWorkflowTestEnv(t, mocks, &spec)
 
-	env.ExecuteWorkflow(PlanWorkflow, &planWorkflowInput{Spec: spec})
+	env.ExecuteWorkflow(PlanWorkflow, planWorkflowInputForTest(&spec))
 
 	require.True(t, env.IsWorkflowCompleted())
 	require.NoError(t, env.GetWorkflowError())
@@ -251,7 +251,7 @@ func TestPlanWorkflowRetriesFailedNodeAttempt(t *testing.T) {
 	planWorkflowTestSpec(&spec)
 	env := newPlanWorkflowTestEnv(t, mocks, &spec)
 
-	env.ExecuteWorkflow(PlanWorkflow, &planWorkflowInput{Spec: spec})
+	env.ExecuteWorkflow(PlanWorkflow, planWorkflowInputForTest(&spec))
 
 	require.True(t, env.IsWorkflowCompleted())
 	require.NoError(t, env.GetWorkflowError())
@@ -289,7 +289,7 @@ func TestPlanWorkflowAppliesPlanDeltaArtifact(t *testing.T) {
 
 	planWorkflowTestSpec(&spec)
 	env := newPlanWorkflowTestEnvWithStores(t, mocks, []agentos.Capability{{Backend: ref, Name: "expand"}}, store, artifactStore, &spec)
-	env.ExecuteWorkflow(PlanWorkflow, &planWorkflowInput{Spec: spec})
+	env.ExecuteWorkflow(PlanWorkflow, planWorkflowInputForTest(&spec))
 	require.True(t, env.IsWorkflowCompleted())
 	require.NoError(t, env.GetWorkflowError())
 
@@ -344,7 +344,7 @@ func TestPlanWorkflowCancelsTimedOutNode(t *testing.T) {
 	planWorkflowTestSpec(&spec)
 	env := newPlanWorkflowTestEnv(t, mocks, &spec)
 
-	env.ExecuteWorkflow(PlanWorkflow, &planWorkflowInput{Spec: spec})
+	env.ExecuteWorkflow(PlanWorkflow, planWorkflowInputForTest(&spec))
 
 	require.True(t, env.IsWorkflowCompleted())
 	require.NoError(t, env.GetWorkflowError())
@@ -383,7 +383,7 @@ func TestPlanWorkflowCancelsActiveNodesWhenPlanTimesOut(t *testing.T) {
 	planWorkflowTestSpec(&spec)
 	env := newPlanWorkflowTestEnv(t, mocks, &spec)
 
-	env.ExecuteWorkflow(PlanWorkflow, &planWorkflowInput{Spec: spec})
+	env.ExecuteWorkflow(PlanWorkflow, planWorkflowInputForTest(&spec))
 
 	require.True(t, env.IsWorkflowCompleted())
 	require.NoError(t, env.GetWorkflowError())
@@ -430,7 +430,7 @@ func TestPlanWorkflowCancelsActiveNodesWhenBudgetExceeded(t *testing.T) {
 	planWorkflowTestSpec(&spec)
 	env := newPlanWorkflowTestEnv(t, mocks, &spec)
 
-	env.ExecuteWorkflow(PlanWorkflow, &planWorkflowInput{Spec: spec})
+	env.ExecuteWorkflow(PlanWorkflow, planWorkflowInputForTest(&spec))
 
 	require.True(t, env.IsWorkflowCompleted())
 	require.NoError(t, env.GetWorkflowError())
@@ -495,7 +495,7 @@ func TestPlanWorkflowOrchestratesMixedBackendsThroughRuntime(t *testing.T) {
 	}
 
 	createPlanForWorkflowTest(t, store, &spec)
-	env.ExecuteWorkflow(PlanWorkflow, &planWorkflowInput{Spec: spec})
+	env.ExecuteWorkflow(PlanWorkflow, planWorkflowInputForTest(&spec))
 	require.True(t, env.IsWorkflowCompleted())
 	require.NoError(t, env.GetWorkflowError())
 
@@ -556,7 +556,7 @@ func TestPlanWorkflowRetriesFailedNodeFromSignal(t *testing.T) {
 		})
 	}, time.Second)
 
-	env.ExecuteWorkflow(PlanWorkflow, &planWorkflowInput{Spec: spec})
+	env.ExecuteWorkflow(PlanWorkflow, planWorkflowInputForTest(&spec))
 
 	require.True(t, env.IsWorkflowCompleted())
 	require.NoError(t, env.GetWorkflowError())
@@ -608,7 +608,7 @@ func TestPlanWorkflowRejectsManualRetryBeyondMaxAttempts(t *testing.T) {
 		})
 	}, time.Second)
 
-	env.ExecuteWorkflow(PlanWorkflow, &planWorkflowInput{Spec: spec})
+	env.ExecuteWorkflow(PlanWorkflow, planWorkflowInputForTest(&spec))
 
 	require.True(t, env.IsWorkflowCompleted())
 	require.Error(t, env.GetWorkflowError())
@@ -658,7 +658,7 @@ func TestPlanWorkflowRejectSignalFailsRunningPlan(t *testing.T) {
 		})
 	}, time.Second)
 
-	env.ExecuteWorkflow(PlanWorkflow, &planWorkflowInput{Spec: spec})
+	env.ExecuteWorkflow(PlanWorkflow, planWorkflowInputForTest(&spec))
 
 	require.True(t, env.IsWorkflowCompleted())
 	require.NoError(t, env.GetWorkflowError())
@@ -718,7 +718,7 @@ func TestPlanWorkflowApproveSignalUnblocksPausedPlan(t *testing.T) {
 		})
 	}, 2*time.Second)
 
-	env.ExecuteWorkflow(PlanWorkflow, &planWorkflowInput{Spec: spec})
+	env.ExecuteWorkflow(PlanWorkflow, planWorkflowInputForTest(&spec))
 
 	require.True(t, env.IsWorkflowCompleted())
 	require.NoError(t, env.GetWorkflowError())
@@ -762,7 +762,7 @@ func TestPlanWorkflowPauseControlPreflightsUnsupportedRunningNodes(t *testing.T)
 	env.RegisterDelayedCallback(func() {
 		env.SignalWorkflow(PlanSignalName, agentos.Signal{Type: agentos.SignalPlanReject, IdempotencyKey: "reject-plan", ActorID: "operator-1", Payload: map[string]any{agentosplan.SignalPayloadReason: "end preflight test"}})
 	}, 2*time.Second)
-	env.ExecuteWorkflow(PlanWorkflow, &planWorkflowInput{Spec: spec})
+	env.ExecuteWorkflow(PlanWorkflow, planWorkflowInputForTest(&spec))
 	require.True(t, env.IsWorkflowCompleted())
 	require.NoError(t, env.GetWorkflowError())
 
@@ -837,7 +837,7 @@ func TestPlanWorkflowPauseControlPropagatesToAllSupportedRunningNodes(t *testing
 		})
 	}, 2*time.Second)
 
-	env.ExecuteWorkflow(PlanWorkflow, &planWorkflowInput{Spec: spec})
+	env.ExecuteWorkflow(PlanWorkflow, planWorkflowInputForTest(&spec))
 
 	require.True(t, env.IsWorkflowCompleted())
 	require.NoError(t, env.GetWorkflowError())
@@ -955,7 +955,7 @@ func TestPlanWorkflowContinuesAsNewWhenHistoryLimitReached(t *testing.T) {
 	env := newPlanWorkflowTestEnv(t, mocks, &spec)
 	env.SetCurrentHistoryLength(10)
 
-	env.ExecuteWorkflow(PlanWorkflow, &planWorkflowInput{Spec: spec})
+	env.ExecuteWorkflow(PlanWorkflow, planWorkflowInputForTest(&spec))
 
 	require.True(t, env.IsWorkflowCompleted())
 	require.Error(t, env.GetWorkflowError())
@@ -982,7 +982,7 @@ func TestPlanWorkflowFailsWhenMaxIterationsExceeded(t *testing.T) {
 	planWorkflowTestSpec(&spec)
 	env := newPlanWorkflowTestEnvWithStores(t, mocks, nil, store, agentosplan.NewMemoryArtifactStore(), &spec)
 
-	env.ExecuteWorkflow(PlanWorkflow, &planWorkflowInput{Spec: spec})
+	env.ExecuteWorkflow(PlanWorkflow, planWorkflowInputForTest(&spec))
 
 	require.True(t, env.IsWorkflowCompleted())
 	require.Error(t, env.GetWorkflowError())
@@ -1012,6 +1012,15 @@ func newPlanWorkflowTestEnvWithCapabilities(t *testing.T, mocks *planWorkflowMoc
 	t.Helper()
 
 	return newPlanWorkflowTestEnvWithStores(t, mocks, capabilities, agentosplan.NewMemoryPlanStore(), agentosplan.NewMemoryArtifactStore(), spec)
+}
+
+func planWorkflowInputForTest(spec *agentos.RunPlanSpec) *planWorkflowInput {
+	return &planWorkflowInput{
+		Spec: *spec,
+		TaskQueues: agentfwTaskQueues{
+			PlanActivity: DefaultTaskQueues().PlanActivity,
+		},
+	}
 }
 
 func newPlanWorkflowTestEnvWithStores(t *testing.T, mocks *planWorkflowMocks, capabilities []agentos.Capability, store agentosplan.PlanTransitionStore, artifactStore agentosplan.ArtifactStore, spec *agentos.RunPlanSpec) *testsuite.TestWorkflowEnvironment {

@@ -11,6 +11,8 @@ import (
 
 func temporalConfig(cfg *RuntimeConfig) agentfwconfig.Temporal {
 	base := agentfwconfig.Default().Temporal
+	base.TaskQueues = agentfwconfig.TaskQueues{}
+
 	if cfg.TemporalAddress != "" {
 		base.Address = cfg.TemporalAddress
 	}
@@ -19,9 +21,7 @@ func temporalConfig(cfg *RuntimeConfig) agentfwconfig.Temporal {
 		base.Namespace = cfg.TemporalNamespace
 	}
 
-	if cfg.TemporalTaskQueue != "" {
-		base.TaskQueue = cfg.TemporalTaskQueue
-	}
+	base.TaskQueues = cfg.TemporalTaskQueues.agentFWTaskQueues()
 
 	return base
 }

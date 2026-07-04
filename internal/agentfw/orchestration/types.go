@@ -174,6 +174,7 @@ type InitStreamInput struct {
 	Tools            []entity.ToolDef
 	Config           entity.LLMConfig
 	MCPServerConfigs []entity.MCPServerConfig
+	TaskQueues       WorkflowTaskQueues
 }
 
 // InitStreamOutput is the output of the streaming init activity.
@@ -243,4 +244,21 @@ type AgentWorkflowInput struct {
 	ContinuePolicy   ContinueAsNewPolicy
 	Continuation     ContinuationPayload
 	AwaitUserInput   bool
+	TaskQueues       WorkflowTaskQueues
+}
+
+// WorkflowInput wraps the business orchestration input with Temporal worker
+// routing. Queue names are infrastructure details and stay out of internal/entity.
+type WorkflowInput struct {
+	Input      entity.OrchestrationInput
+	TaskQueues WorkflowTaskQueues
+}
+
+// WorkflowTaskQueues carries worker routing decisions into workflow history.
+type WorkflowTaskQueues struct {
+	NativeControl string
+	NativeLLM     string
+	NativeTool    string
+	Stream        string
+	Trigger       string
 }

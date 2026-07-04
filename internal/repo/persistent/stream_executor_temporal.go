@@ -15,15 +15,17 @@ import (
 // by workflow activities, and the controller reads them via its existing
 // EventStore subscription.
 type TemporalStreamExecutor struct {
-	client    client.Client
-	taskQueue string
+	client     client.Client
+	taskQueue  string
+	taskQueues *orchestration.WorkflowTaskQueues
 }
 
 // NewTemporalStreamExecutor creates a streaming executor backed by Temporal.
-func NewTemporalStreamExecutor(c client.Client, taskQueue string) *TemporalStreamExecutor {
+func NewTemporalStreamExecutor(c client.Client, taskQueue string, taskQueues *orchestration.WorkflowTaskQueues) *TemporalStreamExecutor {
 	return &TemporalStreamExecutor{
-		client:    c,
-		taskQueue: taskQueue,
+		client:     c,
+		taskQueue:  taskQueue,
+		taskQueues: taskQueues,
 	}
 }
 
@@ -43,6 +45,7 @@ func (e *TemporalStreamExecutor) ExecuteStream(ctx context.Context, req *entity.
 		Tools:            req.Tools,
 		Config:           req.Config,
 		MCPServerConfigs: req.MCPServerConfigs,
+		TaskQueues:       *e.taskQueues,
 	}
 
 	_, err := e.client.ExecuteWorkflow(ctx, client.StartWorkflowOptions{

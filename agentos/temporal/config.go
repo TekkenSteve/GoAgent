@@ -11,7 +11,7 @@ import (
 type RuntimeConfig struct {
 	TemporalAddress          string
 	TemporalNamespace        string
-	TemporalTaskQueue        string
+	TemporalTaskQueues       TaskQueues
 	PostgresURL              string
 	PostgresPoolMax          int
 	RedisURL                 string
@@ -126,15 +126,15 @@ func WithRunBackendSelector(selector RunBackendSelector) RuntimeOption {
 // WorkerConfig configures registration of GoAgent workflows and activities into
 // a Temporal worker.
 type WorkerConfig struct {
-	TemporalAddress   string
-	TemporalNamespace string
-	TemporalTaskQueue string
-	PostgresURL       string
-	PostgresPoolMax   int
-	RedisURL          string
-	LLMConfigPath     string
-	LogLevel          string
-	ArtifactStore     ArtifactStoreConfig
+	TemporalAddress    string
+	TemporalNamespace  string
+	TemporalTaskQueues TaskQueues
+	PostgresURL        string
+	PostgresPoolMax    int
+	RedisURL           string
+	LLMConfigPath      string
+	LogLevel           string
+	ArtifactStore      ArtifactStoreConfig
 
 	TemporalExternalBackends []ExternalBackendConfig
 	HTTPBackends             []HTTPBackendConfig

@@ -12,7 +12,7 @@ import (
 
 type planCommandReconciler struct {
 	temporalClient planTemporalClient
-	taskQueue      string
+	taskQueues     *TaskQueues
 	commandStore   agentosplan.PlanCommandStore
 	auditStore     agentosplan.AuditStore
 	planIndex      agentosplan.PlanIndex
@@ -20,14 +20,14 @@ type planCommandReconciler struct {
 
 func newPlanCommandReconciler(
 	temporalClient planTemporalClient,
-	taskQueue string,
+	taskQueues *TaskQueues,
 	commandStore agentosplan.PlanCommandStore,
 	auditStore agentosplan.AuditStore,
 	planIndex agentosplan.PlanIndex,
 ) *planCommandReconciler {
 	return &planCommandReconciler{
 		temporalClient: temporalClient,
-		taskQueue:      taskQueue,
+		taskQueues:     taskQueues,
 		commandStore:   commandStore,
 		auditStore:     auditStore,
 		planIndex:      planIndex,
@@ -130,7 +130,7 @@ func (r *planCommandReconciler) deliverPlanStart(ctx context.Context, command *a
 	}
 
 	auditRecord := planStartAuditRecord(&spec)
-	if err := executePlanWorkflow(ctx, r.temporalClient, r.taskQueue, &spec); err != nil {
+	if err := executePlanWorkflow(ctx, r.temporalClient, r.taskQueues.PlanControl, r.taskQueues, &spec); err != nil {
 		return r.markCommandFailed(ctx, command, err)
 	}
 

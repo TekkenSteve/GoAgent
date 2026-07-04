@@ -26,6 +26,13 @@ func (m *mockToolExec) fn(_ context.Context, _ ToolInput) (*ToolOutput, error) {
 	return &m.result, nil
 }
 
+func testWorkflowInput(input *entity.OrchestrationInput) *WorkflowInput {
+	return &WorkflowInput{
+		Input:      *input,
+		TaskQueues: testWorkflowTaskQueues(),
+	}
+}
+
 // ——— test: sequential agent steps ———
 
 func TestOrchestrationWorkflow_SequentialSteps(t *testing.T) {
@@ -79,10 +86,10 @@ func TestOrchestrationWorkflow_SequentialSteps(t *testing.T) {
 		},
 	}
 
-	env.ExecuteWorkflow(Workflow, &entity.OrchestrationInput{
+	env.ExecuteWorkflow(Workflow, testWorkflowInput(&entity.OrchestrationInput{
 		RunID: "test-seq",
 		Steps: steps,
-	})
+	}))
 
 	require.True(t, env.IsWorkflowCompleted())
 	require.NoError(t, env.GetWorkflowError())
@@ -122,10 +129,10 @@ func TestOrchestrationWorkflow_ToolStep(t *testing.T) {
 		},
 	}
 
-	env.ExecuteWorkflow(Workflow, &entity.OrchestrationInput{
+	env.ExecuteWorkflow(Workflow, testWorkflowInput(&entity.OrchestrationInput{
 		RunID: "test-tool",
 		Steps: steps,
-	})
+	}))
 
 	require.True(t, env.IsWorkflowCompleted())
 	require.NoError(t, env.GetWorkflowError())
@@ -182,10 +189,10 @@ func TestOrchestrationWorkflow_Cancel(t *testing.T) {
 		env.SignalWorkflow(AgentCommandSignal, "cancel")
 	}, 0)
 
-	env.ExecuteWorkflow(Workflow, &entity.OrchestrationInput{
+	env.ExecuteWorkflow(Workflow, testWorkflowInput(&entity.OrchestrationInput{
 		RunID: "test-cancel",
 		Steps: steps,
-	})
+	}))
 
 	require.True(t, env.IsWorkflowCompleted())
 	require.NoError(t, env.GetWorkflowError())
@@ -225,7 +232,7 @@ func TestOrchestrationWorkflow_StepMutation(t *testing.T) {
 		})
 	}, 0)
 
-	env.ExecuteWorkflow(Workflow, &entity.OrchestrationInput{RunID: "test-mutation", Steps: steps})
+	env.ExecuteWorkflow(Workflow, testWorkflowInput(&entity.OrchestrationInput{RunID: "test-mutation", Steps: steps}))
 
 	require.True(t, env.IsWorkflowCompleted())
 	require.NoError(t, env.GetWorkflowError())
@@ -274,10 +281,10 @@ func TestOrchestrationWorkflow_Dependencies(t *testing.T) {
 		},
 	}
 
-	env.ExecuteWorkflow(Workflow, &entity.OrchestrationInput{
+	env.ExecuteWorkflow(Workflow, testWorkflowInput(&entity.OrchestrationInput{
 		RunID: "test-dep",
 		Steps: steps,
-	})
+	}))
 
 	require.True(t, env.IsWorkflowCompleted())
 	require.NoError(t, env.GetWorkflowError())

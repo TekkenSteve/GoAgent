@@ -41,6 +41,7 @@ const (
 type planWorkflowInput struct {
 	Spec              agentos.RunPlanSpec   `json:"spec"`
 	Status            agentos.RunPlanStatus `json:"status"`
+	TaskQueues        agentfwTaskQueues     `json:"task_queues"`
 	Continued         bool                  `json:"continued,omitempty"`
 	ContinuationCount int32                 `json:"continuation_count,omitempty"`
 	IterationCount    int32                 `json:"iteration_count,omitempty"`
@@ -49,24 +50,95 @@ type planWorkflowInput struct {
 	ProcessedSignals  []string              `json:"processed_signals,omitempty"`
 }
 
+type agentfwTaskQueues struct {
+	PlanActivity string `json:"plan_activity"`
+}
+
 // PlanWorkflow executes a cross-backend RunPlan using deterministic plan state
 // and activity-backed backend I/O.
 func PlanWorkflow(ctx workflow.Context, input *planWorkflowInput) (agentos.RunPlanStatus, error) {
-	spec := input.Spec
-
-	state, err := initialPlanWorkflowState(input, workflow.Now(ctx))
+	setup, err := newPlanWorkflowSetup(ctx, input)
 	if err != nil {
 		return agentos.RunPlanStatus{}, err
 	}
 
 	if err := workflow.SetQueryHandler(ctx, PlanStatusQueryName, func() (agentos.RunPlanStatus, error) {
-		return state.Status, nil
+		return setup.State.Status, nil
 	}); err != nil {
-		return state.Status, err
+		return setup.State.Status, err
 	}
 
 	controlCh := workflow.GetSignalChannel(ctx, PlanControlSignalName)
 	signalCh := workflow.GetSignalChannel(ctx, PlanSignalName)
+	activityCtx := newPlanWorkflowActivityContext(ctx, input.TaskQueues.PlanActivity)
+
+	if !input.Continued {
+		evt1 := agentosplan.StateEvent{Kind: agentosplan.EventPlanStarted}
+		if err := applyPlanStateEvent(activityCtx, ctx, setup.Spec, &setup.State, &evt1); err != nil {
+			return setup.State.Status, err
+		}
+	}
+
+	var validation ValidatePlanOutput
+	if err := workflow.ExecuteActivity(activityCtx, ValidatePlanActivityName, validatePlanInput{Spec: *setup.Spec}).Get(activityCtx, &validation); err != nil {
+		evt2 := agentosplan.StateEvent{Kind: agentosplan.EventPlanFailed, Reason: err.Error()}
+
+		return setup.State.Status, errors.Join(err, applyPlanStateEvent(activityCtx, ctx, setup.Spec, &setup.State, &evt2))
+	}
+
+	compiler, err := agentosplan.NewCELCompiler()
+	if err != nil {
+		evt3 := agentosplan.StateEvent{Kind: agentosplan.EventPlanFailed, Reason: err.Error()}
+
+		return setup.State.Status, errors.Join(err, applyPlanStateEvent(activityCtx, ctx, setup.Spec, &setup.State, &evt3))
+	}
+
+	expansionCount := input.ExpansionCount
+	iterationCount := input.IterationCount
+	paused := setup.State.Status.LifecycleState == agentos.PlanLifecycleBlocked
+	runtime := newPlanWorkflowRuntime(activityCtx, ctx, controlCh, signalCh, setup.Spec, input, compiler)
+
+	for {
+		iterationCount++
+		result, err := runPlanWorkflowIteration(&runtime, input, setup.Spec, &setup.State, &validation, &expansionCount, iterationCount, paused)
+		paused = result.Paused
+
+		if err != nil {
+			return setup.State.Status, err
+		}
+
+		if result.Done {
+			return setup.State.Status, nil
+		}
+	}
+}
+
+type planWorkflowSetup struct {
+	Spec  *agentos.RunPlanSpec
+	State agentosplan.State
+}
+
+func newPlanWorkflowSetup(ctx workflow.Context, input *planWorkflowInput) (planWorkflowSetup, error) {
+	if input == nil {
+		return planWorkflowSetup{}, temporal.NewNonRetryableApplicationError("PlanWorkflow input is required", "validation", nil)
+	}
+
+	if input.TaskQueues.PlanActivity == "" {
+		return planWorkflowSetup{}, temporal.NewNonRetryableApplicationError("PlanWorkflow plan activity task queue is required", "validation", nil)
+	}
+
+	state, err := initialPlanWorkflowState(input, workflow.Now(ctx))
+	if err != nil {
+		return planWorkflowSetup{}, err
+	}
+
+	return planWorkflowSetup{
+		Spec:  &input.Spec,
+		State: state,
+	}, nil
+}
+
+func newPlanWorkflowActivityContext(ctx workflow.Context, taskQueue string) workflow.Context {
 	activityCtx := workflow.WithActivityOptions(ctx, workflow.ActivityOptions{
 		StartToCloseTimeout: defaultActivityTimeout,
 		RetryPolicy: &temporal.RetryPolicy{
@@ -74,45 +146,7 @@ func PlanWorkflow(ctx workflow.Context, input *planWorkflowInput) (agentos.RunPl
 		},
 	})
 
-	if !input.Continued {
-		evt1 := agentosplan.StateEvent{Kind: agentosplan.EventPlanStarted}
-		if err := applyPlanStateEvent(activityCtx, ctx, &spec, &state, &evt1); err != nil {
-			return state.Status, err
-		}
-	}
-
-	var validation ValidatePlanOutput
-	if err := workflow.ExecuteActivity(activityCtx, ValidatePlanActivityName, validatePlanInput{Spec: spec}).Get(activityCtx, &validation); err != nil {
-		evt2 := agentosplan.StateEvent{Kind: agentosplan.EventPlanFailed, Reason: err.Error()}
-
-		return state.Status, errors.Join(err, applyPlanStateEvent(activityCtx, ctx, &spec, &state, &evt2))
-	}
-
-	compiler, err := agentosplan.NewCELCompiler()
-	if err != nil {
-		evt3 := agentosplan.StateEvent{Kind: agentosplan.EventPlanFailed, Reason: err.Error()}
-
-		return state.Status, errors.Join(err, applyPlanStateEvent(activityCtx, ctx, &spec, &state, &evt3))
-	}
-
-	expansionCount := input.ExpansionCount
-	iterationCount := input.IterationCount
-	paused := state.Status.LifecycleState == agentos.PlanLifecycleBlocked
-	runtime := newPlanWorkflowRuntime(activityCtx, ctx, controlCh, signalCh, &spec, input, compiler)
-
-	for {
-		iterationCount++
-		result, err := runPlanWorkflowIteration(&runtime, input, &spec, &state, &validation, &expansionCount, iterationCount, paused)
-		paused = result.Paused
-
-		if err != nil {
-			return state.Status, err
-		}
-
-		if result.Done {
-			return state.Status, nil
-		}
-	}
+	return workflow.WithTaskQueue(activityCtx, taskQueue)
 }
 
 type planWorkflowRuntime struct {

@@ -14,15 +14,17 @@ import (
 // Temporal cron workflows. Each scheduled trigger creates a cron-scheduled
 // TriggerFireWorkflow that dispatches agent execution.
 type TemporalTriggerScheduler struct {
-	client    client.Client
-	taskQueue string
+	client     client.Client
+	taskQueue  string
+	taskQueues *orchestration.WorkflowTaskQueues
 }
 
 // NewTemporalTriggerScheduler creates a new Temporal-based trigger scheduler.
-func NewTemporalTriggerScheduler(c client.Client, taskQueue string) *TemporalTriggerScheduler {
+func NewTemporalTriggerScheduler(c client.Client, taskQueue string, taskQueues *orchestration.WorkflowTaskQueues) *TemporalTriggerScheduler {
 	return &TemporalTriggerScheduler{
-		client:    c,
-		taskQueue: taskQueue,
+		client:     c,
+		taskQueue:  taskQueue,
+		taskQueues: taskQueues,
 	}
 }
 
@@ -36,7 +38,12 @@ func (s *TemporalTriggerScheduler) Schedule(ctx context.Context, trigger *entity
 		CronSchedule: trigger.CronExpression,
 	}
 
-	_, err := s.client.ExecuteWorkflow(ctx, opts, orchestration.TriggerFireWorkflowName, trigger.ID)
+	input := orchestration.TriggerFireWorkflowInput{
+		TriggerID:  trigger.ID,
+		TaskQueues: *s.taskQueues,
+	}
+
+	_, err := s.client.ExecuteWorkflow(ctx, opts, orchestration.TriggerFireWorkflowName, &input)
 	if err != nil {
 		return fmt.Errorf("TemporalTriggerScheduler - Schedule - execute: %w", err)
 	}

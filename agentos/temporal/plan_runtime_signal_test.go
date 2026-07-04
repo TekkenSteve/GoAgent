@@ -36,6 +36,21 @@ func TestPlanRuntimeRequiresConfig(t *testing.T) {
 	}
 }
 
+func TestPlanRuntimeRequiresExplicitTaskQueues(t *testing.T) {
+	t.Parallel()
+
+	_, err := newPlanRuntimeWithClient(t.Context(), &RuntimeConfig{
+		PostgresURL: testPostgresURL,
+		ArtifactStore: ArtifactStoreConfig{
+			Backend: ArtifactStoreBackendLocal,
+			Local:   LocalArtifactStoreConfig{Root: t.TempDir()},
+		},
+	}, &fakePlanTemporalClient{}, false)
+	if !errors.Is(err, ErrTemporalTaskQueuesInvalid) {
+		t.Fatalf("newPlanRuntimeWithClient missing queues error = %v, want %v", err, ErrTemporalTaskQueuesInvalid)
+	}
+}
+
 func TestPlanRuntimeSignalPlanValidatesSignalBeforeAudit(t *testing.T) {
 	t.Parallel()
 
@@ -158,27 +173,27 @@ func TestPlanRuntimeStartPlanRequiresTenantScope(t *testing.T) {
 func TestPlanRuntimeRequiresDurableStoresAtConstruction(t *testing.T) {
 	t.Parallel()
 
-	_, err := NewPlanRuntime(t.Context(), &RuntimeConfig{TemporalTaskQueue: "agentos-test"})
+	_, err := NewPlanRuntime(t.Context(), &RuntimeConfig{TemporalTaskQueues: DefaultTaskQueues()})
 	if !errors.Is(err, ErrPlanRuntimePostgresURLRequired) {
 		t.Fatalf("NewPlanRuntime missing postgres error = %v, want %v", err, ErrPlanRuntimePostgresURLRequired)
 	}
 
-	_, err = newPlanRuntimeWithClient(t.Context(), &RuntimeConfig{TemporalTaskQueue: "agentos-test"}, &fakePlanTemporalClient{}, false)
+	_, err = newPlanRuntimeWithClient(t.Context(), &RuntimeConfig{TemporalTaskQueues: DefaultTaskQueues()}, &fakePlanTemporalClient{}, false)
 	if !errors.Is(err, ErrPlanRuntimePostgresURLRequired) {
 		t.Fatalf("newPlanRuntimeWithClient missing postgres error = %v, want %v", err, ErrPlanRuntimePostgresURLRequired)
 	}
 
 	_, err = newPlanRuntimeWithClient(t.Context(), &RuntimeConfig{
-		TemporalTaskQueue: "agentos-test",
-		PostgresURL:       testPostgresURL,
+		TemporalTaskQueues: DefaultTaskQueues(),
+		PostgresURL:        testPostgresURL,
 	}, &fakePlanTemporalClient{}, false)
 	if !errors.Is(err, ErrPlanRuntimeArtifactStoreBackendRequired) {
 		t.Fatalf("newPlanRuntimeWithClient missing artifact backend error = %v, want %v", err, ErrPlanRuntimeArtifactStoreBackendRequired)
 	}
 
 	_, err = newPlanRuntimeWithClient(t.Context(), &RuntimeConfig{
-		TemporalTaskQueue: "agentos-test",
-		PostgresURL:       testPostgresURL,
+		TemporalTaskQueues: DefaultTaskQueues(),
+		PostgresURL:        testPostgresURL,
 		ArtifactStore: ArtifactStoreConfig{
 			Backend: ArtifactStoreBackendLocal,
 		},
@@ -255,7 +270,7 @@ func TestPlanRuntimeStartPlanDoesNotOverwriteWorkflowOwnedState(t *testing.T) {
 			})
 		},
 	}
-	rt := &planRuntime{temporalClient: temporalClient, taskQueue: "agentos-test", planIndex: store, commandStore: store, auditStore: store}
+	rt := newPlanRuntimeForTest(temporalClient, store)
 
 	if _, err := rt.StartPlan(t.Context(), &spec); err != nil {
 		t.Fatalf("StartPlan: %v", err)
@@ -285,7 +300,7 @@ func TestPlanRuntimeStartPlanDoesNotAuditFailedDelivery(t *testing.T) {
 		IdempotencyKey: "plan-start-1",
 	}
 	temporalClient := &fakePlanTemporalClient{executeErr: errTestTemporalUnavailable}
-	rt := &planRuntime{temporalClient: temporalClient, taskQueue: "agentos-test", planIndex: store, commandStore: store, auditStore: store}
+	rt := newPlanRuntimeForTest(temporalClient, store)
 
 	_, err := rt.StartPlan(t.Context(), &spec)
 	if err == nil {
@@ -322,7 +337,7 @@ func TestPlanRuntimeStartPlanRetriesFailedCommand(t *testing.T) {
 		IdempotencyKey: "plan-start-1",
 	}
 	temporalClient := &fakePlanTemporalClient{executeErr: errTestTemporalUnavailable}
-	rt := &planRuntime{temporalClient: temporalClient, taskQueue: "agentos-test", planIndex: store, commandStore: store, auditStore: store}
+	rt := newPlanRuntimeForTest(temporalClient, store)
 
 	if _, err := rt.StartPlan(t.Context(), &spec); err == nil {
 		t.Fatal("StartPlan succeeded, want delivery error")
@@ -385,7 +400,7 @@ func TestPlanRuntimeStartPlanSkipsDeliveryWhenCommandDelivered(t *testing.T) {
 	}
 
 	temporalClient := &fakePlanTemporalClient{executeErr: errTestShouldNotStartWorkflow}
-	rt := &planRuntime{temporalClient: temporalClient, taskQueue: "agentos-test", planIndex: store, commandStore: store, auditStore: store}
+	rt := newPlanRuntimeForTest(temporalClient, store)
 
 	if _, err := rt.StartPlan(t.Context(), &spec); err != nil {
 		t.Fatalf("StartPlan: %v", err)
@@ -1058,6 +1073,19 @@ func newPlanRuntimeTestStore(t *testing.T) (*agentosplan.MemoryPlanStore, agento
 	}
 
 	return store, agentos.PlanRef{PlanID: spec.PlanID, AccountID: spec.AccountID, ProjectID: spec.ProjectID}
+}
+
+func newPlanRuntimeForTest(temporalClient planTemporalClient, store *agentosplan.MemoryPlanStore) *planRuntime {
+	taskQueues := DefaultTaskQueues()
+
+	return &planRuntime{
+		temporalClient: temporalClient,
+		taskQueue:      taskQueues.PlanControl,
+		taskQueues:     &taskQueues,
+		planIndex:      store,
+		commandStore:   store,
+		auditStore:     store,
+	}
 }
 
 func planCommandRef(ref agentos.PlanRef, idempotencyKey string) agentosplan.PlanCommandRef {

@@ -81,7 +81,14 @@ type (
 
 		TemporalAddress   string `env:"AGENTFW_TEMPORAL_ADDRESS" envDefault:"127.0.0.1:7233"`
 		TemporalNamespace string `env:"AGENTFW_TEMPORAL_NAMESPACE" envDefault:"default"`
-		TemporalTaskQueue string `env:"AGENTFW_TEMPORAL_TASK_QUEUE" envDefault:"agent-framework"`
+		// Workload-specific Temporal task queues.
+		TemporalPlanControlTaskQueue   string `env:"AGENTFW_TEMPORAL_PLAN_CONTROL_TASK_QUEUE" envDefault:"agentos-plan-control"`
+		TemporalPlanActivityTaskQueue  string `env:"AGENTFW_TEMPORAL_PLAN_ACTIVITY_TASK_QUEUE" envDefault:"agentos-plan-activity"`
+		TemporalNativeControlTaskQueue string `env:"AGENTFW_TEMPORAL_NATIVE_CONTROL_TASK_QUEUE" envDefault:"agentfw-native-control"`
+		TemporalNativeLLMTaskQueue     string `env:"AGENTFW_TEMPORAL_NATIVE_LLM_TASK_QUEUE" envDefault:"agentfw-native-llm"`
+		TemporalNativeToolTaskQueue    string `env:"AGENTFW_TEMPORAL_NATIVE_TOOL_TASK_QUEUE" envDefault:"agentfw-native-tool"`
+		TemporalStreamTaskQueue        string `env:"AGENTFW_TEMPORAL_STREAM_TASK_QUEUE" envDefault:"agentfw-stream"`
+		TemporalTriggerTaskQueue       string `env:"AGENTFW_TEMPORAL_TRIGGER_TASK_QUEUE" envDefault:"agentfw-trigger"`
 		// TemporalExternalBackendsJSON is a JSON array of temporal_external backend configs.
 		TemporalExternalBackendsJSON string `env:"AGENTFW_TEMPORAL_EXTERNAL_BACKENDS_JSON" envDefault:"[]"`
 		// HTTPBackendsJSON is a JSON array of HTTP backend configs.

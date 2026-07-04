@@ -48,7 +48,7 @@ func TestPlanWorkflowRunsThroughMixedBackendAdapters(t *testing.T) {
 	env.RegisterActivityWithOptions(adapter.activities.PublishPlanArtifactsActivity, activity.RegisterOptions{Name: PublishPlanArtifactsActivityName})
 
 	createPlanForWorkflowTest(t, adapter.planStore, &adapter.spec)
-	env.ExecuteWorkflow(PlanWorkflow, &planWorkflowInput{Spec: adapter.spec})
+	env.ExecuteWorkflow(PlanWorkflow, planWorkflowInputForTest(&adapter.spec))
 
 	require.True(t, env.IsWorkflowCompleted())
 	require.NoError(t, env.GetWorkflowError())

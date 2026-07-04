@@ -25,8 +25,18 @@ const (
 //   - "pause":   blocks until "resume" or "cancel"
 //   - "resume":  exits the pause loop
 func StreamAgentWorkflow(ctx workflow.Context, input *InitStreamInput) error {
+	if input == nil {
+		return nonRetryableWorkflowValidationError(
+			fmt.Errorf("%w: InitStreamInput is required", ErrWorkflowTaskQueuesInvalid),
+		)
+	}
+
+	if err := input.TaskQueues.ValidateStreamAgent(); err != nil {
+		return nonRetryableWorkflowValidationError(err)
+	}
+
 	signalCh := workflow.GetSignalChannel(ctx, AgentCommandSignal)
-	ctx = setupStreamActivityOptions(ctx)
+	ctx = setupStreamActivityOptions(ctx, &input.TaskQueues)
 
 	// Init phase: write start events + Prep
 	var initResult InitStreamOutput
@@ -70,7 +80,7 @@ func StreamAgentWorkflow(ctx workflow.Context, input *InitStreamInput) error {
 }
 
 // setupStreamActivityOptions configures activity options for the streaming workflow.
-func setupStreamActivityOptions(ctx workflow.Context) workflow.Context {
+func setupStreamActivityOptions(ctx workflow.Context, queues *WorkflowTaskQueues) workflow.Context {
 	ao := workflow.ActivityOptions{
 		HeartbeatTimeout: heartbeatTimeout,
 		RetryPolicy: &temporal.RetryPolicy{
@@ -80,7 +90,9 @@ func setupStreamActivityOptions(ctx workflow.Context) workflow.Context {
 		},
 	}
 
-	return workflow.WithActivityOptions(ctx, ao)
+	ctx = workflow.WithActivityOptions(ctx, ao)
+
+	return withRequiredActivityTaskQueue(ctx, queues.Stream)
 }
 
 // processStreamRound runs one LLM call and its associated tool executions.
@@ -142,7 +154,7 @@ func executeStreamToolCalls(
 		}
 
 		if isDelegateToolCall(tc) {
-			resultContent, err := executeDelegateTool(ctx, tc, input.Config, input.AccountID, domainTools, input.MCPServerConfigs)
+			resultContent, err := executeDelegateTool(ctx, tc, input.Config, input.AccountID, domainTools, input.MCPServerConfigs, &input.TaskQueues)
 			if err != nil {
 				resultContent = fmt.Sprintf("Error delegating task: %v", err)
 			}

@@ -1,11 +1,13 @@
 package temporal
 
 import (
+	"errors"
 	"reflect"
 	"testing"
 	"time"
 
 	"github.com/TekkenSteve/GoAgent/agentos"
+	agentfwconfig "github.com/TekkenSteve/GoAgent/internal/agentfw/config"
 	"github.com/TekkenSteve/GoAgent/internal/entity"
 )
 
@@ -115,6 +117,15 @@ func TestControlOperationToEntity(t *testing.T) {
 		if got != want {
 			t.Fatalf("controlOperationToEntity(%q) = %q, want %q", input, got, want)
 		}
+	}
+}
+
+func TestTemporalConfigRequiresExplicitTaskQueues(t *testing.T) {
+	t.Parallel()
+
+	got := temporalConfig(&RuntimeConfig{})
+	if err := got.TaskQueues.Validate(); !errors.Is(err, agentfwconfig.ErrTemporalTaskQueuesInvalid) {
+		t.Fatalf("Temporal task queue validation error = %v, want %v", err, agentfwconfig.ErrTemporalTaskQueuesInvalid)
 	}
 }
 

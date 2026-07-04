@@ -50,6 +50,7 @@ import (
 var (
 	errAppRunAgentOSRuntimeRequired          = errors.New("app - Run - agentos runtime is required for agent execution")
 	errAppRunPlanCmdRecoveryNoImplementation = errors.New("app - Run - agentos plan command recovery: plan runtime does not implement recovery")
+	errAppRunPlanWorkerQueueUnconfigured     = errors.New("app - Run - agentos plan worker task queue is not configured")
 )
 
 type appInfrastructure struct {
@@ -140,7 +141,11 @@ func Run(cfg *config.Config) {
 	}
 
 	// Use-Case
-	agentExecutor, orchExecutor := initAgentExecutor(temporalRuntime, agentOSRuntime, &infra.fwCfg)
+	agentExecutor, orchExecutor, err := initAgentExecutor(temporalRuntime, agentOSRuntime, &infra.fwCfg)
+	if err != nil {
+		l.Fatal(fmt.Errorf("app - Run - init agent executor: %w", err))
+	}
+
 	if agentExecutor == nil {
 		l.Fatal(errAppRunAgentOSRuntimeRequired)
 	}
@@ -157,14 +162,18 @@ func Run(cfg *config.Config) {
 	runHTTPServer(cfg, l, agentExecutor, orchExecutor, cancelWorkflow, signalWorkflow, infra.templateUC, triggerUC, infra.eventIngest, agentOSRuntime, planRuntime, temporalRuntime)
 }
 
-func initAgentExecutor(temporalRuntime *agentfwruntime.TemporalRuntime, agentOSRuntime agentos.Runtime, fwCfg *agentfwconfig.Config) (usecase.AgentExecutor, usecase.OrchestrationExecutor) {
+func initAgentExecutor(temporalRuntime *agentfwruntime.TemporalRuntime, agentOSRuntime agentos.Runtime, fwCfg *agentfwconfig.Config) (usecase.AgentExecutor, usecase.OrchestrationExecutor, error) {
 	var (
 		agentExecutor usecase.AgentExecutor
 		orchExecutor  usecase.OrchestrationExecutor
 	)
 
 	if temporalRuntime != nil {
-		temporalRepo := temporalrepo.NewExecutorTemporal(temporalRuntime.Client, fwCfg.Temporal)
+		temporalRepo, err := temporalrepo.NewExecutorTemporal(temporalRuntime.Client, &fwCfg.Temporal)
+		if err != nil {
+			return nil, nil, err
+		}
+
 		orchExecutor = agentfwusecase.New(temporalRepo)
 
 		if agentOSRuntime != nil {
@@ -172,7 +181,7 @@ func initAgentExecutor(temporalRuntime *agentfwruntime.TemporalRuntime, agentOSR
 		}
 	}
 
-	return agentExecutor, orchExecutor
+	return agentExecutor, orchExecutor, nil
 }
 
 func runHTTPServer(cfg *config.Config, l *logger.Logger, agentExecutor usecase.AgentExecutor, orchExecutor usecase.OrchestrationExecutor, cancelWorkflow restapiv1.CancelWorkflowFn, signalWorkflow restapiv1.SignalWorkflowFn, templateUC *templatepkg.UseCase, triggerUC *triggerpkg.UseCase, eventIngest *eventing.Service, agentOSRuntime agentos.Runtime, planRuntime agentos.PlanRuntime, temporalRuntime *agentfwruntime.TemporalRuntime) {
@@ -301,13 +310,13 @@ func setupPlanRuntime(agentOSRuntime agentos.Runtime, planStore *temporalrepo.Ag
 
 	planRuntimeCfg := cfg.AgentOS.ArtifactStoreConfig()
 	planRuntimeConfig := agentostemporal.RuntimeConfig{
-		TemporalAddress:   fwCfg.Temporal.Address,
-		TemporalNamespace: fwCfg.Temporal.Namespace,
-		TemporalTaskQueue: fwCfg.Temporal.TaskQueue,
-		PostgresURL:       cfg.PG.URL,
-		PostgresPoolMax:   cfg.PG.PoolMax,
-		RedisURL:          cfg.Redis.URL,
-		ArtifactStore:     appAgentOSArtifactStoreConfig(&planRuntimeCfg),
+		TemporalAddress:    fwCfg.Temporal.Address,
+		TemporalNamespace:  fwCfg.Temporal.Namespace,
+		TemporalTaskQueues: agentOSTemporalTaskQueues(&fwCfg.Temporal.TaskQueues),
+		PostgresURL:        cfg.PG.URL,
+		PostgresPoolMax:    cfg.PG.PoolMax,
+		RedisURL:           cfg.Redis.URL,
+		ArtifactStore:      appAgentOSArtifactStoreConfig(&planRuntimeCfg),
 	}
 
 	planRuntime, err := agentostemporal.NewPlanRuntimeWithClient(context.Background(), &planRuntimeConfig, runtime.Client)
@@ -323,7 +332,7 @@ func setupPlanRuntime(agentOSRuntime agentos.Runtime, planStore *temporalrepo.Ag
 		l.Fatal(fmt.Errorf("app - Run - agentfw.StartWorker: %w", err))
 	}
 
-	l.Info("app - Run - agent framework worker started on task queue: %s", fwCfg.Temporal.TaskQueue)
+	l.Info("app - Run - agent framework workers started on task queues: %v", fwCfg.Temporal.TaskQueues.QueueNames())
 	planRecovery := startAgentOSPlanCommandRecovery(l, &cfg.AgentOS, planRuntime)
 	planMetrics := startAgentOSPlanMetricsExporter(l, cfg, planStore)
 
@@ -334,7 +343,7 @@ func initTemporalComponents(l *logger.Logger, cfg *config.Config, fwCfg *agentfw
 	messageRepo *temporalrepo.MessageRepo, agentRepo *cached.AgentRepo, templateRepo *temporalrepo.WorkflowTemplateRepo, triggerRepo *temporalrepo.TriggerRepo,
 	runBackendIndex *temporalrepo.RunBackendIndexRepo, templateUC *templatepkg.UseCase, eventStore stream.EventStore,
 ) *temporalComponents {
-	runtime, err := agentfwruntime.NewTemporalRuntime(fwCfg.Temporal)
+	runtime, err := agentfwruntime.NewTemporalRuntime(&fwCfg.Temporal)
 	if err != nil {
 		l.Fatal(fmt.Errorf("app - Run - agentfw.NewTemporalRuntime: %w", err))
 	}
@@ -362,7 +371,7 @@ func initTemporalComponents(l *logger.Logger, cfg *config.Config, fwCfg *agentfw
 		context.Background(), &agentostemporal.RuntimeConfig{
 			TemporalAddress:          fwCfg.Temporal.Address,
 			TemporalNamespace:        fwCfg.Temporal.Namespace,
-			TemporalTaskQueue:        fwCfg.Temporal.TaskQueue,
+			TemporalTaskQueues:       agentOSTemporalTaskQueues(&fwCfg.Temporal.TaskQueues),
 			RedisURL:                 cfg.Redis.URL,
 			TemporalExternalBackends: temporalExternalBackends(l, cfg),
 			HTTPBackends:             httpBackends(l, cfg),
@@ -507,20 +516,30 @@ type agentOSRegistrar struct {
 	planActivities *agentostemporal.PlanActivities
 }
 
-func (r agentOSRegistrar) RegisterWorkflows(rt *agentfwruntime.TemporalRuntime) {
-	r.base.RegisterWorkflows(rt)
-
-	if err := agentostemporal.RegisterPlanWorkflow(rt.Worker); err != nil {
-		panic(err)
+func (r agentOSRegistrar) RegisterWorkflows(rt *agentfwruntime.TemporalRuntime) error {
+	if err := r.base.RegisterWorkflows(rt); err != nil {
+		return err
 	}
+
+	planWorker, ok := rt.WorkerFor(rt.TaskQueues.PlanControl)
+	if !ok || planWorker == nil {
+		return fmt.Errorf("%w: plan control task queue %q", errAppRunPlanWorkerQueueUnconfigured, rt.TaskQueues.PlanControl)
+	}
+
+	return agentostemporal.RegisterPlanWorkflow(planWorker)
 }
 
-func (r agentOSRegistrar) RegisterActivities(rt *agentfwruntime.TemporalRuntime) {
-	r.base.RegisterActivities(rt)
-
-	if err := agentostemporal.RegisterPlanActivities(rt.Worker, r.planActivities); err != nil {
-		panic(err)
+func (r agentOSRegistrar) RegisterActivities(rt *agentfwruntime.TemporalRuntime) error {
+	if err := r.base.RegisterActivities(rt); err != nil {
+		return err
 	}
+
+	planWorker, ok := rt.WorkerFor(rt.TaskQueues.PlanActivity)
+	if !ok || planWorker == nil {
+		return fmt.Errorf("%w: plan activity task queue %q", errAppRunPlanWorkerQueueUnconfigured, rt.TaskQueues.PlanActivity)
+	}
+
+	return agentostemporal.RegisterPlanActivities(planWorker, r.planActivities)
 }
 
 func closeAgentOSPlanRuntime(planRuntime agentos.PlanRuntime) func() error {
@@ -532,6 +551,18 @@ func closeAgentOSPlanRuntime(planRuntime agentos.PlanRuntime) func() error {
 	}
 
 	return closeable.Close
+}
+
+func agentOSTemporalTaskQueues(taskQueues *agentfwconfig.TaskQueues) agentostemporal.TaskQueues {
+	return agentostemporal.TaskQueues{
+		PlanControl:   taskQueues.PlanControl,
+		PlanActivity:  taskQueues.PlanActivity,
+		NativeControl: taskQueues.NativeControl,
+		NativeLLM:     taskQueues.NativeLLM,
+		NativeTool:    taskQueues.NativeTool,
+		Stream:        taskQueues.Stream,
+		Trigger:       taskQueues.Trigger,
+	}
 }
 
 func appArtifactBlobConfig(cfg *config.ArtifactStoreConfig) artifactrepo.Config {
@@ -724,7 +755,14 @@ func initAgentComponents(
 	agentUC := agent.New(llmProvider, toolExecutor, wal, agentCompressor, toolRegistry, agentRepo)
 	agentUC.SetLogger(l)
 
-	triggerScheduler := temporalrepo.NewTemporalTriggerScheduler(runtime.Client, fwCfg.Temporal.TaskQueue)
+	workflowTaskQueues := orchestration.WorkflowTaskQueues{
+		NativeControl: fwCfg.Temporal.TaskQueues.NativeControl,
+		NativeLLM:     fwCfg.Temporal.TaskQueues.NativeLLM,
+		NativeTool:    fwCfg.Temporal.TaskQueues.NativeTool,
+		Stream:        fwCfg.Temporal.TaskQueues.Stream,
+		Trigger:       fwCfg.Temporal.TaskQueues.Trigger,
+	}
+	triggerScheduler := temporalrepo.NewTemporalTriggerScheduler(runtime.Client, fwCfg.Temporal.TaskQueues.Trigger, &workflowTaskQueues)
 	triggerUC := triggerpkg.New(triggerRepo, triggerScheduler, templateRepo)
 
 	mcpManager := mcpRepo.NewManager()

@@ -89,16 +89,21 @@ func newWorkflowTestEnv() *testsuite.TestWorkflowEnvironment {
 	return env
 }
 
+func testAgentWorkflowInput(runID, message string) *AgentWorkflowInput {
+	return &AgentWorkflowInput{
+		RunID:      runID,
+		Message:    message,
+		TaskQueues: testWorkflowTaskQueues(),
+	}
+}
+
 // ——— tests ———
 
 func TestAgentWorkflowV2_TextOnly(t *testing.T) {
 	t.Parallel()
 
 	env := newWorkflowTestEnv()
-	env.ExecuteWorkflow(AgentWorkflow, &AgentWorkflowInput{
-		RunID:   "run-v2-text",
-		Message: "Hello",
-	})
+	env.ExecuteWorkflow(AgentWorkflow, testAgentWorkflowInput("run-v2-text", "Hello"))
 
 	require.True(t, env.IsWorkflowCompleted())
 	require.NoError(t, env.GetWorkflowError())
@@ -146,11 +151,9 @@ func TestAgentWorkflowV2_UserMessageSignalContinuesRun(t *testing.T) {
 		env.SignalWorkflow(AgentCommandSignal, "cancel")
 	}, 2*time.Second)
 
-	env.ExecuteWorkflow(AgentWorkflow, &AgentWorkflowInput{
-		RunID:          "run-v2-user-message",
-		Message:        "Hello",
-		AwaitUserInput: true,
-	})
+	input := testAgentWorkflowInput("run-v2-user-message", "Hello")
+	input.AwaitUserInput = true
+	env.ExecuteWorkflow(AgentWorkflow, input)
 
 	require.True(t, env.IsWorkflowCompleted())
 	require.NoError(t, env.GetWorkflowError())
@@ -183,10 +186,7 @@ func TestAgentWorkflowV2_ToolRound(t *testing.T) {
 		Name: ToolExecActivityName,
 	})
 
-	env.ExecuteWorkflow(AgentWorkflow, &AgentWorkflowInput{
-		RunID:   "run-v2-tool",
-		Message: "Use a tool",
-	})
+	env.ExecuteWorkflow(AgentWorkflow, testAgentWorkflowInput("run-v2-tool", "Use a tool"))
 
 	require.True(t, env.IsWorkflowCompleted())
 	require.NoError(t, env.GetWorkflowError())
@@ -206,10 +206,7 @@ func TestAgentWorkflowV2_Cancel(t *testing.T) {
 		env.SignalWorkflow(AgentCommandSignal, "cancel")
 	}, 0)
 
-	env.ExecuteWorkflow(AgentWorkflow, &AgentWorkflowInput{
-		RunID:   "run-v2-cancel",
-		Message: "Will be canceled",
-	})
+	env.ExecuteWorkflow(AgentWorkflow, testAgentWorkflowInput("run-v2-cancel", "Will be canceled"))
 
 	require.True(t, env.IsWorkflowCompleted())
 	require.NoError(t, env.GetWorkflowError())
@@ -231,10 +228,7 @@ func TestAgentWorkflowV2_PauseResume(t *testing.T) {
 		env.SignalWorkflow(AgentCommandSignal, "resume")
 	}, time.Second)
 
-	env.ExecuteWorkflow(AgentWorkflow, &AgentWorkflowInput{
-		RunID:   "run-v2-pause",
-		Message: "Will be paused",
-	})
+	env.ExecuteWorkflow(AgentWorkflow, testAgentWorkflowInput("run-v2-pause", "Will be paused"))
 
 	require.True(t, env.IsWorkflowCompleted())
 	require.NoError(t, env.GetWorkflowError())
@@ -267,10 +261,7 @@ func TestAgentWorkflowV2_QueryStatus(t *testing.T) {
 		env.SignalWorkflow(AgentCommandSignal, "cancel")
 	}, 0)
 
-	env.ExecuteWorkflow(AgentWorkflow, &AgentWorkflowInput{
-		RunID:   "run-v2-query",
-		Message: "Query test",
-	})
+	env.ExecuteWorkflow(AgentWorkflow, testAgentWorkflowInput("run-v2-query", "Query test"))
 
 	require.True(t, env.IsWorkflowCompleted())
 	require.NoError(t, env.GetWorkflowError())

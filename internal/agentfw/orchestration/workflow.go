@@ -24,6 +24,16 @@ var ErrPrepChecksFailed = errors.New("agent workflow - prep checks failed")
 //   - "pause":   blocks until "resume" or "cancel"
 //   - "resume":  exits the pause loop
 func AgentWorkflow(ctx workflow.Context, input *AgentWorkflowInput) (WorkflowResult, error) {
+	if input == nil {
+		return WorkflowResult{}, nonRetryableWorkflowValidationError(
+			fmt.Errorf("%w: AgentWorkflowInput is required", ErrWorkflowTaskQueuesInvalid),
+		)
+	}
+
+	if err := input.TaskQueues.ValidateNativeAgent(); err != nil {
+		return WorkflowResult{}, nonRetryableWorkflowValidationError(err)
+	}
+
 	signalCh := workflow.GetSignalChannel(ctx, AgentCommandSignal)
 	userMessageCh := workflow.GetSignalChannel(ctx, AgentMessageSignal)
 	ctx = setupAgentActivityOptions(ctx)
@@ -87,6 +97,10 @@ func setupAgentActivityOptions(ctx workflow.Context) workflow.Context {
 	}
 
 	return workflow.WithActivityOptions(ctx, ao)
+}
+
+func withRequiredActivityTaskQueue(ctx workflow.Context, taskQueue string) workflow.Context {
+	return workflow.WithTaskQueue(ctx, taskQueue)
 }
 
 // makeWorkflowResult builds a WorkflowResult from the current status.
@@ -156,7 +170,7 @@ func executeAgentToolCalls(
 		// instead of routing through ToolExecActivity, giving the
 		// sub-agent full conversational isolation.
 		if isDelegateToolCall(tc) {
-			resultContent, err := executeDelegateTool(ctx, tc, input.Config, input.AccountID, domainTools, input.MCPServerConfigs)
+			resultContent, err := executeDelegateTool(ctx, tc, input.Config, input.AccountID, domainTools, input.MCPServerConfigs, &input.TaskQueues)
 			if err != nil {
 				resultContent = fmt.Sprintf("Error delegating task: %v", err)
 			}
@@ -172,7 +186,9 @@ func executeAgentToolCalls(
 		}
 
 		var toolResult ToolOutput
-		if err := workflow.ExecuteActivity(ctx, ToolExecActivityName, ToolInput{
+
+		toolCtx := withRequiredActivityTaskQueue(ctx, input.TaskQueues.NativeTool)
+		if err := workflow.ExecuteActivity(toolCtx, ToolExecActivityName, ToolInput{
 			RunID:      input.RunID,
 			ToolCallID: tc.ID,
 			ToolName:   tc.Function.Name,
@@ -296,7 +312,9 @@ func agentWorkflowRound(
 
 func callLLMAndTrackMessage(ctx workflow.Context, input *AgentWorkflowInput, messages []entity.Message, allTools []entity.ToolDef, round int) (LLMStepOutput, entity.Message, error) {
 	var llmResult LLMStepOutput
-	if err := workflow.ExecuteActivity(ctx, LLMStepActivityName, LLMStepInput{
+
+	llmCtx := withRequiredActivityTaskQueue(ctx, input.TaskQueues.NativeLLM)
+	if err := workflow.ExecuteActivity(llmCtx, LLMStepActivityName, LLMStepInput{
 		AccountID: input.AccountID,
 		RunID:     input.RunID,
 		Messages:  messages,

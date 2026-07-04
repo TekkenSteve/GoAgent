@@ -6,6 +6,7 @@ import (
 	"slices"
 	"testing"
 
+	"github.com/TekkenSteve/GoAgent/internal/agentfw/orchestration"
 	"github.com/nexus-rpc/sdk-go/nexus"
 	"go.temporal.io/sdk/activity"
 	"go.temporal.io/sdk/workflow"
@@ -39,8 +40,9 @@ func TestNewWorkerKitRequiresArtifactStoreBackend(t *testing.T) {
 	t.Parallel()
 
 	cfg := WorkerConfig{
-		PostgresURL: "postgres://localhost:5432/testdb",
-		RedisURL:    "redis://localhost:6379",
+		PostgresURL:        "postgres://localhost:5432/testdb",
+		RedisURL:           "redis://localhost:6379",
+		TemporalTaskQueues: DefaultTaskQueues(),
 	}
 
 	_, err := NewWorkerKit(context.Background(), &cfg)
@@ -53,8 +55,9 @@ func TestNewWorkerKitRequiresLocalArtifactStoreRoot(t *testing.T) {
 	t.Parallel()
 
 	cfg := WorkerConfig{
-		PostgresURL: "postgres://localhost:5432/testdb",
-		RedisURL:    "redis://localhost:6379",
+		PostgresURL:        "postgres://localhost:5432/testdb",
+		RedisURL:           "redis://localhost:6379",
+		TemporalTaskQueues: DefaultTaskQueues(),
 		ArtifactStore: ArtifactStoreConfig{
 			Backend: ArtifactStoreBackendLocal,
 		},
@@ -70,8 +73,9 @@ func TestNewWorkerKitRequiresS3ArtifactStoreBucket(t *testing.T) {
 	t.Parallel()
 
 	cfg := WorkerConfig{
-		PostgresURL: "postgres://localhost:5432/testdb",
-		RedisURL:    "redis://localhost:6379",
+		PostgresURL:        "postgres://localhost:5432/testdb",
+		RedisURL:           "redis://localhost:6379",
+		TemporalTaskQueues: DefaultTaskQueues(),
 		ArtifactStore: ArtifactStoreConfig{
 			Backend: ArtifactStoreBackendS3,
 		},
@@ -86,17 +90,17 @@ func TestNewWorkerKitRequiresS3ArtifactStoreBucket(t *testing.T) {
 func TestWorkerKitRegistersPlanWorkflowAndActivities(t *testing.T) {
 	t.Parallel()
 	kit := &WorkerKit{planActivities: newTestPlanActivities(t, &fakePlanRuntime{})}
-	worker := &fakeWorker{}
+	workers := fakeWorkerSet()
 
-	if err := kit.Register(worker); err != nil {
+	if err := kit.Register(workers.workerSet()); err != nil {
 		t.Fatalf("Register: %v", err)
 	}
 
 	for _, name := range []string{
 		PlanWorkflowName,
 	} {
-		if !worker.workflowRegistered(name) {
-			t.Fatalf("workflow %q was not registered; got %#v", name, worker.workflows)
+		if !workers.planControl.workflowRegistered(name) {
+			t.Fatalf("workflow %q was not registered on plan control; got %#v", name, workers.planControl.workflows)
 		}
 	}
 
@@ -110,9 +114,92 @@ func TestWorkerKitRegistersPlanWorkflowAndActivities(t *testing.T) {
 		EvaluatePlanExpansionActivityName,
 		PersistPlanStateActivityName,
 	} {
-		if !worker.activityRegistered(name) {
-			t.Fatalf("activity %q was not registered; got %#v", name, worker.activities)
+		if !workers.planActivity.activityRegistered(name) {
+			t.Fatalf("activity %q was not registered on plan activity; got %#v", name, workers.planActivity.activities)
 		}
+	}
+
+	if len(workers.nativeControl.workflows) != 0 || len(workers.nativeLLM.activities) != 0 || len(workers.nativeTool.activities) != 0 {
+		t.Fatalf("native workers should not receive registrations for a plan-only kit: %#v %#v %#v", workers.nativeControl, workers.nativeLLM, workers.nativeTool)
+	}
+}
+
+func TestWorkerKitRegistersNativeWorkloadsOnDedicatedWorkers(t *testing.T) {
+	t.Parallel()
+
+	kit := &WorkerKit{
+		activities:     &orchestration.AgentActivities{},
+		planActivities: newTestPlanActivities(t, &fakePlanRuntime{}),
+	}
+	workers := fakeWorkerSet()
+
+	if err := kit.Register(workers.workerSet()); err != nil {
+		t.Fatalf("Register: %v", err)
+	}
+
+	assertNativeControlRegistrations(t, workers.nativeControl)
+	assertNativeActivityRegistrations(t, workers.nativeLLM, workers.nativeTool)
+	assertStreamRegistrations(t, workers.stream)
+	assertTriggerRegistrations(t, workers.trigger)
+}
+
+func assertNativeControlRegistrations(t *testing.T, worker *fakeWorker) {
+	t.Helper()
+
+	for _, name := range []string{
+		orchestration.AgentWorkflowName,
+		orchestration.OrchestrationWorkflowName,
+	} {
+		if !worker.workflowRegistered(name) {
+			t.Fatalf("workflow %q was not registered on native control; got %#v", name, worker.workflows)
+		}
+	}
+
+	if !worker.activityRegistered(orchestration.PrepareActivityName) {
+		t.Fatalf("prepare activity was not registered on native control; got %#v", worker.activities)
+	}
+}
+
+func assertNativeActivityRegistrations(t *testing.T, llmWorker, toolWorker *fakeWorker) {
+	t.Helper()
+
+	if !llmWorker.activityRegistered(orchestration.LLMStepActivityName) {
+		t.Fatalf("llm activity was not registered on native llm worker; got %#v", llmWorker.activities)
+	}
+
+	if !toolWorker.activityRegistered(orchestration.ToolExecActivityName) {
+		t.Fatalf("tool activity was not registered on native tool worker; got %#v", toolWorker.activities)
+	}
+}
+
+func assertStreamRegistrations(t *testing.T, worker *fakeWorker) {
+	t.Helper()
+
+	if !worker.workflowRegistered(orchestration.StreamWorkflowName) {
+		t.Fatalf("stream workflow was not isolated on stream worker; got %#v", worker.workflows)
+	}
+
+	for _, name := range []string{
+		orchestration.InitStreamActivityName,
+		orchestration.LLMStreamActivityName,
+		orchestration.ToolExecStreamActivityName,
+		orchestration.FinishStreamActivityName,
+	} {
+		if !worker.activityRegistered(name) {
+			t.Fatalf("stream activity %q was not isolated on stream worker; got %#v", name, worker.activities)
+		}
+	}
+}
+
+func assertTriggerRegistrations(t *testing.T, worker *fakeWorker) {
+	t.Helper()
+
+	if !worker.workflowRegistered(orchestration.TriggerFireWorkflowName) {
+		t.Fatalf("trigger workflow was not isolated on trigger worker; got %#v", worker.workflows)
+	}
+
+	if !worker.activityRegistered(orchestration.FireTriggerActivityName) {
+		t.Fatalf("trigger activity was not isolated on trigger worker; got %#v", worker.activities)
 	}
 }
 
@@ -147,4 +234,38 @@ func (w *fakeWorker) workflowRegistered(name string) bool {
 
 func (w *fakeWorker) activityRegistered(name string) bool {
 	return slices.Contains(w.activities, name)
+}
+
+type fakeWorkers struct {
+	planControl   *fakeWorker
+	planActivity  *fakeWorker
+	nativeControl *fakeWorker
+	nativeLLM     *fakeWorker
+	nativeTool    *fakeWorker
+	stream        *fakeWorker
+	trigger       *fakeWorker
+}
+
+func fakeWorkerSet() fakeWorkers {
+	return fakeWorkers{
+		planControl:   &fakeWorker{},
+		planActivity:  &fakeWorker{},
+		nativeControl: &fakeWorker{},
+		nativeLLM:     &fakeWorker{},
+		nativeTool:    &fakeWorker{},
+		stream:        &fakeWorker{},
+		trigger:       &fakeWorker{},
+	}
+}
+
+func (w fakeWorkers) workerSet() *WorkerSet {
+	return &WorkerSet{
+		PlanControl:   w.planControl,
+		PlanActivity:  w.planActivity,
+		NativeControl: w.nativeControl,
+		NativeLLM:     w.nativeLLM,
+		NativeTool:    w.nativeTool,
+		Stream:        w.stream,
+		Trigger:       w.trigger,
+	}
 }

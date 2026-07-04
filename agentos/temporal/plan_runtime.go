@@ -30,6 +30,7 @@ type planRuntime struct {
 	commandStore   agentosplan.PlanCommandStore
 	auditStore     agentosplan.AuditStore
 	taskQueue      string
+	taskQueues     *TaskQueues
 }
 
 var (
@@ -139,7 +140,8 @@ func newPlanRuntimeWithClient(ctx context.Context, cfg *RuntimeConfig, c planTem
 	rt := &planRuntime{
 		temporalClient: c,
 		closeTemporal:  closeTemporal,
-		taskQueue:      fwTemporal.TaskQueue,
+		taskQueue:      fwTemporal.TaskQueues.PlanControl,
+		taskQueues:     &cfg.TemporalTaskQueues,
 	}
 
 	if cfg.RedisURL != "" {
@@ -632,7 +634,7 @@ func (r *planRuntime) RecoverPlanCommands(ctx context.Context, limit int) (PlanC
 		return PlanCommandRecoveryResult{}, errPlanRuntimeNotConfigured
 	}
 
-	reconciler := newPlanCommandReconciler(r.temporalClient, r.taskQueue, r.commandStore, r.auditStore, r.planIndex)
+	reconciler := newPlanCommandReconciler(r.temporalClient, r.taskQueues, r.commandStore, r.auditStore, r.planIndex)
 
 	return reconciler.Recover(ctx, limit)
 }
@@ -700,12 +702,16 @@ func planWorkflowID(planID string) string {
 }
 
 func (r *planRuntime) executePlanWorkflow(ctx context.Context, spec *agentos.RunPlanSpec) error {
-	return executePlanWorkflow(ctx, r.temporalClient, r.taskQueue, spec)
+	return executePlanWorkflow(ctx, r.temporalClient, r.taskQueue, r.taskQueues, spec)
 }
 
-func executePlanWorkflow(ctx context.Context, temporalClient planTemporalClient, taskQueue string, spec *agentos.RunPlanSpec) error {
+func executePlanWorkflow(ctx context.Context, temporalClient planTemporalClient, taskQueue string, taskQueues *TaskQueues, spec *agentos.RunPlanSpec) error {
 	if temporalClient == nil {
 		return errPlanRuntimeTemporalClientNotConfigured
+	}
+
+	if err := taskQueues.Validate(); err != nil {
+		return err
 	}
 
 	options := client.StartWorkflowOptions{
@@ -713,7 +719,12 @@ func executePlanWorkflow(ctx context.Context, temporalClient planTemporalClient,
 		TaskQueue: taskQueue,
 	}
 
-	_, err := temporalClient.ExecuteWorkflow(ctx, &options, PlanWorkflowName, &planWorkflowInput{Spec: *spec})
+	_, err := temporalClient.ExecuteWorkflow(ctx, &options, PlanWorkflowName, &planWorkflowInput{
+		Spec: *spec,
+		TaskQueues: agentfwTaskQueues{
+			PlanActivity: taskQueues.PlanActivity,
+		},
+	})
 	if err != nil && !sdktemporal.IsWorkflowExecutionAlreadyStartedError(err) {
 		return fmt.Errorf("agentos temporal plan runtime - start plan workflow: %w", err)
 	}
@@ -919,6 +930,10 @@ func planDebugTraceStreamScope(scope *agentos.PlanDebugTraceScope) agentos.PlanS
 func validatePlanRuntimeConfig(cfg *RuntimeConfig) error {
 	if cfg == nil {
 		return errPlanRuntimeConfigRequired
+	}
+
+	if err := cfg.TemporalTaskQueues.Validate(); err != nil {
+		return err
 	}
 
 	if cfg.PostgresURL == "" {

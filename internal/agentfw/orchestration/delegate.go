@@ -65,64 +65,86 @@ func executeDelegateTool(
 	accountID string,
 	parentTools []entity.ToolDef,
 	parentMCPServerConfigs []entity.MCPServerConfig,
+	taskQueues *WorkflowTaskQueues,
 ) (string, error) {
+	if err := taskQueues.ValidateNativeAgent(); err != nil {
+		return "", err
+	}
+
 	delegateInput, err := entity.ParseDelegateArgs(tc.Function.Arguments)
 	if err != nil {
 		return "", fmt.Errorf("failed to parse delegate_to_agent args: %w", err)
 	}
 
-	systemPrompt := delegateInput.SystemPrompt
-	task := delegateInput.Task
-	model := delegateInput.ModelRef
-
-	if model == "" {
-		model = parentCfg.Model
-	}
-
-	// Inherit full parent config, override model if caller specified
-	// one (e.g. cheaper/faster model for simple sub-tasks), and force
-	// zero temperature for deterministic sub-agent output.
-	childConfig := parentCfg
-	childConfig.Model = model
-	childConfig.Temperature = 0
-
-	// Filter parent tools by the names the caller explicitly requested.
-	// When no tools argument is provided the sub-agent runs as a pure
-	// LLM call (no tool access), keeping delegation lightweight.
-	var childTools []entity.ToolDef
-
-	if requested := delegateInput.Tools; len(requested) > 0 {
-		nameSet := make(map[string]struct{}, len(requested))
-		for _, name := range requested {
-			nameSet[name] = struct{}{}
-		}
-
-		for _, t := range parentTools {
-			if _, ok := nameSet[t.Function.Name]; ok {
-				childTools = append(childTools, t)
-			}
-		}
-	}
-
-	childCtx := workflow.WithChildOptions(ctx, workflow.ChildWorkflowOptions{
+	childOptions := workflow.ChildWorkflowOptions{
 		WorkflowID:               fmt.Sprintf("delegate-%s", tc.ID),
 		WorkflowExecutionTimeout: delegateChildWorkflowTimeout,
-	})
+		TaskQueue:                taskQueues.NativeControl,
+	}
+
+	childCtx := workflow.WithChildOptions(ctx, childOptions)
 
 	var result WorkflowResult
 
-	err = workflow.ExecuteChildWorkflow(childCtx, AgentWorkflowName, &AgentWorkflowInput{
-		AccountID:        accountID,
-		RunID:            tc.ID,
-		SystemPrompt:     systemPrompt,
-		Message:          task,
-		Config:           childConfig,
-		Tools:            childTools,
-		MCPServerConfigs: parentMCPServerConfigs,
-	}).Get(ctx, &result)
+	childInput := delegateChildWorkflowInput(tc.ID, delegateInput, parentCfg, accountID, parentTools, parentMCPServerConfigs, taskQueues)
+
+	err = workflow.ExecuteChildWorkflow(childCtx, AgentWorkflowName, childInput).Get(ctx, &result)
 	if err != nil {
 		return "", err
 	}
 
 	return result.Output, nil
+}
+
+func delegateChildWorkflowInput(
+	runID string,
+	delegateInput *entity.DelegateTaskInput,
+	parentCfg entity.LLMConfig,
+	accountID string,
+	parentTools []entity.ToolDef,
+	parentMCPServerConfigs []entity.MCPServerConfig,
+	taskQueues *WorkflowTaskQueues,
+) *AgentWorkflowInput {
+	return &AgentWorkflowInput{
+		AccountID:        accountID,
+		RunID:            runID,
+		SystemPrompt:     delegateInput.SystemPrompt,
+		Message:          delegateInput.Task,
+		Config:           delegateChildConfig(parentCfg, delegateInput.ModelRef),
+		Tools:            delegateChildTools(parentTools, delegateInput.Tools),
+		MCPServerConfigs: parentMCPServerConfigs,
+		TaskQueues:       *taskQueues,
+	}
+}
+
+func delegateChildConfig(parentCfg entity.LLMConfig, modelRef string) entity.LLMConfig {
+	childConfig := parentCfg
+	if modelRef != "" {
+		childConfig.Model = modelRef
+	}
+
+	childConfig.Temperature = 0
+
+	return childConfig
+}
+
+func delegateChildTools(parentTools []entity.ToolDef, requested []string) []entity.ToolDef {
+	if len(requested) == 0 {
+		return nil
+	}
+
+	nameSet := make(map[string]struct{}, len(requested))
+	for _, name := range requested {
+		nameSet[name] = struct{}{}
+	}
+
+	childTools := make([]entity.ToolDef, 0, len(requested))
+
+	for _, tool := range parentTools {
+		if _, ok := nameSet[tool.Function.Name]; ok {
+			childTools = append(childTools, tool)
+		}
+	}
+
+	return childTools
 }

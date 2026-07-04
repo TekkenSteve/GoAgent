@@ -1,6 +1,7 @@
 package orchestration
 
 import (
+	"errors"
 	"fmt"
 	"time"
 
@@ -16,6 +17,14 @@ type FireTriggerInput struct {
 	Message      string
 	Tools        []entity.ToolDef
 	Config       entity.LLMConfig
+	TaskQueues   WorkflowTaskQueues
+}
+
+// TriggerFireWorkflowInput carries the trigger identity plus infrastructure
+// routing decisions persisted in workflow history.
+type TriggerFireWorkflowInput struct {
+	TriggerID  string
+	TaskQueues WorkflowTaskQueues
 }
 
 const (
@@ -23,10 +32,27 @@ const (
 	defaultStartToCloseTimeout = 30 * time.Second
 )
 
+var (
+	ErrTriggerFireInputRequired          = errors.New("trigger fire input is required")
+	ErrTriggerFireInputTriggerIDRequired = errors.New("trigger fire input trigger id is required")
+)
+
 // TriggerFireWorkflow is a Temporal cron-scheduled workflow that fires
 // when a trigger's cron expression matches. It loads the trigger + template
 // from the DB via an activity, then dispatches a child AgentWorkflow.
-func TriggerFireWorkflow(ctx workflow.Context, triggerID string) error {
+func TriggerFireWorkflow(ctx workflow.Context, input *TriggerFireWorkflowInput) error {
+	if input == nil {
+		return nonRetryableWorkflowValidationError(ErrTriggerFireInputRequired)
+	}
+
+	if input.TriggerID == "" {
+		return nonRetryableWorkflowValidationError(ErrTriggerFireInputTriggerIDRequired)
+	}
+
+	if err := input.TaskQueues.ValidateTriggerFire(); err != nil {
+		return nonRetryableWorkflowValidationError(err)
+	}
+
 	ao := workflow.ActivityOptions{
 		StartToCloseTimeout: defaultStartToCloseTimeout,
 		RetryPolicy: &temporal.RetryPolicy{
@@ -36,23 +62,29 @@ func TriggerFireWorkflow(ctx workflow.Context, triggerID string) error {
 		},
 	}
 	ctx = workflow.WithActivityOptions(ctx, ao)
+	triggerActivityCtx := withRequiredActivityTaskQueue(ctx, input.TaskQueues.Trigger)
 
-	var input FireTriggerInput
-	if err := workflow.ExecuteActivity(ctx, FireTriggerActivityName, triggerID).Get(ctx, &input); err != nil {
+	var fireInput FireTriggerInput
+	if err := workflow.ExecuteActivity(triggerActivityCtx, FireTriggerActivityName, input.TriggerID).Get(ctx, &fireInput); err != nil {
 		return fmt.Errorf("TriggerFireWorkflow - fire activity: %w", err)
 	}
 
-	// Dispatch child AgentWorkflow (inherits task queue from parent)
-	childID := fmt.Sprintf("trigger-%s-%d", triggerID, workflow.Now(ctx).UnixMilli())
-	childCtx := workflow.WithChildOptions(ctx, workflow.ChildWorkflowOptions{
+	fireInput.TaskQueues = input.TaskQueues
+
+	childID := fmt.Sprintf("trigger-%s-%d", input.TriggerID, workflow.Now(ctx).UnixMilli())
+	childOptions := workflow.ChildWorkflowOptions{
 		WorkflowID: childID,
-	})
+		TaskQueue:  fireInput.TaskQueues.NativeControl,
+	}
+
+	childCtx := workflow.WithChildOptions(ctx, childOptions)
 
 	return workflow.ExecuteChildWorkflow(childCtx, AgentWorkflowName, &AgentWorkflowInput{
-		RunID:        input.RunID,
-		SystemPrompt: input.SystemPrompt,
-		Message:      input.Message,
-		Tools:        input.Tools,
-		Config:       input.Config,
+		RunID:        fireInput.RunID,
+		SystemPrompt: fireInput.SystemPrompt,
+		Message:      fireInput.Message,
+		Tools:        fireInput.Tools,
+		Config:       fireInput.Config,
+		TaskQueues:   fireInput.TaskQueues,
 	}).Get(ctx, nil)
 }

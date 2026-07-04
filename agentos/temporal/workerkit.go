@@ -3,7 +3,6 @@ package temporal
 import (
 	"context"
 	"errors"
-	"fmt"
 
 	"github.com/TekkenSteve/GoAgent/internal/agentfw/orchestration"
 	"go.temporal.io/sdk/activity"
@@ -11,7 +10,7 @@ import (
 	"go.temporal.io/sdk/workflow"
 )
 
-// WorkerKit registers GoAgent workflows and activities into an existing worker.
+// WorkerKit registers GoAgent workflows and activities into explicit workload workers.
 type WorkerKit struct {
 	activities            *orchestration.AgentActivities
 	planActivities        *PlanActivities
@@ -21,9 +20,21 @@ type WorkerKit struct {
 
 var (
 	errWorkerKitNilWorker                          = errors.New("agentos temporal workerkit: nil worker")
+	errWorkerKitWorkersRequired                    = errors.New("agentos temporal workerkit: worker set is required")
 	errWorkerKitPlanActivitiesRequired             = errors.New("agentos temporal workerkit: plan activities are required")
 	errWorkerKitPlanCommandReconcilerNotConfigured = errors.New("agentos temporal workerkit: plan command reconciler is not configured")
 )
+
+// WorkerSet contains one Temporal worker per workload class.
+type WorkerSet struct {
+	PlanControl   worker.Worker
+	PlanActivity  worker.Worker
+	NativeControl worker.Worker
+	NativeLLM     worker.Worker
+	NativeTool    worker.Worker
+	Stream        worker.Worker
+	Trigger       worker.Worker
+}
 
 // RegisterPlanWorkflow installs the AgentOS RunPlan workflow into an existing worker.
 func RegisterPlanWorkflow(w worker.Worker) error {
@@ -76,60 +87,74 @@ func RegisterPlanActivities(w worker.Worker, activities *PlanActivities) error {
 	return nil
 }
 
-// RegisterPlan installs the AgentOS RunPlan workflow and activities into an existing worker.
-func RegisterPlan(w worker.Worker, activities *PlanActivities) error {
-	if err := RegisterPlanWorkflow(w); err != nil {
-		return err
-	}
-
-	if err := RegisterPlanActivities(w, activities); err != nil {
-		return fmt.Errorf("agentos temporal workerkit - plan activities: %w", err)
-	}
-
-	return nil
-}
-
 // NewWorkerKit creates a worker registration kit backed by the default
 // Temporal/Postgres/Redis/Bifrost implementation.
 func NewWorkerKit(ctx context.Context, cfg *WorkerConfig) (*WorkerKit, error) {
 	return newWorkerKit(ctx, cfg)
 }
 
-// Register installs GoAgent workflow definitions into a Temporal worker.
-func (k *WorkerKit) Register(w worker.Worker) error {
-	if w == nil {
-		return errWorkerKitNilWorker
-	}
-
-	w.RegisterWorkflowWithOptions(orchestration.AgentWorkflow, workflow.RegisterOptions{
-		Name: orchestration.AgentWorkflowName,
-	})
-	w.RegisterWorkflowWithOptions(orchestration.StreamAgentWorkflow, workflow.RegisterOptions{
-		Name: orchestration.StreamWorkflowName,
-	})
-	w.RegisterWorkflowWithOptions(orchestration.Workflow, workflow.RegisterOptions{
-		Name: orchestration.OrchestrationWorkflowName,
-	})
-	w.RegisterWorkflowWithOptions(orchestration.TriggerFireWorkflow, workflow.RegisterOptions{
-		Name: orchestration.TriggerFireWorkflowName,
-	})
-
-	if err := RegisterPlanWorkflow(w); err != nil {
+// Register installs workflow definitions and activities into explicit workers.
+func (k *WorkerKit) Register(workers *WorkerSet) error {
+	if err := k.registerPlanWorkloads(workers); err != nil {
 		return err
 	}
 
 	if k.activities == nil {
-		return k.registerPlanActivities(w)
+		return nil
 	}
 
+	return k.registerNativeWorkloads(workers)
+}
+
+func (k *WorkerKit) registerPlanWorkloads(workers *WorkerSet) error {
+	if workers == nil || workers.PlanControl == nil || workers.PlanActivity == nil {
+		return errWorkerKitWorkersRequired
+	}
+
+	workers.PlanControl.RegisterWorkflowWithOptions(PlanWorkflow, workflow.RegisterOptions{
+		Name: PlanWorkflowName,
+	})
+
+	return RegisterPlanActivities(workers.PlanActivity, k.planActivities)
+}
+
+func (k *WorkerKit) registerNativeWorkloads(workers *WorkerSet) error {
+	if workers.NativeControl == nil || workers.NativeLLM == nil || workers.NativeTool == nil || workers.Stream == nil || workers.Trigger == nil {
+		return errWorkerKitWorkersRequired
+	}
+
+	k.registerNativeControlWorkloads(workers.NativeControl)
+	k.registerNativeActivityWorkloads(workers.NativeLLM, workers.NativeTool)
+	k.registerStreamWorkloads(workers.Stream)
+	k.registerTriggerWorkloads(workers.Trigger)
+
+	return nil
+}
+
+func (k *WorkerKit) registerNativeControlWorkloads(w worker.Worker) {
+	w.RegisterWorkflowWithOptions(orchestration.AgentWorkflow, workflow.RegisterOptions{
+		Name: orchestration.AgentWorkflowName,
+	})
+	w.RegisterWorkflowWithOptions(orchestration.Workflow, workflow.RegisterOptions{
+		Name: orchestration.OrchestrationWorkflowName,
+	})
 	w.RegisterActivityWithOptions(k.activities.PrepareActivity, activity.RegisterOptions{
 		Name: orchestration.PrepareActivityName,
 	})
-	w.RegisterActivityWithOptions(k.activities.LLMStepActivity, activity.RegisterOptions{
+}
+
+func (k *WorkerKit) registerNativeActivityWorkloads(llmWorker, toolWorker worker.Worker) {
+	llmWorker.RegisterActivityWithOptions(k.activities.LLMStepActivity, activity.RegisterOptions{
 		Name: orchestration.LLMStepActivityName,
 	})
-	w.RegisterActivityWithOptions(k.activities.ToolExecActivity, activity.RegisterOptions{
+	toolWorker.RegisterActivityWithOptions(k.activities.ToolExecActivity, activity.RegisterOptions{
 		Name: orchestration.ToolExecActivityName,
+	})
+}
+
+func (k *WorkerKit) registerStreamWorkloads(w worker.Worker) {
+	w.RegisterWorkflowWithOptions(orchestration.StreamAgentWorkflow, workflow.RegisterOptions{
+		Name: orchestration.StreamWorkflowName,
 	})
 	w.RegisterActivityWithOptions(k.activities.InitStreamActivity, activity.RegisterOptions{
 		Name: orchestration.InitStreamActivityName,
@@ -143,15 +168,15 @@ func (k *WorkerKit) Register(w worker.Worker) error {
 	w.RegisterActivityWithOptions(k.activities.FinishStreamActivity, activity.RegisterOptions{
 		Name: orchestration.FinishStreamActivityName,
 	})
+}
+
+func (k *WorkerKit) registerTriggerWorkloads(w worker.Worker) {
+	w.RegisterWorkflowWithOptions(orchestration.TriggerFireWorkflow, workflow.RegisterOptions{
+		Name: orchestration.TriggerFireWorkflowName,
+	})
 	w.RegisterActivityWithOptions(k.activities.FireTriggerActivity, activity.RegisterOptions{
 		Name: orchestration.FireTriggerActivityName,
 	})
-
-	return k.registerPlanActivities(w)
-}
-
-func (k *WorkerKit) registerPlanActivities(w worker.Worker) error {
-	return RegisterPlanActivities(w, k.planActivities)
 }
 
 // PlanCommandRecoveryResult summarizes one durable command outbox recovery pass.
