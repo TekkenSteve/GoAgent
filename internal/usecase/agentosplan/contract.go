@@ -5,7 +5,8 @@ import (
 	"encoding/json"
 	"time"
 
-	"github.com/TekkenSteve/GoAgent/agentos"
+	agentos "github.com/TekkenSteve/GoAgent/agentos/control"
+	agentoscore "github.com/TekkenSteve/GoAgent/agentos/core"
 )
 
 // ExpressionCompiler validates and compiles deterministic AgentOS expressions.
@@ -42,9 +43,9 @@ type CapabilityRegistry interface {
 // full account/project plan scope because artifact IDs are not a tenant
 // boundary.
 type ArtifactStore interface {
-	Put(ctx context.Context, artifact *agentos.ArtifactRef, payload any, idempotencyKey string) (agentos.ArtifactRef, error)
-	Get(ctx context.Context, scope *agentos.PlanArtifactScope) (agentos.ArtifactRef, any, error)
-	List(ctx context.Context, scope *agentos.PlanArtifactScope) ([]agentos.ArtifactRef, error)
+	Put(ctx context.Context, artifact *agentoscore.ArtifactRef, payload any, idempotencyKey string) (agentoscore.ArtifactRef, error)
+	Get(ctx context.Context, scope *agentos.PlanArtifactScope) (agentoscore.ArtifactRef, any, error)
+	List(ctx context.Context, scope *agentos.PlanArtifactScope) ([]agentoscore.ArtifactRef, error)
 }
 
 // ArtifactSchemaCatalog resolves JSON Schemas referenced by ArtifactSpec.
@@ -139,7 +140,7 @@ type PlanEventPublisher interface {
 }
 
 // PlanEventSubscription is the typed live tail for public RunPlan events.
-// Public Runtime APIs project these typed events into agentos.Event only at the
+// Public Runtime APIs project these typed events into agentoscore.Event only at the
 // subscription boundary.
 type PlanEventSubscription interface {
 	Events() <-chan agentos.PlanEvent
@@ -265,8 +266,8 @@ type PlanCommandStore interface {
 // Runner starts and controls backend-owned child runs.
 type Runner interface {
 	Start(ctx context.Context, spec *agentos.RunSpec) (agentos.RunStatus, error)
-	Signal(ctx context.Context, runID string, signal *agentos.Signal) error
+	Signal(ctx context.Context, runID string, signal *agentoscore.Signal) error
 	Status(ctx context.Context, runID string) (agentos.RunStatus, error)
-	Control(ctx context.Context, runID string, control *agentos.ControlRequest) error
-	Subscribe(ctx context.Context, scope agentos.StreamScope) (agentos.Subscription, error)
+	Control(ctx context.Context, runID string, control *agentoscore.ControlRequest) error
+	Subscribe(ctx context.Context, scope agentoscore.StreamScope) (agentoscore.Subscription, error)
 }

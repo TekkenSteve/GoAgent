@@ -4,7 +4,8 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/TekkenSteve/GoAgent/agentos"
+	agentos "github.com/TekkenSteve/GoAgent/agentos/control"
+	agentoscore "github.com/TekkenSteve/GoAgent/agentos/core"
 	"github.com/TekkenSteve/GoAgent/internal/entity"
 )
 
@@ -25,7 +26,7 @@ func TestValidateRunBackendIndexIdempotencyRejectsDifferentRun(t *testing.T) {
 	requested.RunID = "run-2"
 
 	err := ValidateRunBackendIndexIdempotency(&existing, &requested)
-	if !errors.Is(err, agentos.ErrInvalidRunSpec) {
+	if !errors.Is(err, agentoscore.ErrInvalidRunSpec) {
 		t.Fatalf("error = %v, want ErrInvalidRunSpec", err)
 	}
 }
@@ -38,7 +39,7 @@ func TestValidateRunBackendIndexIdempotencyRejectsDifferentPlanNode(t *testing.T
 	requested.NodeID = "node-2"
 
 	err := ValidateRunBackendIndexIdempotency(&existing, &requested)
-	if !errors.Is(err, agentos.ErrInvalidRunPlan) {
+	if !errors.Is(err, agentoscore.ErrInvalidRunPlan) {
 		t.Fatalf("error = %v, want ErrInvalidRunPlan", err)
 	}
 }
@@ -51,7 +52,7 @@ func TestValidateRunBackendIndexIdempotencyRejectsDifferentScope(t *testing.T) {
 	requested.AccountID = "account-2"
 
 	err := ValidateRunBackendIndexIdempotency(&existing, &requested)
-	if !errors.Is(err, agentos.ErrInvalidRunSpec) {
+	if !errors.Is(err, agentoscore.ErrInvalidRunSpec) {
 		t.Fatalf("error = %v, want ErrInvalidRunSpec", err)
 	}
 }
@@ -64,7 +65,7 @@ func TestValidateRunBackendIndexIdempotencyRejectsDifferentBackend(t *testing.T)
 	requested.BackendName = "other"
 
 	err := ValidateRunBackendIndexIdempotency(&existing, &requested)
-	if !errors.Is(err, agentos.ErrInvalidBackendRef) {
+	if !errors.Is(err, agentoscore.ErrInvalidBackendRef) {
 		t.Fatalf("error = %v, want ErrInvalidBackendRef", err)
 	}
 }
@@ -77,7 +78,7 @@ func TestValidateRunBackendIndexIdempotencyRejectsDifferentKey(t *testing.T) {
 	requested.IdempotencyKey = "other-key"
 
 	err := ValidateRunBackendIndexIdempotency(&existing, &requested)
-	if !errors.Is(err, agentos.ErrInvalidRunSpec) {
+	if !errors.Is(err, agentoscore.ErrInvalidRunSpec) {
 		t.Fatalf("error = %v, want ErrInvalidRunSpec", err)
 	}
 }

@@ -6,7 +6,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/TekkenSteve/GoAgent/agentos"
+	agentos "github.com/TekkenSteve/GoAgent/agentos/control"
+	agentoscore "github.com/TekkenSteve/GoAgent/agentos/core"
 )
 
 const (
@@ -29,7 +30,7 @@ func TestMemoryPlanStoreCreatePlanRequiresIdempotencyKey(t *testing.T) {
 	status := agentos.RunPlanStatus{}
 
 	_, _, err := store.CreatePlan(context.Background(), &spec, &status)
-	if !errors.Is(err, agentos.ErrInvalidRunPlan) {
+	if !errors.Is(err, agentoscore.ErrInvalidRunPlan) {
 		t.Fatalf("error = %v, want ErrInvalidRunPlan", err)
 	}
 }
@@ -120,7 +121,7 @@ func TestMemoryPlanStoreSavePlanStateRequiresIdempotencyKey(t *testing.T) {
 		Spec:   agentos.RunPlanSpec{PlanID: "plan-1", AccountID: "acct-1", ProjectID: "proj-1"},
 		Status: agentos.RunPlanStatus{PlanID: "plan-1"},
 	})
-	if !errors.Is(err, agentos.ErrInvalidRunPlan) {
+	if !errors.Is(err, agentoscore.ErrInvalidRunPlan) {
 		t.Fatalf("error = %v, want ErrInvalidRunPlan", err)
 	}
 }
@@ -138,7 +139,7 @@ func TestMemoryPlanStoreSavePlanStateCopiesCallerOwnedData(t *testing.T) {
 			PlanID:   spec.PlanID,
 			Metadata: map[string]string{"state": storedValue},
 			Nodes: []agentos.PlanNodeStatus{
-				{NodeID: "node-1", RunID: "run-1", Artifacts: []agentos.ArtifactRef{{ArtifactID: "artifact-1", Metadata: map[string]string{"kind": storedValue}}}},
+				{NodeID: "node-1", RunID: "run-1", Artifacts: []agentoscore.ArtifactRef{{ArtifactID: "artifact-1", Metadata: map[string]string{"kind": storedValue}}}},
 			},
 		},
 	}
@@ -169,7 +170,7 @@ func TestMemoryPlanStoreSavePlanStateRejectsMissingPlan(t *testing.T) {
 		Spec:   spec,
 		Status: agentos.RunPlanStatus{PlanID: spec.PlanID, LifecycleState: agentos.PlanLifecycleRunning},
 	})
-	if !errors.Is(err, agentos.ErrPlanRouteNotFound) {
+	if !errors.Is(err, agentoscore.ErrPlanRouteNotFound) {
 		t.Fatalf("SavePlanState missing plan error = %v, want ErrPlanRouteNotFound", err)
 	}
 }
@@ -184,10 +185,10 @@ func TestMemoryPlanStorePersistPlanTransitionRejectsMissingPlan(t *testing.T) {
 		Spec:   spec,
 		Status: agentos.RunPlanStatus{PlanID: spec.PlanID, LifecycleState: agentos.PlanLifecycleRunning},
 	}, &agentos.PlanEvent{
-		Event:  agentos.Event{EventType: agentos.EventPlanStarted},
+		Event:  agentoscore.Event{EventType: agentoscore.EventPlanStarted},
 		PlanID: spec.PlanID,
 	}, "missing-plan-event")
-	if !errors.Is(err, agentos.ErrPlanRouteNotFound) {
+	if !errors.Is(err, agentoscore.ErrPlanRouteNotFound) {
 		t.Fatalf("PersistPlanTransition missing plan error = %v, want ErrPlanRouteNotFound", err)
 	}
 }
@@ -200,7 +201,7 @@ func TestMemoryPlanStoreAppendPlanEventCopiesPayload(t *testing.T) {
 	spec := createMemoryPlanForTest(ctx, t, store, "plan-event-copy")
 
 	event := agentos.PlanEvent{
-		Event:  agentos.Event{EventType: agentos.EventPlanStarted, Payload: map[string]any{planCopyNestedKey: map[string]any{planCopyPayloadKey: storedValue}}},
+		Event:  agentoscore.Event{EventType: agentoscore.EventPlanStarted, Payload: map[string]any{planCopyNestedKey: map[string]any{planCopyPayloadKey: storedValue}}},
 		PlanID: spec.PlanID,
 	}
 	if _, err := appendPlanEvent(ctx, store, &event, "event-copy"); err != nil {
@@ -242,8 +243,8 @@ func TestMemoryPlanStorePersistPlanTransitionIsAtomic(t *testing.T) {
 	}
 
 	firstEvent := agentos.PlanEvent{
-		Event: agentos.Event{
-			EventType: agentos.EventPlanStarted,
+		Event: agentoscore.Event{
+			EventType: agentoscore.EventPlanStarted,
 			Payload:   map[string]any{"state": "running"},
 		},
 		PlanID: spec.PlanID,
@@ -256,8 +257,8 @@ func TestMemoryPlanStorePersistPlanTransitionIsAtomic(t *testing.T) {
 	next.LifecycleState = agentos.PlanLifecycleFailed
 	next.Reason = "should not commit"
 	changedEvent := agentos.PlanEvent{
-		Event: agentos.Event{
-			EventType: agentos.EventPlanFailed,
+		Event: agentoscore.Event{
+			EventType: agentoscore.EventPlanFailed,
 			Payload:   map[string]any{"state": "failed"},
 		},
 		PlanID: spec.PlanID,
@@ -267,7 +268,7 @@ func TestMemoryPlanStorePersistPlanTransitionIsAtomic(t *testing.T) {
 		Spec:   spec,
 		Status: next,
 	}, &changedEvent, "transition-key")
-	if !errors.Is(err, agentos.ErrInvalidPlanEvent) {
+	if !errors.Is(err, agentoscore.ErrInvalidPlanEvent) {
 		t.Fatalf("PersistPlanTransition error = %v, want ErrInvalidPlanEvent", err)
 	}
 
@@ -298,8 +299,8 @@ func TestMemoryPlanStorePersistPlanTransitionRejectsEventOnlyIdempotencyKey(t *t
 	}
 
 	event := agentos.PlanEvent{
-		Event: agentos.Event{
-			EventType: agentos.EventPlanStarted,
+		Event: agentoscore.Event{
+			EventType: agentoscore.EventPlanStarted,
 			Payload:   map[string]any{"state": "running"},
 		},
 		PlanID: spec.PlanID,
@@ -312,7 +313,7 @@ func TestMemoryPlanStorePersistPlanTransitionRejectsEventOnlyIdempotencyKey(t *t
 		Spec:   spec,
 		Status: initial,
 	}, &event, "event-only-key")
-	if !errors.Is(err, agentos.ErrInvalidRunPlan) {
+	if !errors.Is(err, agentoscore.ErrInvalidRunPlan) {
 		t.Fatalf("PersistPlanTransition event-only key error = %v, want ErrInvalidRunPlan", err)
 	}
 }
@@ -337,8 +338,8 @@ func TestMemoryPlanStorePersistPlanTransitionRejectsSnapshotReplayMismatch(t *te
 	running.LifecycleState = agentos.PlanLifecycleRunning
 
 	event := agentos.PlanEvent{
-		Event: agentos.Event{
-			EventType: agentos.EventPlanStarted,
+		Event: agentoscore.Event{
+			EventType: agentoscore.EventPlanStarted,
 			Payload:   map[string]any{"state": "running"},
 		},
 		PlanID: spec.PlanID,
@@ -358,7 +359,7 @@ func TestMemoryPlanStorePersistPlanTransitionRejectsSnapshotReplayMismatch(t *te
 		Spec:   spec,
 		Status: changed,
 	}, &event, "transition-key")
-	if !errors.Is(err, agentos.ErrInvalidRunPlan) {
+	if !errors.Is(err, agentoscore.ErrInvalidRunPlan) {
 		t.Fatalf("PersistPlanTransition replay mismatch error = %v, want ErrInvalidRunPlan", err)
 	}
 
@@ -384,12 +385,12 @@ func TestMemoryPlanStoreGetPlanByRefRequiresTenantScope(t *testing.T) {
 		{PlanID: spec.PlanID, AccountID: spec.AccountID},
 		{PlanID: spec.PlanID, ProjectID: spec.ProjectID},
 	} {
-		if _, _, _, err := store.GetPlanByRef(ctx, ref); !errors.Is(err, agentos.ErrInvalidPlanScope) {
+		if _, _, _, err := store.GetPlanByRef(ctx, ref); !errors.Is(err, agentoscore.ErrInvalidPlanScope) {
 			t.Fatalf("GetPlanByRef ref %#v error = %v, want ErrInvalidPlanScope", ref, err)
 		}
 	}
 
-	if _, _, _, err := store.GetPlanByRef(ctx, agentos.PlanRef{PlanID: spec.PlanID, AccountID: "acct-other", ProjectID: spec.ProjectID}); !errors.Is(err, agentos.ErrPlanRouteNotFound) {
+	if _, _, _, err := store.GetPlanByRef(ctx, agentos.PlanRef{PlanID: spec.PlanID, AccountID: "acct-other", ProjectID: spec.ProjectID}); !errors.Is(err, agentoscore.ErrPlanRouteNotFound) {
 		t.Fatalf("GetPlanByRef tenant mismatch error = %v, want ErrPlanRouteNotFound", err)
 	}
 
@@ -415,7 +416,7 @@ func TestMemoryPlanStoreRecordAuditRejectsMissingPlan(t *testing.T) {
 	}
 	_, _, err := store.RecordAudit(context.Background(), &missingAudit)
 
-	if !errors.Is(err, agentos.ErrPlanRouteNotFound) {
+	if !errors.Is(err, agentoscore.ErrPlanRouteNotFound) {
 		t.Fatalf("RecordAudit missing plan error = %v, want ErrPlanRouteNotFound", err)
 	}
 }
@@ -432,7 +433,7 @@ func TestMemoryPlanStoreRecordPlanCommandRejectsMissingPlan(t *testing.T) {
 	}
 	_, _, err := store.RecordPlanCommand(context.Background(), &missingCommand)
 
-	if !errors.Is(err, agentos.ErrPlanRouteNotFound) {
+	if !errors.Is(err, agentoscore.ErrPlanRouteNotFound) {
 		t.Fatalf("RecordPlanCommand missing plan error = %v, want ErrPlanRouteNotFound", err)
 	}
 }
@@ -449,7 +450,7 @@ func TestMemoryPlanStoreSavePlanMetricCheckpointRejectsMissingPlan(t *testing.T)
 		ProjectID:  "proj-1",
 		Sequence:   1,
 	})
-	if !errors.Is(err, agentos.ErrPlanRouteNotFound) {
+	if !errors.Is(err, agentoscore.ErrPlanRouteNotFound) {
 		t.Fatalf("SavePlanMetricCheckpoint missing plan error = %v, want ErrPlanRouteNotFound", err)
 	}
 }
@@ -468,7 +469,7 @@ func TestMemoryPlanStoreSavePlanMetricCheckpointRejectsTenantMismatch(t *testing
 		ProjectID:  spec.ProjectID,
 		Sequence:   1,
 	})
-	if !errors.Is(err, agentos.ErrPlanRouteNotFound) {
+	if !errors.Is(err, agentoscore.ErrPlanRouteNotFound) {
 		t.Fatalf("SavePlanMetricCheckpoint tenant mismatch error = %v, want ErrPlanRouteNotFound", err)
 	}
 }
@@ -523,7 +524,7 @@ func TestMemoryPlanStoreCreatePlanRejectsReusedKeyForDifferentRequest(t *testing
 	changedStatus := agentos.RunPlanStatus{PlanID: "plan-1"}
 
 	_, _, err := store.CreatePlan(context.Background(), &changed, &changedStatus)
-	if !errors.Is(err, agentos.ErrInvalidRunPlan) {
+	if !errors.Is(err, agentoscore.ErrInvalidRunPlan) {
 		t.Fatalf("error = %v, want ErrInvalidRunPlan", err)
 	}
 }
@@ -567,7 +568,7 @@ func TestMemoryPlanStoreCreatePlanRejectsReusedKeyWithinTenantScope(t *testing.T
 	secondStatus := agentos.RunPlanStatus{PlanID: second.PlanID}
 
 	_, _, err := store.CreatePlan(context.Background(), &second, &secondStatus)
-	if !errors.Is(err, agentos.ErrInvalidRunPlan) {
+	if !errors.Is(err, agentoscore.ErrInvalidRunPlan) {
 		t.Fatalf("error = %v, want ErrInvalidRunPlan", err)
 	}
 }
@@ -587,7 +588,7 @@ func TestMemoryPlanStoreCreatePlanRejectsPlanIDWithDifferentKey(t *testing.T) {
 	secondStatus := agentos.RunPlanStatus{PlanID: "plan-1"}
 
 	_, _, err := store.CreatePlan(context.Background(), &second, &secondStatus)
-	if !errors.Is(err, agentos.ErrInvalidRunPlan) {
+	if !errors.Is(err, agentoscore.ErrInvalidRunPlan) {
 		t.Fatalf("error = %v, want ErrInvalidRunPlan", err)
 	}
 }
@@ -665,17 +666,17 @@ func TestMemoryPlanStoreRejectsAuditKeyReuseWithDifferentRequest(t *testing.T) {
 		PlanID:         spec.PlanID,
 		Action:         AuditActionPlanSignal,
 		IdempotencyKey: "signal-1",
-		Payload:        map[string]any{"type": string(agentos.SignalPlanApprove)},
+		Payload:        map[string]any{"type": string(agentoscore.SignalPlanApprove)},
 	}
 	if _, _, err := store.RecordAudit(context.Background(), &record); err != nil {
 		t.Fatalf("RecordAudit first: %v", err)
 	}
 
 	changed := record
-	changed.Payload = map[string]any{"type": string(agentos.SignalPlanReject)}
+	changed.Payload = map[string]any{"type": string(agentoscore.SignalPlanReject)}
 
 	_, _, err := store.RecordAudit(context.Background(), &changed)
-	if !errors.Is(err, agentos.ErrInvalidRunPlan) {
+	if !errors.Is(err, agentoscore.ErrInvalidRunPlan) {
 		t.Fatalf("error = %v, want ErrInvalidRunPlan", err)
 	}
 }
@@ -691,7 +692,7 @@ func TestMemoryPlanStoreAllowsAuditKeyReuseAcrossPlans(t *testing.T) {
 		PlanID:         first.PlanID,
 		Action:         AuditActionPlanSignal,
 		IdempotencyKey: "signal-1",
-		Payload:        map[string]any{"type": string(agentos.SignalPlanApprove)},
+		Payload:        map[string]any{"type": string(agentoscore.SignalPlanApprove)},
 	}
 	if _, _, err := store.RecordAudit(context.Background(), &firstAudit); err != nil {
 		t.Fatalf("RecordAudit first: %v", err)
@@ -701,7 +702,7 @@ func TestMemoryPlanStoreAllowsAuditKeyReuseAcrossPlans(t *testing.T) {
 		PlanID:         second.PlanID,
 		Action:         AuditActionPlanSignal,
 		IdempotencyKey: "signal-1",
-		Payload:        map[string]any{"type": string(agentos.SignalPlanReject)},
+		Payload:        map[string]any{"type": string(agentoscore.SignalPlanReject)},
 	}
 	if _, _, err := store.RecordAudit(context.Background(), &secondAudit); err != nil {
 		t.Fatalf("RecordAudit second: %v", err)
@@ -729,7 +730,7 @@ func TestMemoryPlanStoreRecordAuditRejectsInvalidNodeRunOwnership(t *testing.T) 
 	unpaired.IdempotencyKey = "unpaired-node-audit"
 
 	unpaired.RunID = ""
-	if _, _, err := store.RecordAudit(context.Background(), &unpaired); !errors.Is(err, agentos.ErrInvalidRunPlan) {
+	if _, _, err := store.RecordAudit(context.Background(), &unpaired); !errors.Is(err, agentoscore.ErrInvalidRunPlan) {
 		t.Fatalf("RecordAudit unpaired node/run error = %v, want ErrInvalidRunPlan", err)
 	}
 
@@ -737,7 +738,7 @@ func TestMemoryPlanStoreRecordAuditRejectsInvalidNodeRunOwnership(t *testing.T) 
 	missingNode.IdempotencyKey = "missing-node-audit"
 
 	missingNode.NodeID = "missing-node"
-	if _, _, err := store.RecordAudit(context.Background(), &missingNode); !errors.Is(err, agentos.ErrInvalidRunPlan) {
+	if _, _, err := store.RecordAudit(context.Background(), &missingNode); !errors.Is(err, agentoscore.ErrInvalidRunPlan) {
 		t.Fatalf("RecordAudit missing node error = %v, want ErrInvalidRunPlan", err)
 	}
 
@@ -745,7 +746,7 @@ func TestMemoryPlanStoreRecordAuditRejectsInvalidNodeRunOwnership(t *testing.T) 
 	wrongRun.IdempotencyKey = "wrong-run-audit"
 
 	wrongRun.RunID = "run-other"
-	if _, _, err := store.RecordAudit(context.Background(), &wrongRun); !errors.Is(err, agentos.ErrInvalidRunPlan) {
+	if _, _, err := store.RecordAudit(context.Background(), &wrongRun); !errors.Is(err, agentoscore.ErrInvalidRunPlan) {
 		t.Fatalf("RecordAudit wrong run error = %v, want ErrInvalidRunPlan", err)
 	}
 }
@@ -852,7 +853,7 @@ func TestRecoverablePlanCommandStatusesRejectsDelivered(t *testing.T) {
 	scope := PlanCommandScope{
 		Statuses: []PlanCommandStatus{PlanCommandDelivered},
 	}
-	requireRecoverablePlanCommandStatusesError(t, &scope, agentos.ErrInvalidRunPlan)
+	requireRecoverablePlanCommandStatusesError(t, &scope, agentoscore.ErrInvalidRunPlan)
 }
 
 func requireRecoverablePlanCommandStatusesError(t *testing.T, scope *PlanCommandScope, want error) {
@@ -872,7 +873,7 @@ func TestRecoverablePlanCommandStatusesRejectsPartialTenantScope(t *testing.T) {
 		{ProjectID: "proj-1"},
 	} {
 		_, err := RecoverablePlanCommandStatuses(&scope)
-		if !errors.Is(err, agentos.ErrInvalidPlanScope) {
+		if !errors.Is(err, agentoscore.ErrInvalidPlanScope) {
 			t.Fatalf("RecoverablePlanCommandStatuses(%#v) error = %v, want ErrInvalidPlanScope", scope, err)
 		}
 	}
@@ -889,17 +890,17 @@ func TestMemoryPlanStoreRejectsCommandKeyReuseWithDifferentRequest(t *testing.T)
 		ActorID:        "operator-1",
 		Action:         AuditActionPlanSignal,
 		IdempotencyKey: "signal-1",
-		Payload:        map[string]any{"type": string(agentos.SignalPlanApprove)},
+		Payload:        map[string]any{"type": string(agentoscore.SignalPlanApprove)},
 	}
 	if _, _, err := store.RecordPlanCommand(context.Background(), &command); err != nil {
 		t.Fatalf("RecordPlanCommand first: %v", err)
 	}
 
 	changed := command
-	changed.Payload = map[string]any{"type": string(agentos.SignalPlanReject)}
+	changed.Payload = map[string]any{"type": string(agentoscore.SignalPlanReject)}
 
 	_, _, err := store.RecordPlanCommand(context.Background(), &changed)
-	if !errors.Is(err, agentos.ErrInvalidRunPlan) {
+	if !errors.Is(err, agentoscore.ErrInvalidRunPlan) {
 		t.Fatalf("error = %v, want ErrInvalidRunPlan", err)
 	}
 }
@@ -916,7 +917,7 @@ func TestMemoryPlanStoreAllowsCommandKeyReuseAcrossPlans(t *testing.T) {
 		ActorID:        "operator-1",
 		Action:         AuditActionPlanSignal,
 		IdempotencyKey: "signal-1",
-		Payload:        map[string]any{"type": string(agentos.SignalPlanApprove)},
+		Payload:        map[string]any{"type": string(agentoscore.SignalPlanApprove)},
 	}
 	if _, _, err := store.RecordPlanCommand(context.Background(), &firstCommand); err != nil {
 		t.Fatalf("RecordPlanCommand first: %v", err)
@@ -927,7 +928,7 @@ func TestMemoryPlanStoreAllowsCommandKeyReuseAcrossPlans(t *testing.T) {
 		ActorID:        "operator-1",
 		Action:         AuditActionPlanSignal,
 		IdempotencyKey: "signal-1",
-		Payload:        map[string]any{"type": string(agentos.SignalPlanReject)},
+		Payload:        map[string]any{"type": string(agentoscore.SignalPlanReject)},
 	}
 	if _, _, err := store.RecordPlanCommand(context.Background(), &secondCommand); err != nil {
 		t.Fatalf("RecordPlanCommand second: %v", err)
@@ -969,12 +970,12 @@ func TestMemoryPlanStoreListAuditRecordsFiltersAndLimits(t *testing.T) {
 		{PlanID: spec.PlanID, AccountID: spec.AccountID},
 		{PlanID: spec.PlanID, ProjectID: spec.ProjectID},
 	} {
-		if _, err := store.ListAuditRecords(ctx, &scope); !errors.Is(err, agentos.ErrInvalidPlanScope) {
+		if _, err := store.ListAuditRecords(ctx, &scope); !errors.Is(err, agentoscore.ErrInvalidPlanScope) {
 			t.Fatalf("ListAuditRecords scope %#v error = %v, want ErrInvalidPlanScope", scope, err)
 		}
 	}
 
-	if _, err := store.ListAuditRecords(ctx, &agentos.PlanAuditScope{PlanID: spec.PlanID, AccountID: "acct-other", ProjectID: spec.ProjectID}); !errors.Is(err, agentos.ErrPlanRouteNotFound) {
+	if _, err := store.ListAuditRecords(ctx, &agentos.PlanAuditScope{PlanID: spec.PlanID, AccountID: "acct-other", ProjectID: spec.ProjectID}); !errors.Is(err, agentoscore.ErrPlanRouteNotFound) {
 		t.Fatalf("tenant mismatch error = %v, want ErrPlanRouteNotFound", err)
 	}
 }
@@ -1016,7 +1017,7 @@ func memoryPlanControlCommand(planID, idempotencyKey string) PlanCommandRecord {
 		ActorID:        "operator-1",
 		Action:         AuditActionPlanControl,
 		IdempotencyKey: idempotencyKey,
-		Payload:        map[string]any{"operation": string(agentos.ControlCancel)},
+		Payload:        map[string]any{"operation": string(agentoscore.ControlCancel)},
 	}
 }
 
@@ -1106,10 +1107,10 @@ func seedRecoverablePlanCommands(ctx context.Context, t *testing.T, store *Memor
 
 func recoverablePlanCommandFixtures(planID, otherPlanID string) []PlanCommandRecord {
 	return []PlanCommandRecord{
-		memoryPlanCommandFixture("command-delivered", planID, AuditActionPlanControl, map[string]any{"operation": string(agentos.ControlCancel)}, 0),
-		memoryPlanCommandFixture("command-pending", planID, AuditActionPlanSignal, map[string]any{"type": string(agentos.SignalPlanApprove)}, 1),
-		memoryPlanCommandFixture(CommandFailed, planID, AuditActionPlanSignal, map[string]any{"type": string(agentos.SignalPlanReject)}, 2),
-		memoryPlanCommandFixture("command-other-tenant", otherPlanID, AuditActionPlanSignal, map[string]any{"type": string(agentos.SignalPlanReject)}, 3),
+		memoryPlanCommandFixture("command-delivered", planID, AuditActionPlanControl, map[string]any{"operation": string(agentoscore.ControlCancel)}, 0),
+		memoryPlanCommandFixture("command-pending", planID, AuditActionPlanSignal, map[string]any{"type": string(agentoscore.SignalPlanApprove)}, 1),
+		memoryPlanCommandFixture(CommandFailed, planID, AuditActionPlanSignal, map[string]any{"type": string(agentoscore.SignalPlanReject)}, 2),
+		memoryPlanCommandFixture("command-other-tenant", otherPlanID, AuditActionPlanSignal, map[string]any{"type": string(agentoscore.SignalPlanReject)}, 3),
 	}
 }
 

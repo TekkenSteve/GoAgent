@@ -7,7 +7,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/TekkenSteve/GoAgent/agentos"
+	agentos "github.com/TekkenSteve/GoAgent/agentos/control"
+	agentoscore "github.com/TekkenSteve/GoAgent/agentos/core"
 	"github.com/TekkenSteve/GoAgent/internal/usecase/agentosplan"
 )
 
@@ -58,11 +59,11 @@ func TestPlanActivitiesStartStatusControl(t *testing.T) {
 		t.Fatalf("status = %#v", status)
 	}
 
-	if err := activities.ControlPlanNodeActivity(context.Background(), &controlPlanNodeInput{RunID: "run-1", Control: agentos.ControlRequest{Operation: agentos.ControlCancel}}); err != nil {
+	if err := activities.ControlPlanNodeActivity(context.Background(), &controlPlanNodeInput{RunID: "run-1", Control: agentoscore.ControlRequest{Operation: agentoscore.ControlCancel}}); err != nil {
 		t.Fatalf("ControlPlanNodeActivity: %v", err)
 	}
 
-	if runtime.control != agentos.ControlCancel {
+	if runtime.control != agentoscore.ControlCancel {
 		t.Fatalf("control = %q", runtime.control)
 	}
 }
@@ -86,7 +87,7 @@ func TestPlanActivitiesStartPlanNodeRejectsBackendRunIDDrift(t *testing.T) {
 			},
 		},
 	})
-	if !errors.Is(err, agentos.ErrInvalidRunSpec) {
+	if !errors.Is(err, agentoscore.ErrInvalidRunSpec) {
 		t.Fatalf("StartPlanNodeActivity error = %v, want ErrInvalidRunSpec", err)
 	}
 }
@@ -104,7 +105,7 @@ func TestPlanActivitiesConstructorRequiresTransitionStore(t *testing.T) {
 		nil,
 		agentosplan.NewMemoryArtifactStore(),
 	)
-	if !errors.Is(err, agentos.ErrInvalidRunPlan) {
+	if !errors.Is(err, agentoscore.ErrInvalidRunPlan) {
 		t.Fatalf("missing transition store error = %v, want ErrInvalidRunPlan", err)
 	}
 
@@ -116,7 +117,7 @@ func TestPlanActivitiesConstructorRequiresTransitionStore(t *testing.T) {
 		nil,
 		nil,
 	)
-	if !errors.Is(err, agentos.ErrInvalidArtifact) {
+	if !errors.Is(err, agentoscore.ErrInvalidArtifact) {
 		t.Fatalf("missing artifact store error = %v, want ErrInvalidArtifact", err)
 	}
 }
@@ -172,13 +173,13 @@ func TestPlanActivitiesResolvePlanNodeInputDereferencesArtifactPayload(t *testin
 	ctx := context.Background()
 	activities := newTestPlanActivities(t, &fakePlanRuntime{})
 
-	ref, err := putArtifact(ctx, activities.ArtifactStore, &agentos.ArtifactRef{
+	ref, err := putArtifact(ctx, activities.ArtifactStore, &agentoscore.ArtifactRef{
 		ArtifactID: "artifact-summary",
 		PlanID:     Plan1,
 		NodeID:     "research",
 		RunID:      "run-research",
 		Name:       "summary",
-		Kind:       agentos.ArtifactKindObject,
+		Kind:       agentoscore.ArtifactKindObject,
 	}, map[string]any{
 		"body": map[string]any{"title": "artifact mapping"},
 	}, "plan-1:artifact-summary")
@@ -194,7 +195,7 @@ func TestPlanActivitiesResolvePlanNodeInputDereferencesArtifactPayload(t *testin
 		},
 		Status: agentos.RunPlanStatus{
 			PlanID:    Plan1,
-			Artifacts: []agentos.ArtifactRef{ref},
+			Artifacts: []agentoscore.ArtifactRef{ref},
 		},
 		Node: agentos.PlanNodeSpec{
 			NodeID: "verify",
@@ -234,8 +235,8 @@ func TestPlanActivitiesPublishArtifactsIsIdempotent(t *testing.T) {
 		Status: agentos.RunStatus{
 			RunID:          "run-1",
 			LifecycleState: "completed",
-			Artifacts: []agentos.ArtifactRef{
-				{ArtifactID: "artifact-1", Name: "summary", Kind: agentos.ArtifactKindObject},
+			Artifacts: []agentoscore.ArtifactRef{
+				{ArtifactID: "artifact-1", Name: "summary", Kind: agentoscore.ArtifactKindObject},
 			},
 		},
 	}
@@ -276,14 +277,14 @@ func TestPublishPlanArtifactsActivityHistoryInputContainsArtifactRefsOnly(t *tes
 		Status: agentos.RunStatus{
 			RunID:          "run-1",
 			LifecycleState: "completed",
-			Artifacts: []agentos.ArtifactRef{
+			Artifacts: []agentoscore.ArtifactRef{
 				{
 					ArtifactID: "artifact-1",
 					PlanID:     Plan1,
 					NodeID:     Node1,
 					RunID:      "run-1",
 					Name:       "summary",
-					Kind:       agentos.ArtifactKindObject,
+					Kind:       agentoscore.ArtifactKindObject,
 					URI:        "s3://artifact-bucket/plan-1/artifact-1",
 					SizeBytes:  128,
 					Digest:     "sha256:digest",
@@ -326,19 +327,19 @@ func TestPlanActivitiesPublishArtifactsRetainsStoredPayload(t *testing.T) {
 		t.Fatalf("ArtifactPublishIdempotencyKey: %v", err)
 	}
 
-	ref, err := putArtifact(ctx, activities.ArtifactStore, &agentos.ArtifactRef{
+	ref, err := putArtifact(ctx, activities.ArtifactStore, &agentoscore.ArtifactRef{
 		ArtifactID: "artifact-summary",
 		PlanID:     Plan1,
 		NodeID:     node.NodeID,
 		RunID:      status.RunID,
 		Name:       "summary",
-		Kind:       agentos.ArtifactKindObject,
+		Kind:       agentoscore.ArtifactKindObject,
 	}, map[string]any{"value": "from backend"}, key)
 	if err != nil {
 		t.Fatalf("Put artifact payload: %v", err)
 	}
 
-	status.Artifacts = []agentos.ArtifactRef{ref}
+	status.Artifacts = []agentoscore.ArtifactRef{ref}
 
 	output, err := activities.PublishPlanArtifactsActivity(ctx, &publishPlanArtifactsInput{
 		Spec: agentos.RunPlanSpec{
@@ -401,24 +402,24 @@ func TestPlanActivitiesPublishArtifactsValidatesSchemaRefPayload(t *testing.T) {
 	node := agentos.PlanNodeSpec{
 		NodeID: "research",
 		Outputs: []agentos.ArtifactSpec{
-			{Name: "summary", Kind: agentos.ArtifactKindObject, SchemaRef: "schema:summary"},
+			{Name: "summary", Kind: agentoscore.ArtifactKindObject, SchemaRef: "schema:summary"},
 		},
 	}
 	status := agentos.RunStatus{RunID: "run-research", LifecycleState: "completed"}
 
-	ref, err := putArtifact(ctx, activities.ArtifactStore, &agentos.ArtifactRef{
+	ref, err := putArtifact(ctx, activities.ArtifactStore, &agentoscore.ArtifactRef{
 		ArtifactID: "artifact-summary",
 		PlanID:     Plan1,
 		NodeID:     node.NodeID,
 		RunID:      status.RunID,
 		Name:       "summary",
-		Kind:       agentos.ArtifactKindObject,
+		Kind:       agentoscore.ArtifactKindObject,
 	}, map[string]any{"score": "high"}, "plan-1:artifact-summary")
 	if err != nil {
 		t.Fatalf("Put artifact payload: %v", err)
 	}
 
-	status.Artifacts = []agentos.ArtifactRef{ref}
+	status.Artifacts = []agentoscore.ArtifactRef{ref}
 
 	_, err = activities.PublishPlanArtifactsActivity(ctx, &publishPlanArtifactsInput{
 		Spec: agentos.RunPlanSpec{
@@ -429,7 +430,7 @@ func TestPlanActivitiesPublishArtifactsValidatesSchemaRefPayload(t *testing.T) {
 		Node:   node,
 		Status: status,
 	})
-	if !errors.Is(err, agentos.ErrInvalidArtifact) {
+	if !errors.Is(err, agentoscore.ErrInvalidArtifact) {
 		t.Fatalf("schema mismatch error = %v, want ErrInvalidArtifact", err)
 	}
 }
@@ -476,24 +477,24 @@ func TestPlanActivitiesPublishArtifactsValidatesSuccessfulOutputContract(t *test
 			Capability: "run",
 			Run:        agentos.RunSpec{RunID: "run-research", Backend: ref},
 			Outputs: []agentos.ArtifactSpec{
-				{Name: "summary", Kind: agentos.ArtifactKindObject, MediaType: "application/json", Required: true},
+				{Name: "summary", Kind: agentoscore.ArtifactKindObject, MediaType: "application/json", Required: true},
 			},
 		},
 		Status: agentos.RunStatus{
 			RunID:          "run-research",
 			LifecycleState: "completed",
-			Artifacts: []agentos.ArtifactRef{
+			Artifacts: []agentoscore.ArtifactRef{
 				{
 					ArtifactID: "artifact-1",
 					Name:       "summary",
-					Kind:       agentos.ArtifactKindObject,
+					Kind:       agentoscore.ArtifactKindObject,
 					MediaType:  "application/json",
 					Metadata:   map[string]string{"quality": "draft"},
 				},
 			},
 		},
 	})
-	if !errors.Is(err, agentos.ErrInvalidArtifact) {
+	if !errors.Is(err, agentoscore.ErrInvalidArtifact) {
 		t.Fatalf("error = %v, want ErrInvalidArtifact", err)
 	}
 }
@@ -511,7 +512,7 @@ func TestPlanActivitiesPublishArtifactsDoesNotRequireOutputsForFailedRun(t *test
 		Node: agentos.PlanNodeSpec{
 			NodeID: Node1,
 			Outputs: []agentos.ArtifactSpec{
-				{Name: "summary", Kind: agentos.ArtifactKindObject, Required: true},
+				{Name: "summary", Kind: agentoscore.ArtifactKindObject, Required: true},
 			},
 		},
 		Status: agentos.RunStatus{
@@ -545,8 +546,8 @@ func TestPlanActivitiesPersistPlanStatePublishesStoredEvent(t *testing.T) {
 		Spec:   spec,
 		Status: status,
 		Event: agentos.PlanEvent{
-			Event: agentos.Event{
-				EventType: agentos.EventPlanStarted,
+			Event: agentoscore.Event{
+				EventType: agentoscore.EventPlanStarted,
 			},
 			PlanID: Plan1,
 		},
@@ -586,8 +587,8 @@ func TestPlanActivitiesPersistPlanStateDoesNotFailOnLivePublishError(t *testing.
 		Spec:   spec,
 		Status: status,
 		Event: agentos.PlanEvent{
-			Event: agentos.Event{
-				EventType: agentos.EventPlanStarted,
+			Event: agentoscore.Event{
+				EventType: agentoscore.EventPlanStarted,
 			},
 			PlanID: Plan1,
 		},
@@ -625,8 +626,8 @@ func TestPlanActivitiesPersistPlanStateDoesNotPublishWhenDurableTransitionFails(
 			LifecycleState: agentos.PlanLifecycleRunning,
 		},
 		Event: agentos.PlanEvent{
-			Event: agentos.Event{
-				EventType: agentos.EventPlanStarted,
+			Event: agentoscore.Event{
+				EventType: agentoscore.EventPlanStarted,
 			},
 			PlanID: Plan1,
 		},
@@ -647,7 +648,7 @@ func TestPlanActivitiesEvaluatePlanExpansionValidatesDelta(t *testing.T) {
 	ref := agentos.BackendRef{Kind: agentos.BackendKindNative, Name: agentos.BackendNameGoAgentNative}
 	artifactStore := agentosplan.NewMemoryArtifactStore()
 
-	deltaRef, err := putArtifact(context.Background(), artifactStore, &agentos.ArtifactRef{ArtifactID: "delta-1", PlanID: "plan-expand", NodeID: "seed", RunID: "run-seed", Name: "expand", Kind: agentos.ArtifactKindPlanDelta}, agentosplan.PlanDelta{
+	deltaRef, err := putArtifact(context.Background(), artifactStore, &agentoscore.ArtifactRef{ArtifactID: "delta-1", PlanID: "plan-expand", NodeID: "seed", RunID: "run-seed", Name: "expand", Kind: agentoscore.ArtifactKindPlanDelta}, agentosplan.PlanDelta{
 		Nodes: []agentos.PlanNodeSpec{{NodeID: Expanded, Capability: "expand", Run: agentos.RunSpec{RunID: "run-expanded", Backend: ref}}},
 		Edges: []agentos.PlanEdgeSpec{{EdgeID: "seed-expanded", From: "seed", To: Expanded, On: agentos.EdgeOnSuccess}},
 	}, "delta-key")
@@ -655,7 +656,7 @@ func TestPlanActivitiesEvaluatePlanExpansionValidatesDelta(t *testing.T) {
 		t.Fatalf("Put delta artifact: %v", err)
 	}
 
-	activities, err := NewPlanActivitiesWithStores(&fakePlanRuntime{}, []agentos.Capability{{Backend: ref, Name: "expand", Controls: []agentos.ControlOperation{agentos.ControlPause, agentos.ControlResume}}}, agentosplan.NewMemoryPlanStore(), nil, artifactStore)
+	activities, err := NewPlanActivitiesWithStores(&fakePlanRuntime{}, []agentos.Capability{{Backend: ref, Name: "expand", Controls: []agentoscore.ControlOperation{agentoscore.ControlPause, agentoscore.ControlResume}}}, agentosplan.NewMemoryPlanStore(), nil, artifactStore)
 	if err != nil {
 		t.Fatalf("NewPlanActivitiesWithStores: %v", err)
 	}
@@ -665,7 +666,7 @@ func TestPlanActivitiesEvaluatePlanExpansionValidatesDelta(t *testing.T) {
 		Status:    agentos.RunPlanStatus{PlanID: "plan-expand"},
 		Node:      agentos.PlanNodeSpec{NodeID: "seed", Run: agentos.RunSpec{RunID: "run-seed", Backend: ref}},
 		RunStatus: agentos.RunStatus{RunID: "run-seed", LifecycleState: "completed"},
-		Artifacts: []agentos.ArtifactRef{deltaRef},
+		Artifacts: []agentoscore.ArtifactRef{deltaRef},
 	})
 	if err != nil {
 		t.Fatalf("EvaluatePlanExpansionActivity: %v", err)
@@ -700,7 +701,7 @@ func TestPlanActivitiesValidatePlanUsesCapabilityCatalog(t *testing.T) {
 			},
 		},
 	})
-	if !errors.Is(err, agentos.ErrCapabilityNotFound) {
+	if !errors.Is(err, agentoscore.ErrCapabilityNotFound) {
 		t.Fatalf("error = %v, want ErrCapabilityNotFound", err)
 	}
 
@@ -737,7 +738,7 @@ func TestPlanActivitiesValidatePlanReturnsCapabilityControls(t *testing.T) {
 	activities := newTestPlanActivities(t, &fakePlanRuntime{}, agentos.Capability{
 		Backend:  ref,
 		Name:     "known",
-		Controls: []agentos.ControlOperation{agentos.ControlPause, agentos.ControlResume},
+		Controls: []agentoscore.ControlOperation{agentoscore.ControlPause, agentoscore.ControlResume},
 	})
 
 	output, err := activities.ValidatePlanActivity(context.Background(), &validatePlanInput{
@@ -761,7 +762,7 @@ func TestPlanActivitiesValidatePlanReturnsCapabilityControls(t *testing.T) {
 		t.Fatalf("ValidatePlanActivity: %v", err)
 	}
 
-	if got := output.ControlsByNode["research"]; len(got) != 2 || got[0] != agentos.ControlPause || got[1] != agentos.ControlResume {
+	if got := output.ControlsByNode["research"]; len(got) != 2 || got[0] != agentoscore.ControlPause || got[1] != agentoscore.ControlResume {
 		t.Fatalf("controls = %#v", output.ControlsByNode)
 	}
 }
@@ -772,7 +773,7 @@ func TestPlanActivitiesValidatePlanUsesInjectedCapabilityCatalog(t *testing.T) {
 	ref := agentos.BackendRef{Kind: agentos.BackendKindHTTP, Name: "research"}
 
 	catalog, err := agentosplan.NewStaticCapabilityCatalog([]agentos.Capability{
-		{Backend: ref, Name: "run", Controls: []agentos.ControlOperation{agentos.ControlCancel}},
+		{Backend: ref, Name: "run", Controls: []agentoscore.ControlOperation{agentoscore.ControlCancel}},
 	})
 	if err != nil {
 		t.Fatalf("NewStaticCapabilityCatalog: %v", err)
@@ -812,7 +813,7 @@ func TestPlanActivitiesValidatePlanUsesInjectedCapabilityCatalog(t *testing.T) {
 		t.Fatalf("ValidatePlanActivity: %v", err)
 	}
 
-	if got := output.ControlsByNode["research"]; len(got) != 1 || got[0] != agentos.ControlCancel {
+	if got := output.ControlsByNode["research"]; len(got) != 1 || got[0] != agentoscore.ControlCancel {
 		t.Fatalf("controls = %#v", output.ControlsByNode)
 	}
 }
@@ -889,10 +890,10 @@ func assertPlanExpansionApplied(t *testing.T, output *EvaluatePlanExpansionOutpu
 	assertExpandedCapability(t, output.CapabilitiesByNode, ref)
 }
 
-func assertExpandedControls(t *testing.T, controlsByNode map[string][]agentos.ControlOperation) {
+func assertExpandedControls(t *testing.T, controlsByNode map[string][]agentoscore.ControlOperation) {
 	t.Helper()
 
-	if got := controlsByNode[Expanded]; len(got) != 2 || got[0] != agentos.ControlPause || got[1] != agentos.ControlResume {
+	if got := controlsByNode[Expanded]; len(got) != 2 || got[0] != agentoscore.ControlPause || got[1] != agentoscore.ControlResume {
 		t.Fatalf("expanded controls = %#v", controlsByNode)
 	}
 }
@@ -913,7 +914,7 @@ func assertExpandedCapability(t *testing.T, capabilitiesByNode map[string]agento
 type fakePlanRuntime struct {
 	started     agentos.RunSpec
 	startStatus agentos.RunStatus
-	control     agentos.ControlOperation
+	control     agentoscore.ControlOperation
 }
 
 type fakePlanEventPublisher struct {
@@ -950,7 +951,7 @@ func (r *fakePlanRuntime) StartPlanNode(ctx context.Context, _, _ string, spec *
 	return r.Start(ctx, spec)
 }
 
-func (r *fakePlanRuntime) Signal(context.Context, string, *agentos.Signal) error {
+func (r *fakePlanRuntime) Signal(context.Context, string, *agentoscore.Signal) error {
 	return nil
 }
 
@@ -958,13 +959,13 @@ func (r *fakePlanRuntime) Status(context.Context, string) (agentos.RunStatus, er
 	return agentos.RunStatus{RunID: "run-1", LifecycleState: "completed", UpdatedAt: time.Now()}, nil
 }
 
-func (r *fakePlanRuntime) Control(_ context.Context, _ string, control *agentos.ControlRequest) error {
+func (r *fakePlanRuntime) Control(_ context.Context, _ string, control *agentoscore.ControlRequest) error {
 	r.control = control.Operation
 
 	return nil
 }
 
-func (r *fakePlanRuntime) Subscribe(context.Context, agentos.StreamScope) (agentos.Subscription, error) {
+func (r *fakePlanRuntime) Subscribe(context.Context, agentoscore.StreamScope) (agentoscore.Subscription, error) {
 	return nil, nil
 }
 

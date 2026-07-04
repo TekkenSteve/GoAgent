@@ -3,7 +3,8 @@ package httpbackend
 import (
 	"time"
 
-	"github.com/TekkenSteve/GoAgent/agentos"
+	agentos "github.com/TekkenSteve/GoAgent/agentos/control"
+	agentoscore "github.com/TekkenSteve/GoAgent/agentos/core"
 )
 
 type startRequest struct {
@@ -23,16 +24,16 @@ type startRequest struct {
 }
 
 type signalRequest struct {
-	Type           agentos.SignalType `json:"type"`
-	IdempotencyKey string             `json:"idempotency_key,omitempty"`
-	Payload        map[string]any     `json:"payload,omitempty"`
-	SentAt         time.Time          `json:"sent_at"`
+	Type           agentoscore.SignalType `json:"type"`
+	IdempotencyKey string                 `json:"idempotency_key,omitempty"`
+	Payload        map[string]any         `json:"payload,omitempty"`
+	SentAt         time.Time              `json:"sent_at"`
 }
 
 type controlRequest struct {
-	Operation      agentos.ControlOperation `json:"operation"`
-	IdempotencyKey string                   `json:"idempotency_key,omitempty"`
-	RequestedAt    time.Time                `json:"requested_at"`
+	Operation      agentoscore.ControlOperation `json:"operation"`
+	IdempotencyKey string                       `json:"idempotency_key,omitempty"`
+	RequestedAt    time.Time                    `json:"requested_at"`
 }
 
 func startRequestFromSpec(spec *agentos.RunSpec) startRequest {
@@ -58,7 +59,7 @@ func startRequestFromSpec(spec *agentos.RunSpec) startRequest {
 	}
 }
 
-func signalRequestFromSignal(signal *agentos.Signal) signalRequest {
+func signalRequestFromSignal(signal *agentoscore.Signal) signalRequest {
 	sentAt := signal.SentAt
 	if sentAt.IsZero() {
 		sentAt = time.Now().UTC()
@@ -72,7 +73,7 @@ func signalRequestFromSignal(signal *agentos.Signal) signalRequest {
 	}
 }
 
-func controlRequestFromControl(control *agentos.ControlRequest) controlRequest {
+func controlRequestFromControl(control *agentoscore.ControlRequest) controlRequest {
 	requestedAt := control.RequestedAt
 	if requestedAt.IsZero() {
 		requestedAt = time.Now().UTC()

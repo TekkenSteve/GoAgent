@@ -10,7 +10,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/TekkenSteve/GoAgent/agentos"
+	agentos "github.com/TekkenSteve/GoAgent/agentos/control"
+	agentoscore "github.com/TekkenSteve/GoAgent/agentos/core"
 	"github.com/goccy/go-json"
 )
 
@@ -54,17 +55,17 @@ type planTopologyNode struct {
 }
 
 type planEvent struct {
-	EventID   string            `json:"event_id"`
-	EventType agentos.EventType `json:"event_type"`
-	PlanID    string            `json:"plan_id"`
-	NodeID    string            `json:"node_id"`
-	Sequence  int64             `json:"sequence"`
-	Payload   map[string]any    `json:"payload"`
+	EventID   string                `json:"event_id"`
+	EventType agentoscore.EventType `json:"event_type"`
+	PlanID    string                `json:"plan_id"`
+	NodeID    string                `json:"node_id"`
+	Sequence  int64                 `json:"sequence"`
+	Payload   map[string]any        `json:"payload"`
 }
 
 type planDebugTrace struct {
 	EventID    string                    `json:"event_id"`
-	EventType  agentos.EventType         `json:"event_type"`
+	EventType  agentoscore.EventType     `json:"event_type"`
 	PlanID     string                    `json:"plan_id"`
 	NodeID     string                    `json:"node_id"`
 	Capability *planDebugCapabilityTrace `json:"capability"`
@@ -100,9 +101,9 @@ func TestHTTPAgentOSRunPlanNativeCancelV1(t *testing.T) {
 	requireNativePlanDescription(t, &description, planID)
 
 	events := listAgentOSPlanEvents(t, planID)
-	requirePlanEvent(t, events, agentos.EventPlanStarted)
-	requirePlanEvent(t, events, agentos.EventCapabilitySelected)
-	requirePlanEvent(t, events, agentos.EventPlanNodeStarted)
+	requirePlanEvent(t, events, agentoscore.EventPlanStarted)
+	requirePlanEvent(t, events, agentoscore.EventCapabilitySelected)
+	requirePlanEvent(t, events, agentoscore.EventPlanNodeStarted)
 
 	traces := listAgentOSPlanDebugTraces(t, planID)
 	requireCapabilityTrace(t, traces)
@@ -112,7 +113,7 @@ func TestHTTPAgentOSRunPlanNativeCancelV1(t *testing.T) {
 
 	requireAgentOSPlanConsole(t, planID)
 
-	controlAgentOSPlan(t, planID, agentos.ControlCancel, fmt.Sprintf("%s-cancel", planID))
+	controlAgentOSPlan(t, planID, agentoscore.ControlCancel, fmt.Sprintf("%s-cancel", planID))
 	canceled := waitForPlanLifecycle(t, planID, agentos.PlanLifecycleCanceled)
 
 	canceledNode := requirePlanNode(t, &canceled, agentOSPlanNodeID)
@@ -192,15 +193,15 @@ func TestHTTPAgentOSRunPlanMixedBackendsV1(t *testing.T) {
 	}
 
 	events := listAgentOSPlanEvents(t, planID)
-	requirePlanEvent(t, events, agentos.EventPlanStarted)
-	requirePlanEvent(t, events, agentos.EventPlanNodeSucceeded)
-	requirePlanEvent(t, events, agentos.EventUsageReported)
+	requirePlanEvent(t, events, agentoscore.EventPlanStarted)
+	requirePlanEvent(t, events, agentoscore.EventPlanNodeSucceeded)
+	requirePlanEvent(t, events, agentoscore.EventUsageReported)
 	traces := listAgentOSPlanDebugTraces(t, planID)
 	requireCapabilityTraceForBackend(t, traces, nativeBackend)
 	requireCapabilityTraceForBackend(t, traces, temporalBackend)
 	requireCapabilityTraceForBackend(t, traces, httpBackend)
 	requireCapabilityTraceForBackend(t, traces, grpcBackend)
-	controlAgentOSPlan(t, planID, agentos.ControlCancel, fmt.Sprintf("%s-cancel", planID))
+	controlAgentOSPlan(t, planID, agentoscore.ControlCancel, fmt.Sprintf("%s-cancel", planID))
 	canceled := waitForPlanLifecycle(t, planID, agentos.PlanLifecycleCanceled)
 
 	canceledNative := requirePlanNode(t, &canceled, "native")
@@ -418,7 +419,7 @@ func requireAgentOSPlanConsole(t *testing.T, planID string) {
 	}
 }
 
-func controlAgentOSPlan(t *testing.T, planID string, operation agentos.ControlOperation, idempotencyKey string) {
+func controlAgentOSPlan(t *testing.T, planID string, operation agentoscore.ControlOperation, idempotencyKey string) {
 	t.Helper()
 
 	body, err := json.Marshal(map[string]any{
@@ -499,7 +500,7 @@ func requirePlanNodeBackend(t *testing.T, status *planStatus, nodeID, runID stri
 	}
 }
 
-func requirePlanEvent(t *testing.T, events []planEvent, eventType agentos.EventType) {
+func requirePlanEvent(t *testing.T, events []planEvent, eventType agentoscore.EventType) {
 	t.Helper()
 
 	for _, event := range events {

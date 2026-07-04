@@ -4,7 +4,7 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/TekkenSteve/GoAgent/agentos"
+	agentoscore "github.com/TekkenSteve/GoAgent/agentos/core"
 	"github.com/TekkenSteve/GoAgent/internal/usecase/agentosplan"
 )
 
@@ -12,7 +12,7 @@ func TestDecodeStoredArtifactPayloadRejectsSizeMismatch(t *testing.T) {
 	t.Parallel()
 
 	payload := []byte(`{"ok":true}`)
-	ref := agentos.ArtifactRef{
+	ref := agentoscore.ArtifactRef{
 		ArtifactID: "artifact-1",
 		MediaType:  "application/json",
 		SizeBytes:  int64(len(payload) + 1),
@@ -20,7 +20,7 @@ func TestDecodeStoredArtifactPayloadRejectsSizeMismatch(t *testing.T) {
 	}
 
 	_, err := decodeStoredArtifactPayload(&ref, payload)
-	if !errors.Is(err, agentos.ErrInvalidArtifact) {
+	if !errors.Is(err, agentoscore.ErrInvalidArtifact) {
 		t.Fatalf("error = %v, want ErrInvalidArtifact", err)
 	}
 }
@@ -29,7 +29,7 @@ func TestDecodeStoredArtifactPayloadRejectsDigestMismatch(t *testing.T) {
 	t.Parallel()
 
 	payload := []byte(`{"ok":true}`)
-	ref := agentos.ArtifactRef{
+	ref := agentoscore.ArtifactRef{
 		ArtifactID: "artifact-1",
 		MediaType:  "application/json",
 		SizeBytes:  int64(len(payload)),
@@ -37,7 +37,7 @@ func TestDecodeStoredArtifactPayloadRejectsDigestMismatch(t *testing.T) {
 	}
 
 	_, err := decodeStoredArtifactPayload(&ref, payload)
-	if !errors.Is(err, agentos.ErrInvalidArtifact) {
+	if !errors.Is(err, agentoscore.ErrInvalidArtifact) {
 		t.Fatalf("error = %v, want ErrInvalidArtifact", err)
 	}
 }
@@ -46,7 +46,7 @@ func TestDecodeStoredArtifactPayloadDecodesVerifiedPayload(t *testing.T) {
 	t.Parallel()
 
 	payload := []byte(`{"ok":true}`)
-	ref := agentos.ArtifactRef{
+	ref := agentoscore.ArtifactRef{
 		ArtifactID: "artifact-1",
 		MediaType:  "application/json",
 		SizeBytes:  int64(len(payload)),

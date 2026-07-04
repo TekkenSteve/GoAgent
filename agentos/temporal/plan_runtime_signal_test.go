@@ -6,7 +6,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/TekkenSteve/GoAgent/agentos"
+	agentos "github.com/TekkenSteve/GoAgent/agentos/control"
+	agentoscore "github.com/TekkenSteve/GoAgent/agentos/core"
 	"github.com/TekkenSteve/GoAgent/internal/usecase/agentosplan"
 	"go.temporal.io/sdk/client"
 )
@@ -57,19 +58,19 @@ func TestPlanRuntimeSignalPlanValidatesSignalBeforeAudit(t *testing.T) {
 	rt := &planRuntime{}
 	ref := agentos.PlanRef{PlanID: "plan-1", AccountID: "acct-1", ProjectID: "proj-1"}
 
-	err := rt.SignalPlan(t.Context(), ref, &agentos.Signal{
-		Type:           agentos.SignalUserMessage,
+	err := rt.SignalPlan(t.Context(), ref, &agentoscore.Signal{
+		Type:           agentoscore.SignalUserMessage,
 		IdempotencyKey: "message-1",
 	})
-	if !errors.Is(err, agentos.ErrInvalidSignal) {
+	if !errors.Is(err, agentoscore.ErrInvalidSignal) {
 		t.Fatalf("SignalPlan error = %v, want ErrInvalidSignal", err)
 	}
 
-	err = rt.SignalPlan(t.Context(), ref, &agentos.Signal{
-		Type:           agentos.SignalPlanNodeRetry,
+	err = rt.SignalPlan(t.Context(), ref, &agentoscore.Signal{
+		Type:           agentoscore.SignalPlanNodeRetry,
 		IdempotencyKey: "retry-1",
 	})
-	if !errors.Is(err, agentos.ErrInvalidSignal) {
+	if !errors.Is(err, agentoscore.ErrInvalidSignal) {
 		t.Fatalf("SignalPlan retry error = %v, want ErrInvalidSignal", err)
 	}
 }
@@ -156,7 +157,7 @@ func TestPlanRuntimeStartPlanRequiresTenantScope(t *testing.T) {
 		PlanID:         "plan-1",
 		IdempotencyKey: "plan-start-1",
 	})
-	if !errors.Is(err, agentos.ErrInvalidPlanScope) {
+	if !errors.Is(err, agentoscore.ErrInvalidPlanScope) {
 		t.Fatalf("StartPlan missing account error = %v, want ErrInvalidPlanScope", err)
 	}
 
@@ -165,7 +166,7 @@ func TestPlanRuntimeStartPlanRequiresTenantScope(t *testing.T) {
 		AccountID:      "acct-1",
 		IdempotencyKey: "plan-start-1",
 	})
-	if !errors.Is(err, agentos.ErrInvalidPlanScope) {
+	if !errors.Is(err, agentoscore.ErrInvalidPlanScope) {
 		t.Fatalf("StartPlan missing project error = %v, want ErrInvalidPlanScope", err)
 	}
 }
@@ -421,8 +422,8 @@ func TestPlanRuntimeSignalPlanRequiresCommandStore(t *testing.T) {
 	store, ref := newPlanRuntimeTestStore(t)
 	rt := &planRuntime{temporalClient: &fakePlanTemporalClient{}, auditStore: store, planIndex: store}
 
-	err := rt.SignalPlan(t.Context(), ref, &agentos.Signal{
-		Type:           agentos.SignalPlanApprove,
+	err := rt.SignalPlan(t.Context(), ref, &agentoscore.Signal{
+		Type:           agentoscore.SignalPlanApprove,
 		IdempotencyKey: "approve-1",
 		ActorID:        "operator-1",
 	})
@@ -437,7 +438,7 @@ func TestPlanRuntimeStatusPlanReportsMissingDurablePlan(t *testing.T) {
 	rt := &planRuntime{planIndex: agentosplan.NewMemoryPlanStore()}
 
 	_, err := rt.StatusPlan(t.Context(), agentos.PlanRef{PlanID: "missing-plan", AccountID: "acct-1", ProjectID: "proj-1"})
-	if !errors.Is(err, agentos.ErrPlanRouteNotFound) {
+	if !errors.Is(err, agentoscore.ErrPlanRouteNotFound) {
 		t.Fatalf("StatusPlan error = %v, want ErrPlanRouteNotFound", err)
 	}
 }
@@ -450,7 +451,7 @@ func TestPlanRuntimeStatusPlanRejectsTenantMismatch(t *testing.T) {
 	ref.AccountID = "acct-other"
 
 	_, err := rt.StatusPlan(t.Context(), ref)
-	if !errors.Is(err, agentos.ErrPlanRouteNotFound) {
+	if !errors.Is(err, agentoscore.ErrPlanRouteNotFound) {
 		t.Fatalf("StatusPlan error = %v, want ErrPlanRouteNotFound", err)
 	}
 }
@@ -459,14 +460,14 @@ func TestPlanRuntimeSubscribePlanEnforcesTenantScope(t *testing.T) {
 	t.Parallel()
 
 	store, ref := newPlanRuntimeTestStore(t)
-	if _, err := store.AppendPlanEvent(t.Context(), &agentos.PlanEvent{Event: agentos.Event{EventType: agentos.EventPlanStarted}, PlanID: ref.PlanID}, "event-1"); err != nil {
+	if _, err := store.AppendPlanEvent(t.Context(), &agentos.PlanEvent{Event: agentoscore.Event{EventType: agentoscore.EventPlanStarted}, PlanID: ref.PlanID}, "event-1"); err != nil {
 		t.Fatalf("AppendPlanEvent: %v", err)
 	}
 
 	rt := &planRuntime{planIndex: store, planEvents: store}
 
 	_, err := rt.SubscribePlan(t.Context(), &agentos.PlanStreamScope{PlanID: ref.PlanID, AccountID: "acct-other", ProjectID: ref.ProjectID})
-	if !errors.Is(err, agentos.ErrPlanRouteNotFound) {
+	if !errors.Is(err, agentoscore.ErrPlanRouteNotFound) {
 		t.Fatalf("SubscribePlan mismatch error = %v, want ErrPlanRouteNotFound", err)
 	}
 
@@ -477,7 +478,7 @@ func TestPlanRuntimeSubscribePlanEnforcesTenantScope(t *testing.T) {
 	defer sub.Close()
 
 	event := <-sub.Events()
-	if event.EventType != agentos.EventPlanStarted {
+	if event.EventType != agentoscore.EventPlanStarted {
 		t.Fatalf("event = %#v", event)
 	}
 }
@@ -487,7 +488,7 @@ func TestPlanRuntimeSubscribePlanCatchesUpDurableEventsAfterLiveSubscribe(t *tes
 	store, ref := newPlanRuntimeTestStore(t)
 
 	if _, err := store.AppendPlanEvent(t.Context(), &agentos.PlanEvent{
-		Event:  agentos.Event{EventType: agentos.EventPlanStarted},
+		Event:  agentoscore.Event{EventType: agentoscore.EventPlanStarted},
 		PlanID: ref.PlanID,
 	}, "event-1"); err != nil {
 		t.Fatalf("AppendPlanEvent initial: %v", err)
@@ -496,7 +497,7 @@ func TestPlanRuntimeSubscribePlanCatchesUpDurableEventsAfterLiveSubscribe(t *tes
 	live := &catchUpPlanEventSubscriber{
 		append: func(ctx context.Context, scope *agentos.PlanStreamScope) error {
 			_, err := store.AppendPlanEvent(ctx, &agentos.PlanEvent{
-				Event:  agentos.Event{EventType: agentos.EventPlanNodeStarted, RunID: "run-draft"},
+				Event:  agentoscore.Event{EventType: agentoscore.EventPlanNodeStarted, RunID: "run-draft"},
 				PlanID: scope.PlanID,
 				NodeID: "draft",
 			}, "event-2")
@@ -515,7 +516,7 @@ func TestPlanRuntimeSubscribePlanCatchesUpDurableEventsAfterLiveSubscribe(t *tes
 	first := <-sub.Events()
 
 	second := <-sub.Events()
-	if first.EventType != agentos.EventPlanStarted || second.EventType != agentos.EventPlanNodeStarted {
+	if first.EventType != agentoscore.EventPlanStarted || second.EventType != agentoscore.EventPlanNodeStarted {
 		t.Fatalf("events = %#v, %#v", first, second)
 	}
 
@@ -529,21 +530,21 @@ func TestPlanRuntimeListPlanEventsEnforcesTenantScopeAndFilters(t *testing.T) {
 	store, ref := newPlanRuntimeTestStore(t)
 	events := []agentos.PlanEvent{
 		{
-			Event:  agentos.Event{EventType: agentos.EventPlanStarted},
+			Event:  agentoscore.Event{EventType: agentoscore.EventPlanStarted},
 			PlanID: ref.PlanID,
 		},
 		{
-			Event:  agentos.Event{EventType: agentos.EventPlanNodeStarted, RunID: runResearch},
-			PlanID: ref.PlanID,
-			NodeID: "research",
-		},
-		{
-			Event:  agentos.Event{EventType: agentos.EventPlanNodeSucceeded, RunID: runResearch},
+			Event:  agentoscore.Event{EventType: agentoscore.EventPlanNodeStarted, RunID: runResearch},
 			PlanID: ref.PlanID,
 			NodeID: "research",
 		},
 		{
-			Event:  agentos.Event{EventType: agentos.EventPlanNodeStarted, RunID: "run-verify"},
+			Event:  agentoscore.Event{EventType: agentoscore.EventPlanNodeSucceeded, RunID: runResearch},
+			PlanID: ref.PlanID,
+			NodeID: "research",
+		},
+		{
+			Event:  agentoscore.Event{EventType: agentoscore.EventPlanNodeStarted, RunID: "run-verify"},
 			PlanID: ref.PlanID,
 			NodeID: "verify",
 		},
@@ -559,7 +560,7 @@ func TestPlanRuntimeListPlanEventsEnforcesTenantScopeAndFilters(t *testing.T) {
 	rt := &planRuntime{planIndex: store, planEvents: store}
 
 	_, err := rt.ListPlanEvents(t.Context(), &agentos.PlanEventScope{PlanID: ref.PlanID, AccountID: "acct-other", ProjectID: ref.ProjectID})
-	if !errors.Is(err, agentos.ErrPlanRouteNotFound) {
+	if !errors.Is(err, agentoscore.ErrPlanRouteNotFound) {
 		t.Fatalf("ListPlanEvents mismatch error = %v, want ErrPlanRouteNotFound", err)
 	}
 
@@ -576,7 +577,7 @@ func TestPlanRuntimeListPlanEventsEnforcesTenantScopeAndFilters(t *testing.T) {
 		t.Fatalf("ListPlanEvents scoped: %v", err)
 	}
 
-	if len(got) != 1 || got[0].EventType != agentos.EventPlanNodeStarted || got[0].NodeID != "research" || got[0].RunID != runResearch {
+	if len(got) != 1 || got[0].EventType != agentoscore.EventPlanNodeStarted || got[0].NodeID != "research" || got[0].RunID != runResearch {
 		t.Fatalf("events = %#v", got)
 	}
 }
@@ -589,7 +590,7 @@ func TestPlanRuntimeListPlanDebugTracesProjectsDurableEvents(t *testing.T) {
 	rt := &planRuntime{planIndex: store, planEvents: store}
 
 	_, err := rt.ListPlanDebugTraces(t.Context(), &agentos.PlanDebugTraceScope{PlanID: ref.PlanID, AccountID: "acct-other", ProjectID: ref.ProjectID})
-	if !errors.Is(err, agentos.ErrPlanRouteNotFound) {
+	if !errors.Is(err, agentoscore.ErrPlanRouteNotFound) {
 		t.Fatalf("ListPlanDebugTraces mismatch error = %v, want ErrPlanRouteNotFound", err)
 	}
 
@@ -611,7 +612,7 @@ func TestPlanRuntimeListPlanAuditsEnforcesTenantScope(t *testing.T) {
 		ActorID:        "operator-1",
 		Action:         agentosplan.AuditActionPlanControl,
 		IdempotencyKey: "control-1",
-		Payload:        map[string]any{"operation": string(agentos.ControlCancel)},
+		Payload:        map[string]any{"operation": string(agentoscore.ControlCancel)},
 		CreatedAt:      time.Date(2026, 6, 19, 12, 0, 0, 0, time.UTC),
 	}
 	if _, _, err := store.RecordAudit(t.Context(), &audit); err != nil {
@@ -621,7 +622,7 @@ func TestPlanRuntimeListPlanAuditsEnforcesTenantScope(t *testing.T) {
 	rt := &planRuntime{planIndex: store, auditStore: store}
 
 	_, err := rt.ListPlanAudits(t.Context(), &agentos.PlanAuditScope{PlanID: ref.PlanID, AccountID: "acct-other", ProjectID: ref.ProjectID})
-	if !errors.Is(err, agentos.ErrPlanRouteNotFound) {
+	if !errors.Is(err, agentoscore.ErrPlanRouteNotFound) {
 		t.Fatalf("ListPlanAudits mismatch error = %v, want ErrPlanRouteNotFound", err)
 	}
 
@@ -646,25 +647,25 @@ func TestPlanRuntimeListPlanArtifactsEnforcesTenantScopeAndFilters(t *testing.T)
 	store, ref := newPlanRuntimeTestStore(t)
 	artifactStore := agentosplan.NewMemoryArtifactStore()
 
-	_, err := putArtifact(t.Context(), artifactStore, &agentos.ArtifactRef{
+	_, err := putArtifact(t.Context(), artifactStore, &agentoscore.ArtifactRef{
 		ArtifactID: "artifact-research",
 		PlanID:     ref.PlanID,
 		NodeID:     "research",
 		RunID:      runResearch,
 		Name:       "summary",
-		Kind:       agentos.ArtifactKindObject,
+		Kind:       agentoscore.ArtifactKindObject,
 	}, map[string]any{"summary": "ok"}, "artifact-research")
 	if err != nil {
 		t.Fatalf("Put artifact: %v", err)
 	}
 
-	_, err = putArtifact(t.Context(), artifactStore, &agentos.ArtifactRef{
+	_, err = putArtifact(t.Context(), artifactStore, &agentoscore.ArtifactRef{
 		ArtifactID: "artifact-other",
 		PlanID:     ref.PlanID,
 		NodeID:     "verify",
 		RunID:      "run-verify",
 		Name:       "report",
-		Kind:       agentos.ArtifactKindReport,
+		Kind:       agentoscore.ArtifactKindReport,
 	}, map[string]any{"report": "ok"}, "artifact-other")
 	if err != nil {
 		t.Fatalf("Put other artifact: %v", err)
@@ -673,7 +674,7 @@ func TestPlanRuntimeListPlanArtifactsEnforcesTenantScopeAndFilters(t *testing.T)
 	rt := &planRuntime{planIndex: store, artifactStore: artifactStore}
 
 	_, err = rt.ListPlanArtifacts(t.Context(), &agentos.PlanArtifactScope{PlanID: ref.PlanID, AccountID: "acct-other", ProjectID: ref.ProjectID})
-	if !errors.Is(err, agentos.ErrPlanRouteNotFound) {
+	if !errors.Is(err, agentoscore.ErrPlanRouteNotFound) {
 		t.Fatalf("ListPlanArtifacts mismatch error = %v, want ErrPlanRouteNotFound", err)
 	}
 
@@ -698,25 +699,25 @@ func TestPlanRuntimeGetPlanArtifactEnforcesPlanOwnership(t *testing.T) {
 	store, ref := newPlanRuntimeTestStore(t)
 	artifactStore := agentosplan.NewMemoryArtifactStore()
 
-	_, err := putArtifact(t.Context(), artifactStore, &agentos.ArtifactRef{
+	_, err := putArtifact(t.Context(), artifactStore, &agentoscore.ArtifactRef{
 		ArtifactID: "artifact-1",
 		PlanID:     ref.PlanID,
 		NodeID:     "research",
 		RunID:      runResearch,
 		Name:       "summary",
-		Kind:       agentos.ArtifactKindObject,
+		Kind:       agentoscore.ArtifactKindObject,
 	}, map[string]any{"summary": "ok"}, "artifact-1")
 	if err != nil {
 		t.Fatalf("Put artifact: %v", err)
 	}
 
-	_, err = putArtifact(t.Context(), artifactStore, &agentos.ArtifactRef{
+	_, err = putArtifact(t.Context(), artifactStore, &agentoscore.ArtifactRef{
 		ArtifactID: "artifact-other-plan",
 		PlanID:     "plan-other",
 		NodeID:     "research",
 		RunID:      "run-other",
 		Name:       "summary",
-		Kind:       agentos.ArtifactKindObject,
+		Kind:       agentoscore.ArtifactKindObject,
 	}, map[string]any{"summary": "other"}, "artifact-other-plan")
 	if err != nil {
 		t.Fatalf("Put other artifact: %v", err)
@@ -745,7 +746,7 @@ func TestPlanRuntimeGetPlanArtifactEnforcesPlanOwnership(t *testing.T) {
 		ProjectID:  ref.ProjectID,
 		ArtifactID: "artifact-other-plan",
 	})
-	if !errors.Is(err, agentos.ErrArtifactNotFound) {
+	if !errors.Is(err, agentoscore.ErrArtifactNotFound) {
 		t.Fatalf("GetPlanArtifact other plan error = %v, want ErrArtifactNotFound", err)
 	}
 }
@@ -756,8 +757,8 @@ func TestPlanRuntimeSignalPlanDoesNotAuditFailedDelivery(t *testing.T) {
 	temporalClient := &fakePlanTemporalClient{signalErr: errTestTemporalUnavailable}
 	rt := &planRuntime{temporalClient: temporalClient, commandStore: store, auditStore: store, planIndex: store}
 
-	err := rt.SignalPlan(t.Context(), ref, &agentos.Signal{
-		Type:           agentos.SignalPlanApprove,
+	err := rt.SignalPlan(t.Context(), ref, &agentoscore.Signal{
+		Type:           agentoscore.SignalPlanApprove,
 		IdempotencyKey: "approve-1",
 		ActorID:        "operator-1",
 	})
@@ -788,8 +789,8 @@ func TestPlanRuntimeSignalPlanRetriesFailedCommand(t *testing.T) {
 	store, ref := newPlanRuntimeTestStore(t)
 	temporalClient := &fakePlanTemporalClient{signalErr: errTestTemporalUnavailable}
 	rt := &planRuntime{temporalClient: temporalClient, commandStore: store, auditStore: store, planIndex: store}
-	signal := agentos.Signal{
-		Type:           agentos.SignalPlanApprove,
+	signal := agentoscore.Signal{
+		Type:           agentoscore.SignalPlanApprove,
 		IdempotencyKey: "approve-1",
 		ActorID:        "operator-1",
 	}
@@ -832,8 +833,8 @@ func TestPlanRuntimeSignalPlanKeepsCommandRecoverableWhenAuditFails(t *testing.T
 		auditStore:     failingAuditStore{AuditStore: store, err: errTestAuditUnavailable},
 		planIndex:      store,
 	}
-	signal := agentos.Signal{
-		Type:           agentos.SignalPlanApprove,
+	signal := agentoscore.Signal{
+		Type:           agentoscore.SignalPlanApprove,
 		IdempotencyKey: "approve-1",
 		ActorID:        "operator-1",
 	}
@@ -869,8 +870,8 @@ func (s failingAuditStore) RecordAudit(context.Context, *agentosplan.AuditRecord
 func TestPlanRuntimeSignalPlanSkipsDeliveryWhenCommandDelivered(t *testing.T) {
 	t.Parallel()
 	store, ref := newPlanRuntimeTestStore(t)
-	signal := agentos.Signal{
-		Type:           agentos.SignalPlanApprove,
+	signal := agentoscore.Signal{
+		Type:           agentoscore.SignalPlanApprove,
 		IdempotencyKey: "approve-1",
 		ActorID:        "operator-1",
 	}
@@ -909,8 +910,8 @@ func TestPlanRuntimeSignalPlanRejectsCommandKeyReuseWithDifferentSignal(t *testi
 	t.Parallel()
 
 	store, ref := newPlanRuntimeTestStore(t)
-	if _, _, err := recordPlanCommandForTest(t, store, commandFromAudit(planSignalAuditRecord(ref, &agentos.Signal{
-		Type:           agentos.SignalPlanApprove,
+	if _, _, err := recordPlanCommandForTest(t, store, commandFromAudit(planSignalAuditRecord(ref, &agentoscore.Signal{
+		Type:           agentoscore.SignalPlanApprove,
 		IdempotencyKey: "signal-1",
 		ActorID:        "operator-1",
 	}))); err != nil {
@@ -920,12 +921,12 @@ func TestPlanRuntimeSignalPlanRejectsCommandKeyReuseWithDifferentSignal(t *testi
 	temporalClient := &fakePlanTemporalClient{signalErr: errTestShouldNotSignal}
 	rt := &planRuntime{temporalClient: temporalClient, commandStore: store, auditStore: store, planIndex: store}
 
-	err := rt.SignalPlan(t.Context(), ref, &agentos.Signal{
-		Type:           agentos.SignalPlanReject,
+	err := rt.SignalPlan(t.Context(), ref, &agentoscore.Signal{
+		Type:           agentoscore.SignalPlanReject,
 		IdempotencyKey: "signal-1",
 		ActorID:        "operator-1",
 	})
-	if !errors.Is(err, agentos.ErrInvalidRunPlan) {
+	if !errors.Is(err, agentoscore.ErrInvalidRunPlan) {
 		t.Fatalf("SignalPlan error = %v, want ErrInvalidRunPlan", err)
 	}
 
@@ -939,8 +940,8 @@ func TestPlanRuntimeSignalPlanRejectsCommandKeyReuseWithDifferentSentAt(t *testi
 	store, ref := newPlanRuntimeTestStore(t)
 
 	sentAt := time.Date(2026, 6, 20, 12, 0, 0, 0, time.UTC)
-	if _, _, err := recordPlanCommandForTest(t, store, commandFromAudit(planSignalAuditRecord(ref, &agentos.Signal{
-		Type:           agentos.SignalPlanApprove,
+	if _, _, err := recordPlanCommandForTest(t, store, commandFromAudit(planSignalAuditRecord(ref, &agentoscore.Signal{
+		Type:           agentoscore.SignalPlanApprove,
 		IdempotencyKey: "signal-1",
 		ActorID:        "operator-1",
 		SentAt:         sentAt,
@@ -951,13 +952,13 @@ func TestPlanRuntimeSignalPlanRejectsCommandKeyReuseWithDifferentSentAt(t *testi
 	temporalClient := &fakePlanTemporalClient{signalErr: errTestShouldNotSignal}
 	rt := &planRuntime{temporalClient: temporalClient, commandStore: store, auditStore: store, planIndex: store}
 
-	err := rt.SignalPlan(t.Context(), ref, &agentos.Signal{
-		Type:           agentos.SignalPlanApprove,
+	err := rt.SignalPlan(t.Context(), ref, &agentoscore.Signal{
+		Type:           agentoscore.SignalPlanApprove,
 		IdempotencyKey: "signal-1",
 		ActorID:        "operator-1",
 		SentAt:         sentAt.Add(time.Second),
 	})
-	if !errors.Is(err, agentos.ErrInvalidRunPlan) {
+	if !errors.Is(err, agentoscore.ErrInvalidRunPlan) {
 		t.Fatalf("SignalPlan error = %v, want ErrInvalidRunPlan", err)
 	}
 
@@ -972,8 +973,8 @@ func TestPlanRuntimeControlPlanAuditsAfterDelivery(t *testing.T) {
 	temporalClient := &fakePlanTemporalClient{}
 	rt := &planRuntime{temporalClient: temporalClient, commandStore: store, auditStore: store, planIndex: store}
 
-	err := rt.ControlPlan(t.Context(), ref, &agentos.ControlRequest{
-		Operation:      agentos.ControlCancel,
+	err := rt.ControlPlan(t.Context(), ref, &agentoscore.ControlRequest{
+		Operation:      agentoscore.ControlCancel,
 		IdempotencyKey: "cancel-1",
 		ActorID:        "operator-1",
 	})
@@ -995,7 +996,7 @@ func TestPlanRuntimeControlPlanRejectsCommandKeyReuseWithDifferentControl(t *tes
 		Action:         agentosplan.AuditActionPlanControl,
 		IdempotencyKey: "control-1",
 		Payload: map[string]any{
-			"operation": agentos.ControlCancel,
+			"operation": agentoscore.ControlCancel,
 			"metadata":  map[string]string(nil),
 		},
 	}
@@ -1006,12 +1007,12 @@ func TestPlanRuntimeControlPlanRejectsCommandKeyReuseWithDifferentControl(t *tes
 	temporalClient := &fakePlanTemporalClient{signalErr: errTestShouldNotSignal}
 	rt := &planRuntime{temporalClient: temporalClient, commandStore: store, auditStore: store, planIndex: store}
 
-	err := rt.ControlPlan(t.Context(), ref, &agentos.ControlRequest{
-		Operation:      agentos.ControlPause,
+	err := rt.ControlPlan(t.Context(), ref, &agentoscore.ControlRequest{
+		Operation:      agentoscore.ControlPause,
 		IdempotencyKey: "control-1",
 		ActorID:        "operator-1",
 	})
-	if !errors.Is(err, agentos.ErrInvalidRunPlan) {
+	if !errors.Is(err, agentoscore.ErrInvalidRunPlan) {
 		t.Fatalf("ControlPlan error = %v, want ErrInvalidRunPlan", err)
 	}
 
@@ -1025,8 +1026,8 @@ func TestPlanRuntimeControlPlanRejectsCommandKeyReuseWithDifferentRequestedAt(t 
 	store, ref := newPlanRuntimeTestStore(t)
 
 	requestedAt := time.Date(2026, 6, 20, 12, 0, 0, 0, time.UTC)
-	if _, _, err := recordPlanCommandForTest(t, store, commandFromAudit(planControlAuditRecord(ref, &agentos.ControlRequest{
-		Operation:      agentos.ControlCancel,
+	if _, _, err := recordPlanCommandForTest(t, store, commandFromAudit(planControlAuditRecord(ref, &agentoscore.ControlRequest{
+		Operation:      agentoscore.ControlCancel,
 		IdempotencyKey: "control-1",
 		RequestedAt:    requestedAt,
 		ActorID:        "operator-1",
@@ -1037,13 +1038,13 @@ func TestPlanRuntimeControlPlanRejectsCommandKeyReuseWithDifferentRequestedAt(t 
 	temporalClient := &fakePlanTemporalClient{signalErr: errTestShouldNotSignal}
 	rt := &planRuntime{temporalClient: temporalClient, commandStore: store, auditStore: store, planIndex: store}
 
-	err := rt.ControlPlan(t.Context(), ref, &agentos.ControlRequest{
-		Operation:      agentos.ControlCancel,
+	err := rt.ControlPlan(t.Context(), ref, &agentoscore.ControlRequest{
+		Operation:      agentoscore.ControlCancel,
 		IdempotencyKey: "control-1",
 		RequestedAt:    requestedAt.Add(time.Second),
 		ActorID:        "operator-1",
 	})
-	if !errors.Is(err, agentos.ErrInvalidRunPlan) {
+	if !errors.Is(err, agentoscore.ErrInvalidRunPlan) {
 		t.Fatalf("ControlPlan error = %v, want ErrInvalidRunPlan", err)
 	}
 
@@ -1138,8 +1139,8 @@ func appendDebugTraceEvents(t *testing.T, store agentosplan.PlanEventStore, ref 
 	debugStatus := agentos.RunPlanStatus{PlanID: ref.PlanID, LifecycleState: agentos.PlanLifecycleRunning}
 	debugEvent := debugTracePlanEvent(t, &debugSpec, &debugStatus)
 	events := []agentos.PlanEvent{
-		{Event: agentos.Event{EventType: agentos.EventPlanStarted}, PlanID: ref.PlanID},
-		{Event: agentos.Event{EventType: agentos.EventPlanNodeStarted, RunID: runResearch}, PlanID: ref.PlanID, NodeID: "research"},
+		{Event: agentoscore.Event{EventType: agentoscore.EventPlanStarted}, PlanID: ref.PlanID},
+		{Event: agentoscore.Event{EventType: agentoscore.EventPlanNodeStarted, RunID: runResearch}, PlanID: ref.PlanID, NodeID: "research"},
 		debugEvent,
 	}
 
@@ -1184,8 +1185,8 @@ func assertProjectedDebugTrace(t *testing.T, traces []agentos.PlanDebugTrace) {
 	}
 
 	trace := traces[0]
-	if trace.EventType != agentos.EventNodeInputResolved {
-		t.Fatalf("trace event type = %q, want %q", trace.EventType, agentos.EventNodeInputResolved)
+	if trace.EventType != agentoscore.EventNodeInputResolved {
+		t.Fatalf("trace event type = %q, want %q", trace.EventType, agentoscore.EventNodeInputResolved)
 	}
 
 	if trace.InputResolution == nil || trace.InputResolution.MappingCount != 1 {

@@ -5,7 +5,8 @@ import (
 	"fmt"
 	"testing"
 
-	"github.com/TekkenSteve/GoAgent/agentos"
+	agentoscore "github.com/TekkenSteve/GoAgent/agentos/core"
+	agentos "github.com/TekkenSteve/GoAgent/agentos/process"
 )
 
 const (
@@ -48,7 +49,7 @@ func TestMemoryStoreRejectsLedgerKeyReuseWithDifferentEntry(t *testing.T) {
 	changed.EntryID = secondLedgerEntryID
 
 	_, err := store.AppendLedgerEntry(t.Context(), &changed)
-	if !errors.Is(err, agentos.ErrInvalidLedgerEntry) {
+	if !errors.Is(err, agentoscore.ErrInvalidLedgerEntry) {
 		t.Fatalf("AppendLedgerEntry changed error = %v, want ErrInvalidLedgerEntry", err)
 	}
 }
@@ -67,7 +68,7 @@ func TestMemoryStoreRejectsEntryIDReuseWithDifferentKey(t *testing.T) {
 	changed.IdempotencyKey = secondLedgerEntryKey
 
 	_, err := store.AppendLedgerEntry(t.Context(), &changed)
-	if !errors.Is(err, agentos.ErrInvalidLedgerEntry) {
+	if !errors.Is(err, agentoscore.ErrInvalidLedgerEntry) {
 		t.Fatalf("AppendLedgerEntry changed error = %v, want ErrInvalidLedgerEntry", err)
 	}
 }

@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/TekkenSteve/GoAgent/agentos"
+	agentos "github.com/TekkenSteve/GoAgent/agentos/control"
 )
 
 // ContinuationSnapshot is deterministic input for RunPlan continuation policy.

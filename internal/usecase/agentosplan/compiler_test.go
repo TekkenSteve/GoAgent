@@ -6,7 +6,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/TekkenSteve/GoAgent/agentos"
+	agentos "github.com/TekkenSteve/GoAgent/agentos/control"
+	agentoscore "github.com/TekkenSteve/GoAgent/agentos/core"
 )
 
 func TestRunPlanCompilerRejectsUnknownJSONField(t *testing.T) {
@@ -29,7 +30,7 @@ func TestRunPlanCompilerRejectsUnknownJSONField(t *testing.T) {
 	    }
 	  ]
 	}`))
-	if !errors.Is(err, agentos.ErrInvalidRunPlan) {
+	if !errors.Is(err, agentoscore.ErrInvalidRunPlan) {
 		t.Fatalf("error = %v, want ErrInvalidRunPlan", err)
 	}
 
@@ -56,7 +57,7 @@ nodes:
         kind: native
         name: goagent-native
 `))
-	if !errors.Is(err, agentos.ErrInvalidRunPlan) {
+	if !errors.Is(err, agentoscore.ErrInvalidRunPlan) {
 		t.Fatalf("error = %v, want ErrInvalidRunPlan", err)
 	}
 
@@ -132,7 +133,7 @@ edges:
     to: expanded
     on: success
 `), 0)
-	if !errors.Is(err, agentos.ErrInvalidRunPlan) {
+	if !errors.Is(err, agentoscore.ErrInvalidRunPlan) {
 		t.Fatalf("error = %v, want ErrInvalidRunPlan", err)
 	}
 

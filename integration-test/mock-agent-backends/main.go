@@ -14,7 +14,8 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/TekkenSteve/GoAgent/agentos"
+	agentos "github.com/TekkenSteve/GoAgent/agentos/control"
+	agentoscore "github.com/TekkenSteve/GoAgent/agentos/core"
 	"go.temporal.io/sdk/client"
 	"go.temporal.io/sdk/worker"
 	"go.temporal.io/sdk/workflow"
@@ -182,8 +183,8 @@ func (s *runStore) status(runID string) agentos.RunStatus {
 	return status
 }
 
-func (s *runStore) control(runID string, op agentos.ControlOperation) {
-	if op != agentos.ControlCancel {
+func (s *runStore) control(runID string, op agentoscore.ControlOperation) {
+	if op != agentoscore.ControlCancel {
 		return
 	}
 
@@ -247,7 +248,7 @@ func handleRunAction(w http.ResponseWriter, r *http.Request, store *runStore) {
 }
 
 func handleRunControl(w http.ResponseWriter, r *http.Request, store *runStore, runID string) {
-	var control agentos.ControlRequest
+	var control agentoscore.ControlRequest
 	if err := json.NewDecoder(r.Body).Decode(&control); err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 
@@ -333,18 +334,18 @@ type mockGRPCServiceContract interface {
 func (*mockGRPCService) mustEmbedMockGRPCService() {}
 
 type grpcSignalRequest struct {
-	RunID          string             `json:"run_id"`
-	Type           agentos.SignalType `json:"type"`
-	IdempotencyKey string             `json:"idempotency_key,omitempty"`
-	Payload        map[string]any     `json:"payload,omitempty"`
-	SentAt         time.Time          `json:"sent_at"`
+	RunID          string                 `json:"run_id"`
+	Type           agentoscore.SignalType `json:"type"`
+	IdempotencyKey string                 `json:"idempotency_key,omitempty"`
+	Payload        map[string]any         `json:"payload,omitempty"`
+	SentAt         time.Time              `json:"sent_at"`
 }
 
 type grpcControlRequest struct {
-	RunID          string                   `json:"run_id"`
-	Operation      agentos.ControlOperation `json:"operation"`
-	IdempotencyKey string                   `json:"idempotency_key,omitempty"`
-	RequestedAt    time.Time                `json:"requested_at"`
+	RunID          string                       `json:"run_id"`
+	Operation      agentoscore.ControlOperation `json:"operation"`
+	IdempotencyKey string                       `json:"idempotency_key,omitempty"`
+	RequestedAt    time.Time                    `json:"requested_at"`
 }
 
 type grpcStatusRequest struct {

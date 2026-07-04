@@ -3,7 +3,8 @@ package config
 import (
 	"testing"
 
-	"github.com/TekkenSteve/GoAgent/agentos"
+	agentos "github.com/TekkenSteve/GoAgent/agentos/control"
+	agentoscore "github.com/TekkenSteve/GoAgent/agentos/core"
 )
 
 func TestAgentOSArtifactStoreConfig(t *testing.T) {
@@ -224,8 +225,8 @@ func TestAgentOSCapabilities(t *testing.T) {
 	if got.Backend.Kind != agentos.BackendKindHTTP ||
 		got.Backend.Name != "research-http" ||
 		got.Name != "summarize" ||
-		got.Signals[0] != agentos.SignalUserMessage ||
-		got.Controls[0] != agentos.ControlCancel {
+		got.Signals[0] != agentoscore.SignalUserMessage ||
+		got.Controls[0] != agentoscore.ControlCancel {
 		t.Fatalf("unexpected capability config: %#v", got)
 	}
 }

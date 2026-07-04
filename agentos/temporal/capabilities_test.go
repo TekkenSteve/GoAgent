@@ -4,7 +4,8 @@ import (
 	"slices"
 	"testing"
 
-	"github.com/TekkenSteve/GoAgent/agentos"
+	agentos "github.com/TekkenSteve/GoAgent/agentos/control"
+	agentoscore "github.com/TekkenSteve/GoAgent/agentos/core"
 )
 
 func TestDefaultCapabilitiesDeclareNativeRun(t *testing.T) {
@@ -22,14 +23,14 @@ func TestDefaultCapabilitiesDeclareNativeRun(t *testing.T) {
 		t.Fatalf("unexpected native run capability: %#v", got)
 	}
 
-	if !containsSignal(got.Signals, agentos.SignalUserMessage) {
-		t.Fatalf("native run signals = %#v, want %q", got.Signals, agentos.SignalUserMessage)
+	if !containsSignal(got.Signals, agentoscore.SignalUserMessage) {
+		t.Fatalf("native run signals = %#v, want %q", got.Signals, agentoscore.SignalUserMessage)
 	}
 
-	for _, control := range []agentos.ControlOperation{
-		agentos.ControlPause,
-		agentos.ControlResume,
-		agentos.ControlCancel,
+	for _, control := range []agentoscore.ControlOperation{
+		agentoscore.ControlPause,
+		agentoscore.ControlResume,
+		agentoscore.ControlCancel,
 	} {
 		if !containsControl(got.Controls, control) {
 			t.Fatalf("native run controls = %#v, want %q", got.Controls, control)
@@ -60,10 +61,10 @@ func TestCapabilitiesWithDefaultsPreservesConfiguredCapabilities(t *testing.T) {
 	}
 }
 
-func containsSignal(signals []agentos.SignalType, want agentos.SignalType) bool {
+func containsSignal(signals []agentoscore.SignalType, want agentoscore.SignalType) bool {
 	return slices.Contains(signals, want)
 }
 
-func containsControl(controls []agentos.ControlOperation, want agentos.ControlOperation) bool {
+func containsControl(controls []agentoscore.ControlOperation, want agentoscore.ControlOperation) bool {
 	return slices.Contains(controls, want)
 }

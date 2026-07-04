@@ -3,18 +3,19 @@ package agentosplan
 import (
 	"fmt"
 
-	"github.com/TekkenSteve/GoAgent/agentos"
+	agentos "github.com/TekkenSteve/GoAgent/agentos/control"
+	agentoscore "github.com/TekkenSteve/GoAgent/agentos/core"
 )
 
 // RecoverablePlanCommandStatuses validates a command query scope and returns
 // the statuses that a command reconciler may redeliver.
 func RecoverablePlanCommandStatuses(scope *PlanCommandScope) ([]PlanCommandStatus, error) {
 	if scope.Limit < 0 {
-		return nil, fmt.Errorf("%w: command limit must be non-negative", agentos.ErrInvalidRunPlan)
+		return nil, fmt.Errorf("%w: command limit must be non-negative", agentoscore.ErrInvalidRunPlan)
 	}
 
 	if (scope.AccountID == "") != (scope.ProjectID == "") {
-		return nil, fmt.Errorf("%w: command account_id and project_id must be provided together", agentos.ErrInvalidPlanScope)
+		return nil, fmt.Errorf("%w: command account_id and project_id must be provided together", agentoscore.ErrInvalidPlanScope)
 	}
 
 	if len(scope.Statuses) == 0 {
@@ -26,7 +27,7 @@ func RecoverablePlanCommandStatuses(scope *PlanCommandScope) ([]PlanCommandStatu
 	seen := make(map[PlanCommandStatus]struct{}, len(scope.Statuses))
 	for _, status := range scope.Statuses {
 		if status != PlanCommandPending && status != PlanCommandFailed {
-			return nil, fmt.Errorf("%w: command status %q is not recoverable", agentos.ErrInvalidRunPlan, status)
+			return nil, fmt.Errorf("%w: command status %q is not recoverable", agentoscore.ErrInvalidRunPlan, status)
 		}
 
 		if _, ok := seen[status]; ok {
@@ -49,7 +50,7 @@ func NormalizeNewPlanCommandStatus(status PlanCommandStatus) (PlanCommandStatus,
 	}
 
 	if status != PlanCommandPending {
-		return "", fmt.Errorf("%w: new command status must be %q, got %q", agentos.ErrInvalidRunPlan, PlanCommandPending, status)
+		return "", fmt.Errorf("%w: new command status must be %q, got %q", agentoscore.ErrInvalidRunPlan, PlanCommandPending, status)
 	}
 
 	return status, nil
@@ -72,11 +73,11 @@ func ValidatePlanCommandStatusTransition(current, next PlanCommandStatus) error 
 	}
 
 	if current == PlanCommandDelivered {
-		return fmt.Errorf("%w: delivered command is terminal", agentos.ErrInvalidRunPlan)
+		return fmt.Errorf("%w: delivered command is terminal", agentoscore.ErrInvalidRunPlan)
 	}
 
 	if next == PlanCommandPending {
-		return fmt.Errorf("%w: command status cannot move back to %q", agentos.ErrInvalidRunPlan, PlanCommandPending)
+		return fmt.Errorf("%w: command status cannot move back to %q", agentoscore.ErrInvalidRunPlan, PlanCommandPending)
 	}
 
 	return nil
@@ -87,7 +88,7 @@ func validatePlanCommandStatus(status PlanCommandStatus) error {
 	case PlanCommandPending, PlanCommandDelivered, PlanCommandFailed:
 		return nil
 	default:
-		return fmt.Errorf("%w: command status %q is invalid", agentos.ErrInvalidRunPlan, status)
+		return fmt.Errorf("%w: command status %q is invalid", agentoscore.ErrInvalidRunPlan, status)
 	}
 }
 
@@ -97,7 +98,7 @@ func ValidatePlanCommandRef(ref PlanCommandRef) error {
 	}
 
 	if ref.IdempotencyKey == "" {
-		return fmt.Errorf("%w: command idempotency key is required", agentos.ErrInvalidRunPlan)
+		return fmt.Errorf("%w: command idempotency key is required", agentoscore.ErrInvalidRunPlan)
 	}
 
 	return nil
@@ -132,7 +133,7 @@ func ValidateAuditRef(ref AuditRef) error {
 	}
 
 	if ref.IdempotencyKey == "" {
-		return fmt.Errorf("%w: audit idempotency key is required", agentos.ErrInvalidRunPlan)
+		return fmt.Errorf("%w: audit idempotency key is required", agentoscore.ErrInvalidRunPlan)
 	}
 
 	return nil

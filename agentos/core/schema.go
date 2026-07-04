@@ -1,4 +1,4 @@
-package agentos
+package core
 
 import (
 	"encoding/json"
@@ -8,7 +8,7 @@ import (
 	"github.com/google/jsonschema-go/jsonschema"
 )
 
-func jsonSchemaFor[T any]() ([]byte, error) {
+func JSONSchemaFor[T any]() ([]byte, error) {
 	schema, err := jsonschema.For[T](&jsonschema.ForOptions{
 		TypeSchemas: map[reflect.Type]*jsonschema.Schema{
 			reflect.TypeFor[json.RawMessage](): {

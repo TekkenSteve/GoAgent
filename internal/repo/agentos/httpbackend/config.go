@@ -5,7 +5,8 @@ import (
 	"net/url"
 	"strings"
 
-	"github.com/TekkenSteve/GoAgent/agentos"
+	agentos "github.com/TekkenSteve/GoAgent/agentos/control"
+	agentoscore "github.com/TekkenSteve/GoAgent/agentos/core"
 )
 
 // Config describes one HTTP agent backend.
@@ -25,16 +26,16 @@ func (c Config) Ref() agentos.BackendRef {
 
 func (c Config) validate() error {
 	if c.Name == "" {
-		return fmt.Errorf("%w: http backend name is required", agentos.ErrInvalidBackendRef)
+		return fmt.Errorf("%w: http backend name is required", agentoscore.ErrInvalidBackendRef)
 	}
 
 	if c.Endpoint == "" {
-		return fmt.Errorf("%w: http backend endpoint is required", agentos.ErrInvalidBackendRef)
+		return fmt.Errorf("%w: http backend endpoint is required", agentoscore.ErrInvalidBackendRef)
 	}
 
 	parsed, err := url.Parse(c.Endpoint)
 	if err != nil || parsed.Scheme == "" || parsed.Host == "" {
-		return fmt.Errorf("%w: invalid http backend endpoint %q", agentos.ErrInvalidBackendRef, c.Endpoint)
+		return fmt.Errorf("%w: invalid http backend endpoint %q", agentoscore.ErrInvalidBackendRef, c.Endpoint)
 	}
 
 	return nil

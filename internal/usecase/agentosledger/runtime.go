@@ -4,7 +4,8 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/TekkenSteve/GoAgent/agentos"
+	agentoscore "github.com/TekkenSteve/GoAgent/agentos/core"
+	agentos "github.com/TekkenSteve/GoAgent/agentos/process"
 )
 
 // Runtime coordinates the generic AgentOS ledger boundary.
@@ -15,7 +16,7 @@ type Runtime struct {
 // NewRuntime creates a generic append-only ledger use case.
 func NewRuntime(store Store) (*Runtime, error) {
 	if store == nil {
-		return nil, fmt.Errorf("%w: ledger store is required", agentos.ErrInvalidLedgerScope)
+		return nil, fmt.Errorf("%w: ledger store is required", agentoscore.ErrInvalidLedgerScope)
 	}
 
 	return &Runtime{store: store}, nil

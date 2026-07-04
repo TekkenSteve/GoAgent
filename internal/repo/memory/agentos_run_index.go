@@ -5,7 +5,8 @@ import (
 	"fmt"
 	"sync"
 
-	"github.com/TekkenSteve/GoAgent/agentos"
+	agentos "github.com/TekkenSteve/GoAgent/agentos/control"
+	agentoscore "github.com/TekkenSteve/GoAgent/agentos/core"
 	"github.com/TekkenSteve/GoAgent/internal/entity"
 	"github.com/TekkenSteve/GoAgent/internal/usecase/agentosruntime"
 )
@@ -92,7 +93,7 @@ func mergeRunBackendIndexRecord(existing, requested *entity.RunBackendIndexRecor
 
 func (i *AgentOSRunIndex) GetRunBackend(_ context.Context, runID string) (agentos.RunBackendOwnership, bool, error) {
 	if runID == "" {
-		return agentos.RunBackendOwnership{}, false, fmt.Errorf("%w: run id is required", agentos.ErrInvalidRunSpec)
+		return agentos.RunBackendOwnership{}, false, fmt.Errorf("%w: run id is required", agentoscore.ErrInvalidRunSpec)
 	}
 
 	i.mu.RLock()
@@ -109,7 +110,7 @@ func (i *AgentOSRunIndex) GetRunBackend(_ context.Context, runID string) (agento
 // Resolve returns the backend reference that owns a run.
 func (i *AgentOSRunIndex) Resolve(_ context.Context, runID string) (agentos.BackendRef, error) {
 	if runID == "" {
-		return agentos.BackendRef{}, fmt.Errorf("%w: run id is required", agentos.ErrInvalidRunSpec)
+		return agentos.BackendRef{}, fmt.Errorf("%w: run id is required", agentoscore.ErrInvalidRunSpec)
 	}
 
 	i.mu.RLock()
@@ -117,7 +118,7 @@ func (i *AgentOSRunIndex) Resolve(_ context.Context, runID string) (agentos.Back
 
 	record, ok := i.records[runID]
 	if !ok {
-		return agentos.BackendRef{}, fmt.Errorf("%w: %s", agentos.ErrRunRouteNotFound, runID)
+		return agentos.BackendRef{}, fmt.Errorf("%w: %s", agentoscore.ErrRunRouteNotFound, runID)
 	}
 
 	return agentos.BackendRef{

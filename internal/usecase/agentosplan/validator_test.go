@@ -7,7 +7,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/TekkenSteve/GoAgent/agentos"
+	agentos "github.com/TekkenSteve/GoAgent/agentos/control"
+	agentoscore "github.com/TekkenSteve/GoAgent/agentos/core"
 )
 
 const (
@@ -66,7 +67,7 @@ func TestValidatorRejectsCycle(t *testing.T) {
 	})
 
 	_, err := Validator{Capabilities: sampleCapabilityCatalog(t, ref)}.Validate(context.Background(), &spec)
-	if !errors.Is(err, agentos.ErrInvalidRunPlan) {
+	if !errors.Is(err, agentoscore.ErrInvalidRunPlan) {
 		t.Fatalf("error = %v, want ErrInvalidRunPlan", err)
 	}
 }
@@ -77,7 +78,7 @@ func TestValidatorRejectsCapabilityWithoutCatalog(t *testing.T) {
 	ref := agentos.BackendRef{Kind: agentos.BackendKindNative, Name: agentos.BackendNameGoAgentNative}
 
 	_, err := Validator{}.Validate(context.Background(), samplePlanPtr(ref))
-	if !errors.Is(err, agentos.ErrCapabilityNotFound) {
+	if !errors.Is(err, agentoscore.ErrCapabilityNotFound) {
 		t.Fatalf("error = %v, want ErrCapabilityNotFound", err)
 	}
 }
@@ -106,7 +107,7 @@ func TestValidatorRejectsSchemaMismatch(t *testing.T) {
 	spec.Nodes[0].Run.Input = map[string]any{"topic": 42}
 
 	_, err = Validator{Capabilities: catalog}.Validate(context.Background(), &spec)
-	if !errors.Is(err, agentos.ErrInvalidRunPlan) {
+	if !errors.Is(err, agentoscore.ErrInvalidRunPlan) {
 		t.Fatalf("error = %v, want ErrInvalidRunPlan", err)
 	}
 }
@@ -119,7 +120,7 @@ func TestValidatorRejectsArtifactSchemaRefWithoutCatalog(t *testing.T) {
 	spec.Nodes[0].Outputs[0].SchemaRef = SchemaSummary
 
 	_, err := Validator{Capabilities: sampleCapabilityCatalog(t, ref)}.Validate(context.Background(), &spec)
-	if !errors.Is(err, agentos.ErrInvalidArtifact) {
+	if !errors.Is(err, agentoscore.ErrInvalidArtifact) {
 		t.Fatalf("error = %v, want ErrInvalidArtifact", err)
 	}
 }
@@ -169,7 +170,7 @@ func TestValidatorRejectsArtifactMappingWithoutSourceNode(t *testing.T) {
 	}
 
 	_, err := Validator{Capabilities: sampleCapabilityCatalog(t, ref)}.Validate(context.Background(), &spec)
-	if !errors.Is(err, agentos.ErrInvalidArtifact) {
+	if !errors.Is(err, agentoscore.ErrInvalidArtifact) {
 		t.Fatalf("error = %v, want ErrInvalidArtifact", err)
 	}
 }
@@ -184,7 +185,7 @@ func TestValidatorRejectsArtifactMappingForUndeclaredOutput(t *testing.T) {
 	}
 
 	_, err := Validator{Capabilities: sampleCapabilityCatalog(t, ref)}.Validate(context.Background(), &spec)
-	if !errors.Is(err, agentos.ErrInvalidArtifact) {
+	if !errors.Is(err, agentoscore.ErrInvalidArtifact) {
 		t.Fatalf("error = %v, want ErrInvalidArtifact", err)
 	}
 }
@@ -200,7 +201,7 @@ func TestValidatorRejectsNodeArtifactMappingWithoutDependencyPath(t *testing.T) 
 	}
 
 	_, err := Validator{Capabilities: sampleCapabilityCatalog(t, ref)}.Validate(context.Background(), &spec)
-	if !errors.Is(err, agentos.ErrInvalidRunPlan) {
+	if !errors.Is(err, agentoscore.ErrInvalidRunPlan) {
 		t.Fatalf("error = %v, want ErrInvalidRunPlan", err)
 	}
 }
@@ -216,7 +217,7 @@ func TestValidatorRejectsContinuationThresholdAboveHistoryGuard(t *testing.T) {
 	}
 
 	_, err := Validator{Capabilities: sampleCapabilityCatalog(t, ref)}.Validate(context.Background(), &spec)
-	if !errors.Is(err, agentos.ErrInvalidRunPlan) {
+	if !errors.Is(err, agentoscore.ErrInvalidRunPlan) {
 		t.Fatalf("error = %v, want ErrInvalidRunPlan", err)
 	}
 }
@@ -506,7 +507,7 @@ func TestApplyDeltaRespectsLimits(t *testing.T) {
 	}}
 
 	_, _, err := ApplyDelta(context.Background(), Validator{}, &spec, delta, 0)
-	if !errors.Is(err, agentos.ErrInvalidRunPlan) {
+	if !errors.Is(err, agentoscore.ErrInvalidRunPlan) {
 		t.Fatalf("error = %v, want ErrInvalidRunPlan", err)
 	}
 }
@@ -559,7 +560,7 @@ func samplePlan(ref agentos.BackendRef) agentos.RunPlanSpec {
 				},
 				Conditions: []string{"inputs.enabled == true"},
 				Outputs: []agentos.ArtifactSpec{
-					{Name: "summary", Kind: agentos.ArtifactKindObject},
+					{Name: "summary", Kind: agentoscore.ArtifactKindObject},
 				},
 			},
 			{

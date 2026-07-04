@@ -8,7 +8,8 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/TekkenSteve/GoAgent/agentos"
+	agentos "github.com/TekkenSteve/GoAgent/agentos/control"
+	agentoscore "github.com/TekkenSteve/GoAgent/agentos/core"
 	"github.com/TekkenSteve/GoAgent/internal/pkg/redis"
 	"github.com/TekkenSteve/GoAgent/internal/usecase/agentosplan"
 	goredis "github.com/redis/go-redis/v9"
@@ -66,15 +67,15 @@ func (s *RedisPlanEventStream) PublishPlanEvent(ctx context.Context, event *agen
 
 func validateRedisPlanEventStream(stream *RedisPlanEventStream, event *agentos.PlanEvent) error {
 	if stream == nil || stream.rdb == nil {
-		return fmt.Errorf("%w: redis plan event stream is not configured", agentos.ErrInvalidPlanEvent)
+		return fmt.Errorf("%w: redis plan event stream is not configured", agentoscore.ErrInvalidPlanEvent)
 	}
 
 	if event.PlanID == "" {
-		return fmt.Errorf("%w: plan id is required", agentos.ErrInvalidPlanEvent)
+		return fmt.Errorf("%w: plan id is required", agentoscore.ErrInvalidPlanEvent)
 	}
 
 	if event.Sequence <= 0 {
-		return fmt.Errorf("%w: plan event sequence is required", agentos.ErrInvalidPlanEvent)
+		return fmt.Errorf("%w: plan event sequence is required", agentoscore.ErrInvalidPlanEvent)
 	}
 
 	return nil
@@ -123,7 +124,7 @@ func (s *RedisPlanEventStream) SubscribePlanEvents(_ context.Context, scope *age
 	}
 
 	if s == nil || s.hub == nil {
-		return nil, fmt.Errorf("%w: redis plan event subscriber is not configured", agentos.ErrInvalidStreamScope)
+		return nil, fmt.Errorf("%w: redis plan event subscriber is not configured", agentoscore.ErrInvalidStreamScope)
 	}
 
 	hubSub := s.hub.Subscribe(planEventStreamKey(planStreamRef(scope)), planEventSubscriptionStartID(*scope))
@@ -198,7 +199,7 @@ func planEventFromStreamEntry(entry redis.XStreamEntry) (agentos.PlanEvent, erro
 func planEventFromValues(values map[string]any) (agentos.PlanEvent, error) {
 	data, ok := values["data"]
 	if !ok {
-		return agentos.PlanEvent{}, fmt.Errorf("%w: plan event stream entry has no data", agentos.ErrInvalidPlanEvent)
+		return agentos.PlanEvent{}, fmt.Errorf("%w: plan event stream entry has no data", agentoscore.ErrInvalidPlanEvent)
 	}
 
 	return decodePlanEventStreamValue(data)
@@ -207,7 +208,7 @@ func planEventFromValues(values map[string]any) (agentos.PlanEvent, error) {
 func planEventFromStringValues(values map[string]string) (agentos.PlanEvent, error) {
 	data, ok := values["data"]
 	if !ok {
-		return agentos.PlanEvent{}, fmt.Errorf("%w: plan event stream entry has no data", agentos.ErrInvalidPlanEvent)
+		return agentos.PlanEvent{}, fmt.Errorf("%w: plan event stream entry has no data", agentoscore.ErrInvalidPlanEvent)
 	}
 
 	return decodePlanEventStreamValue(data)
@@ -220,7 +221,7 @@ func decodePlanEventStreamValue(value any) (agentos.PlanEvent, error) {
 	case []byte:
 		return agentos.UnmarshalPlanEvent(typed)
 	default:
-		return agentos.PlanEvent{}, fmt.Errorf("%w: plan event stream data has type %T", agentos.ErrInvalidPlanEvent, value)
+		return agentos.PlanEvent{}, fmt.Errorf("%w: plan event stream data has type %T", agentoscore.ErrInvalidPlanEvent, value)
 	}
 }
 
@@ -260,7 +261,7 @@ func ensureSamePlanEvent(existing, expected *agentos.PlanEvent) error {
 		return nil
 	}
 
-	return fmt.Errorf("%w: plan event sequence %d already belongs to event %q", agentos.ErrInvalidPlanEvent, expected.Sequence, existing.EventID)
+	return fmt.Errorf("%w: plan event sequence %d already belongs to event %q", agentoscore.ErrInvalidPlanEvent, expected.Sequence, existing.EventID)
 }
 
 func planEventStreamKey(ref agentos.PlanRef) string {

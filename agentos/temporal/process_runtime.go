@@ -6,7 +6,8 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/TekkenSteve/GoAgent/agentos"
+	agentoscore "github.com/TekkenSteve/GoAgent/agentos/core"
+	agentosproc "github.com/TekkenSteve/GoAgent/agentos/process"
 	"github.com/TekkenSteve/GoAgent/internal/pkg/postgres"
 	temporalrepo "github.com/TekkenSteve/GoAgent/internal/repo/persistent"
 	"github.com/TekkenSteve/GoAgent/internal/usecase/agentosprocess"
@@ -30,8 +31,8 @@ var (
 	errProcessRuntimeNotConfigured               = errors.New("agentos temporal process runtime: runtime is not configured")
 )
 
-// NewProcessRuntime creates the default Temporal implementation of agentos.ProcessRuntime.
-func NewProcessRuntime(ctx context.Context, cfg *RuntimeConfig) (agentos.ProcessRuntime, error) {
+// NewProcessRuntime creates the default Temporal implementation of agentosproc.Runtime.
+func NewProcessRuntime(ctx context.Context, cfg *RuntimeConfig) (agentosproc.Runtime, error) {
 	if err := validateProcessRuntimeConfig(cfg); err != nil {
 		return nil, err
 	}
@@ -53,8 +54,8 @@ func NewProcessRuntime(ctx context.Context, cfg *RuntimeConfig) (agentos.Process
 	return rt, nil
 }
 
-// NewProcessRuntimeWithClient adapts an existing Temporal client to agentos.ProcessRuntime.
-func NewProcessRuntimeWithClient(ctx context.Context, cfg *RuntimeConfig, c client.Client) (agentos.ProcessRuntime, error) {
+// NewProcessRuntimeWithClient adapts an existing Temporal client to agentosproc.Runtime.
+func NewProcessRuntimeWithClient(ctx context.Context, cfg *RuntimeConfig, c client.Client) (agentosproc.Runtime, error) {
 	if cfg == nil {
 		return nil, errProcessRuntimeConfigRequired
 	}
@@ -108,16 +109,16 @@ func newProcessRuntimeWithStores(
 	}
 }
 
-func (r *processRuntime) StartProcess(ctx context.Context, spec *agentos.ProcessSpec) (agentos.ProcessStatus, error) {
+func (r *processRuntime) StartProcess(ctx context.Context, spec *agentosproc.Spec) (agentosproc.Status, error) {
 	if r == nil || r.processRuntime == nil {
-		return agentos.ProcessStatus{}, errProcessRuntimeNotConfigured
+		return agentosproc.Status{}, errProcessRuntimeNotConfigured
 	}
 
 	prepared := cloneProcessSpec(spec)
 
 	status, err := r.processRuntime.StartProcess(ctx, &prepared)
 	if err != nil {
-		return agentos.ProcessStatus{}, err
+		return agentosproc.Status{}, err
 	}
 
 	if processWorkflowTerminal(status.LifecycleState) {
@@ -127,23 +128,23 @@ func (r *processRuntime) StartProcess(ctx context.Context, spec *agentos.Process
 	return status, r.executeProcessWorkflow(ctx, &prepared)
 }
 
-func (r *processRuntime) StatusProcess(ctx context.Context, ref agentos.ProcessRef) (agentos.ProcessStatus, error) {
+func (r *processRuntime) StatusProcess(ctx context.Context, ref agentosproc.Ref) (agentosproc.Status, error) {
 	if r == nil || r.processRuntime == nil {
-		return agentos.ProcessStatus{}, errProcessRuntimeNotConfigured
+		return agentosproc.Status{}, errProcessRuntimeNotConfigured
 	}
 
 	return r.processRuntime.StatusProcess(ctx, ref)
 }
 
-func (r *processRuntime) DescribeProcess(ctx context.Context, ref agentos.ProcessRef) (agentos.ProcessDescription, error) {
+func (r *processRuntime) DescribeProcess(ctx context.Context, ref agentosproc.Ref) (agentosproc.Description, error) {
 	if r == nil || r.processRuntime == nil {
-		return agentos.ProcessDescription{}, errProcessRuntimeNotConfigured
+		return agentosproc.Description{}, errProcessRuntimeNotConfigured
 	}
 
 	return r.processRuntime.DescribeProcess(ctx, ref)
 }
 
-func (r *processRuntime) SignalProcess(ctx context.Context, ref agentos.ProcessRef, signal *agentos.Signal) error {
+func (r *processRuntime) SignalProcess(ctx context.Context, ref agentosproc.Ref, signal *agentoscore.Signal) error {
 	if r == nil || r.processRuntime == nil {
 		return errProcessRuntimeNotConfigured
 	}
@@ -157,7 +158,7 @@ func (r *processRuntime) SignalProcess(ctx context.Context, ref agentos.ProcessR
 	return r.signalProcessWorkflow(ctx, ref, ProcessSignalName, &prepared)
 }
 
-func (r *processRuntime) ControlProcess(ctx context.Context, ref agentos.ProcessRef, control *agentos.ControlRequest) error {
+func (r *processRuntime) ControlProcess(ctx context.Context, ref agentosproc.Ref, control *agentoscore.ControlRequest) error {
 	if r == nil || r.processRuntime == nil {
 		return errProcessRuntimeNotConfigured
 	}
@@ -171,7 +172,7 @@ func (r *processRuntime) ControlProcess(ctx context.Context, ref agentos.Process
 	return r.signalProcessWorkflow(ctx, ref, ProcessControlSignalName, &prepared)
 }
 
-func (r *processRuntime) SubscribeProcess(ctx context.Context, scope *agentos.ProcessStreamScope) (agentos.Subscription, error) {
+func (r *processRuntime) SubscribeProcess(ctx context.Context, scope *agentosproc.StreamScope) (agentoscore.Subscription, error) {
 	if r == nil || r.processRuntime == nil {
 		return nil, errProcessRuntimeNotConfigured
 	}
@@ -179,7 +180,7 @@ func (r *processRuntime) SubscribeProcess(ctx context.Context, scope *agentos.Pr
 	return r.processRuntime.SubscribeProcess(ctx, scope)
 }
 
-func (r *processRuntime) ListProcessEvents(ctx context.Context, scope *agentos.ProcessEventScope) ([]agentos.ProcessEvent, error) {
+func (r *processRuntime) ListProcessEvents(ctx context.Context, scope *agentosproc.EventScope) ([]agentosproc.Event, error) {
 	if r == nil || r.processRuntime == nil {
 		return nil, errProcessRuntimeNotConfigured
 	}
@@ -203,13 +204,13 @@ func (r *processRuntime) Close() error {
 	return nil
 }
 
-func (r *processRuntime) authorizeProcess(ctx context.Context, ref agentos.ProcessRef) error {
+func (r *processRuntime) authorizeProcess(ctx context.Context, ref agentosproc.Ref) error {
 	_, err := r.processRuntime.StatusProcess(ctx, ref)
 
 	return err
 }
 
-func (r *processRuntime) executeProcessWorkflow(ctx context.Context, spec *agentos.ProcessSpec) error {
+func (r *processRuntime) executeProcessWorkflow(ctx context.Context, spec *agentosproc.Spec) error {
 	if r.temporalClient == nil {
 		return errProcessRuntimeTemporalClientNotConfigured
 	}
@@ -236,7 +237,7 @@ func (r *processRuntime) executeProcessWorkflow(ctx context.Context, spec *agent
 	return nil
 }
 
-func (r *processRuntime) signalProcessWorkflow(ctx context.Context, ref agentos.ProcessRef, signalName string, arg any) error {
+func (r *processRuntime) signalProcessWorkflow(ctx context.Context, ref agentosproc.Ref, signalName string, arg any) error {
 	if r.temporalClient == nil {
 		return errProcessRuntimeTemporalClientNotConfigured
 	}
@@ -260,16 +261,16 @@ func validateProcessRuntimeConfig(cfg *RuntimeConfig) error {
 	return cfg.TemporalTaskQueues.Validate()
 }
 
-func cloneProcessSpec(spec *agentos.ProcessSpec) agentos.ProcessSpec {
+func cloneProcessSpec(spec *agentosproc.Spec) agentosproc.Spec {
 	if spec == nil {
-		return agentos.ProcessSpec{}
+		return agentosproc.Spec{}
 	}
 
 	clone := *spec
 	clone.Inputs = cloneAnyMap(spec.Inputs)
 	clone.Metadata = cloneStringMap(spec.Metadata)
 
-	clone.Timers = append([]agentos.ProcessTimerSpec(nil), spec.Timers...)
+	clone.Timers = append([]agentosproc.TimerSpec(nil), spec.Timers...)
 	for i := range clone.Timers {
 		clone.Timers[i].Payload = cloneAnyMap(clone.Timers[i].Payload)
 	}
@@ -277,9 +278,9 @@ func cloneProcessSpec(spec *agentos.ProcessSpec) agentos.ProcessSpec {
 	return clone
 }
 
-func cloneProcessSignal(signal *agentos.Signal) agentos.Signal {
+func cloneProcessSignal(signal *agentoscore.Signal) agentoscore.Signal {
 	if signal == nil {
-		return agentos.Signal{}
+		return agentoscore.Signal{}
 	}
 
 	clone := *signal
@@ -292,9 +293,9 @@ func cloneProcessSignal(signal *agentos.Signal) agentos.Signal {
 	return clone
 }
 
-func cloneProcessControlRequest(control *agentos.ControlRequest) agentos.ControlRequest {
+func cloneProcessControlRequest(control *agentoscore.ControlRequest) agentoscore.ControlRequest {
 	if control == nil {
-		return agentos.ControlRequest{}
+		return agentoscore.ControlRequest{}
 	}
 
 	clone := *control
@@ -307,4 +308,4 @@ func cloneProcessControlRequest(control *agentos.ControlRequest) agentos.Control
 	return clone
 }
 
-var _ agentos.ProcessRuntime = (*processRuntime)(nil)
+var _ agentosproc.Runtime = (*processRuntime)(nil)

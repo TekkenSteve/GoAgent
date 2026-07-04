@@ -5,7 +5,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/TekkenSteve/GoAgent/agentos"
+	agentos "github.com/TekkenSteve/GoAgent/agentos/control"
+	agentoscore "github.com/TekkenSteve/GoAgent/agentos/core"
 )
 
 const RESEARCH = "research"
@@ -36,7 +37,7 @@ func descriptionTestSpec() agentos.RunPlanSpec {
 		ProjectID: "project-1",
 		Nodes: []agentos.PlanNodeSpec{
 			{NodeID: "write", Capability: "run", Run: agentos.RunSpec{RunID: "run-write-planned", Backend: plannedRef}, Policy: agentos.NodePolicy{Join: agentos.PlanJoinAll}},
-			{NodeID: RESEARCH, Capability: "run", Run: agentos.RunSpec{RunID: "run-research-planned", Backend: plannedRef}, Outputs: []agentos.ArtifactSpec{{Name: "summary", Kind: agentos.ArtifactKindObject, Required: true}}},
+			{NodeID: RESEARCH, Capability: "run", Run: agentos.RunSpec{RunID: "run-research-planned", Backend: plannedRef}, Outputs: []agentos.ArtifactSpec{{Name: "summary", Kind: agentoscore.ArtifactKindObject, Required: true}}},
 		},
 		Edges:    []agentos.PlanEdgeSpec{{EdgeID: "research-write", From: RESEARCH, To: "write", On: agentos.EdgeOnSuccess}},
 		Metadata: map[string]string{"purpose": "test"},
@@ -119,7 +120,7 @@ func TestDescribeRunPlanRejectsInconsistentStatus(t *testing.T) {
 	}
 
 	_, err := DescribeRunPlan(&spec, &status)
-	if !errors.Is(err, agentos.ErrInvalidRunPlan) {
+	if !errors.Is(err, agentoscore.ErrInvalidRunPlan) {
 		t.Fatalf("error = %v, want ErrInvalidRunPlan", err)
 	}
 }

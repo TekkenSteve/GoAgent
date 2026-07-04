@@ -4,7 +4,7 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/TekkenSteve/GoAgent/agentos"
+	agentoscore "github.com/TekkenSteve/GoAgent/agentos/core"
 	"github.com/google/cel-go/cel"
 	celenv "github.com/google/cel-go/common/env"
 	"github.com/google/cel-go/common/overloads"
@@ -59,12 +59,12 @@ func (c *CELCompiler) Compile(expression string) (Expression, error) {
 func (c *CELCompiler) CompileValue(expression string) (ValueExpression, error) {
 	ast, issues := c.env.Compile(expression)
 	if issues != nil && issues.Err() != nil {
-		return nil, fmt.Errorf("%w: %w", agentos.ErrInvalidExpression, issues.Err())
+		return nil, fmt.Errorf("%w: %w", agentoscore.ErrInvalidExpression, issues.Err())
 	}
 
 	program, err := c.env.Program(ast)
 	if err != nil {
-		return nil, fmt.Errorf("%w: %w", agentos.ErrInvalidExpression, err)
+		return nil, fmt.Errorf("%w: %w", agentoscore.ErrInvalidExpression, err)
 	}
 
 	return celExpression{program: program}, nil
@@ -83,7 +83,7 @@ func (e boolExpression) Evaluate(ctx context.Context, vars map[string]any) (bool
 
 	result, ok := value.(bool)
 	if !ok {
-		return false, fmt.Errorf("%w: expression result must be bool", agentos.ErrInvalidExpression)
+		return false, fmt.Errorf("%w: expression result must be bool", agentoscore.ErrInvalidExpression)
 	}
 
 	return result, nil
@@ -97,7 +97,7 @@ type celExpression struct {
 func (e celExpression) EvaluateValue(_ context.Context, vars map[string]any) (any, error) {
 	value, _, err := e.program.Eval(vars)
 	if err != nil {
-		return nil, fmt.Errorf("%w: %w", agentos.ErrInvalidExpression, err)
+		return nil, fmt.Errorf("%w: %w", agentoscore.ErrInvalidExpression, err)
 	}
 
 	return value.Value(), nil

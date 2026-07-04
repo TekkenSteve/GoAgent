@@ -6,7 +6,8 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/TekkenSteve/GoAgent/agentos"
+	agentos "github.com/TekkenSteve/GoAgent/agentos/control"
+	agentoscore "github.com/TekkenSteve/GoAgent/agentos/core"
 )
 
 func TestCapabilityRegistrationIdempotencyKeyIsContentAddressed(t *testing.T) {
@@ -48,13 +49,13 @@ func TestCapabilityRegistrationIdempotencyKeyIsContentAddressed(t *testing.T) {
 func TestValidateCapabilityRejectsInvalidDeclaration(t *testing.T) {
 	t.Parallel()
 
-	if err := ValidateCapability(&agentos.Capability{Name: "run"}); !errors.Is(err, agentos.ErrInvalidBackendRef) {
+	if err := ValidateCapability(&agentos.Capability{Name: "run"}); !errors.Is(err, agentoscore.ErrInvalidBackendRef) {
 		t.Fatalf("missing backend error = %v, want ErrInvalidBackendRef", err)
 	}
 
 	if err := ValidateCapability(&agentos.Capability{
 		Backend: agentos.BackendRef{Kind: agentos.BackendKindHTTP, Name: "research"},
-	}); !errors.Is(err, agentos.ErrCapabilityNotFound) {
+	}); !errors.Is(err, agentoscore.ErrCapabilityNotFound) {
 		t.Fatalf("missing name error = %v, want ErrCapabilityNotFound", err)
 	}
 
@@ -62,7 +63,7 @@ func TestValidateCapabilityRejectsInvalidDeclaration(t *testing.T) {
 		Backend:     agentos.BackendRef{Kind: agentos.BackendKindHTTP, Name: "research"},
 		Name:        "run",
 		InputSchema: json.RawMessage(`{`),
-	}); !errors.Is(err, agentos.ErrInvalidRunPlan) {
+	}); !errors.Is(err, agentoscore.ErrInvalidRunPlan) {
 		t.Fatalf("invalid schema error = %v, want ErrInvalidRunPlan", err)
 	}
 }
@@ -80,7 +81,7 @@ func TestStaticCapabilityCatalogRegistersAndReads(t *testing.T) {
 	if _, created, err := catalog.RegisterCapability(context.Background(), &agentos.Capability{
 		Backend:  ref,
 		Name:     "run",
-		Controls: []agentos.ControlOperation{agentos.ControlCancel},
+		Controls: []agentoscore.ControlOperation{agentoscore.ControlCancel},
 	}, ""); err != nil || !created {
 		t.Fatalf("RegisterCapability created=%v err=%v", created, err)
 	}
@@ -90,7 +91,7 @@ func TestStaticCapabilityCatalogRegistersAndReads(t *testing.T) {
 		t.Fatalf("GetCapability: %v", err)
 	}
 
-	if !ok || len(capability.Controls) != 1 || capability.Controls[0] != agentos.ControlCancel {
+	if !ok || len(capability.Controls) != 1 || capability.Controls[0] != agentoscore.ControlCancel {
 		t.Fatalf("capability = %#v ok=%v", capability, ok)
 	}
 }
@@ -104,7 +105,7 @@ func TestRegisterCapabilitiesRequiresRegistry(t *testing.T) {
 			Name:    "run",
 		},
 	})
-	if !errors.Is(err, agentos.ErrCapabilityNotFound) {
+	if !errors.Is(err, agentoscore.ErrCapabilityNotFound) {
 		t.Fatalf("error = %v, want ErrCapabilityNotFound", err)
 	}
 }
@@ -117,7 +118,7 @@ func TestValidateCapabilityRegistrationIdempotencyRejectsDifferentDeclaration(t 
 	requested := agentos.Capability{Backend: ref, Name: "run", Description: "v2"}
 
 	err := ValidateCapabilityRegistrationIdempotency(&existing, &requested)
-	if !errors.Is(err, agentos.ErrInvalidRunPlan) {
+	if !errors.Is(err, agentoscore.ErrInvalidRunPlan) {
 		t.Fatalf("error = %v, want ErrInvalidRunPlan", err)
 	}
 }

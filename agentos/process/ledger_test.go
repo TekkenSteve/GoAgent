@@ -1,9 +1,11 @@
-package agentos
+package process
 
 import (
 	"errors"
 	"testing"
 	"time"
+
+	"github.com/TekkenSteve/GoAgent/agentos/core"
 )
 
 func TestValidateLedgerEntrySpecAcceptsProcessOrResourceScopedEntry(t *testing.T) {
@@ -50,8 +52,8 @@ func TestValidateLedgerEntrySpecRequiresStableIdentity(t *testing.T) {
 			tt.edit(&spec)
 
 			err := ValidateLedgerEntrySpec(&spec)
-			if !errors.Is(err, ErrInvalidLedgerEntry) {
-				t.Fatalf("ValidateLedgerEntrySpec error = %v, want ErrInvalidLedgerEntry", err)
+			if !errors.Is(err, core.ErrInvalidLedgerEntry) {
+				t.Fatalf("ValidateLedgerEntrySpec error = %v, want core.ErrInvalidLedgerEntry", err)
 			}
 		})
 	}
@@ -76,8 +78,8 @@ func TestValidateLedgerEntrySpecRejectsInvalidDataRefs(t *testing.T) {
 			spec.DataRefs = []LedgerDataRef{tt.ref}
 
 			err := ValidateLedgerEntrySpec(&spec)
-			if !errors.Is(err, ErrInvalidLedgerEntry) {
-				t.Fatalf("ValidateLedgerEntrySpec error = %v, want ErrInvalidLedgerEntry", err)
+			if !errors.Is(err, core.ErrInvalidLedgerEntry) {
+				t.Fatalf("ValidateLedgerEntrySpec error = %v, want core.ErrInvalidLedgerEntry", err)
 			}
 		})
 	}
@@ -87,8 +89,8 @@ func TestValidateLedgerScopeRequiresTenantScope(t *testing.T) {
 	t.Parallel()
 
 	err := ValidateLedgerScope(&LedgerScope{AccountID: "acct-1", Limit: -1})
-	if !errors.Is(err, ErrInvalidLedgerScope) {
-		t.Fatalf("ValidateLedgerScope error = %v, want ErrInvalidLedgerScope", err)
+	if !errors.Is(err, core.ErrInvalidLedgerScope) {
+		t.Fatalf("ValidateLedgerScope error = %v, want core.ErrInvalidLedgerScope", err)
 	}
 
 	scope := LedgerScope{
@@ -103,8 +105,8 @@ func TestValidateLedgerScopeRequiresTenantScope(t *testing.T) {
 	}
 
 	err = ValidateLedgerScope(&scope)
-	if !errors.Is(err, ErrInvalidLedgerScope) {
-		t.Fatalf("ValidateLedgerScope resource error = %v, want ErrInvalidLedgerScope", err)
+	if !errors.Is(err, core.ErrInvalidLedgerScope) {
+		t.Fatalf("ValidateLedgerScope resource error = %v, want core.ErrInvalidLedgerScope", err)
 	}
 }
 

@@ -4,7 +4,8 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/TekkenSteve/GoAgent/agentos"
+	agentos "github.com/TekkenSteve/GoAgent/agentos/control"
+	agentoscore "github.com/TekkenSteve/GoAgent/agentos/core"
 	"github.com/TekkenSteve/GoAgent/internal/usecase/agentosruntime"
 )
 
@@ -25,7 +26,7 @@ func TestAgentOSRunIndexRejectsRunOwnershipOverwrite(t *testing.T) {
 	}
 
 	spec.Backend = agentos.BackendRef{Kind: agentos.BackendKindHTTP, Name: "http-agent"}
-	if err := bindRun(t, index, &spec, "created"); !errors.Is(err, agentos.ErrInvalidBackendRef) {
+	if err := bindRun(t, index, &spec, "created"); !errors.Is(err, agentoscore.ErrInvalidBackendRef) {
 		t.Fatalf("Bind changed backend error = %v, want ErrInvalidBackendRef", err)
 	}
 }
@@ -38,7 +39,7 @@ func TestAgentOSRunIndexRequiresIdempotencyKey(t *testing.T) {
 	spec := nativeRunSpec("")
 	err := bindRun(t, index, &spec, "created")
 
-	if !errors.Is(err, agentos.ErrInvalidRunSpec) {
+	if !errors.Is(err, agentoscore.ErrInvalidRunSpec) {
 		t.Fatalf("Bind error = %v, want ErrInvalidRunSpec", err)
 	}
 }
@@ -55,7 +56,7 @@ func testAgentOSRunIndexRejectsMutation(t *testing.T, mutate func(*agentos.RunSp
 
 	mutate(&spec)
 
-	if err := bindRun(t, index, &spec, "created"); !errors.Is(err, agentos.ErrInvalidRunSpec) {
+	if err := bindRun(t, index, &spec, "created"); !errors.Is(err, agentoscore.ErrInvalidRunSpec) {
 		t.Fatalf("%s error = %v, want ErrInvalidRunSpec", errMsg, err)
 	}
 }
@@ -125,7 +126,7 @@ func TestAgentOSRunIndexRejectsPlanNodeOwnershipChange(t *testing.T) {
 		t.Fatalf("BindPlanNode replay: %v", err)
 	}
 
-	if err := bindPlanNode(t, index, &spec, "node-2", "running"); !errors.Is(err, agentos.ErrInvalidRunPlan) {
+	if err := bindPlanNode(t, index, &spec, "node-2", "running"); !errors.Is(err, agentoscore.ErrInvalidRunPlan) {
 		t.Fatalf("BindPlanNode changed node error = %v, want ErrInvalidRunPlan", err)
 	}
 }

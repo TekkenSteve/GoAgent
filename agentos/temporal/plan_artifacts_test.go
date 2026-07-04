@@ -4,7 +4,8 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/TekkenSteve/GoAgent/agentos"
+	agentos "github.com/TekkenSteve/GoAgent/agentos/control"
+	agentoscore "github.com/TekkenSteve/GoAgent/agentos/core"
 )
 
 const (
@@ -18,11 +19,11 @@ func TestNormalizeRunArtifactsAddsPlanNodeAndRunRefs(t *testing.T) {
 	node := agentos.PlanNodeSpec{NodeID: RESEARCH}
 	status := agentos.RunStatus{
 		RunID: "run-research",
-		Artifacts: []agentos.ArtifactRef{
+		Artifacts: []agentoscore.ArtifactRef{
 			{
 				ArtifactID: "artifact-1",
 				Name:       "summary",
-				Kind:       agentos.ArtifactKindObject,
+				Kind:       agentoscore.ArtifactKindObject,
 			},
 		},
 	}
@@ -49,41 +50,41 @@ func TestNormalizeRunArtifactsRejectsMismatchedOwnership(t *testing.T) {
 
 	for _, test := range []struct {
 		name string
-		ref  agentos.ArtifactRef
+		ref  agentoscore.ArtifactRef
 	}{
 		{
 			name: "plan",
-			ref: agentos.ArtifactRef{
+			ref: agentoscore.ArtifactRef{
 				ArtifactID: "artifact-1",
 				PlanID:     "other-plan",
 				Name:       "summary",
-				Kind:       agentos.ArtifactKindObject,
+				Kind:       agentoscore.ArtifactKindObject,
 			},
 		},
 		{
 			name: "node",
-			ref: agentos.ArtifactRef{
+			ref: agentoscore.ArtifactRef{
 				ArtifactID: "artifact-1",
 				NodeID:     "other-node",
 				Name:       "summary",
-				Kind:       agentos.ArtifactKindObject,
+				Kind:       agentoscore.ArtifactKindObject,
 			},
 		},
 		{
 			name: "run",
-			ref: agentos.ArtifactRef{
+			ref: agentoscore.ArtifactRef{
 				ArtifactID: "artifact-1",
 				RunID:      "other-run",
 				Name:       "summary",
-				Kind:       agentos.ArtifactKindObject,
+				Kind:       agentoscore.ArtifactKindObject,
 			},
 		},
 		{
 			name: "uri-only",
-			ref: agentos.ArtifactRef{
+			ref: agentoscore.ArtifactRef{
 				URI:  "s3://artifacts/plan-1/artifact-1",
 				Name: "summary",
-				Kind: agentos.ArtifactKindObject,
+				Kind: agentoscore.ArtifactKindObject,
 			},
 		},
 	} {
@@ -92,9 +93,9 @@ func TestNormalizeRunArtifactsRejectsMismatchedOwnership(t *testing.T) {
 
 			_, err := normalizeRunArtifacts("plan-1", &node, &agentos.RunStatus{
 				RunID:     status.RunID,
-				Artifacts: []agentos.ArtifactRef{test.ref},
+				Artifacts: []agentoscore.ArtifactRef{test.ref},
 			})
-			if !errors.Is(err, agentos.ErrInvalidArtifact) {
+			if !errors.Is(err, agentoscore.ErrInvalidArtifact) {
 				t.Fatalf("normalizeRunArtifacts error = %v, want ErrInvalidArtifact", err)
 			}
 		})
@@ -105,10 +106,10 @@ func TestValidateRequiredArtifactsRejectsMissingOutput(t *testing.T) {
 	t.Parallel()
 
 	err := validateRequiredArtifacts(
-		[]agentos.ArtifactSpec{{Name: "summary", Kind: agentos.ArtifactKindObject, Required: true}},
+		[]agentos.ArtifactSpec{{Name: "summary", Kind: agentoscore.ArtifactKindObject, Required: true}},
 		nil,
 	)
-	if !errors.Is(err, agentos.ErrInvalidArtifact) {
+	if !errors.Is(err, agentoscore.ErrInvalidArtifact) {
 		t.Fatalf("error = %v, want ErrInvalidArtifact", err)
 	}
 }

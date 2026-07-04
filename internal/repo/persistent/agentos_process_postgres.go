@@ -8,7 +8,8 @@ import (
 	"time"
 
 	sq "github.com/Masterminds/squirrel"
-	"github.com/TekkenSteve/GoAgent/agentos"
+	agentoscore "github.com/TekkenSteve/GoAgent/agentos/core"
+	agentos "github.com/TekkenSteve/GoAgent/agentos/process"
 	"github.com/TekkenSteve/GoAgent/internal/pkg/postgres"
 	"github.com/TekkenSteve/GoAgent/internal/usecase/agentosprocess"
 	"github.com/jackc/pgx/v5"
@@ -24,16 +25,16 @@ func NewAgentOSProcessRepo(pg *postgres.Postgres) *AgentOSProcessRepo {
 	return &AgentOSProcessRepo{pg}
 }
 
-func (r *AgentOSProcessRepo) CreateProcess(ctx context.Context, spec *agentos.ProcessSpec, status *agentos.ProcessStatus) (agentos.ProcessStatus, bool, error) {
+func (r *AgentOSProcessRepo) CreateProcess(ctx context.Context, spec *agentos.Spec, status *agentos.Status) (agentos.Status, bool, error) {
 	if err := agentos.ValidateProcessSpec(spec); err != nil {
-		return agentos.ProcessStatus{}, false, err
+		return agentos.Status{}, false, err
 	}
 
 	normalizedStatus := normalizePostgresProcessStatus(spec, status)
 
 	existingSpec, existingStatus, exists, err := r.processForCreate(ctx, spec)
 	if err != nil {
-		return agentos.ProcessStatus{}, false, err
+		return agentos.Status{}, false, err
 	}
 
 	if exists {
@@ -43,22 +44,22 @@ func (r *AgentOSProcessRepo) CreateProcess(ctx context.Context, spec *agentos.Pr
 	if err := r.insertProcess(ctx, spec, &normalizedStatus); err != nil {
 		existing, lookupErr := r.resolveProcessCreateConflict(ctx, spec, err)
 		if lookupErr != nil {
-			return agentos.ProcessStatus{}, false, lookupErr
+			return agentos.Status{}, false, lookupErr
 		}
 
 		if existing != nil {
 			return *existing, false, nil
 		}
 
-		return agentos.ProcessStatus{}, false, err
+		return agentos.Status{}, false, err
 	}
 
 	return normalizedStatus, true, nil
 }
 
-func (r *AgentOSProcessRepo) GetProcessByRef(ctx context.Context, ref agentos.ProcessRef) (agentos.ProcessSpec, agentos.ProcessStatus, bool, error) {
+func (r *AgentOSProcessRepo) GetProcessByRef(ctx context.Context, ref agentos.Ref) (agentos.Spec, agentos.Status, bool, error) {
 	if err := agentos.ValidateProcessRef(ref); err != nil {
-		return agentos.ProcessSpec{}, agentos.ProcessStatus{}, false, err
+		return agentos.Spec{}, agentos.Status{}, false, err
 	}
 
 	return r.loadProcess(ctx, sq.Eq{
@@ -70,32 +71,32 @@ func (r *AgentOSProcessRepo) GetProcessByRef(ctx context.Context, ref agentos.Pr
 
 func (r *AgentOSProcessRepo) UpdateProcessStatus(
 	ctx context.Context,
-	status *agentos.ProcessStatus,
+	status *agentos.Status,
 	idempotencyKey string,
-) (agentos.ProcessStatus, error) {
+) (agentos.Status, error) {
 	if err := validatePostgresProcessStatusUpdate(status, idempotencyKey); err != nil {
-		return agentos.ProcessStatus{}, err
+		return agentos.Status{}, err
 	}
 
-	spec, _, exists, err := r.GetProcessByRef(ctx, agentos.ProcessRef{
+	spec, _, exists, err := r.GetProcessByRef(ctx, agentos.Ref{
 		ProcessID: status.ProcessID,
 		AccountID: status.AccountID,
 		ProjectID: status.ProjectID,
 	})
 	if err != nil || !exists {
-		return agentos.ProcessStatus{}, err
+		return agentos.Status{}, err
 	}
 
 	normalized := normalizePostgresProcessStatus(&spec, status)
 
 	statusJSON, err := json.Marshal(normalized)
 	if err != nil {
-		return agentos.ProcessStatus{}, fmt.Errorf("AgentOSProcessRepo - UpdateProcessStatus - marshal status: %w", err)
+		return agentos.Status{}, fmt.Errorf("AgentOSProcessRepo - UpdateProcessStatus - marshal status: %w", err)
 	}
 
 	existingStatus, exists, err := r.processStatusByIdempotencyKey(ctx, status.ProcessID, status.AccountID, status.ProjectID, idempotencyKey)
 	if err != nil {
-		return agentos.ProcessStatus{}, err
+		return agentos.Status{}, err
 	}
 
 	if exists {
@@ -107,14 +108,14 @@ func (r *AgentOSProcessRepo) UpdateProcessStatus(
 
 func (r *AgentOSProcessRepo) applyProcessStatusUpdate(
 	ctx context.Context,
-	spec *agentos.ProcessSpec,
-	status *agentos.ProcessStatus,
+	spec *agentos.Spec,
+	status *agentos.Status,
 	idempotencyKey string,
 	statusJSON []byte,
-) (agentos.ProcessStatus, error) {
+) (agentos.Status, error) {
 	tx, err := r.Pool.Begin(ctx)
 	if err != nil {
-		return agentos.ProcessStatus{}, fmt.Errorf("AgentOSProcessRepo - UpdateProcessStatus - begin: %w", err)
+		return agentos.Status{}, fmt.Errorf("AgentOSProcessRepo - UpdateProcessStatus - begin: %w", err)
 	}
 
 	defer func() {
@@ -134,24 +135,24 @@ func (r *AgentOSProcessRepo) applyProcessStatusUpdate(
 		}).
 		ToSql()
 	if err != nil {
-		return agentos.ProcessStatus{}, fmt.Errorf("AgentOSProcessRepo - UpdateProcessStatus - builder: %w", err)
+		return agentos.Status{}, fmt.Errorf("AgentOSProcessRepo - UpdateProcessStatus - builder: %w", err)
 	}
 
 	tag, err := tx.Exec(ctx, query, args...)
 	if err != nil {
-		return agentos.ProcessStatus{}, fmt.Errorf("AgentOSProcessRepo - UpdateProcessStatus - exec: %w", err)
+		return agentos.Status{}, fmt.Errorf("AgentOSProcessRepo - UpdateProcessStatus - exec: %w", err)
 	}
 
 	if tag.RowsAffected() == 0 {
-		return agentos.ProcessStatus{}, fmt.Errorf("%w: process %q not found", agentos.ErrProcessRouteNotFound, spec.ProcessID)
+		return agentos.Status{}, fmt.Errorf("%w: process %q not found", agentoscore.ErrProcessRouteNotFound, spec.ProcessID)
 	}
 
 	if err := r.insertProcessStatusUpdate(ctx, tx, status, idempotencyKey, statusJSON); err != nil {
-		return agentos.ProcessStatus{}, err
+		return agentos.Status{}, err
 	}
 
 	if err := tx.Commit(ctx); err != nil {
-		return agentos.ProcessStatus{}, fmt.Errorf("AgentOSProcessRepo - UpdateProcessStatus - commit: %w", err)
+		return agentos.Status{}, fmt.Errorf("AgentOSProcessRepo - UpdateProcessStatus - commit: %w", err)
 	}
 
 	return *status, nil
@@ -159,22 +160,22 @@ func (r *AgentOSProcessRepo) applyProcessStatusUpdate(
 
 func (r *AgentOSProcessRepo) AppendProcessEvent(
 	ctx context.Context,
-	event *agentos.ProcessEvent,
+	event *agentos.Event,
 	idempotencyKey string,
-) (agentos.ProcessEvent, error) {
+) (agentos.Event, error) {
 	if err := validatePostgresProcessEvent(event, idempotencyKey); err != nil {
-		return agentos.ProcessEvent{}, err
+		return agentos.Event{}, err
 	}
 
 	existing, exists, err := r.processEventByIdempotencyKey(ctx, event.ProcessID, event.AccountID, event.ProjectID, idempotencyKey)
 	if err != nil {
-		return agentos.ProcessEvent{}, err
+		return agentos.Event{}, err
 	}
 
 	if exists {
 		requested := normalizePostgresProcessEventReplay(event, &existing)
 		if err := agentosprocess.ValidateProcessEventIdempotency(&existing, &requested); err != nil {
-			return agentos.ProcessEvent{}, err
+			return agentos.Event{}, err
 		}
 
 		return existing, nil
@@ -182,7 +183,7 @@ func (r *AgentOSProcessRepo) AppendProcessEvent(
 
 	tx, err := r.Pool.Begin(ctx)
 	if err != nil {
-		return agentos.ProcessEvent{}, fmt.Errorf("AgentOSProcessRepo - AppendProcessEvent - begin: %w", err)
+		return agentos.Event{}, fmt.Errorf("AgentOSProcessRepo - AppendProcessEvent - begin: %w", err)
 	}
 
 	defer func() {
@@ -191,27 +192,27 @@ func (r *AgentOSProcessRepo) AppendProcessEvent(
 
 	scope, err := r.lockProcessEventScope(ctx, tx, event)
 	if err != nil {
-		return agentos.ProcessEvent{}, err
+		return agentos.Event{}, err
 	}
 
 	prepared := normalizePostgresProcessEvent(event, &scope)
 	if err := r.insertProcessEvent(ctx, tx, &prepared, idempotencyKey); err != nil {
-		return agentos.ProcessEvent{}, err
+		return agentos.Event{}, err
 	}
 
 	if err := tx.Commit(ctx); err != nil {
-		return agentos.ProcessEvent{}, fmt.Errorf("AgentOSProcessRepo - AppendProcessEvent - commit: %w", err)
+		return agentos.Event{}, fmt.Errorf("AgentOSProcessRepo - AppendProcessEvent - commit: %w", err)
 	}
 
 	return prepared, nil
 }
 
-func (r *AgentOSProcessRepo) ListProcessEvents(ctx context.Context, scope *agentos.ProcessEventScope) ([]agentos.ProcessEvent, error) {
+func (r *AgentOSProcessRepo) ListProcessEvents(ctx context.Context, scope *agentos.EventScope) ([]agentos.Event, error) {
 	if err := agentos.ValidateProcessEventScope(scope); err != nil {
 		return nil, err
 	}
 
-	_, _, exists, err := r.GetProcessByRef(ctx, agentos.ProcessRef{
+	_, _, exists, err := r.GetProcessByRef(ctx, agentos.Ref{
 		ProcessID: scope.ProcessID,
 		AccountID: scope.AccountID,
 		ProjectID: scope.ProjectID,
@@ -245,7 +246,7 @@ func (r *AgentOSProcessRepo) ListProcessEvents(ctx context.Context, scope *agent
 	}
 	defer rows.Close()
 
-	var events []agentos.ProcessEvent
+	var events []agentos.Event
 
 	for rows.Next() {
 		event, err := scanProcessEvent(rows)
@@ -263,7 +264,7 @@ func (r *AgentOSProcessRepo) ListProcessEvents(ctx context.Context, scope *agent
 	return events, nil
 }
 
-func (r *AgentOSProcessRepo) processForCreate(ctx context.Context, spec *agentos.ProcessSpec) (agentos.ProcessSpec, agentos.ProcessStatus, bool, error) {
+func (r *AgentOSProcessRepo) processForCreate(ctx context.Context, spec *agentos.Spec) (agentos.Spec, agentos.Status, bool, error) {
 	existingSpec, existingStatus, exists, err := r.loadProcess(ctx, sq.Eq{
 		"account_id":      spec.AccountID,
 		"project_id":      spec.ProjectID,
@@ -280,7 +281,7 @@ func (r *AgentOSProcessRepo) processForCreate(ctx context.Context, spec *agentos
 	}, "processForCreateByRef")
 }
 
-func (r *AgentOSProcessRepo) insertProcess(ctx context.Context, spec *agentos.ProcessSpec, status *agentos.ProcessStatus) error {
+func (r *AgentOSProcessRepo) insertProcess(ctx context.Context, spec *agentos.Spec, status *agentos.Status) error {
 	specJSON, err := json.Marshal(spec)
 	if err != nil {
 		return fmt.Errorf("AgentOSProcessRepo - insertProcess - marshal spec: %w", err)
@@ -335,7 +336,7 @@ func (r *AgentOSProcessRepo) insertProcess(ctx context.Context, spec *agentos.Pr
 	return nil
 }
 
-func (r *AgentOSProcessRepo) resolveProcessCreateConflict(ctx context.Context, spec *agentos.ProcessSpec, err error) (*agentos.ProcessStatus, error) {
+func (r *AgentOSProcessRepo) resolveProcessCreateConflict(ctx context.Context, spec *agentos.Spec, err error) (*agentos.Status, error) {
 	if !isPostgresUniqueViolation(err) {
 		return nil, nil
 	}
@@ -356,33 +357,33 @@ func (r *AgentOSProcessRepo) resolveProcessCreateConflict(ctx context.Context, s
 	return &existingStatus, nil
 }
 
-func (r *AgentOSProcessRepo) loadProcess(ctx context.Context, where sq.Eq, op string) (agentos.ProcessSpec, agentos.ProcessStatus, bool, error) {
+func (r *AgentOSProcessRepo) loadProcess(ctx context.Context, where sq.Eq, op string) (agentos.Spec, agentos.Status, bool, error) {
 	query, args, err := r.Builder.
 		Select("spec_json", "status_json").
 		From("processes").
 		Where(where).
 		ToSql()
 	if err != nil {
-		return agentos.ProcessSpec{}, agentos.ProcessStatus{}, false, fmt.Errorf("AgentOSProcessRepo - %s - builder: %w", op, err)
+		return agentos.Spec{}, agentos.Status{}, false, fmt.Errorf("AgentOSProcessRepo - %s - builder: %w", op, err)
 	}
 
 	var specJSON, statusJSON []byte
 	if err := r.Pool.QueryRow(ctx, query, args...).Scan(&specJSON, &statusJSON); err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
-			return agentos.ProcessSpec{}, agentos.ProcessStatus{}, false, nil
+			return agentos.Spec{}, agentos.Status{}, false, nil
 		}
 
-		return agentos.ProcessSpec{}, agentos.ProcessStatus{}, false, fmt.Errorf("AgentOSProcessRepo - %s - query: %w", op, err)
+		return agentos.Spec{}, agentos.Status{}, false, fmt.Errorf("AgentOSProcessRepo - %s - query: %w", op, err)
 	}
 
-	var spec agentos.ProcessSpec
+	var spec agentos.Spec
 	if err := json.Unmarshal(specJSON, &spec); err != nil {
-		return agentos.ProcessSpec{}, agentos.ProcessStatus{}, false, fmt.Errorf("AgentOSProcessRepo - %s - decode spec: %w", op, err)
+		return agentos.Spec{}, agentos.Status{}, false, fmt.Errorf("AgentOSProcessRepo - %s - decode spec: %w", op, err)
 	}
 
-	var status agentos.ProcessStatus
+	var status agentos.Status
 	if err := json.Unmarshal(statusJSON, &status); err != nil {
-		return agentos.ProcessSpec{}, agentos.ProcessStatus{}, false, fmt.Errorf("AgentOSProcessRepo - %s - decode status: %w", op, err)
+		return agentos.Spec{}, agentos.Status{}, false, fmt.Errorf("AgentOSProcessRepo - %s - decode status: %w", op, err)
 	}
 
 	return spec, status, true, nil
@@ -397,7 +398,7 @@ type processEventScope struct {
 	Sequence     int64
 }
 
-func (r *AgentOSProcessRepo) lockProcessEventScope(ctx context.Context, tx pgx.Tx, event *agentos.ProcessEvent) (processEventScope, error) {
+func (r *AgentOSProcessRepo) lockProcessEventScope(ctx context.Context, tx pgx.Tx, event *agentos.Event) (processEventScope, error) {
 	query, args, err := r.Builder.
 		Select("process_id", "account_id", "project_id", "resource_kind", "resource_id", "event_sequence").
 		From("processes").
@@ -422,7 +423,7 @@ func (r *AgentOSProcessRepo) lockProcessEventScope(ctx context.Context, tx pgx.T
 		&scope.Sequence,
 	); err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
-			return processEventScope{}, fmt.Errorf("%w: process %q not found", agentos.ErrProcessRouteNotFound, event.ProcessID)
+			return processEventScope{}, fmt.Errorf("%w: process %q not found", agentoscore.ErrProcessRouteNotFound, event.ProcessID)
 		}
 
 		return processEventScope{}, fmt.Errorf("AgentOSProcessRepo - AppendProcessEvent - lock query: %w", err)
@@ -452,7 +453,7 @@ func (r *AgentOSProcessRepo) lockProcessEventScope(ctx context.Context, tx pgx.T
 	return scope, nil
 }
 
-func (r *AgentOSProcessRepo) insertProcessEvent(ctx context.Context, tx pgx.Tx, event *agentos.ProcessEvent, idempotencyKey string) error {
+func (r *AgentOSProcessRepo) insertProcessEvent(ctx context.Context, tx pgx.Tx, event *agentos.Event, idempotencyKey string) error {
 	payloadJSON, err := json.Marshal(event.Payload)
 	if err != nil {
 		return fmt.Errorf("AgentOSProcessRepo - insertProcessEvent - marshal payload: %w", err)
@@ -505,7 +506,7 @@ func (r *AgentOSProcessRepo) insertProcessEvent(ctx context.Context, tx pgx.Tx, 
 	return nil
 }
 
-func (r *AgentOSProcessRepo) processEventByIdempotencyKey(ctx context.Context, processID, accountID, projectID, idempotencyKey string) (agentos.ProcessEvent, bool, error) {
+func (r *AgentOSProcessRepo) processEventByIdempotencyKey(ctx context.Context, processID, accountID, projectID, idempotencyKey string) (agentos.Event, bool, error) {
 	query, args, err := r.Builder.
 		Select(processEventColumns()...).
 		From("process_events").
@@ -517,22 +518,22 @@ func (r *AgentOSProcessRepo) processEventByIdempotencyKey(ctx context.Context, p
 		}).
 		ToSql()
 	if err != nil {
-		return agentos.ProcessEvent{}, false, fmt.Errorf("AgentOSProcessRepo - processEventByIdempotencyKey - builder: %w", err)
+		return agentos.Event{}, false, fmt.Errorf("AgentOSProcessRepo - processEventByIdempotencyKey - builder: %w", err)
 	}
 
 	event, err := scanProcessEvent(r.Pool.QueryRow(ctx, query, args...))
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
-			return agentos.ProcessEvent{}, false, nil
+			return agentos.Event{}, false, nil
 		}
 
-		return agentos.ProcessEvent{}, false, err
+		return agentos.Event{}, false, err
 	}
 
 	return event, true, nil
 }
 
-func (r *AgentOSProcessRepo) processStatusByIdempotencyKey(ctx context.Context, processID, accountID, projectID, idempotencyKey string) (agentos.ProcessStatus, bool, error) {
+func (r *AgentOSProcessRepo) processStatusByIdempotencyKey(ctx context.Context, processID, accountID, projectID, idempotencyKey string) (agentos.Status, bool, error) {
 	query, args, err := r.Builder.
 		Select("status_json").
 		From("process_status_updates").
@@ -544,27 +545,27 @@ func (r *AgentOSProcessRepo) processStatusByIdempotencyKey(ctx context.Context, 
 		}).
 		ToSql()
 	if err != nil {
-		return agentos.ProcessStatus{}, false, fmt.Errorf("AgentOSProcessRepo - processStatusByIdempotencyKey - builder: %w", err)
+		return agentos.Status{}, false, fmt.Errorf("AgentOSProcessRepo - processStatusByIdempotencyKey - builder: %w", err)
 	}
 
 	var statusJSON []byte
 	if err := r.Pool.QueryRow(ctx, query, args...).Scan(&statusJSON); err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
-			return agentos.ProcessStatus{}, false, nil
+			return agentos.Status{}, false, nil
 		}
 
-		return agentos.ProcessStatus{}, false, fmt.Errorf("AgentOSProcessRepo - processStatusByIdempotencyKey - query: %w", err)
+		return agentos.Status{}, false, fmt.Errorf("AgentOSProcessRepo - processStatusByIdempotencyKey - query: %w", err)
 	}
 
-	var status agentos.ProcessStatus
+	var status agentos.Status
 	if err := json.Unmarshal(statusJSON, &status); err != nil {
-		return agentos.ProcessStatus{}, false, fmt.Errorf("AgentOSProcessRepo - processStatusByIdempotencyKey - decode status: %w", err)
+		return agentos.Status{}, false, fmt.Errorf("AgentOSProcessRepo - processStatusByIdempotencyKey - decode status: %w", err)
 	}
 
 	return status, true, nil
 }
 
-func (r *AgentOSProcessRepo) insertProcessStatusUpdate(ctx context.Context, tx pgx.Tx, status *agentos.ProcessStatus, idempotencyKey string, statusJSON []byte) error {
+func (r *AgentOSProcessRepo) insertProcessStatusUpdate(ctx context.Context, tx pgx.Tx, status *agentos.Status, idempotencyKey string, statusJSON []byte) error {
 	query, args, err := r.Builder.
 		Insert("process_status_updates").
 		Columns(
@@ -593,8 +594,8 @@ func (r *AgentOSProcessRepo) insertProcessStatusUpdate(ctx context.Context, tx p
 	return nil
 }
 
-func normalizePostgresProcessStatus(spec *agentos.ProcessSpec, status *agentos.ProcessStatus) agentos.ProcessStatus {
-	var out agentos.ProcessStatus
+func normalizePostgresProcessStatus(spec *agentos.Spec, status *agentos.Status) agentos.Status {
+	var out agentos.Status
 	if status != nil {
 		out = *status
 	}
@@ -626,47 +627,47 @@ func normalizePostgresProcessStatus(spec *agentos.ProcessSpec, status *agentos.P
 	return out
 }
 
-func validatePostgresProcessStatusUpdate(status *agentos.ProcessStatus, idempotencyKey string) error {
+func validatePostgresProcessStatusUpdate(status *agentos.Status, idempotencyKey string) error {
 	if status == nil {
-		return fmt.Errorf("%w: process status is required", agentos.ErrInvalidProcess)
+		return fmt.Errorf("%w: process status is required", agentoscore.ErrInvalidProcess)
 	}
 
 	if idempotencyKey == "" {
-		return fmt.Errorf("%w: process status idempotency key is required", agentos.ErrInvalidProcess)
+		return fmt.Errorf("%w: process status idempotency key is required", agentoscore.ErrInvalidProcess)
 	}
 
 	return nil
 }
 
-func validatePostgresProcessEvent(event *agentos.ProcessEvent, idempotencyKey string) error {
+func validatePostgresProcessEvent(event *agentos.Event, idempotencyKey string) error {
 	if event == nil {
-		return fmt.Errorf("%w: process event is required", agentos.ErrInvalidProcess)
+		return fmt.Errorf("%w: process event is required", agentoscore.ErrInvalidProcess)
 	}
 
 	if idempotencyKey == "" {
-		return fmt.Errorf("%w: process event idempotency key is required", agentos.ErrInvalidProcess)
+		return fmt.Errorf("%w: process event idempotency key is required", agentoscore.ErrInvalidProcess)
 	}
 
 	if event.ProcessID == "" {
-		return fmt.Errorf("%w: process id is required", agentos.ErrInvalidProcess)
+		return fmt.Errorf("%w: process id is required", agentoscore.ErrInvalidProcess)
 	}
 
 	if event.AccountID == "" {
-		return fmt.Errorf("%w: account id is required", agentos.ErrInvalidProcess)
+		return fmt.Errorf("%w: account id is required", agentoscore.ErrInvalidProcess)
 	}
 
 	if event.ProjectID == "" {
-		return fmt.Errorf("%w: project id is required", agentos.ErrInvalidProcess)
+		return fmt.Errorf("%w: project id is required", agentoscore.ErrInvalidProcess)
 	}
 
 	if event.EventType == "" {
-		return fmt.Errorf("%w: process event type is required", agentos.ErrInvalidProcess)
+		return fmt.Errorf("%w: process event type is required", agentoscore.ErrInvalidProcess)
 	}
 
 	return nil
 }
 
-func normalizePostgresProcessEvent(event *agentos.ProcessEvent, scope *processEventScope) agentos.ProcessEvent {
+func normalizePostgresProcessEvent(event *agentos.Event, scope *processEventScope) agentos.Event {
 	out := *event
 	out.ProcessID = scope.ProcessID
 	out.AccountID = scope.AccountID
@@ -695,7 +696,7 @@ func normalizePostgresProcessEvent(event *agentos.ProcessEvent, scope *processEv
 	return out
 }
 
-func normalizePostgresProcessEventReplay(event, existing *agentos.ProcessEvent) agentos.ProcessEvent {
+func normalizePostgresProcessEventReplay(event, existing *agentos.Event) agentos.Event {
 	out := *event
 	out.EventID = existing.EventID
 	out.ProcessID = existing.ProcessID
@@ -718,15 +719,15 @@ func processEventColumns() []string {
 	}
 }
 
-func scanProcessEvent(scanner interface{ Scan(dest ...any) error }) (agentos.ProcessEvent, error) {
+func scanProcessEvent(scanner interface{ Scan(dest ...any) error }) (agentos.Event, error) {
 	var eventJSON []byte
 	if err := scanner.Scan(&eventJSON); err != nil {
-		return agentos.ProcessEvent{}, err
+		return agentos.Event{}, err
 	}
 
-	var event agentos.ProcessEvent
+	var event agentos.Event
 	if err := json.Unmarshal(eventJSON, &event); err != nil {
-		return agentos.ProcessEvent{}, fmt.Errorf("AgentOSProcessRepo - scanProcessEvent - decode event: %w", err)
+		return agentos.Event{}, fmt.Errorf("AgentOSProcessRepo - scanProcessEvent - decode event: %w", err)
 	}
 
 	return event, nil

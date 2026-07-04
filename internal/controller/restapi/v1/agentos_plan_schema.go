@@ -3,7 +3,7 @@ package v1
 import (
 	"net/http"
 
-	"github.com/TekkenSteve/GoAgent/agentos"
+	agentos "github.com/TekkenSteve/GoAgent/agentos/control"
 	"github.com/gofiber/fiber/v2"
 )
 

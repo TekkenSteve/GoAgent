@@ -5,7 +5,8 @@ import (
 	"fmt"
 	"sort"
 
-	"github.com/TekkenSteve/GoAgent/agentos"
+	agentos "github.com/TekkenSteve/GoAgent/agentos/control"
+	agentoscore "github.com/TekkenSteve/GoAgent/agentos/core"
 )
 
 // Scheduler calculates ready nodes from deterministic plan state.
@@ -140,7 +141,7 @@ func (s Scheduler) evaluateDependencies(ctx context.Context, node *agentos.PlanN
 	case agentos.PlanJoinAny, agentos.PlanJoinFirst:
 		return evaluateAnyJoin(waiting, satisfied, impossible, active, traces), nil
 	default:
-		return dependencyEvaluation{}, fmt.Errorf("%w: invalid join strategy %q", agentos.ErrInvalidRunPlan, node.Policy.Join)
+		return dependencyEvaluation{}, fmt.Errorf("%w: invalid join strategy %q", agentoscore.ErrInvalidRunPlan, node.Policy.Join)
 	}
 }
 
@@ -184,7 +185,7 @@ func (s Scheduler) evaluateEdges(ctx context.Context, node *agentos.PlanNodeSpec
 	for _, edge := range edges {
 		parent, ok := statusByNode[edge.From]
 		if !ok {
-			return 0, 0, 0, nil, fmt.Errorf("%w: edge %q from unknown node %q", agentos.ErrInvalidRunPlan, edge.EdgeID, edge.From)
+			return 0, 0, 0, nil, fmt.Errorf("%w: edge %q from unknown node %q", agentoscore.ErrInvalidRunPlan, edge.EdgeID, edge.From)
 		}
 
 		if !nodeTerminal(parent.LifecycleState) {
@@ -232,7 +233,7 @@ func (s Scheduler) evaluate(ctx context.Context, expression string, vars map[str
 	}
 
 	if s.Expressions == nil {
-		return false, fmt.Errorf("%w: expression compiler is required", agentos.ErrInvalidExpression)
+		return false, fmt.Errorf("%w: expression compiler is required", agentoscore.ErrInvalidExpression)
 	}
 
 	compiled, err := s.Expressions.Compile(expression)

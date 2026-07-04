@@ -8,7 +8,7 @@ import (
 	"io"
 	"strconv"
 
-	"github.com/TekkenSteve/GoAgent/agentos"
+	agentoscore "github.com/TekkenSteve/GoAgent/agentos/core"
 	"gopkg.in/yaml.v3"
 )
 
@@ -21,16 +21,16 @@ func DecodeWireJSON[T any](data []byte) (T, error) {
 	decoder.DisallowUnknownFields()
 
 	if err := decoder.Decode(&value); err != nil {
-		return value, fmt.Errorf("%w: decode json: %w", agentos.ErrInvalidRunPlan, err)
+		return value, fmt.Errorf("%w: decode json: %w", agentoscore.ErrInvalidRunPlan, err)
 	}
 
 	var trailing struct{}
 	if err := decoder.Decode(&trailing); err != io.EOF {
 		if err == nil {
-			return value, fmt.Errorf("%w: decode json: multiple documents", agentos.ErrInvalidRunPlan)
+			return value, fmt.Errorf("%w: decode json: multiple documents", agentoscore.ErrInvalidRunPlan)
 		}
 
-		return value, fmt.Errorf("%w: decode json trailing data: %w", agentos.ErrInvalidRunPlan, err)
+		return value, fmt.Errorf("%w: decode json trailing data: %w", agentoscore.ErrInvalidRunPlan, err)
 	}
 
 	return value, nil
@@ -43,7 +43,7 @@ func DecodeWireYAML[T any](data []byte) (T, error) {
 
 	jsonData, err := yamlWireToJSON(data)
 	if err != nil {
-		return zero, fmt.Errorf("%w: decode yaml: %w", agentos.ErrInvalidRunPlan, err)
+		return zero, fmt.Errorf("%w: decode yaml: %w", agentoscore.ErrInvalidRunPlan, err)
 	}
 
 	return DecodeWireJSON[T](jsonData)

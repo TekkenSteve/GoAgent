@@ -5,7 +5,8 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/TekkenSteve/GoAgent/agentos"
+	agentos "github.com/TekkenSteve/GoAgent/agentos/control"
+	agentoscore "github.com/TekkenSteve/GoAgent/agentos/core"
 	"github.com/TekkenSteve/GoAgent/internal/entity"
 	"github.com/TekkenSteve/GoAgent/internal/usecase"
 )
@@ -58,7 +59,7 @@ func (e *agentOSExecutor) Control(ctx context.Context, runID string, op entity.C
 		return err
 	}
 
-	control := agentos.ControlRequest{Operation: agentOSOp}
+	control := agentoscore.ControlRequest{Operation: agentOSOp}
 	if err := e.runtime.Control(ctx, runID, &control); err != nil {
 		return fmt.Errorf("agentos executor - control: %w", err)
 	}
@@ -81,14 +82,14 @@ func runStatusToEntity(status *agentos.RunStatus) entity.RunStatus {
 	}
 }
 
-func controlOperationToAgentOS(op entity.ControlOperation) (agentos.ControlOperation, error) {
+func controlOperationToAgentOS(op entity.ControlOperation) (agentoscore.ControlOperation, error) {
 	switch op {
 	case entity.ControlPause:
-		return agentos.ControlPause, nil
+		return agentoscore.ControlPause, nil
 	case entity.ControlResume:
-		return agentos.ControlResume, nil
+		return agentoscore.ControlResume, nil
 	case entity.ControlCancel:
-		return agentos.ControlCancel, nil
+		return agentoscore.ControlCancel, nil
 	default:
 		return "", fmt.Errorf("%w: %s", errAgentOSExecutorUnknownControl, op)
 	}

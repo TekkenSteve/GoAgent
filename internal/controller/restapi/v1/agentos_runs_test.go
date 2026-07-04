@@ -9,7 +9,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/TekkenSteve/GoAgent/agentos"
+	agentos "github.com/TekkenSteve/GoAgent/agentos/control"
+	agentoscore "github.com/TekkenSteve/GoAgent/agentos/core"
 	"github.com/TekkenSteve/GoAgent/pkg/logger"
 	"github.com/gofiber/fiber/v2"
 )
@@ -74,7 +75,7 @@ func assertRunSignalRoute(t *testing.T, resp *http.Response, runtime *fakeAgentO
 	}
 
 	if runtime.signalRunID != Run1 ||
-		runtime.signal.Type != agentos.SignalUserMessage ||
+		runtime.signal.Type != agentoscore.SignalUserMessage ||
 		runtime.signal.Payload["content"] != "continue" {
 		t.Fatalf("unexpected signal: run=%q signal=%#v", runtime.signalRunID, runtime.signal)
 	}
@@ -87,7 +88,7 @@ func assertRunControlRoute(t *testing.T, resp *http.Response, runtime *fakeAgent
 		t.Fatalf("control status = %d", resp.StatusCode)
 	}
 
-	if runtime.controlRunID != Run1 || runtime.control != agentos.ControlCancel {
+	if runtime.controlRunID != Run1 || runtime.control != agentoscore.ControlCancel {
 		t.Fatalf("unexpected control: run=%q op=%q", runtime.controlRunID, runtime.control)
 	}
 }
@@ -133,9 +134,9 @@ func doAgentOSRouteRequest(t *testing.T, app *fiber.App, method, target, body st
 type fakeAgentOSRuntime struct {
 	started      agentos.RunSpec
 	signalRunID  string
-	signal       agentos.Signal
+	signal       agentoscore.Signal
 	controlRunID string
-	control      agentos.ControlOperation
+	control      agentoscore.ControlOperation
 }
 
 func (r *fakeAgentOSRuntime) Start(_ context.Context, spec *agentos.RunSpec) (agentos.RunStatus, error) {
@@ -144,7 +145,7 @@ func (r *fakeAgentOSRuntime) Start(_ context.Context, spec *agentos.RunSpec) (ag
 	return agentos.RunStatus{RunID: spec.RunID, LifecycleState: "created", UpdatedAt: time.Now()}, nil
 }
 
-func (r *fakeAgentOSRuntime) Signal(_ context.Context, runID string, signal *agentos.Signal) error {
+func (r *fakeAgentOSRuntime) Signal(_ context.Context, runID string, signal *agentoscore.Signal) error {
 	r.signalRunID = runID
 	r.signal = *signal
 
@@ -155,14 +156,14 @@ func (r *fakeAgentOSRuntime) Status(_ context.Context, runID string) (agentos.Ru
 	return agentos.RunStatus{RunID: runID, LifecycleState: "running", UpdatedAt: time.Now()}, nil
 }
 
-func (r *fakeAgentOSRuntime) Control(_ context.Context, runID string, control *agentos.ControlRequest) error {
+func (r *fakeAgentOSRuntime) Control(_ context.Context, runID string, control *agentoscore.ControlRequest) error {
 	r.controlRunID = runID
 	r.control = control.Operation
 
 	return nil
 }
 
-func (r *fakeAgentOSRuntime) Subscribe(context.Context, agentos.StreamScope) (agentos.Subscription, error) {
+func (r *fakeAgentOSRuntime) Subscribe(context.Context, agentoscore.StreamScope) (agentoscore.Subscription, error) {
 	return nil, nil
 }
 

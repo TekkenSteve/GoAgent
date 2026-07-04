@@ -5,7 +5,8 @@ import (
 	"encoding/json"
 	"fmt"
 
-	"github.com/TekkenSteve/GoAgent/agentos"
+	agentos "github.com/TekkenSteve/GoAgent/agentos/control"
+	agentoscore "github.com/TekkenSteve/GoAgent/agentos/core"
 	"github.com/TekkenSteve/GoAgent/internal/usecase/agentosplan"
 	"sigs.k8s.io/yaml"
 )
@@ -86,7 +87,7 @@ func (a Adapter) Export(ctx context.Context, spec *agentos.RunPlanSpec) (Workflo
 
 	runPlanPayload, err := json.Marshal(runPlanExtension{Spec: *spec})
 	if err != nil {
-		return Workflow{}, fmt.Errorf("%w: encode run plan extension: %w", agentos.ErrInvalidRunPlan, err)
+		return Workflow{}, fmt.Errorf("%w: encode run plan extension: %w", agentoscore.ErrInvalidRunPlan, err)
 	}
 
 	tasks := make(TaskList, 0, len(spec.Nodes))
@@ -95,7 +96,7 @@ func (a Adapter) Export(ctx context.Context, spec *agentos.RunPlanSpec) (Workflo
 
 		nodePayload, err := json.Marshal(planNodeExtension{Node: *node})
 		if err != nil {
-			return Workflow{}, fmt.Errorf("%w: encode node extension: %w", agentos.ErrInvalidRunPlan, err)
+			return Workflow{}, fmt.Errorf("%w: encode node extension: %w", agentoscore.ErrInvalidRunPlan, err)
 		}
 
 		tasks = append(tasks, Task{
@@ -130,19 +131,19 @@ func (a Adapter) Export(ctx context.Context, spec *agentos.RunPlanSpec) (Workflo
 // validated RunPlanSpec.
 func (a Adapter) Import(ctx context.Context, workflow *Workflow) (agentos.RunPlanSpec, error) {
 	if workflow.Document.DSL != DSLVersion {
-		return agentos.RunPlanSpec{}, fmt.Errorf("%w: unsupported serverless workflow dsl %q", agentos.ErrInvalidRunPlan, workflow.Document.DSL)
+		return agentos.RunPlanSpec{}, fmt.Errorf("%w: unsupported serverless workflow dsl %q", agentoscore.ErrInvalidRunPlan, workflow.Document.DSL)
 	}
 
 	raw, ok := workflow.Use.Extensions[AgentOSRunPlanKey]
 	if !ok {
-		return agentos.RunPlanSpec{}, fmt.Errorf("%w: missing %s extension", agentos.ErrInvalidRunPlan, AgentOSRunPlanKey)
+		return agentos.RunPlanSpec{}, fmt.Errorf("%w: missing %s extension", agentoscore.ErrInvalidRunPlan, AgentOSRunPlanKey)
 	}
 
 	var extension runPlanExtension
 
 	extension, err := agentosplan.DecodeWireJSON[runPlanExtension](raw)
 	if err != nil {
-		return agentos.RunPlanSpec{}, fmt.Errorf("%w: decode run plan extension: %w", agentos.ErrInvalidRunPlan, err)
+		return agentos.RunPlanSpec{}, fmt.Errorf("%w: decode run plan extension: %w", agentoscore.ErrInvalidRunPlan, err)
 	}
 
 	if _, err := a.Validator.Validate(ctx, &extension.Spec); err != nil {
@@ -161,7 +162,7 @@ func MarshalJSON(workflow *Workflow) ([]byte, error) {
 func UnmarshalJSON(data []byte) (Workflow, error) {
 	workflow, err := agentosplan.DecodeWireJSON[Workflow](data)
 	if err != nil {
-		return Workflow{}, fmt.Errorf("%w: decode serverless workflow json: %w", agentos.ErrInvalidRunPlan, err)
+		return Workflow{}, fmt.Errorf("%w: decode serverless workflow json: %w", agentoscore.ErrInvalidRunPlan, err)
 	}
 
 	return workflow, nil
@@ -181,7 +182,7 @@ func MarshalYAML(workflow *Workflow) ([]byte, error) {
 func UnmarshalYAML(data []byte) (Workflow, error) {
 	workflow, err := agentosplan.DecodeWireYAML[Workflow](data)
 	if err != nil {
-		return Workflow{}, fmt.Errorf("%w: decode serverless workflow yaml: %w", agentos.ErrInvalidRunPlan, err)
+		return Workflow{}, fmt.Errorf("%w: decode serverless workflow yaml: %w", agentoscore.ErrInvalidRunPlan, err)
 	}
 
 	return workflow, nil
@@ -192,7 +193,7 @@ func (tasks TaskList) MarshalJSON() ([]byte, error) {
 	for i := range tasks {
 		task := tasks[i]
 		if task.Name == "" {
-			return nil, fmt.Errorf("%w: serverless workflow task name is required", agentos.ErrInvalidRunPlan)
+			return nil, fmt.Errorf("%w: serverless workflow task name is required", agentoscore.ErrInvalidRunPlan)
 		}
 
 		rawTasks = append(rawTasks, map[string]TaskDefinition{task.Name: task.Definition})
@@ -204,19 +205,19 @@ func (tasks TaskList) MarshalJSON() ([]byte, error) {
 func (tasks *TaskList) UnmarshalJSON(data []byte) error {
 	rawTasks, err := agentosplan.DecodeWireJSON[[]map[string]TaskDefinition](data)
 	if err != nil {
-		return fmt.Errorf("%w: decode serverless workflow tasks: %w", agentos.ErrInvalidRunPlan, err)
+		return fmt.Errorf("%w: decode serverless workflow tasks: %w", agentoscore.ErrInvalidRunPlan, err)
 	}
 
 	decoded := make(TaskList, 0, len(rawTasks))
 	for i := range rawTasks {
 		rawTask := rawTasks[i]
 		if len(rawTask) != 1 {
-			return fmt.Errorf("%w: serverless workflow task must have exactly one name", agentos.ErrInvalidRunPlan)
+			return fmt.Errorf("%w: serverless workflow task must have exactly one name", agentoscore.ErrInvalidRunPlan)
 		}
 
 		for name, definition := range rawTask {
 			if name == "" {
-				return fmt.Errorf("%w: serverless workflow task name is required", agentos.ErrInvalidRunPlan)
+				return fmt.Errorf("%w: serverless workflow task name is required", agentoscore.ErrInvalidRunPlan)
 			}
 
 			decoded = append(decoded, Task{Name: name, Definition: definition})

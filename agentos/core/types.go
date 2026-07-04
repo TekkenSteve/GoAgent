@@ -1,78 +1,9 @@
-package agentos
+package core
 
 import (
 	"encoding/json"
 	"time"
 )
-
-// RunSpec describes a generic agent run without binding callers to GoAgent internals.
-type RunSpec struct {
-	RunID          string            `json:"run_id"`
-	ThreadID       string            `json:"thread_id,omitempty"`
-	AccountID      string            `json:"account_id,omitempty"`
-	ProjectID      string            `json:"project_id,omitempty"`
-	AgentID        string            `json:"agent_id,omitempty"`
-	ModelRef       string            `json:"model_ref,omitempty"`
-	SystemPrompt   string            `json:"system_prompt,omitempty"`
-	UserMessage    string            `json:"user_message,omitempty"`
-	IdempotencyKey string            `json:"idempotency_key,omitempty"`
-	RequestedAt    time.Time         `json:"requested_at,omitzero" schema:"optional"`
-	Metadata       map[string]string `json:"metadata,omitempty"`
-	Backend        BackendRef        `json:"backend"`
-	Input          map[string]any    `json:"input,omitempty"`
-}
-
-// BackendKind identifies the execution substrate used by an agent backend.
-type BackendKind string
-
-const (
-	BackendKindNative           BackendKind = "native"
-	BackendKindTemporalExternal BackendKind = "temporal_external"
-	BackendKindHTTP             BackendKind = "http"
-	BackendKindGRPC             BackendKind = "grpc"
-)
-
-const (
-	// BackendNameGoAgentNative is the built-in GoAgent native backend.
-	BackendNameGoAgentNative = "goagent-native"
-)
-
-const (
-	// CapabilityRun is the standard capability for starting one backend-owned run.
-	CapabilityRun = "run"
-)
-
-// BackendRef selects the backend that owns a run.
-type BackendRef struct {
-	Kind BackendKind `json:"kind"`
-	Name string      `json:"name"`
-}
-
-// RunStatus is the public lifecycle view for a run.
-type RunStatus struct {
-	RunID          string          `json:"run_id"`
-	LifecycleState string          `json:"lifecycle_state"`
-	Progress       *RunProgress    `json:"progress,omitempty"`
-	Artifacts      []ArtifactRef   `json:"artifacts,omitempty"`
-	BudgetUsage    PlanBudgetUsage `json:"budget_usage,omitzero" schema:"optional"`
-	Reason         string          `json:"reason,omitempty"`
-	UpdatedAt      time.Time       `json:"updated_at,omitzero" schema:"optional"`
-}
-
-// RunBackendOwnership is the durable routing record for a backend-owned run.
-type RunBackendOwnership struct {
-	RunID          string     `json:"run_id"`
-	PlanID         string     `json:"plan_id,omitempty"`
-	NodeID         string     `json:"node_id,omitempty"`
-	ThreadID       string     `json:"thread_id,omitempty"`
-	AccountID      string     `json:"account_id,omitempty"`
-	ProjectID      string     `json:"project_id,omitempty"`
-	Backend        BackendRef `json:"backend"`
-	IdempotencyKey string     `json:"idempotency_key,omitempty"`
-	LifecycleState string     `json:"lifecycle_state,omitempty"`
-	CreatedAt      time.Time  `json:"created_at,omitzero" schema:"optional"`
-	UpdatedAt      time.Time  `json:"updated_at,omitzero" schema:"optional"`
-}
 
 // RunProgress is a generic public progress view. Backend-specific details
 // should be emitted as events or artifacts.
@@ -150,6 +81,42 @@ const (
 	EventProcessControlReceived EventType = "process.control.received"
 )
 
+// ArtifactKind identifies public artifact payload categories.
+type ArtifactKind string
+
+const (
+	ArtifactKindObject    ArtifactKind = "object"
+	ArtifactKindText      ArtifactKind = "text"
+	ArtifactKindFile      ArtifactKind = "file"
+	ArtifactKindPatch     ArtifactKind = "patch"
+	ArtifactKindReport    ArtifactKind = "report"
+	ArtifactKindReference ArtifactKind = "reference"
+	ArtifactKindPlanDelta ArtifactKind = "plan_delta"
+)
+
+// ArtifactRef points to an artifact outside Temporal workflow history.
+type ArtifactRef struct {
+	ArtifactID string            `json:"artifact_id"`
+	PlanID     string            `json:"plan_id,omitempty"`
+	NodeID     string            `json:"node_id,omitempty"`
+	RunID      string            `json:"run_id,omitempty"`
+	Name       string            `json:"name"`
+	Kind       ArtifactKind      `json:"kind"`
+	MediaType  string            `json:"media_type,omitempty"`
+	URI        string            `json:"uri,omitempty"`
+	SizeBytes  int64             `json:"size_bytes,omitempty"`
+	Digest     string            `json:"digest,omitempty"`
+	Metadata   map[string]string `json:"metadata,omitempty"`
+	CreatedAt  time.Time         `json:"created_at,omitzero" schema:"optional"`
+}
+
+// Artifact is the public artifact document returned by ArtifactStore-backed
+// control-plane APIs. Payloads are never embedded in Temporal workflow history.
+type Artifact struct {
+	Ref     ArtifactRef `json:"ref"`
+	Payload any         `json:"payload,omitempty"`
+}
+
 // Message is a public conversation message.
 type Message struct {
 	Role       string     `json:"role"`
@@ -189,4 +156,10 @@ type StreamScope struct {
 	RunID         string `json:"run_id,omitempty"`
 	ThreadID      string `json:"thread_id,omitempty"`
 	AfterSequence int64  `json:"after_sequence,omitempty"`
+}
+
+// Subscription is a stream of run events.
+type Subscription interface {
+	Events() <-chan Event
+	Close() error
 }

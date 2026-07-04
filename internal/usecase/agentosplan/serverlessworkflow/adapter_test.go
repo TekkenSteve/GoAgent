@@ -6,7 +6,8 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/TekkenSteve/GoAgent/agentos"
+	agentos "github.com/TekkenSteve/GoAgent/agentos/control"
+	agentoscore "github.com/TekkenSteve/GoAgent/agentos/core"
 	"github.com/TekkenSteve/GoAgent/internal/usecase/agentosplan"
 )
 
@@ -89,7 +90,7 @@ func TestAdapterRejectsUnsupportedDSLVersion(t *testing.T) {
 	workflow.Document.DSL = "0.8"
 
 	_, err = adapter.Import(context.Background(), &workflow)
-	if !errors.Is(err, agentos.ErrInvalidRunPlan) {
+	if !errors.Is(err, agentoscore.ErrInvalidRunPlan) {
 		t.Fatalf("Import error = %v, want ErrInvalidRunPlan", err)
 	}
 }
@@ -102,7 +103,7 @@ func TestAdapterRejectsMissingRunPlanExtension(t *testing.T) {
 		Document: Document{DSL: DSLVersion, Name: "missing"},
 		Do:       TaskList{},
 	})
-	if !errors.Is(err, agentos.ErrInvalidRunPlan) {
+	if !errors.Is(err, agentoscore.ErrInvalidRunPlan) {
 		t.Fatalf("Import error = %v, want ErrInvalidRunPlan", err)
 	}
 }
@@ -115,7 +116,7 @@ func TestTaskListRejectsAmbiguousTaskObjects(t *testing.T) {
 	var tasks TaskList
 
 	err := json.Unmarshal(data, &tasks)
-	if !errors.Is(err, agentos.ErrInvalidRunPlan) {
+	if !errors.Is(err, agentoscore.ErrInvalidRunPlan) {
 		t.Fatalf("Unmarshal error = %v, want ErrInvalidRunPlan", err)
 	}
 }
@@ -128,7 +129,7 @@ func TestUnmarshalRejectsUnknownWorkflowFields(t *testing.T) {
 	  "do": [],
 	  "listen": {}
 	}`))
-	if !errors.Is(err, agentos.ErrInvalidRunPlan) {
+	if !errors.Is(err, agentoscore.ErrInvalidRunPlan) {
 		t.Fatalf("UnmarshalJSON error = %v, want ErrInvalidRunPlan", err)
 	}
 }
@@ -141,7 +142,7 @@ func TestTaskListRejectsUnknownTaskDefinitionFields(t *testing.T) {
 	var tasks TaskList
 
 	err := json.Unmarshal(data, &tasks)
-	if !errors.Is(err, agentos.ErrInvalidRunPlan) {
+	if !errors.Is(err, agentoscore.ErrInvalidRunPlan) {
 		t.Fatalf("Unmarshal error = %v, want ErrInvalidRunPlan", err)
 	}
 }
@@ -166,7 +167,7 @@ func TestAdapterRejectsUnknownRunPlanExtensionFields(t *testing.T) {
 			},
 		},
 	})
-	if !errors.Is(err, agentos.ErrInvalidRunPlan) {
+	if !errors.Is(err, agentoscore.ErrInvalidRunPlan) {
 		t.Fatalf("Import error = %v, want ErrInvalidRunPlan", err)
 	}
 }
@@ -243,7 +244,7 @@ func testRunPlanSpec() agentos.RunPlanSpec {
 				},
 				Conditions: []string{"inputs.enabled == true"},
 				Outputs: []agentos.ArtifactSpec{
-					{Name: "summary", Kind: agentos.ArtifactKindObject, Required: true},
+					{Name: "summary", Kind: agentoscore.ArtifactKindObject, Required: true},
 				},
 			},
 			{

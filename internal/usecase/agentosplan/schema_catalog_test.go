@@ -6,7 +6,8 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/TekkenSteve/GoAgent/agentos"
+	agentos "github.com/TekkenSteve/GoAgent/agentos/control"
+	agentoscore "github.com/TekkenSteve/GoAgent/agentos/core"
 )
 
 func TestArtifactSchemaRegistrationUsesCanonicalJSON(t *testing.T) {
@@ -52,7 +53,7 @@ func TestArtifactSchemaRegistrationUsesCanonicalJSON(t *testing.T) {
 	changedKey := artifactSchemaRegistrationKeyForTest(t, changed, "changed")
 
 	_, _, err = catalog.RegisterArtifactSchema(context.Background(), changed, changedKey)
-	if !errors.Is(err, agentos.ErrInvalidArtifact) {
+	if !errors.Is(err, agentoscore.ErrInvalidArtifact) {
 		t.Fatalf("RegisterArtifactSchema changed error = %v, want ErrInvalidArtifact", err)
 	}
 }

@@ -4,7 +4,8 @@ import (
 	"encoding/json"
 	"fmt"
 
-	"github.com/TekkenSteve/GoAgent/agentos"
+	agentos "github.com/TekkenSteve/GoAgent/agentos/control"
+	agentoscore "github.com/TekkenSteve/GoAgent/agentos/core"
 )
 
 // BuildPlanDebugTraces projects typed debug records from durable PlanEvents.
@@ -87,11 +88,11 @@ func decodePlanDebugPayload[T any](value any, field string) (T, error) {
 
 	data, err := json.Marshal(value)
 	if err != nil {
-		return decoded, fmt.Errorf("%w: marshal debug field %q: %w", agentos.ErrInvalidPlanEvent, field, err)
+		return decoded, fmt.Errorf("%w: marshal debug field %q: %w", agentoscore.ErrInvalidPlanEvent, field, err)
 	}
 
 	if err := json.Unmarshal(data, &decoded); err != nil {
-		return decoded, fmt.Errorf("%w: decode debug field %q: %w", agentos.ErrInvalidPlanEvent, field, err)
+		return decoded, fmt.Errorf("%w: decode debug field %q: %w", agentoscore.ErrInvalidPlanEvent, field, err)
 	}
 
 	return decoded, nil

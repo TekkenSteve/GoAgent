@@ -6,7 +6,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/TekkenSteve/GoAgent/agentos"
+	agentos "github.com/TekkenSteve/GoAgent/agentos/control"
+	agentoscore "github.com/TekkenSteve/GoAgent/agentos/core"
 )
 
 var errTestSinkUnavailable = errors.New("sink unavailable")
@@ -28,8 +29,8 @@ func TestPlanMetricsExporterProjectsTailEventsWithCheckpointState(t *testing.T) 
 		t.Fatalf("CreatePlan: %v", err)
 	}
 
-	appendMetricEventForTest(ctx, t, store, agentos.EventPlanStarted, spec.PlanID, "", "", spec.RequestedAt.Add(time.Second), "event-1")
-	appendMetricEventForTest(ctx, t, store, agentos.EventPlanNodeStarted, spec.PlanID, "draft", "run-draft", spec.RequestedAt.Add(2*time.Second), "event-2")
+	appendMetricEventForTest(ctx, t, store, agentoscore.EventPlanStarted, spec.PlanID, "", "", spec.RequestedAt.Add(time.Second), "event-1")
+	appendMetricEventForTest(ctx, t, store, agentoscore.EventPlanNodeStarted, spec.PlanID, "draft", "run-draft", spec.RequestedAt.Add(2*time.Second), "event-2")
 
 	sink := &recordingPlanMetricsSink{}
 	exporter := newTestPlanMetricsExporter(t, store, sink, 2)
@@ -41,8 +42,8 @@ func TestPlanMetricsExporterProjectsTailEventsWithCheckpointState(t *testing.T) 
 	requireMetric(t, sink.samples, PlanMetricPlanStartedTotal, "", 1)
 	requireMetric(t, sink.samples, PlanMetricNodeStartedTotal, "draft", 1)
 
-	appendMetricEventForTest(ctx, t, store, agentos.EventPlanNodeSucceeded, spec.PlanID, "draft", "run-draft", spec.RequestedAt.Add(12*time.Second), "event-3")
-	appendMetricEventForTest(ctx, t, store, agentos.EventPlanSucceeded, spec.PlanID, "", "", spec.RequestedAt.Add(20*time.Second), "event-4")
+	appendMetricEventForTest(ctx, t, store, agentoscore.EventPlanNodeSucceeded, spec.PlanID, "draft", "run-draft", spec.RequestedAt.Add(12*time.Second), "event-3")
+	appendMetricEventForTest(ctx, t, store, agentoscore.EventPlanSucceeded, spec.PlanID, "", "", spec.RequestedAt.Add(20*time.Second), "event-4")
 
 	sink.samples = nil
 
@@ -66,7 +67,7 @@ func TestPlanMetricsExporterProjectsTailEventsWithCheckpointState(t *testing.T) 
 	requireMetricsCheckpoint(t, &checkpoint, exists, 4)
 }
 
-func appendMetricEventForTest(ctx context.Context, t *testing.T, store *MemoryPlanStore, eventType agentos.EventType, planID, nodeID, runID string, at time.Time, key string) {
+func appendMetricEventForTest(ctx context.Context, t *testing.T, store *MemoryPlanStore, eventType agentoscore.EventType, planID, nodeID, runID string, at time.Time, key string) {
 	t.Helper()
 
 	if _, err := appendPlanEvent(ctx, store, metricEventPtr(eventType, planID, nodeID, runID, at), key); err != nil {
@@ -127,7 +128,7 @@ func TestPlanMetricsExporterDoesNotAdvanceCheckpointWhenSinkFails(t *testing.T) 
 		t.Fatalf("CreatePlan: %v", err)
 	}
 
-	if _, err := appendPlanEvent(ctx, store, metricEventPtr(agentos.EventPlanStarted, spec.PlanID, "", "", spec.RequestedAt.Add(time.Second)), "event-1"); err != nil {
+	if _, err := appendPlanEvent(ctx, store, metricEventPtr(agentoscore.EventPlanStarted, spec.PlanID, "", "", spec.RequestedAt.Add(time.Second)), "event-1"); err != nil {
 		t.Fatalf("AppendPlanEvent: %v", err)
 	}
 

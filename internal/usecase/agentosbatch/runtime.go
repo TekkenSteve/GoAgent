@@ -6,7 +6,8 @@ import (
 	"maps"
 	"time"
 
-	"github.com/TekkenSteve/GoAgent/agentos"
+	agentoscore "github.com/TekkenSteve/GoAgent/agentos/core"
+	agentos "github.com/TekkenSteve/GoAgent/agentos/process"
 )
 
 // Runtime coordinates generic batch workset progress.
@@ -17,7 +18,7 @@ type Runtime struct {
 // NewRuntime creates a generic batch use case.
 func NewRuntime(store Store) (*Runtime, error) {
 	if store == nil {
-		return nil, fmt.Errorf("%w: workset store is required", agentos.ErrInvalidWorksetScope)
+		return nil, fmt.Errorf("%w: workset store is required", agentoscore.ErrInvalidWorksetScope)
 	}
 
 	return &Runtime{store: store}, nil
@@ -44,7 +45,7 @@ func (r *Runtime) StatusWorkset(ctx context.Context, ref agentos.WorksetRef) (ag
 	}
 
 	if !exists {
-		return agentos.WorksetStatus{}, fmt.Errorf("%w: workset %q not found", agentos.ErrInvalidWorksetScope, ref.WorksetID)
+		return agentos.WorksetStatus{}, fmt.Errorf("%w: workset %q not found", agentoscore.ErrInvalidWorksetScope, ref.WorksetID)
 	}
 
 	return status, nil
@@ -75,7 +76,7 @@ func (r *Runtime) RecordWorksetChunk(
 	}
 
 	if !worksetHasChunk(&spec, result.ChunkID) {
-		return agentos.WorksetStatus{}, fmt.Errorf("%w: chunk %q is not part of workset %q", agentos.ErrInvalidWorkset, result.ChunkID, ref.WorksetID)
+		return agentos.WorksetStatus{}, fmt.Errorf("%w: chunk %q is not part of workset %q", agentoscore.ErrInvalidWorkset, result.ChunkID, ref.WorksetID)
 	}
 
 	next := status
@@ -99,7 +100,7 @@ func (r *Runtime) RecordWorksetChunk(
 func (r *Runtime) CancelWorkset(
 	ctx context.Context,
 	ref agentos.WorksetRef,
-	control *agentos.ControlRequest,
+	control *agentoscore.ControlRequest,
 ) (agentos.WorksetStatus, error) {
 	_, status, err := r.requireWorkset(ctx, ref)
 	if err != nil {
@@ -132,7 +133,7 @@ func (r *Runtime) requireWorkset(
 	}
 
 	if !exists {
-		return agentos.WorksetSpec{}, agentos.WorksetStatus{}, fmt.Errorf("%w: workset %q not found", agentos.ErrInvalidWorksetScope, ref.WorksetID)
+		return agentos.WorksetSpec{}, agentos.WorksetStatus{}, fmt.Errorf("%w: workset %q not found", agentoscore.ErrInvalidWorksetScope, ref.WorksetID)
 	}
 
 	return spec, status, nil
@@ -200,32 +201,32 @@ func worksetHasChunk(spec *agentos.WorksetSpec, chunkID string) bool {
 
 func validateChunkResult(result *agentos.WorksetChunkResult) error {
 	if result == nil {
-		return fmt.Errorf("%w: chunk result is required", agentos.ErrInvalidWorkset)
+		return fmt.Errorf("%w: chunk result is required", agentoscore.ErrInvalidWorkset)
 	}
 
 	switch {
 	case result.ChunkID == "":
-		return fmt.Errorf("%w: chunk id is required", agentos.ErrInvalidWorkset)
+		return fmt.Errorf("%w: chunk id is required", agentoscore.ErrInvalidWorkset)
 	case result.IdempotencyKey == "":
-		return fmt.Errorf("%w: chunk idempotency key is required", agentos.ErrInvalidWorkset)
+		return fmt.Errorf("%w: chunk idempotency key is required", agentoscore.ErrInvalidWorkset)
 	case result.CompletedItems < 0 || result.FailedItems < 0:
-		return fmt.Errorf("%w: chunk item counts must be non-negative", agentos.ErrInvalidWorkset)
+		return fmt.Errorf("%w: chunk item counts must be non-negative", agentoscore.ErrInvalidWorkset)
 	default:
 		return nil
 	}
 }
 
-func validateCancelControl(control *agentos.ControlRequest) error {
-	if err := agentos.ValidateControlRequest(control); err != nil {
+func validateCancelControl(control *agentoscore.ControlRequest) error {
+	if err := agentoscore.ValidateControlRequest(control); err != nil {
 		return err
 	}
 
-	if control.Operation != agentos.ControlCancel {
-		return fmt.Errorf("%w: workset only accepts cancel control", agentos.ErrInvalidControlOperation)
+	if control.Operation != agentoscore.ControlCancel {
+		return fmt.Errorf("%w: workset only accepts cancel control", agentoscore.ErrInvalidControlOperation)
 	}
 
 	if control.IdempotencyKey == "" {
-		return fmt.Errorf("%w: cancel idempotency key is required", agentos.ErrInvalidWorkset)
+		return fmt.Errorf("%w: cancel idempotency key is required", agentoscore.ErrInvalidWorkset)
 	}
 
 	return nil

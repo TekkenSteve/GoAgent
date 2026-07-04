@@ -3,7 +3,8 @@ package temporal
 import (
 	"time"
 
-	"github.com/TekkenSteve/GoAgent/agentos"
+	agentoscore "github.com/TekkenSteve/GoAgent/agentos/core"
+	agentosproc "github.com/TekkenSteve/GoAgent/agentos/process"
 	"go.temporal.io/sdk/temporal"
 	"go.temporal.io/sdk/workflow"
 )
@@ -21,8 +22,8 @@ const (
 )
 
 type processWorkflowInput struct {
-	Spec       agentos.ProcessSpec `json:"spec"`
-	TaskQueues processTaskQueues   `json:"task_queues"`
+	Spec       agentosproc.Spec  `json:"spec"`
+	TaskQueues processTaskQueues `json:"task_queues"`
 }
 
 type processTaskQueues struct {
@@ -31,23 +32,23 @@ type processTaskQueues struct {
 
 // ProcessWorkflow runs one coarse-grained durable process for an application
 // resource. It owns process lifecycle signals and timers, not backend internals.
-func ProcessWorkflow(ctx workflow.Context, input *processWorkflowInput) (agentos.ProcessStatus, error) {
+func ProcessWorkflow(ctx workflow.Context, input *processWorkflowInput) (agentosproc.Status, error) {
 	if input == nil {
-		return agentos.ProcessStatus{}, temporal.NewNonRetryableApplicationError("ProcessWorkflow input is required", "validation", nil)
+		return agentosproc.Status{}, temporal.NewNonRetryableApplicationError("ProcessWorkflow input is required", "validation", nil)
 	}
 
 	if input.TaskQueues.ProcessActivity == "" {
-		return agentos.ProcessStatus{}, temporal.NewNonRetryableApplicationError("ProcessWorkflow process activity task queue is required", "validation", nil)
+		return agentosproc.Status{}, temporal.NewNonRetryableApplicationError("ProcessWorkflow process activity task queue is required", "validation", nil)
 	}
 
 	activityCtx := newProcessWorkflowActivityContext(ctx, input.TaskQueues.ProcessActivity)
 
-	var status agentos.ProcessStatus
+	var status agentosproc.Status
 	if err := workflow.ExecuteActivity(activityCtx, StartProcessActivityName, startProcessActivityInput{Spec: input.Spec}).Get(activityCtx, &status); err != nil {
 		return status, err
 	}
 
-	if err := workflow.SetQueryHandler(ctx, ProcessStatusQueryName, func() (agentos.ProcessStatus, error) {
+	if err := workflow.SetQueryHandler(ctx, ProcessStatusQueryName, func() (agentosproc.Status, error) {
 		return status, nil
 	}); err != nil {
 		return status, err
@@ -59,10 +60,10 @@ func ProcessWorkflow(ctx workflow.Context, input *processWorkflowInput) (agentos
 	timers := newProcessWorkflowTimers(ctx, activityCtx, ref, input.Spec.Timers)
 	selector := workflow.NewSelector(ctx)
 	selector.AddReceive(signalCh, func(ch workflow.ReceiveChannel, _ bool) {
-		var signal agentos.Signal
+		var signal agentoscore.Signal
 		ch.Receive(ctx, &signal)
 
-		var next agentos.ProcessStatus
+		var next agentosproc.Status
 		if err := workflow.ExecuteActivity(activityCtx, SignalProcessActivityName, signalProcessActivityInput{Ref: ref, Signal: signal}).Get(activityCtx, &next); err != nil {
 			failProcessWorkflowStatus(&status, workflow.Now(ctx), err)
 
@@ -72,10 +73,10 @@ func ProcessWorkflow(ctx workflow.Context, input *processWorkflowInput) (agentos
 		status = next
 	})
 	selector.AddReceive(controlCh, func(ch workflow.ReceiveChannel, _ bool) {
-		var control agentos.ControlRequest
+		var control agentoscore.ControlRequest
 		ch.Receive(ctx, &control)
 
-		var next agentos.ProcessStatus
+		var next agentosproc.Status
 		if err := workflow.ExecuteActivity(activityCtx, ControlProcessActivityName, controlProcessActivityInput{Ref: ref, Control: control}).Get(activityCtx, &next); err != nil {
 			failProcessWorkflowStatus(&status, workflow.Now(ctx), err)
 
@@ -105,18 +106,18 @@ func newProcessWorkflowActivityContext(ctx workflow.Context, taskQueue string) w
 }
 
 type processWorkflowTimer struct {
-	Timer agentos.ProcessTimerSpec
+	Timer agentosproc.TimerSpec
 	At    time.Time
 	Fired bool
 }
 
 type processWorkflowTimers struct {
 	ActivityCtx workflow.Context
-	Ref         agentos.ProcessRef
+	Ref         agentosproc.Ref
 	Timers      []processWorkflowTimer
 }
 
-func newProcessWorkflowTimers(ctx, activityCtx workflow.Context, ref agentos.ProcessRef, specs []agentos.ProcessTimerSpec) processWorkflowTimers {
+func newProcessWorkflowTimers(ctx, activityCtx workflow.Context, ref agentosproc.Ref, specs []agentosproc.TimerSpec) processWorkflowTimers {
 	now := workflow.Now(ctx)
 
 	timers := make([]processWorkflowTimer, 0, len(specs))
@@ -138,7 +139,7 @@ func newProcessWorkflowTimers(ctx, activityCtx workflow.Context, ref agentos.Pro
 	}
 }
 
-func (t *processWorkflowTimers) AddToSelector(ctx workflow.Context, selector workflow.Selector, status *agentos.ProcessStatus) {
+func (t *processWorkflowTimers) AddToSelector(ctx workflow.Context, selector workflow.Selector, status *agentosproc.Status) {
 	now := workflow.Now(ctx)
 
 	for i := range t.Timers {
@@ -154,7 +155,7 @@ func (t *processWorkflowTimers) AddToSelector(ctx workflow.Context, selector wor
 			timer := &t.Timers[index]
 			timer.Fired = true
 
-			var next agentos.ProcessStatus
+			var next agentosproc.Status
 
 			input := fireProcessTimerActivityInput{
 				Ref:   t.Ref,
@@ -172,23 +173,23 @@ func (t *processWorkflowTimers) AddToSelector(ctx workflow.Context, selector wor
 	}
 }
 
-func failProcessWorkflowStatus(status *agentos.ProcessStatus, now time.Time, err error) {
-	status.LifecycleState = agentos.ProcessFailed
+func failProcessWorkflowStatus(status *agentosproc.Status, now time.Time, err error) {
+	status.LifecycleState = agentosproc.ProcessFailed
 	status.Reason = err.Error()
 	status.UpdatedAt = now
 }
 
 func processWorkflowTerminal(lifecycle string) bool {
 	switch lifecycle {
-	case agentos.ProcessSucceeded, agentos.ProcessFailed, agentos.ProcessCanceled:
+	case agentosproc.ProcessSucceeded, agentosproc.ProcessFailed, agentosproc.ProcessCanceled:
 		return true
 	default:
 		return false
 	}
 }
 
-func processRefFromSpec(spec *agentos.ProcessSpec) agentos.ProcessRef {
-	return agentos.ProcessRef{
+func processRefFromSpec(spec *agentosproc.Spec) agentosproc.Ref {
+	return agentosproc.Ref{
 		ProcessID: spec.ProcessID,
 		AccountID: spec.AccountID,
 		ProjectID: spec.ProjectID,

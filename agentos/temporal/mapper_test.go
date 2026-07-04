@@ -6,7 +6,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/TekkenSteve/GoAgent/agentos"
+	agentos "github.com/TekkenSteve/GoAgent/agentos/control"
+	agentoscore "github.com/TekkenSteve/GoAgent/agentos/core"
 	agentfwconfig "github.com/TekkenSteve/GoAgent/internal/agentfw/config"
 	"github.com/TekkenSteve/GoAgent/internal/entity"
 )
@@ -90,7 +91,7 @@ func TestRunStatusFromEntity(t *testing.T) {
 	want := agentos.RunStatus{
 		RunID:          Run1,
 		LifecycleState: "running",
-		Progress:       &agentos.RunProgress{Current: 3},
+		Progress:       &agentoscore.RunProgress{Current: 3},
 		Reason:         "waiting",
 		UpdatedAt:      updatedAt,
 	}
@@ -102,10 +103,10 @@ func TestRunStatusFromEntity(t *testing.T) {
 func TestControlOperationToEntity(t *testing.T) {
 	t.Parallel()
 
-	tests := map[agentos.ControlOperation]entity.ControlOperation{
-		agentos.ControlPause:  entity.ControlPause,
-		agentos.ControlResume: entity.ControlResume,
-		agentos.ControlCancel: entity.ControlCancel,
+	tests := map[agentoscore.ControlOperation]entity.ControlOperation{
+		agentoscore.ControlPause:  entity.ControlPause,
+		agentoscore.ControlResume: entity.ControlResume,
+		agentoscore.ControlCancel: entity.ControlCancel,
 	}
 
 	for input, want := range tests {
@@ -141,8 +142,8 @@ func TestTemporalExternalConfig(t *testing.T) {
 			Pause:  "pause",
 			Resume: "resume",
 			Cancel: "cancel",
-			Defaults: map[agentos.SignalType]string{
-				agentos.SignalUserMessage: "user_input",
+			Defaults: map[agentoscore.SignalType]string{
+				agentoscore.SignalUserMessage: "user_input",
 			},
 		},
 	}
@@ -155,7 +156,7 @@ func TestTemporalExternalConfig(t *testing.T) {
 		got.Signals.Pause != "pause" ||
 		got.Signals.Resume != "resume" ||
 		got.Signals.Cancel != "cancel" ||
-		got.Signals.Defaults[agentos.SignalUserMessage] != "user_input" {
+		got.Signals.Defaults[agentoscore.SignalUserMessage] != "user_input" {
 		t.Fatalf("unexpected temporal external config: %#v", got)
 	}
 }

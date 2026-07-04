@@ -5,7 +5,8 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/TekkenSteve/GoAgent/agentos"
+	agentoscore "github.com/TekkenSteve/GoAgent/agentos/core"
+	agentos "github.com/TekkenSteve/GoAgent/agentos/process"
 )
 
 // Runtime coordinates governed action lifecycle state.
@@ -16,7 +17,7 @@ type Runtime struct {
 // NewRuntime creates a generic governed action use case.
 func NewRuntime(store Store) (*Runtime, error) {
 	if store == nil {
-		return nil, fmt.Errorf("%w: action store is required", agentos.ErrInvalidGovernedActionScope)
+		return nil, fmt.Errorf("%w: action store is required", agentoscore.ErrInvalidGovernedActionScope)
 	}
 
 	return &Runtime{store: store}, nil
@@ -44,7 +45,7 @@ func (r *Runtime) StatusAction(ctx context.Context, ref agentos.ActionRef) (agen
 	}
 
 	if !exists {
-		return agentos.GovernedActionStatus{}, fmt.Errorf("%w: action %q not found", agentos.ErrInvalidGovernedActionScope, ref.ActionID)
+		return agentos.GovernedActionStatus{}, fmt.Errorf("%w: action %q not found", agentoscore.ErrInvalidGovernedActionScope, ref.ActionID)
 	}
 
 	return status, nil
@@ -75,7 +76,7 @@ func (r *Runtime) RecordActionDryRun(
 	}
 
 	if status.DryRunState == "" {
-		return agentos.GovernedActionStatus{}, fmt.Errorf("%w: action %q does not require dry-run", agentos.ErrInvalidGovernedAction, ref.ActionID)
+		return agentos.GovernedActionStatus{}, fmt.Errorf("%w: action %q does not require dry-run", agentoscore.ErrInvalidGovernedAction, ref.ActionID)
 	}
 
 	next := status
@@ -115,7 +116,7 @@ func (r *Runtime) ResolveActionApproval(
 	}
 
 	if status.ApprovalState == "" {
-		return agentos.GovernedActionStatus{}, fmt.Errorf("%w: action %q does not require approval", agentos.ErrInvalidGovernedAction, ref.ActionID)
+		return agentos.GovernedActionStatus{}, fmt.Errorf("%w: action %q does not require approval", agentoscore.ErrInvalidGovernedAction, ref.ActionID)
 	}
 
 	next := status
@@ -149,7 +150,7 @@ func (r *Runtime) CompleteAction(
 	}
 
 	if !actionReadyForExecution(&status) {
-		return agentos.GovernedActionStatus{}, fmt.Errorf("%w: action %q is not ready for execution", agentos.ErrInvalidGovernedAction, ref.ActionID)
+		return agentos.GovernedActionStatus{}, fmt.Errorf("%w: action %q is not ready for execution", agentoscore.ErrInvalidGovernedAction, ref.ActionID)
 	}
 
 	next := status
@@ -183,7 +184,7 @@ func (r *Runtime) CancelAction(
 	}
 
 	if status.LifecycleState == agentos.ActionExecuted {
-		return agentos.GovernedActionStatus{}, fmt.Errorf("%w: action %q is already executed", agentos.ErrInvalidGovernedAction, ref.ActionID)
+		return agentos.GovernedActionStatus{}, fmt.Errorf("%w: action %q is already executed", agentoscore.ErrInvalidGovernedAction, ref.ActionID)
 	}
 
 	next := status
@@ -208,7 +209,7 @@ func (r *Runtime) requireAction(
 	}
 
 	if !exists {
-		return agentos.GovernedActionSpec{}, agentos.GovernedActionStatus{}, fmt.Errorf("%w: action %q not found", agentos.ErrInvalidGovernedActionScope, ref.ActionID)
+		return agentos.GovernedActionSpec{}, agentos.GovernedActionStatus{}, fmt.Errorf("%w: action %q not found", agentoscore.ErrInvalidGovernedActionScope, ref.ActionID)
 	}
 
 	return spec, status, nil
@@ -278,11 +279,11 @@ func actionReadyForExecution(status *agentos.GovernedActionStatus) bool {
 
 func validateDryRunResult(result *agentos.ActionDryRunResult) error {
 	if result == nil {
-		return fmt.Errorf("%w: dry-run result is required", agentos.ErrInvalidGovernedAction)
+		return fmt.Errorf("%w: dry-run result is required", agentoscore.ErrInvalidGovernedAction)
 	}
 
 	if result.IdempotencyKey == "" {
-		return fmt.Errorf("%w: dry-run idempotency key is required", agentos.ErrInvalidGovernedAction)
+		return fmt.Errorf("%w: dry-run idempotency key is required", agentoscore.ErrInvalidGovernedAction)
 	}
 
 	return nil
@@ -290,11 +291,11 @@ func validateDryRunResult(result *agentos.ActionDryRunResult) error {
 
 func validateApprovalDecision(decision *agentos.ActionApprovalDecision) error {
 	if decision == nil {
-		return fmt.Errorf("%w: approval decision is required", agentos.ErrInvalidGovernedAction)
+		return fmt.Errorf("%w: approval decision is required", agentoscore.ErrInvalidGovernedAction)
 	}
 
 	if decision.IdempotencyKey == "" {
-		return fmt.Errorf("%w: approval idempotency key is required", agentos.ErrInvalidGovernedAction)
+		return fmt.Errorf("%w: approval idempotency key is required", agentoscore.ErrInvalidGovernedAction)
 	}
 
 	return nil
@@ -302,11 +303,11 @@ func validateApprovalDecision(decision *agentos.ActionApprovalDecision) error {
 
 func validateExecutionResult(result *agentos.ActionExecutionResult) error {
 	if result == nil {
-		return fmt.Errorf("%w: execution result is required", agentos.ErrInvalidGovernedAction)
+		return fmt.Errorf("%w: execution result is required", agentoscore.ErrInvalidGovernedAction)
 	}
 
 	if result.IdempotencyKey == "" {
-		return fmt.Errorf("%w: execution idempotency key is required", agentos.ErrInvalidGovernedAction)
+		return fmt.Errorf("%w: execution idempotency key is required", agentoscore.ErrInvalidGovernedAction)
 	}
 
 	return nil
@@ -314,11 +315,11 @@ func validateExecutionResult(result *agentos.ActionExecutionResult) error {
 
 func validateCancelRequest(req *agentos.ActionCancelRequest) error {
 	if req == nil {
-		return fmt.Errorf("%w: cancel request is required", agentos.ErrInvalidGovernedAction)
+		return fmt.Errorf("%w: cancel request is required", agentoscore.ErrInvalidGovernedAction)
 	}
 
 	if req.IdempotencyKey == "" {
-		return fmt.Errorf("%w: cancel idempotency key is required", agentos.ErrInvalidGovernedAction)
+		return fmt.Errorf("%w: cancel idempotency key is required", agentoscore.ErrInvalidGovernedAction)
 	}
 
 	return nil

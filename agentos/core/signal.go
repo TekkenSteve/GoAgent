@@ -1,4 +1,4 @@
-package agentos
+package core
 
 import "time"
 

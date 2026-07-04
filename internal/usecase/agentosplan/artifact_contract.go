@@ -5,7 +5,8 @@ import (
 	"encoding/json"
 	"fmt"
 
-	"github.com/TekkenSteve/GoAgent/agentos"
+	agentos "github.com/TekkenSteve/GoAgent/agentos/control"
+	agentoscore "github.com/TekkenSteve/GoAgent/agentos/core"
 )
 
 // ValidateArtifactSpecs validates declared node output contracts.
@@ -35,7 +36,7 @@ func ValidateArtifactSpecs(nodeID string, specs []agentos.ArtifactSpec) error {
 // node's declared output contract. An empty contract intentionally accepts any
 // well-formed artifact refs so legacy-free callers can opt into strict outputs
 // by declaring Outputs.
-func ValidateArtifactsAgainstSpecs(nodeID string, specs []agentos.ArtifactSpec, refs []agentos.ArtifactRef) error {
+func ValidateArtifactsAgainstSpecs(nodeID string, specs []agentos.ArtifactSpec, refs []agentoscore.ArtifactRef) error {
 	if err := ValidateArtifactSpecs(nodeID, specs); err != nil {
 		return err
 	}
@@ -58,7 +59,7 @@ func ValidateArtifactsAgainstSpecs(nodeID string, specs []agentos.ArtifactSpec, 
 	return checkRequiredArtifacts(nodeID, specByName, seenRefs)
 }
 
-func validatePublishedArtifacts(nodeID string, refs []agentos.ArtifactRef) (map[string]struct{}, error) {
+func validatePublishedArtifacts(nodeID string, refs []agentoscore.ArtifactRef) (map[string]struct{}, error) {
 	seenRefs := make(map[string]struct{}, len(refs))
 	for i := range refs {
 		ref := refs[i]
@@ -90,7 +91,7 @@ func buildSpecByName(specs []agentos.ArtifactSpec) map[string]agentos.ArtifactSp
 	return specByName
 }
 
-func matchRefsAgainstSpecs(nodeID string, specByName map[string]agentos.ArtifactSpec, refs []agentos.ArtifactRef) error {
+func matchRefsAgainstSpecs(nodeID string, specByName map[string]agentos.ArtifactSpec, refs []agentoscore.ArtifactRef) error {
 	for i := range refs {
 		ref := refs[i]
 
@@ -149,7 +150,7 @@ func ValidateArtifactSchemaRefs(ctx context.Context, catalog ArtifactSchemaCatal
 
 // ValidateArtifactPayloadsAgainstSchemas validates stored artifact payloads
 // against their declared schema_ref contracts.
-func ValidateArtifactPayloadsAgainstSchemas(ctx context.Context, store ArtifactStore, catalog ArtifactSchemaCatalog, plan *agentos.RunPlanSpec, node *agentos.PlanNodeSpec, refs []agentos.ArtifactRef) error {
+func ValidateArtifactPayloadsAgainstSchemas(ctx context.Context, store ArtifactStore, catalog ArtifactSchemaCatalog, plan *agentos.RunPlanSpec, node *agentos.PlanNodeSpec, refs []agentoscore.ArtifactRef) error {
 	for _, spec := range node.Outputs {
 		if spec.SchemaRef == "" {
 			continue
@@ -164,7 +165,7 @@ func ValidateArtifactPayloadsAgainstSchemas(ctx context.Context, store ArtifactS
 	return nil
 }
 
-func validateArtifactPayloadAgainstSchema(ctx context.Context, store ArtifactStore, catalog ArtifactSchemaCatalog, plan *agentos.RunPlanSpec, node *agentos.PlanNodeSpec, spec *agentos.ArtifactSpec, refs []agentos.ArtifactRef) error {
+func validateArtifactPayloadAgainstSchema(ctx context.Context, store ArtifactStore, catalog ArtifactSchemaCatalog, plan *agentos.RunPlanSpec, node *agentos.PlanNodeSpec, spec *agentos.ArtifactSpec, refs []agentoscore.ArtifactRef) error {
 	ref, ok := findArtifact(refs, "", spec.Name)
 	if !ok {
 		return nil
@@ -199,7 +200,7 @@ func validateArtifactPayloadAgainstSchema(ctx context.Context, store ArtifactSto
 	return nil
 }
 
-func storedArtifactPayload(ctx context.Context, store ArtifactStore, plan *agentos.RunPlanSpec, ref *agentos.ArtifactRef) (any, error) {
+func storedArtifactPayload(ctx context.Context, store ArtifactStore, plan *agentos.RunPlanSpec, ref *agentoscore.ArtifactRef) (any, error) {
 	scope := agentos.PlanArtifactScope{
 		PlanID:     plan.PlanID,
 		AccountID:  plan.AccountID,
@@ -218,8 +219,8 @@ func storedArtifactPayload(ctx context.Context, store ArtifactStore, plan *agent
 // ValidateCapabilityOutputArtifacts validates published artifact refs against a
 // capability output JSON Schema. The validated document shape is:
 //
-//	{"artifacts": [agentos.ArtifactRef JSON objects]}
-func ValidateCapabilityOutputArtifacts(nodeID string, outputSchema json.RawMessage, refs []agentos.ArtifactRef) error {
+//	{"artifacts": [agentoscore.ArtifactRef JSON objects]}
+func ValidateCapabilityOutputArtifacts(nodeID string, outputSchema json.RawMessage, refs []agentoscore.ArtifactRef) error {
 	if len(outputSchema) == 0 {
 		return nil
 	}
@@ -233,7 +234,7 @@ func ValidateCapabilityOutputArtifacts(nodeID string, outputSchema json.RawMessa
 
 // ArtifactOutputDocument returns the stable JSON document shape validated by
 // capability output schemas.
-func ArtifactOutputDocument(refs []agentos.ArtifactRef) map[string]any {
+func ArtifactOutputDocument(refs []agentoscore.ArtifactRef) map[string]any {
 	data, err := json.Marshal(refs)
 	if err != nil {
 		return map[string]any{"artifacts": []any{}}
@@ -250,10 +251,10 @@ func ArtifactOutputDocument(refs []agentos.ArtifactRef) map[string]any {
 func artifactContractError(nodeID, format string, args ...any) error {
 	message := fmt.Sprintf(format, args...)
 	if nodeID == "" {
-		return fmt.Errorf("%w: %s", agentos.ErrInvalidArtifact, message)
+		return fmt.Errorf("%w: %s", agentoscore.ErrInvalidArtifact, message)
 	}
 
-	return fmt.Errorf("%w: node %q %s", agentos.ErrInvalidArtifact, nodeID, message)
+	return fmt.Errorf("%w: node %q %s", agentoscore.ErrInvalidArtifact, nodeID, message)
 }
 
 func artifactSchema(ctx context.Context, catalog ArtifactSchemaCatalog, nodeID string, spec agentos.ArtifactSpec) (json.RawMessage, error) {

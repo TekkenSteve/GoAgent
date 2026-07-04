@@ -5,7 +5,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/TekkenSteve/GoAgent/agentos"
+	agentos "github.com/TekkenSteve/GoAgent/agentos/control"
+	agentoscore "github.com/TekkenSteve/GoAgent/agentos/core"
 )
 
 func TestBuildPlanMetricSamplesProjectsDurationsAndBackendErrors(t *testing.T) {
@@ -35,10 +36,10 @@ func TestBuildPlanMetricSamplesProjectsDurationsAndBackendErrors(t *testing.T) {
 		},
 	}
 	events := []agentos.PlanEvent{
-		metricEvent(4, agentos.EventPlanFailed, spec.PlanID, "", "", planFailedAt, nil),
-		metricEvent(2, agentos.EventPlanNodeStarted, spec.PlanID, RESEARCH, "run-research", nodeStartedAt, nil),
-		metricEvent(1, agentos.EventPlanStarted, spec.PlanID, "", "", planStartedAt, nil),
-		metricEvent(3, agentos.EventPlanNodeFailed, spec.PlanID, RESEARCH, "run-research", nodeFailedAt, nil),
+		metricEvent(4, agentoscore.EventPlanFailed, spec.PlanID, "", "", planFailedAt, nil),
+		metricEvent(2, agentoscore.EventPlanNodeStarted, spec.PlanID, RESEARCH, "run-research", nodeStartedAt, nil),
+		metricEvent(1, agentoscore.EventPlanStarted, spec.PlanID, "", "", planStartedAt, nil),
+		metricEvent(3, agentoscore.EventPlanNodeFailed, spec.PlanID, RESEARCH, "run-research", nodeFailedAt, nil),
 	}
 
 	samples, err := BuildPlanMetricSamples(context.Background(), &spec, events)
@@ -89,25 +90,25 @@ func TestBuildPlanMetricSamplesProjectsArtifactsBudgetExpansionAndRetries(t *tes
 		},
 	}
 	events := []agentos.PlanEvent{
-		metricEvent(1, agentos.EventNodeOutputPublished, spec.PlanID, "writer", "run-writer", now, map[string]any{
-			planEventPayloadArtifacts: []agentos.ArtifactRef{
+		metricEvent(1, agentoscore.EventNodeOutputPublished, spec.PlanID, "writer", "run-writer", now, map[string]any{
+			planEventPayloadArtifacts: []agentoscore.ArtifactRef{
 				{
 					ArtifactID: "artifact-1",
 					PlanID:     spec.PlanID,
 					NodeID:     "writer",
 					RunID:      "run-writer",
 					Name:       "summary",
-					Kind:       agentos.ArtifactKindObject,
+					Kind:       agentoscore.ArtifactKindObject,
 					SizeBytes:  4096,
 				},
 			},
 		}),
-		metricEvent(2, agentos.EventUsageReported, spec.PlanID, "writer", "run-writer", now.Add(time.Second), map[string]any{
+		metricEvent(2, agentoscore.EventUsageReported, spec.PlanID, "writer", "run-writer", now.Add(time.Second), map[string]any{
 			planEventPayloadBudgetDelta: agentos.PlanBudgetUsage{SpentCents: 25},
 			planEventPayloadBudgetUsage: agentos.PlanBudgetUsage{SpentCents: 75},
 		}),
-		metricEvent(3, agentos.EventPlanExpanded, spec.PlanID, "", "", now.Add(2*time.Second), nil),
-		metricEvent(4, agentos.EventPlanNodeRetryScheduled, spec.PlanID, "writer", "run-writer", now.Add(3*time.Second), nil),
+		metricEvent(3, agentoscore.EventPlanExpanded, spec.PlanID, "", "", now.Add(2*time.Second), nil),
+		metricEvent(4, agentoscore.EventPlanNodeRetryScheduled, spec.PlanID, "writer", "run-writer", now.Add(3*time.Second), nil),
 	}
 
 	samples, err := BuildPlanMetricSamples(context.Background(), &spec, events)
@@ -116,7 +117,7 @@ func TestBuildPlanMetricSamplesProjectsArtifactsBudgetExpansionAndRetries(t *tes
 	}
 
 	artifact := requireMetric(t, samples, PlanMetricArtifactPublishedBytes, "writer", 4096)
-	if artifact.Labels["artifact_kind"] != string(agentos.ArtifactKindObject) {
+	if artifact.Labels["artifact_kind"] != string(agentoscore.ArtifactKindObject) {
 		t.Fatalf("artifact labels = %#v", artifact.Labels)
 	}
 
@@ -154,10 +155,10 @@ func TestBuildPlanMetricSamplesAfterUsesEarlierHistoryForDurations(t *testing.T)
 		},
 	}
 	events := []agentos.PlanEvent{
-		metricEvent(1, agentos.EventPlanStarted, spec.PlanID, "", "", planStartedAt, nil),
-		metricEvent(2, agentos.EventPlanNodeStarted, spec.PlanID, "draft", "run-draft", nodeStartedAt, nil),
-		metricEvent(3, agentos.EventPlanNodeSucceeded, spec.PlanID, "draft", "run-draft", nodeSucceededAt, nil),
-		metricEvent(4, agentos.EventPlanSucceeded, spec.PlanID, "", "", planSucceededAt, nil),
+		metricEvent(1, agentoscore.EventPlanStarted, spec.PlanID, "", "", planStartedAt, nil),
+		metricEvent(2, agentoscore.EventPlanNodeStarted, spec.PlanID, "draft", "run-draft", nodeStartedAt, nil),
+		metricEvent(3, agentoscore.EventPlanNodeSucceeded, spec.PlanID, "draft", "run-draft", nodeSucceededAt, nil),
+		metricEvent(4, agentoscore.EventPlanSucceeded, spec.PlanID, "", "", planSucceededAt, nil),
 	}
 
 	samples, err := BuildPlanMetricSamplesAfter(context.Background(), &spec, events, 2)
@@ -210,8 +211,8 @@ func TestBuildPlanMetricSamplesFromStateProjectsTailBatch(t *testing.T) {
 		},
 	}
 	events := []agentos.PlanEvent{
-		metricEvent(3, agentos.EventPlanNodeSucceeded, spec.PlanID, "review", "run-review", nodeSucceededAt, nil),
-		metricEvent(4, agentos.EventPlanSucceeded, spec.PlanID, "", "", planSucceededAt, nil),
+		metricEvent(3, agentoscore.EventPlanNodeSucceeded, spec.PlanID, "review", "run-review", nodeSucceededAt, nil),
+		metricEvent(4, agentoscore.EventPlanSucceeded, spec.PlanID, "", "", planSucceededAt, nil),
 	}
 
 	samples, nextState, err := BuildPlanMetricSamplesFromState(context.Background(), &spec, state, events)
@@ -233,9 +234,9 @@ func TestBuildPlanMetricSamplesFromStateProjectsTailBatch(t *testing.T) {
 	}
 }
 
-func metricEvent(sequence int64, eventType agentos.EventType, planID, nodeID, runID string, at time.Time, payload map[string]any) agentos.PlanEvent {
+func metricEvent(sequence int64, eventType agentoscore.EventType, planID, nodeID, runID string, at time.Time, payload map[string]any) agentos.PlanEvent {
 	return agentos.PlanEvent{
-		Event: agentos.Event{
+		Event: agentoscore.Event{
 			EventID:   "event-" + string(eventType) + "-" + nodeID,
 			EventType: eventType,
 			RunID:     runID,
@@ -248,7 +249,7 @@ func metricEvent(sequence int64, eventType agentos.EventType, planID, nodeID, ru
 	}
 }
 
-func metricEventPtr(eventType agentos.EventType, planID, nodeID, runID string, at time.Time) *agentos.PlanEvent {
+func metricEventPtr(eventType agentoscore.EventType, planID, nodeID, runID string, at time.Time) *agentos.PlanEvent {
 	event := metricEvent(0, eventType, planID, nodeID, runID, at, nil)
 
 	return &event

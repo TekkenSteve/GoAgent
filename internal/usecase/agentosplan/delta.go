@@ -5,7 +5,8 @@ import (
 	"fmt"
 	"math"
 
-	"github.com/TekkenSteve/GoAgent/agentos"
+	agentos "github.com/TekkenSteve/GoAgent/agentos/control"
+	agentoscore "github.com/TekkenSteve/GoAgent/agentos/core"
 )
 
 // PlanDelta is the only supported dynamic expansion unit. It is intended to be
@@ -16,16 +17,16 @@ type PlanDelta = agentos.PlanDeltaSpec
 func ApplyDelta(ctx context.Context, validator Validator, current *agentos.RunPlanSpec, delta PlanDelta, expansionCount int32) (agentos.RunPlanSpec, ExecutablePlan, error) {
 	policy := normalizePolicy(current.Policy)
 	if expansionCount >= policy.MaxExpansions {
-		return agentos.RunPlanSpec{}, ExecutablePlan{}, fmt.Errorf("%w: expansion count exceeds max %d", agentos.ErrInvalidRunPlan, policy.MaxExpansions)
+		return agentos.RunPlanSpec{}, ExecutablePlan{}, fmt.Errorf("%w: expansion count exceeds max %d", agentoscore.ErrInvalidRunPlan, policy.MaxExpansions)
 	}
 
 	totalNodes := len(current.Nodes) + len(delta.Nodes)
 	if totalNodes > math.MaxInt32 {
-		return agentos.RunPlanSpec{}, ExecutablePlan{}, fmt.Errorf("%w: too many nodes", agentos.ErrInvalidRunPlan)
+		return agentos.RunPlanSpec{}, ExecutablePlan{}, fmt.Errorf("%w: too many nodes", agentoscore.ErrInvalidRunPlan)
 	}
 
 	if int32(totalNodes) > policy.MaxNodes {
-		return agentos.RunPlanSpec{}, ExecutablePlan{}, fmt.Errorf("%w: delta exceeds max nodes %d", agentos.ErrInvalidRunPlan, policy.MaxNodes)
+		return agentos.RunPlanSpec{}, ExecutablePlan{}, fmt.Errorf("%w: delta exceeds max nodes %d", agentoscore.ErrInvalidRunPlan, policy.MaxNodes)
 	}
 
 	next := *current

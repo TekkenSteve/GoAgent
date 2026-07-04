@@ -4,7 +4,8 @@ import (
 	"fmt"
 	"sync"
 
-	"github.com/TekkenSteve/GoAgent/agentos"
+	agentos "github.com/TekkenSteve/GoAgent/agentos/control"
+	agentoscore "github.com/TekkenSteve/GoAgent/agentos/core"
 )
 
 // Registry stores named agent backends.
@@ -25,7 +26,7 @@ func (r *Registry) Register(ref agentos.BackendRef, backend AgentBackend) error 
 	}
 
 	if backend == nil {
-		return fmt.Errorf("%w: nil backend for %s/%s", agentos.ErrBackendNotFound, ref.Kind, ref.Name)
+		return fmt.Errorf("%w: nil backend for %s/%s", agentoscore.ErrBackendNotFound, ref.Kind, ref.Name)
 	}
 
 	r.mu.Lock()
@@ -47,7 +48,7 @@ func (r *Registry) Get(ref agentos.BackendRef) (AgentBackend, error) {
 
 	backend, ok := r.backends[ref]
 	if !ok {
-		return nil, fmt.Errorf("%w: %s/%s", agentos.ErrBackendNotFound, ref.Kind, ref.Name)
+		return nil, fmt.Errorf("%w: %s/%s", agentoscore.ErrBackendNotFound, ref.Kind, ref.Name)
 	}
 
 	return backend, nil
@@ -55,11 +56,11 @@ func (r *Registry) Get(ref agentos.BackendRef) (AgentBackend, error) {
 
 func validateBackendRef(ref agentos.BackendRef) error {
 	if ref.Kind == "" {
-		return fmt.Errorf("%w: kind is required", agentos.ErrInvalidBackendRef)
+		return fmt.Errorf("%w: kind is required", agentoscore.ErrInvalidBackendRef)
 	}
 
 	if ref.Name == "" {
-		return fmt.Errorf("%w: name is required", agentos.ErrInvalidBackendRef)
+		return fmt.Errorf("%w: name is required", agentoscore.ErrInvalidBackendRef)
 	}
 
 	return nil

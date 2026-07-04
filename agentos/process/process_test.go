@@ -1,10 +1,12 @@
-package agentos
+package process
 
 import (
 	"encoding/json"
 	"errors"
 	"testing"
 	"time"
+
+	"github.com/TekkenSteve/GoAgent/agentos/core"
 )
 
 func TestValidateResourceRefRequiresTenantScopedIdentity(t *testing.T) {
@@ -25,8 +27,8 @@ func TestValidateResourceRefRequiresTenantScopedIdentity(t *testing.T) {
 			t.Parallel()
 
 			err := ValidateResourceRef(tt.ref)
-			if !errors.Is(err, ErrInvalidResourceRef) {
-				t.Fatalf("ValidateResourceRef error = %v, want ErrInvalidResourceRef", err)
+			if !errors.Is(err, core.ErrInvalidResourceRef) {
+				t.Fatalf("ValidateResourceRef error = %v, want core.ErrInvalidResourceRef", err)
 			}
 		})
 	}
@@ -36,11 +38,11 @@ func TestValidateProcessSpecAcceptsGenericDurableProcess(t *testing.T) {
 	t.Parallel()
 
 	spec := validProcessSpec()
-	spec.Timers = []ProcessTimerSpec{
+	spec.Timers = []TimerSpec{
 		{TimerID: "sla", AfterSeconds: 300, Signal: "sla.expired"},
 		{TimerID: "follow-up", FireAt: time.Date(2026, 7, 4, 12, 0, 0, 0, time.UTC)},
 	}
-	spec.Policy = ProcessPolicy{MaxHistoryEvents: 1000, ContinueAsNewEvents: 800}
+	spec.Policy = Policy{MaxHistoryEvents: 1000, ContinueAsNewEvents: 800}
 
 	if err := ValidateProcessSpec(&spec); err != nil {
 		t.Fatalf("ValidateProcessSpec: %v", err)
@@ -52,13 +54,13 @@ func TestValidateProcessSpecRequiresStableStartIdentity(t *testing.T) {
 
 	tests := []struct {
 		name string
-		edit func(*ProcessSpec)
+		edit func(*Spec)
 	}{
-		{name: "process id", edit: func(spec *ProcessSpec) { spec.ProcessID = "" }},
-		{name: "kind", edit: func(spec *ProcessSpec) { spec.Kind = "" }},
-		{name: "account id", edit: func(spec *ProcessSpec) { spec.AccountID = "" }},
-		{name: "project id", edit: func(spec *ProcessSpec) { spec.ProjectID = "" }},
-		{name: "idempotency key", edit: func(spec *ProcessSpec) { spec.IdempotencyKey = "" }},
+		{name: "process id", edit: func(spec *Spec) { spec.ProcessID = "" }},
+		{name: "kind", edit: func(spec *Spec) { spec.Kind = "" }},
+		{name: "account id", edit: func(spec *Spec) { spec.AccountID = "" }},
+		{name: "project id", edit: func(spec *Spec) { spec.ProjectID = "" }},
+		{name: "idempotency key", edit: func(spec *Spec) { spec.IdempotencyKey = "" }},
 	}
 
 	for _, tt := range tests {
@@ -69,8 +71,8 @@ func TestValidateProcessSpecRequiresStableStartIdentity(t *testing.T) {
 			tt.edit(&spec)
 
 			err := ValidateProcessSpec(&spec)
-			if !errors.Is(err, ErrInvalidProcess) {
-				t.Fatalf("ValidateProcessSpec error = %v, want ErrInvalidProcess", err)
+			if !errors.Is(err, core.ErrInvalidProcess) {
+				t.Fatalf("ValidateProcessSpec error = %v, want core.ErrInvalidProcess", err)
 			}
 		})
 	}
@@ -81,10 +83,10 @@ func TestValidateProcessSpecRejectsCrossTenantResource(t *testing.T) {
 
 	tests := []struct {
 		name string
-		edit func(*ProcessSpec)
+		edit func(*Spec)
 	}{
-		{name: "account", edit: func(spec *ProcessSpec) { spec.Resource.AccountID = "acct-2" }},
-		{name: "project", edit: func(spec *ProcessSpec) { spec.Resource.ProjectID = "proj-2" }},
+		{name: "account", edit: func(spec *Spec) { spec.Resource.AccountID = "acct-2" }},
+		{name: "project", edit: func(spec *Spec) { spec.Resource.ProjectID = "proj-2" }},
 	}
 
 	for _, tt := range tests {
@@ -95,8 +97,8 @@ func TestValidateProcessSpecRejectsCrossTenantResource(t *testing.T) {
 			tt.edit(&spec)
 
 			err := ValidateProcessSpec(&spec)
-			if !errors.Is(err, ErrInvalidProcess) {
-				t.Fatalf("ValidateProcessSpec error = %v, want ErrInvalidProcess", err)
+			if !errors.Is(err, core.ErrInvalidProcess) {
+				t.Fatalf("ValidateProcessSpec error = %v, want core.ErrInvalidProcess", err)
 			}
 		})
 	}
@@ -107,16 +109,16 @@ func TestValidateProcessSpecRejectsInvalidTimers(t *testing.T) {
 
 	tests := []struct {
 		name  string
-		timer ProcessTimerSpec
+		timer TimerSpec
 	}{
-		{name: "missing id", timer: ProcessTimerSpec{AfterSeconds: 1}},
-		{name: "missing schedule", timer: ProcessTimerSpec{TimerID: "sla"}},
-		{name: "two schedules", timer: ProcessTimerSpec{
+		{name: "missing id", timer: TimerSpec{AfterSeconds: 1}},
+		{name: "missing schedule", timer: TimerSpec{TimerID: "sla"}},
+		{name: "two schedules", timer: TimerSpec{
 			TimerID:      "sla",
 			FireAt:       time.Date(2026, 7, 4, 12, 0, 0, 0, time.UTC),
 			AfterSeconds: 1,
 		}},
-		{name: "negative schedule", timer: ProcessTimerSpec{TimerID: "sla", AfterSeconds: -1}},
+		{name: "negative schedule", timer: TimerSpec{TimerID: "sla", AfterSeconds: -1}},
 	}
 
 	for _, tt := range tests {
@@ -124,11 +126,11 @@ func TestValidateProcessSpecRejectsInvalidTimers(t *testing.T) {
 			t.Parallel()
 
 			spec := validProcessSpec()
-			spec.Timers = []ProcessTimerSpec{tt.timer}
+			spec.Timers = []TimerSpec{tt.timer}
 
 			err := ValidateProcessSpec(&spec)
-			if !errors.Is(err, ErrInvalidProcess) {
-				t.Fatalf("ValidateProcessSpec error = %v, want ErrInvalidProcess", err)
+			if !errors.Is(err, core.ErrInvalidProcess) {
+				t.Fatalf("ValidateProcessSpec error = %v, want core.ErrInvalidProcess", err)
 			}
 		})
 	}
@@ -137,28 +139,28 @@ func TestValidateProcessSpecRejectsInvalidTimers(t *testing.T) {
 func TestValidateProcessScopesRequireTenantScope(t *testing.T) {
 	t.Parallel()
 
-	refErr := ValidateProcessRef(ProcessRef{ProcessID: "process-1", AccountID: "acct-1"})
-	if !errors.Is(refErr, ErrInvalidProcessScope) {
-		t.Fatalf("ValidateProcessRef error = %v, want ErrInvalidProcessScope", refErr)
+	refErr := ValidateProcessRef(Ref{ProcessID: "process-1", AccountID: "acct-1"})
+	if !errors.Is(refErr, core.ErrInvalidProcessScope) {
+		t.Fatalf("ValidateProcessRef error = %v, want core.ErrInvalidProcessScope", refErr)
 	}
 
 	streamErr := ValidateProcessStreamScope(nil)
-	if !errors.Is(streamErr, ErrInvalidProcessScope) {
-		t.Fatalf("ValidateProcessStreamScope error = %v, want ErrInvalidProcessScope", streamErr)
+	if !errors.Is(streamErr, core.ErrInvalidProcessScope) {
+		t.Fatalf("ValidateProcessStreamScope error = %v, want core.ErrInvalidProcessScope", streamErr)
 	}
 
-	eventErr := ValidateProcessEventScope(&ProcessEventScope{ProcessID: "process-1", AccountID: "acct-1", ProjectID: "proj-1", Limit: -1})
-	if !errors.Is(eventErr, ErrInvalidProcessScope) {
-		t.Fatalf("ValidateProcessEventScope error = %v, want ErrInvalidProcessScope", eventErr)
+	eventErr := ValidateProcessEventScope(&EventScope{ProcessID: "process-1", AccountID: "acct-1", ProjectID: "proj-1", Limit: -1})
+	if !errors.Is(eventErr, core.ErrInvalidProcessScope) {
+		t.Fatalf("ValidateProcessEventScope error = %v, want core.ErrInvalidProcessScope", eventErr)
 	}
 }
 
 func TestProcessSpecJSONSchema(t *testing.T) {
 	t.Parallel()
 
-	data, err := ProcessSpecJSONSchema()
+	data, err := SpecJSONSchema()
 	if err != nil {
-		t.Fatalf("ProcessSpecJSONSchema: %v", err)
+		t.Fatalf("SpecJSONSchema: %v", err)
 	}
 
 	var schema map[string]any
@@ -173,8 +175,33 @@ func TestProcessSpecJSONSchema(t *testing.T) {
 	assertSchemaDoesNotRequire(t, schema, []string{"requested_at", "policy"})
 }
 
-func validProcessSpec() ProcessSpec {
-	return ProcessSpec{
+func assertSchemaDoesNotRequire(t *testing.T, schema map[string]any, fields []string) {
+	t.Helper()
+
+	requiredValues, ok := schema["required"].([]any)
+	if !ok {
+		requiredValues = nil
+	}
+
+	required := make(map[string]bool, len(requiredValues))
+	for _, value := range requiredValues {
+		name, ok := value.(string)
+		if !ok {
+			t.Fatalf("required contains non-string %#v", value)
+		}
+
+		required[name] = true
+	}
+
+	for _, field := range fields {
+		if required[field] {
+			t.Fatalf("schema unexpectedly requires optional field %q", field)
+		}
+	}
+}
+
+func validProcessSpec() Spec {
+	return Spec{
 		ProcessID:      "process-1",
 		Kind:           "resource-lifecycle",
 		AccountID:      "acct-1",

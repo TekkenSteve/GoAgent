@@ -3,7 +3,7 @@ package agentosledger
 import (
 	"context"
 
-	"github.com/TekkenSteve/GoAgent/agentos"
+	agentos "github.com/TekkenSteve/GoAgent/agentos/process"
 )
 
 // Store persists append-only ledger entries.

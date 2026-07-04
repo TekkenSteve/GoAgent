@@ -7,7 +7,8 @@ import (
 	"fmt"
 
 	sq "github.com/Masterminds/squirrel"
-	"github.com/TekkenSteve/GoAgent/agentos"
+	agentos "github.com/TekkenSteve/GoAgent/agentos/control"
+	agentoscore "github.com/TekkenSteve/GoAgent/agentos/core"
 	"github.com/TekkenSteve/GoAgent/internal/pkg/postgres"
 	"github.com/TekkenSteve/GoAgent/internal/usecase/agentosplan"
 	"github.com/jackc/pgx/v5"
@@ -118,7 +119,7 @@ RETURNING schema_decl_json`,
 
 func (r *AgentOSArtifactSchemaCatalogRepo) handleSchemaInsertErr(ctx context.Context, scanErr error, normalized agentos.ArtifactSchema, idempotencyKey string) (agentos.ArtifactSchema, error) {
 	if errors.Is(scanErr, pgx.ErrNoRows) {
-		return agentos.ArtifactSchema{}, fmt.Errorf("%w: artifact schema %q already exists with a different declaration", agentos.ErrInvalidArtifact, normalized.Ref)
+		return agentos.ArtifactSchema{}, fmt.Errorf("%w: artifact schema %q already exists with a different declaration", agentoscore.ErrInvalidArtifact, normalized.Ref)
 	}
 
 	if !isPostgresUniqueViolation(scanErr) {
@@ -148,7 +149,7 @@ func validateArtifactSchemaIdempotencyKey(normalized agentos.ArtifactSchema, ide
 	}
 
 	if idempotencyKey != expectedKey {
-		return fmt.Errorf("%w: artifact schema registration idempotency key must match declaration", agentos.ErrInvalidArtifact)
+		return fmt.Errorf("%w: artifact schema registration idempotency key must match declaration", agentoscore.ErrInvalidArtifact)
 	}
 
 	return nil

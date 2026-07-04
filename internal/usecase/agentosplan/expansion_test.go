@@ -7,7 +7,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/TekkenSteve/GoAgent/agentos"
+	agentos "github.com/TekkenSteve/GoAgent/agentos/control"
+	agentoscore "github.com/TekkenSteve/GoAgent/agentos/core"
 )
 
 func TestArtifactPlanDeltaProviderDecodesPlanDeltaArtifact(t *testing.T) {
@@ -15,13 +16,13 @@ func TestArtifactPlanDeltaProviderDecodesPlanDeltaArtifact(t *testing.T) {
 
 	store := NewMemoryArtifactStore()
 
-	ref, err := putArtifact(context.Background(), store, &agentos.ArtifactRef{
+	ref, err := putArtifact(context.Background(), store, &agentoscore.ArtifactRef{
 		ArtifactID: "delta-1",
 		PlanID:     "plan-1",
 		NodeID:     "seed",
 		RunID:      "run-seed",
 		Name:       "expand",
-		Kind:       agentos.ArtifactKindPlanDelta,
+		Kind:       agentoscore.ArtifactKindPlanDelta,
 	}, PlanDelta{
 		Nodes: []agentos.PlanNodeSpec{
 			{
@@ -45,7 +46,7 @@ func TestArtifactPlanDeltaProviderDecodesPlanDeltaArtifact(t *testing.T) {
 
 	input := PlanDeltaInput{
 		Spec:      agentos.RunPlanSpec{PlanID: "plan-1", AccountID: "acct-1", ProjectID: "proj-1"},
-		Artifacts: []agentos.ArtifactRef{ref},
+		Artifacts: []agentoscore.ArtifactRef{ref},
 	}
 
 	delta, ok, err := NewArtifactPlanDeltaProvider(store).NextPlanDelta(context.Background(), &input)
@@ -70,11 +71,11 @@ func TestArtifactPlanDeltaProviderReadsArtifactWithTenantScope(t *testing.T) {
 	t.Parallel()
 
 	store := &recordingPlanDeltaArtifactStore{
-		ref: agentos.ArtifactRef{
+		ref: agentoscore.ArtifactRef{
 			ArtifactID: "delta-1",
 			PlanID:     "plan-1",
 			Name:       "expand",
-			Kind:       agentos.ArtifactKindPlanDelta,
+			Kind:       agentoscore.ArtifactKindPlanDelta,
 		},
 		payload: PlanDelta{
 			Nodes: []agentos.PlanNodeSpec{
@@ -98,7 +99,7 @@ func TestArtifactPlanDeltaProviderReadsArtifactWithTenantScope(t *testing.T) {
 			AccountID: "acct-1",
 			ProjectID: "proj-1",
 		},
-		Artifacts: []agentos.ArtifactRef{store.ref},
+		Artifacts: []agentoscore.ArtifactRef{store.ref},
 	}
 
 	_, ok, err := NewArtifactPlanDeltaProvider(store).NextPlanDelta(context.Background(), &input)
@@ -120,11 +121,11 @@ func TestArtifactPlanDeltaProviderFailsWhenPayloadMissing(t *testing.T) {
 
 	store := NewMemoryArtifactStore()
 
-	ref, err := putArtifact(context.Background(), store, &agentos.ArtifactRef{
+	ref, err := putArtifact(context.Background(), store, &agentoscore.ArtifactRef{
 		ArtifactID: "delta-1",
 		PlanID:     "plan-1",
 		Name:       "expand",
-		Kind:       agentos.ArtifactKindPlanDelta,
+		Kind:       agentoscore.ArtifactKindPlanDelta,
 	}, nil, "delta-key")
 	if err != nil {
 		t.Fatalf("Put: %v", err)
@@ -136,11 +137,11 @@ func TestArtifactPlanDeltaProviderFailsWhenPayloadMissing(t *testing.T) {
 			AccountID: "acct-1",
 			ProjectID: "proj-1",
 		},
-		Artifacts: []agentos.ArtifactRef{ref},
+		Artifacts: []agentoscore.ArtifactRef{ref},
 	}
 
 	_, _, err = NewArtifactPlanDeltaProvider(store).NextPlanDelta(context.Background(), &input)
-	if !errors.Is(err, agentos.ErrArtifactNotFound) {
+	if !errors.Is(err, agentoscore.ErrArtifactNotFound) {
 		t.Fatalf("error = %v, want ErrArtifactNotFound", err)
 	}
 }
@@ -163,7 +164,7 @@ func TestDecodePlanDeltaPayloadRejectsUnknownFields(t *testing.T) {
 			},
 		},
 	})
-	if !errors.Is(err, agentos.ErrInvalidRunPlan) {
+	if !errors.Is(err, agentoscore.ErrInvalidRunPlan) {
 		t.Fatalf("error = %v, want ErrInvalidRunPlan", err)
 	}
 
@@ -174,21 +175,21 @@ func TestDecodePlanDeltaPayloadRejectsUnknownFields(t *testing.T) {
 
 type recordingPlanDeltaArtifactStore struct {
 	scope   agentos.PlanArtifactScope
-	ref     agentos.ArtifactRef
+	ref     agentoscore.ArtifactRef
 	payload any
 }
 
-func (s *recordingPlanDeltaArtifactStore) Put(context.Context, *agentos.ArtifactRef, any, string) (agentos.ArtifactRef, error) {
-	return agentos.ArtifactRef{}, nil
+func (s *recordingPlanDeltaArtifactStore) Put(context.Context, *agentoscore.ArtifactRef, any, string) (agentoscore.ArtifactRef, error) {
+	return agentoscore.ArtifactRef{}, nil
 }
 
-func (s *recordingPlanDeltaArtifactStore) Get(_ context.Context, scope *agentos.PlanArtifactScope) (agentos.ArtifactRef, any, error) {
+func (s *recordingPlanDeltaArtifactStore) Get(_ context.Context, scope *agentos.PlanArtifactScope) (agentoscore.ArtifactRef, any, error) {
 	s.scope = *scope
 
 	return s.ref, s.payload, nil
 }
 
-func (s *recordingPlanDeltaArtifactStore) List(context.Context, *agentos.PlanArtifactScope) ([]agentos.ArtifactRef, error) {
+func (s *recordingPlanDeltaArtifactStore) List(context.Context, *agentos.PlanArtifactScope) ([]agentoscore.ArtifactRef, error) {
 	return nil, nil
 }
 

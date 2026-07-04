@@ -6,7 +6,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/TekkenSteve/GoAgent/agentos"
+	agentos "github.com/TekkenSteve/GoAgent/agentos/control"
+	agentoscore "github.com/TekkenSteve/GoAgent/agentos/core"
 )
 
 const (
@@ -53,7 +54,7 @@ func TestPlanEventFromStateEventMapsPublicEvent(t *testing.T) {
 		t.Fatal("idempotency key is empty")
 	}
 
-	if event.EventType != agentos.EventPlanNodeStarted || event.PlanID != Plan1 || event.NodeID != Node1 || event.RunID != Run1 {
+	if event.EventType != agentoscore.EventPlanNodeStarted || event.PlanID != Plan1 || event.NodeID != Node1 || event.RunID != Run1 {
 		t.Fatalf("event = %#v", event)
 	}
 
@@ -76,7 +77,7 @@ func TestPlanEventFromStateEventRequiresReducerTimestamp(t *testing.T) {
 		},
 		&StateEvent{Kind: EventPlanStarted},
 	)
-	if !errors.Is(err, agentos.ErrInvalidPlanEvent) {
+	if !errors.Is(err, agentoscore.ErrInvalidPlanEvent) {
 		t.Fatalf("PlanEventFromStateEvent error = %v, want ErrInvalidPlanEvent", err)
 	}
 }
@@ -91,7 +92,7 @@ func TestMemoryPlanStoreAppendPlanEventIsIdempotent(t *testing.T) {
 	createMemoryPlanStateForEventTest(ctx, t, store, &spec, &status)
 
 	event := agentos.PlanEvent{
-		Event:  agentos.Event{EventType: agentos.EventPlanStarted},
+		Event:  agentoscore.Event{EventType: agentoscore.EventPlanStarted},
 		PlanID: Plan1,
 	}
 
@@ -147,7 +148,7 @@ func TestMemoryPlanStoreAppendPlanEventScopesIdempotencyKeyByPlan(t *testing.T) 
 	}
 
 	first, err := appendPlanEvent(ctx, store, &agentos.PlanEvent{
-		Event:  agentos.Event{EventType: agentos.EventPlanStarted},
+		Event:  agentoscore.Event{EventType: agentoscore.EventPlanStarted},
 		PlanID: Plan1,
 	}, "shared-key")
 	if err != nil {
@@ -155,7 +156,7 @@ func TestMemoryPlanStoreAppendPlanEventScopesIdempotencyKeyByPlan(t *testing.T) 
 	}
 
 	second, err := appendPlanEvent(ctx, store, &agentos.PlanEvent{
-		Event:  agentos.Event{EventType: agentos.EventPlanStarted},
+		Event:  agentoscore.Event{EventType: agentoscore.EventPlanStarted},
 		PlanID: "plan-2",
 	}, "shared-key")
 	if err != nil {
@@ -181,9 +182,9 @@ func TestMemoryPlanStoreAppendPlanEventAssignsStoreOwnedIdentity(t *testing.T) {
 	)
 
 	event := agentos.PlanEvent{
-		Event: agentos.Event{
+		Event: agentoscore.Event{
 			EventID:   "caller-event",
-			EventType: agentos.EventPlanStarted,
+			EventType: agentoscore.EventPlanStarted,
 			Sequence:  99,
 		},
 		PlanID: Plan1,
@@ -222,10 +223,10 @@ func TestMemoryPlanStoreAppendPlanEventRequiresIdempotencyKey(t *testing.T) {
 	)
 
 	_, err := appendPlanEvent(ctx, store, &agentos.PlanEvent{
-		Event:  agentos.Event{EventType: agentos.EventPlanStarted},
+		Event:  agentoscore.Event{EventType: agentoscore.EventPlanStarted},
 		PlanID: Plan1,
 	}, "")
-	if !errors.Is(err, agentos.ErrInvalidPlanEvent) {
+	if !errors.Is(err, agentoscore.ErrInvalidPlanEvent) {
 		t.Fatalf("AppendPlanEvent empty key error = %v, want ErrInvalidPlanEvent", err)
 	}
 }
@@ -236,10 +237,10 @@ func TestMemoryPlanStoreAppendPlanEventRejectsMissingPlan(t *testing.T) {
 	store := NewMemoryPlanStore()
 
 	_, err := appendPlanEvent(context.Background(), store, &agentos.PlanEvent{
-		Event:  agentos.Event{EventType: agentos.EventPlanStarted},
+		Event:  agentoscore.Event{EventType: agentoscore.EventPlanStarted},
 		PlanID: "missing-plan",
 	}, "event-1")
-	if !errors.Is(err, agentos.ErrPlanRouteNotFound) {
+	if !errors.Is(err, agentoscore.ErrPlanRouteNotFound) {
 		t.Fatalf("AppendPlanEvent missing plan error = %v, want ErrPlanRouteNotFound", err)
 	}
 }
@@ -254,17 +255,17 @@ func TestMemoryPlanStoreAppendPlanEventRejectsDifferentReplay(t *testing.T) {
 	createMemoryPlanStateForEventTest(ctx, t, store, &spec, &status)
 
 	event := agentos.PlanEvent{
-		Event:  agentos.Event{EventType: agentos.EventPlanStarted, Payload: map[string]any{"state": "started"}},
+		Event:  agentoscore.Event{EventType: agentoscore.EventPlanStarted, Payload: map[string]any{"state": "started"}},
 		PlanID: Plan1,
 	}
 	if _, err := appendPlanEvent(ctx, store, &event, "key-1"); err != nil {
 		t.Fatalf("AppendPlanEvent first: %v", err)
 	}
 
-	event.EventType = agentos.EventPlanFailed
+	event.EventType = agentoscore.EventPlanFailed
 
 	event.Payload = map[string]any{"state": "failed"}
-	if _, err := appendPlanEvent(ctx, store, &event, "key-1"); !errors.Is(err, agentos.ErrInvalidPlanEvent) {
+	if _, err := appendPlanEvent(ctx, store, &event, "key-1"); !errors.Is(err, agentoscore.ErrInvalidPlanEvent) {
 		t.Fatalf("AppendPlanEvent changed replay error = %v, want ErrInvalidPlanEvent", err)
 	}
 }
@@ -278,7 +279,7 @@ func TestMemoryPlanStoreListPlanEventsEnforcesTenantScope(t *testing.T) {
 	status := agentos.RunPlanStatus{PlanID: Plan1, LifecycleState: agentos.PlanLifecycleRunning}
 	createMemoryPlanStateForEventTest(ctx, t, store, &spec, &status)
 
-	if _, err := appendPlanEvent(ctx, store, &agentos.PlanEvent{Event: agentos.Event{EventType: agentos.EventPlanStarted}, PlanID: spec.PlanID}, "event-1"); err != nil {
+	if _, err := appendPlanEvent(ctx, store, &agentos.PlanEvent{Event: agentoscore.Event{EventType: agentoscore.EventPlanStarted}, PlanID: spec.PlanID}, "event-1"); err != nil {
 		t.Fatalf("AppendPlanEvent: %v", err)
 	}
 
@@ -287,12 +288,12 @@ func TestMemoryPlanStoreListPlanEventsEnforcesTenantScope(t *testing.T) {
 		{PlanID: spec.PlanID, AccountID: spec.AccountID},
 		{PlanID: spec.PlanID, ProjectID: spec.ProjectID},
 	} {
-		if _, err := store.ListPlanEvents(ctx, &scope, 0); !errors.Is(err, agentos.ErrInvalidPlanScope) {
+		if _, err := store.ListPlanEvents(ctx, &scope, 0); !errors.Is(err, agentoscore.ErrInvalidPlanScope) {
 			t.Fatalf("ListPlanEvents scope %#v error = %v, want ErrInvalidPlanScope", scope, err)
 		}
 	}
 
-	if _, err := store.ListPlanEvents(ctx, &agentos.PlanStreamScope{PlanID: spec.PlanID, AccountID: "acct-other", ProjectID: spec.ProjectID}, 0); !errors.Is(err, agentos.ErrPlanRouteNotFound) {
+	if _, err := store.ListPlanEvents(ctx, &agentos.PlanStreamScope{PlanID: spec.PlanID, AccountID: "acct-other", ProjectID: spec.ProjectID}, 0); !errors.Is(err, agentoscore.ErrPlanRouteNotFound) {
 		t.Fatalf("ListPlanEvents mismatch error = %v, want ErrPlanRouteNotFound", err)
 	}
 
@@ -328,7 +329,7 @@ func TestPlanEventFromRetryScheduledIncludesAttempt(t *testing.T) {
 		t.Fatalf("PlanEventFromStateEvent: %v", err)
 	}
 
-	if event.EventType != agentos.EventPlanNodeRetryScheduled {
+	if event.EventType != agentoscore.EventPlanNodeRetryScheduled {
 		t.Fatalf("event type = %q", event.EventType)
 	}
 
@@ -345,10 +346,10 @@ func TestPlanEventFromApprovalSignals(t *testing.T) {
 	tests := []struct {
 		name string
 		kind EventKind
-		want agentos.EventType
+		want agentoscore.EventType
 	}{
-		{name: "approved", kind: EventPlanApproved, want: agentos.EventPlanApproved},
-		{name: "rejected", kind: EventPlanRejected, want: agentos.EventPlanRejected},
+		{name: "approved", kind: EventPlanApproved, want: agentoscore.EventPlanApproved},
+		{name: "rejected", kind: EventPlanRejected, want: agentoscore.EventPlanRejected},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -398,7 +399,7 @@ func TestPlanEventFromBudgetReportedUsesPublicUsageEvent(t *testing.T) {
 		t.Fatalf("PlanEventFromStateEvent: %v", err)
 	}
 
-	if event.EventType != agentos.EventUsageReported {
+	if event.EventType != agentoscore.EventUsageReported {
 		t.Fatalf("event type = %q", event.EventType)
 	}
 
@@ -426,8 +427,8 @@ func TestPlanEventFromDebugTraceEvents(t *testing.T) {
 		t.Fatalf("PlanEventFromStateEvent capability: %v", err)
 	}
 
-	requirePlanEventPayload(t, &capabilityEvent, agentos.EventCapabilitySelected, planEventPayloadCapability)
-	requirePlanEventPayload(t, &capabilityEvent, agentos.EventCapabilitySelected, planEventPayloadTransition)
+	requirePlanEventPayload(t, &capabilityEvent, agentoscore.EventCapabilitySelected, planEventPayloadCapability)
+	requirePlanEventPayload(t, &capabilityEvent, agentoscore.EventCapabilitySelected, planEventPayloadTransition)
 
 	inputEvent, _, err := planEventFromStateEventForTest(&spec, &status, &StateEvent{
 		Kind:   EventNodeInputResolved,
@@ -447,7 +448,7 @@ func TestPlanEventFromDebugTraceEvents(t *testing.T) {
 		t.Fatalf("PlanEventFromStateEvent input: %v", err)
 	}
 
-	requirePlanEventPayload(t, &inputEvent, agentos.EventNodeInputResolved, planEventPayloadInputResolution)
+	requirePlanEventPayload(t, &inputEvent, agentoscore.EventNodeInputResolved, planEventPayloadInputResolution)
 
 	conditionEvent, _, err := planEventFromStateEventForTest(&spec, &status, &StateEvent{
 		Kind: EventConditionsEvaluated,
@@ -460,10 +461,10 @@ func TestPlanEventFromDebugTraceEvents(t *testing.T) {
 		t.Fatalf("PlanEventFromStateEvent conditions: %v", err)
 	}
 
-	requirePlanEventPayload(t, &conditionEvent, agentos.EventConditionEvaluated, planEventPayloadConditions)
+	requirePlanEventPayload(t, &conditionEvent, agentoscore.EventConditionEvaluated, planEventPayloadConditions)
 }
 
-func requirePlanEventPayload(t *testing.T, event *agentos.PlanEvent, eventType agentos.EventType, payloadKey string) {
+func requirePlanEventPayload(t *testing.T, event *agentos.PlanEvent, eventType agentoscore.EventType, payloadKey string) {
 	t.Helper()
 
 	if event.EventType != eventType {
@@ -549,8 +550,8 @@ func TestPlanTimeoutControlIdempotencyKeyRequiresStartedAt(t *testing.T) {
 func TestPlanSignalCancelControlIdempotencyKeyOnlyAcceptsReject(t *testing.T) {
 	t.Parallel()
 
-	reject := agentos.Signal{
-		Type:           agentos.SignalPlanReject,
+	reject := agentoscore.Signal{
+		Type:           agentoscore.SignalPlanReject,
 		IdempotencyKey: "reject-1",
 		ActorID:        "operator-1",
 	}
@@ -569,11 +570,11 @@ func TestPlanSignalCancelControlIdempotencyKeyOnlyAcceptsReject(t *testing.T) {
 		t.Fatalf("signal cancel keys = %q/%q, want stable non-empty key", first, second)
 	}
 
-	if _, err := PlanSignalCancelControlIdempotencyKey(Plan1, &agentos.Signal{
-		Type:           agentos.SignalPlanApprove,
+	if _, err := PlanSignalCancelControlIdempotencyKey(Plan1, &agentoscore.Signal{
+		Type:           agentoscore.SignalPlanApprove,
 		IdempotencyKey: "approve-1",
 		ActorID:        "operator-1",
-	}); !errors.Is(err, agentos.ErrInvalidSignal) {
+	}); !errors.Is(err, agentoscore.ErrInvalidSignal) {
 		t.Fatalf("approve signal key error = %v, want ErrInvalidSignal", err)
 	}
 }

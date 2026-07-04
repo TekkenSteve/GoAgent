@@ -6,18 +6,19 @@ import (
 	"encoding/json"
 	"sort"
 
-	"github.com/TekkenSteve/GoAgent/agentos"
+	agentos "github.com/TekkenSteve/GoAgent/agentos/control"
+	agentoscore "github.com/TekkenSteve/GoAgent/agentos/core"
 )
 
 // CapabilitySelectionTrace is the durable debug view for a selected backend
 // capability without embedding potentially large JSON schemas in event history.
 type CapabilitySelectionTrace struct {
-	Backend         agentos.BackendRef         `json:"backend"`
-	Capability      string                     `json:"capability"`
-	Signals         []agentos.SignalType       `json:"signals,omitempty"`
-	Controls        []agentos.ControlOperation `json:"controls,omitempty"`
-	HasInputSchema  bool                       `json:"has_input_schema,omitempty"`
-	HasOutputSchema bool                       `json:"has_output_schema,omitempty"`
+	Backend         agentos.BackendRef             `json:"backend"`
+	Capability      string                         `json:"capability"`
+	Signals         []agentoscore.SignalType       `json:"signals,omitempty"`
+	Controls        []agentoscore.ControlOperation `json:"controls,omitempty"`
+	HasInputSchema  bool                           `json:"has_input_schema,omitempty"`
+	HasOutputSchema bool                           `json:"has_output_schema,omitempty"`
 }
 
 // InputResolutionTrace describes how a node input was resolved without storing
@@ -59,8 +60,8 @@ func NewCapabilitySelectionTrace(capability *agentos.Capability) CapabilitySelec
 	return CapabilitySelectionTrace{
 		Backend:         capability.Backend,
 		Capability:      capability.Name,
-		Signals:         append([]agentos.SignalType(nil), capability.Signals...),
-		Controls:        append([]agentos.ControlOperation(nil), capability.Controls...),
+		Signals:         append([]agentoscore.SignalType(nil), capability.Signals...),
+		Controls:        append([]agentoscore.ControlOperation(nil), capability.Controls...),
 		HasInputSchema:  len(capability.InputSchema) > 0,
 		HasOutputSchema: len(capability.OutputSchema) > 0,
 	}

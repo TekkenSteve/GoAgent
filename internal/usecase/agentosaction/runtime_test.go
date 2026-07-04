@@ -5,7 +5,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/TekkenSteve/GoAgent/agentos"
+	agentoscore "github.com/TekkenSteve/GoAgent/agentos/core"
+	agentos "github.com/TekkenSteve/GoAgent/agentos/process"
 )
 
 func TestRuntimeImplementsGovernedActionRuntime(t *testing.T) {
@@ -98,7 +99,7 @@ func TestRuntimeRejectsExecutionBeforeGates(t *testing.T) {
 		IdempotencyKey: "execute-1",
 		Succeeded:      true,
 	})
-	if !errors.Is(err, agentos.ErrInvalidGovernedAction) {
+	if !errors.Is(err, agentoscore.ErrInvalidGovernedAction) {
 		t.Fatalf("CompleteAction error = %v, want ErrInvalidGovernedAction", err)
 	}
 }

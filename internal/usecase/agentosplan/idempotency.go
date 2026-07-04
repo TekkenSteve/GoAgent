@@ -8,32 +8,33 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/TekkenSteve/GoAgent/agentos"
+	agentos "github.com/TekkenSteve/GoAgent/agentos/control"
+	agentoscore "github.com/TekkenSteve/GoAgent/agentos/core"
 )
 
 // ValidatePlanStartIdempotency verifies that a repeated plan start request is
 // the same durable request that originally claimed the idempotency key.
 func ValidatePlanStartIdempotency(existing, requested *agentos.RunPlanSpec) error {
 	if existing.PlanID != requested.PlanID {
-		return fmt.Errorf("%w: plan idempotency key belongs to plan %q", agentos.ErrInvalidRunPlan, existing.PlanID)
+		return fmt.Errorf("%w: plan idempotency key belongs to plan %q", agentoscore.ErrInvalidRunPlan, existing.PlanID)
 	}
 
 	if existing.IdempotencyKey != requested.IdempotencyKey {
-		return fmt.Errorf("%w: plan %q was started with a different idempotency key", agentos.ErrInvalidRunPlan, existing.PlanID)
+		return fmt.Errorf("%w: plan %q was started with a different idempotency key", agentoscore.ErrInvalidRunPlan, existing.PlanID)
 	}
 
 	existingJSON, err := json.Marshal(existing)
 	if err != nil {
-		return fmt.Errorf("%w: marshal existing plan start request: %w", agentos.ErrInvalidRunPlan, err)
+		return fmt.Errorf("%w: marshal existing plan start request: %w", agentoscore.ErrInvalidRunPlan, err)
 	}
 
 	requestedJSON, err := json.Marshal(requested)
 	if err != nil {
-		return fmt.Errorf("%w: marshal requested plan start request: %w", agentos.ErrInvalidRunPlan, err)
+		return fmt.Errorf("%w: marshal requested plan start request: %w", agentoscore.ErrInvalidRunPlan, err)
 	}
 
 	if !bytes.Equal(existingJSON, requestedJSON) {
-		return fmt.Errorf("%w: plan %q idempotency key was reused with a different request", agentos.ErrInvalidRunPlan, existing.PlanID)
+		return fmt.Errorf("%w: plan %q idempotency key was reused with a different request", agentoscore.ErrInvalidRunPlan, existing.PlanID)
 	}
 
 	return nil
@@ -45,25 +46,25 @@ func ValidatePlanStartIdempotency(existing, requested *agentos.RunPlanSpec) erro
 // part of this comparison.
 func ValidatePlanStateIdentity(existing, requested *agentos.RunPlanSpec) error {
 	if existing.PlanID != requested.PlanID {
-		return fmt.Errorf("%w: plan state belongs to plan %q", agentos.ErrInvalidRunPlan, existing.PlanID)
+		return fmt.Errorf("%w: plan state belongs to plan %q", agentoscore.ErrInvalidRunPlan, existing.PlanID)
 	}
 
 	if existing.IdempotencyKey != requested.IdempotencyKey {
-		return fmt.Errorf("%w: plan %q state has a different idempotency key", agentos.ErrInvalidRunPlan, existing.PlanID)
+		return fmt.Errorf("%w: plan %q state has a different idempotency key", agentoscore.ErrInvalidRunPlan, existing.PlanID)
 	}
 
 	existingJSON, err := json.Marshal(planStateIdentity(existing))
 	if err != nil {
-		return fmt.Errorf("%w: marshal existing plan state identity: %w", agentos.ErrInvalidRunPlan, err)
+		return fmt.Errorf("%w: marshal existing plan state identity: %w", agentoscore.ErrInvalidRunPlan, err)
 	}
 
 	requestedJSON, err := json.Marshal(planStateIdentity(requested))
 	if err != nil {
-		return fmt.Errorf("%w: marshal requested plan state identity: %w", agentos.ErrInvalidRunPlan, err)
+		return fmt.Errorf("%w: marshal requested plan state identity: %w", agentoscore.ErrInvalidRunPlan, err)
 	}
 
 	if !bytes.Equal(existingJSON, requestedJSON) {
-		return fmt.Errorf("%w: plan %q state changed immutable fields", agentos.ErrInvalidRunPlan, existing.PlanID)
+		return fmt.Errorf("%w: plan %q state changed immutable fields", agentoscore.ErrInvalidRunPlan, existing.PlanID)
 	}
 
 	if err := validateTopologyExpansion(existing, requested); err != nil {
@@ -86,12 +87,12 @@ type PlanTransitionSnapshotIdentity struct {
 // the transition being retried.
 func NewPlanTransitionSnapshotIdentity(snapshot *PlanStateSnapshot, idempotencyKey string) (PlanTransitionSnapshotIdentity, error) {
 	if idempotencyKey == "" {
-		return PlanTransitionSnapshotIdentity{}, fmt.Errorf("%w: transition idempotency key is required", agentos.ErrInvalidRunPlan)
+		return PlanTransitionSnapshotIdentity{}, fmt.Errorf("%w: transition idempotency key is required", agentoscore.ErrInvalidRunPlan)
 	}
 
 	identityJSON, err := json.Marshal(planTransitionIdempotencyIdentity(snapshot, idempotencyKey))
 	if err != nil {
-		return PlanTransitionSnapshotIdentity{}, fmt.Errorf("%w: marshal plan transition identity: %w", agentos.ErrInvalidRunPlan, err)
+		return PlanTransitionSnapshotIdentity{}, fmt.Errorf("%w: marshal plan transition identity: %w", agentoscore.ErrInvalidRunPlan, err)
 	}
 
 	sum := sha256.Sum256(identityJSON)
@@ -107,15 +108,15 @@ func NewPlanTransitionSnapshotIdentity(snapshot *PlanStateSnapshot, idempotencyK
 // transition idempotency key.
 func ValidatePlanTransitionIdempotency(existingDigest string, requested PlanTransitionSnapshotIdentity) error {
 	if requested.Digest == "" {
-		return fmt.Errorf("%w: requested transition snapshot digest is required", agentos.ErrInvalidRunPlan)
+		return fmt.Errorf("%w: requested transition snapshot digest is required", agentoscore.ErrInvalidRunPlan)
 	}
 
 	if existingDigest == "" {
-		return fmt.Errorf("%w: transition idempotency key was not claimed by a reducer snapshot", agentos.ErrInvalidRunPlan)
+		return fmt.Errorf("%w: transition idempotency key was not claimed by a reducer snapshot", agentoscore.ErrInvalidRunPlan)
 	}
 
 	if existingDigest != requested.Digest {
-		return fmt.Errorf("%w: transition idempotency key was reused with a different reducer snapshot", agentos.ErrInvalidRunPlan)
+		return fmt.Errorf("%w: transition idempotency key was reused with a different reducer snapshot", agentoscore.ErrInvalidRunPlan)
 	}
 
 	return nil
@@ -174,11 +175,11 @@ func validateTopologyExpansion(existing, requested *agentos.RunPlanSpec) error {
 		requestedNode, exists := requestedNodes[node.NodeID]
 
 		if !exists {
-			return fmt.Errorf("%w: plan %q removed existing node %q", agentos.ErrInvalidRunPlan, existing.PlanID, node.NodeID)
+			return fmt.Errorf("%w: plan %q removed existing node %q", agentoscore.ErrInvalidRunPlan, existing.PlanID, node.NodeID)
 		}
 
 		if !jsonEqual(node, requestedNode) {
-			return fmt.Errorf("%w: plan %q changed existing node %q", agentos.ErrInvalidRunPlan, existing.PlanID, node.NodeID)
+			return fmt.Errorf("%w: plan %q changed existing node %q", agentoscore.ErrInvalidRunPlan, existing.PlanID, node.NodeID)
 		}
 	}
 
@@ -191,7 +192,7 @@ func validateTopologyExpansion(existing, requested *agentos.RunPlanSpec) error {
 	for i := range existing.Edges {
 		edge := existing.Edges[i]
 		if _, exists := requestedEdges[jsonKey(edge)]; !exists {
-			return fmt.Errorf("%w: plan %q removed or changed existing edge %q", agentos.ErrInvalidRunPlan, existing.PlanID, edge.EdgeID)
+			return fmt.Errorf("%w: plan %q removed or changed existing edge %q", agentoscore.ErrInvalidRunPlan, existing.PlanID, edge.EdgeID)
 		}
 	}
 
@@ -220,16 +221,16 @@ func ValidateAuditIdempotency(existing, requested *AuditRecord) error {
 
 	existingPayload, err := json.Marshal(normalizeAuditPayload(existing.Payload))
 	if err != nil {
-		return fmt.Errorf("%w: marshal existing audit payload: %w", agentos.ErrInvalidRunPlan, err)
+		return fmt.Errorf("%w: marshal existing audit payload: %w", agentoscore.ErrInvalidRunPlan, err)
 	}
 
 	requestedPayload, err := json.Marshal(normalizeAuditPayload(requested.Payload))
 	if err != nil {
-		return fmt.Errorf("%w: marshal requested audit payload: %w", agentos.ErrInvalidRunPlan, err)
+		return fmt.Errorf("%w: marshal requested audit payload: %w", agentoscore.ErrInvalidRunPlan, err)
 	}
 
 	if !bytes.Equal(existingPayload, requestedPayload) {
-		return fmt.Errorf("%w: audit idempotency key was reused with a different payload", agentos.ErrInvalidRunPlan)
+		return fmt.Errorf("%w: audit idempotency key was reused with a different payload", agentoscore.ErrInvalidRunPlan)
 	}
 
 	return nil
@@ -252,12 +253,12 @@ func validateAuditReplayScope(existing, requested *AuditRecord) error {
 
 	for _, field := range fields {
 		if field.existing != field.requested {
-			return fmt.Errorf("%w: %s", agentos.ErrInvalidRunPlan, field.message)
+			return fmt.Errorf("%w: %s", agentoscore.ErrInvalidRunPlan, field.message)
 		}
 	}
 
 	if existing.IdempotencyKey != requested.IdempotencyKey {
-		return fmt.Errorf("%w: audit idempotency key mismatch", agentos.ErrInvalidRunPlan)
+		return fmt.Errorf("%w: audit idempotency key mismatch", agentoscore.ErrInvalidRunPlan)
 	}
 
 	return nil
@@ -267,41 +268,41 @@ func validateAuditReplayScope(existing, requested *AuditRecord) error {
 // replayed for the same durable control-plane command.
 func ValidatePlanCommandIdempotency(existing, requested *PlanCommandRecord) error {
 	if existing.PlanID != requested.PlanID {
-		return fmt.Errorf("%w: command idempotency key belongs to plan %q", agentos.ErrInvalidRunPlan, existing.PlanID)
+		return fmt.Errorf("%w: command idempotency key belongs to plan %q", agentoscore.ErrInvalidRunPlan, existing.PlanID)
 	}
 
 	if existing.AccountID != requested.AccountID {
-		return fmt.Errorf("%w: command idempotency key belongs to account %q", agentos.ErrInvalidRunPlan, existing.AccountID)
+		return fmt.Errorf("%w: command idempotency key belongs to account %q", agentoscore.ErrInvalidRunPlan, existing.AccountID)
 	}
 
 	if existing.ProjectID != requested.ProjectID {
-		return fmt.Errorf("%w: command idempotency key belongs to project %q", agentos.ErrInvalidRunPlan, existing.ProjectID)
+		return fmt.Errorf("%w: command idempotency key belongs to project %q", agentoscore.ErrInvalidRunPlan, existing.ProjectID)
 	}
 
 	if existing.ActorID != requested.ActorID {
-		return fmt.Errorf("%w: command idempotency key belongs to actor %q", agentos.ErrInvalidRunPlan, existing.ActorID)
+		return fmt.Errorf("%w: command idempotency key belongs to actor %q", agentoscore.ErrInvalidRunPlan, existing.ActorID)
 	}
 
 	if existing.Action != requested.Action {
-		return fmt.Errorf("%w: command idempotency key belongs to action %q", agentos.ErrInvalidRunPlan, existing.Action)
+		return fmt.Errorf("%w: command idempotency key belongs to action %q", agentoscore.ErrInvalidRunPlan, existing.Action)
 	}
 
 	if existing.IdempotencyKey != requested.IdempotencyKey {
-		return fmt.Errorf("%w: command idempotency key mismatch", agentos.ErrInvalidRunPlan)
+		return fmt.Errorf("%w: command idempotency key mismatch", agentoscore.ErrInvalidRunPlan)
 	}
 
 	existingPayload, err := json.Marshal(normalizeAuditPayload(existing.Payload))
 	if err != nil {
-		return fmt.Errorf("%w: marshal existing command payload: %w", agentos.ErrInvalidRunPlan, err)
+		return fmt.Errorf("%w: marshal existing command payload: %w", agentoscore.ErrInvalidRunPlan, err)
 	}
 
 	requestedPayload, err := json.Marshal(normalizeAuditPayload(requested.Payload))
 	if err != nil {
-		return fmt.Errorf("%w: marshal requested command payload: %w", agentos.ErrInvalidRunPlan, err)
+		return fmt.Errorf("%w: marshal requested command payload: %w", agentoscore.ErrInvalidRunPlan, err)
 	}
 
 	if !bytes.Equal(existingPayload, requestedPayload) {
-		return fmt.Errorf("%w: command idempotency key was reused with a different payload", agentos.ErrInvalidRunPlan)
+		return fmt.Errorf("%w: command idempotency key was reused with a different payload", agentoscore.ErrInvalidRunPlan)
 	}
 
 	return nil
@@ -387,44 +388,44 @@ func AuditIDFromRef(ref AuditRef) string {
 // them.
 func ValidatePlanEventIdempotency(existing, requested *agentos.PlanEvent) error {
 	if requested.EventID != "" && existing.EventID != requested.EventID {
-		return fmt.Errorf("%w: plan event idempotency key belongs to event %q", agentos.ErrInvalidPlanEvent, existing.EventID)
+		return fmt.Errorf("%w: plan event idempotency key belongs to event %q", agentoscore.ErrInvalidPlanEvent, existing.EventID)
 	}
 
 	if requested.Sequence != 0 && existing.Sequence != requested.Sequence {
-		return fmt.Errorf("%w: plan event idempotency key belongs to sequence %d", agentos.ErrInvalidPlanEvent, existing.Sequence)
+		return fmt.Errorf("%w: plan event idempotency key belongs to sequence %d", agentoscore.ErrInvalidPlanEvent, existing.Sequence)
 	}
 
 	if !requested.Timestamp.IsZero() && !sameTime(existing.Timestamp, requested.Timestamp) {
-		return fmt.Errorf("%w: plan event idempotency key belongs to timestamp %s", agentos.ErrInvalidPlanEvent, existing.Timestamp.Format(time.RFC3339Nano))
+		return fmt.Errorf("%w: plan event idempotency key belongs to timestamp %s", agentoscore.ErrInvalidPlanEvent, existing.Timestamp.Format(time.RFC3339Nano))
 	}
 
 	existingJSON, err := json.Marshal(planEventIdempotencyIdentity(existing))
 	if err != nil {
-		return fmt.Errorf("%w: marshal existing plan event: %w", agentos.ErrInvalidPlanEvent, err)
+		return fmt.Errorf("%w: marshal existing plan event: %w", agentoscore.ErrInvalidPlanEvent, err)
 	}
 
 	requestedJSON, err := json.Marshal(planEventIdempotencyIdentity(requested))
 	if err != nil {
-		return fmt.Errorf("%w: marshal requested plan event: %w", agentos.ErrInvalidPlanEvent, err)
+		return fmt.Errorf("%w: marshal requested plan event: %w", agentoscore.ErrInvalidPlanEvent, err)
 	}
 
 	if !bytes.Equal(existingJSON, requestedJSON) {
-		return fmt.Errorf("%w: plan event idempotency key was reused with a different event", agentos.ErrInvalidPlanEvent)
+		return fmt.Errorf("%w: plan event idempotency key was reused with a different event", agentoscore.ErrInvalidPlanEvent)
 	}
 
 	return nil
 }
 
 type planEventIdempotencyFields struct {
-	PlanID    string            `json:"plan_id"`
-	AccountID string            `json:"account_id"`
-	ProjectID string            `json:"project_id"`
-	NodeID    string            `json:"node_id,omitempty"`
-	RunID     string            `json:"run_id,omitempty"`
-	ThreadID  string            `json:"thread_id,omitempty"`
-	EventType agentos.EventType `json:"event_type"`
-	Source    string            `json:"source,omitempty"`
-	Payload   map[string]any    `json:"payload"`
+	PlanID    string                `json:"plan_id"`
+	AccountID string                `json:"account_id"`
+	ProjectID string                `json:"project_id"`
+	NodeID    string                `json:"node_id,omitempty"`
+	RunID     string                `json:"run_id,omitempty"`
+	ThreadID  string                `json:"thread_id,omitempty"`
+	EventType agentoscore.EventType `json:"event_type"`
+	Source    string                `json:"source,omitempty"`
+	Payload   map[string]any        `json:"payload"`
 }
 
 func planEventIdempotencyIdentity(event *agentos.PlanEvent) planEventIdempotencyFields {
@@ -473,46 +474,46 @@ func NormalizeDurableTimestamp(timestamp time.Time) time.Time {
 
 // ValidateArtifactPublishIdempotency verifies that a repeated artifact publish
 // request is the same durable artifact request that originally claimed the key.
-func ValidateArtifactPublishIdempotency(existing, requested *agentos.ArtifactRef) error {
+func ValidateArtifactPublishIdempotency(existing, requested *agentoscore.ArtifactRef) error {
 	if existing.ArtifactID != requested.ArtifactID {
-		return fmt.Errorf("%w: artifact idempotency key belongs to artifact %q", agentos.ErrInvalidArtifact, existing.ArtifactID)
+		return fmt.Errorf("%w: artifact idempotency key belongs to artifact %q", agentoscore.ErrInvalidArtifact, existing.ArtifactID)
 	}
 
 	if requested.URI != "" && existing.URI != requested.URI {
-		return fmt.Errorf("%w: artifact idempotency key belongs to uri %q", agentos.ErrInvalidArtifact, existing.URI)
+		return fmt.Errorf("%w: artifact idempotency key belongs to uri %q", agentoscore.ErrInvalidArtifact, existing.URI)
 	}
 
 	existingJSON, err := json.Marshal(artifactIdempotencyIdentity(existing))
 	if err != nil {
-		return fmt.Errorf("%w: marshal existing artifact: %w", agentos.ErrInvalidArtifact, err)
+		return fmt.Errorf("%w: marshal existing artifact: %w", agentoscore.ErrInvalidArtifact, err)
 	}
 
 	requestedJSON, err := json.Marshal(artifactIdempotencyIdentity(requested))
 	if err != nil {
-		return fmt.Errorf("%w: marshal requested artifact: %w", agentos.ErrInvalidArtifact, err)
+		return fmt.Errorf("%w: marshal requested artifact: %w", agentoscore.ErrInvalidArtifact, err)
 	}
 
 	if !bytes.Equal(existingJSON, requestedJSON) {
-		return fmt.Errorf("%w: artifact idempotency key was reused with a different artifact", agentos.ErrInvalidArtifact)
+		return fmt.Errorf("%w: artifact idempotency key was reused with a different artifact", agentoscore.ErrInvalidArtifact)
 	}
 
 	return nil
 }
 
 type artifactIdempotencyFields struct {
-	ArtifactID string               `json:"artifact_id"`
-	PlanID     string               `json:"plan_id,omitempty"`
-	NodeID     string               `json:"node_id,omitempty"`
-	RunID      string               `json:"run_id,omitempty"`
-	Name       string               `json:"name"`
-	Kind       agentos.ArtifactKind `json:"kind"`
-	MediaType  string               `json:"media_type,omitempty"`
-	SizeBytes  int64                `json:"size_bytes,omitempty"`
-	Digest     string               `json:"digest,omitempty"`
-	Metadata   map[string]string    `json:"metadata"`
+	ArtifactID string                   `json:"artifact_id"`
+	PlanID     string                   `json:"plan_id,omitempty"`
+	NodeID     string                   `json:"node_id,omitempty"`
+	RunID      string                   `json:"run_id,omitempty"`
+	Name       string                   `json:"name"`
+	Kind       agentoscore.ArtifactKind `json:"kind"`
+	MediaType  string                   `json:"media_type,omitempty"`
+	SizeBytes  int64                    `json:"size_bytes,omitempty"`
+	Digest     string                   `json:"digest,omitempty"`
+	Metadata   map[string]string        `json:"metadata"`
 }
 
-func artifactIdempotencyIdentity(ref *agentos.ArtifactRef) artifactIdempotencyFields {
+func artifactIdempotencyIdentity(ref *agentoscore.ArtifactRef) artifactIdempotencyFields {
 	return artifactIdempotencyFields{
 		ArtifactID: ref.ArtifactID,
 		PlanID:     ref.PlanID,

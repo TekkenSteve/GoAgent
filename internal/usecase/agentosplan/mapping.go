@@ -6,7 +6,8 @@ import (
 	"fmt"
 	"maps"
 
-	"github.com/TekkenSteve/GoAgent/agentos"
+	agentos "github.com/TekkenSteve/GoAgent/agentos/control"
+	agentoscore "github.com/TekkenSteve/GoAgent/agentos/core"
 	"github.com/tidwall/gjson"
 	"github.com/tidwall/sjson"
 )
@@ -23,7 +24,7 @@ func ResolveRunInput(ctx context.Context, store ArtifactStore, expressions Value
 
 	data, err := json.Marshal(resolved)
 	if err != nil {
-		return nil, fmt.Errorf("%w: encode node input: %w", agentos.ErrInvalidRunPlan, err)
+		return nil, fmt.Errorf("%w: encode node input: %w", agentoscore.ErrInvalidRunPlan, err)
 	}
 
 	for i := range mappings {
@@ -43,13 +44,13 @@ func ResolveRunInput(ctx context.Context, store ArtifactStore, expressions Value
 
 		data, err = sjson.SetBytes(data, mapping.Target, value)
 		if err != nil {
-			return nil, fmt.Errorf("%w: set input mapping %q: %w", agentos.ErrInvalidRunPlan, mapping.Target, err)
+			return nil, fmt.Errorf("%w: set input mapping %q: %w", agentoscore.ErrInvalidRunPlan, mapping.Target, err)
 		}
 	}
 
 	var output map[string]any
 	if err := json.Unmarshal(data, &output); err != nil {
-		return nil, fmt.Errorf("%w: decode mapped input: %w", agentos.ErrInvalidRunPlan, err)
+		return nil, fmt.Errorf("%w: decode mapped input: %w", agentoscore.ErrInvalidRunPlan, err)
 	}
 
 	return output, nil
@@ -69,7 +70,7 @@ func runInputMappings(node *agentos.PlanNodeSpec, edges []agentos.PlanEdgeSpec) 
 func resolveMappingValue(ctx context.Context, store ArtifactStore, expressions ValueExpressionCompiler, spec *agentos.RunPlanSpec, status *agentos.RunPlanStatus, node *agentos.PlanNodeSpec, mapping *agentos.InputMapping) (any, error) {
 	if mapping.Expression != "" {
 		if expressions == nil {
-			return nil, fmt.Errorf("%w: expression compiler is required for mapping %q", agentos.ErrInvalidExpression, mapping.Target)
+			return nil, fmt.Errorf("%w: expression compiler is required for mapping %q", agentoscore.ErrInvalidExpression, mapping.Target)
 		}
 
 		compiled, err := expressions.CompileValue(mapping.Expression)
@@ -93,24 +94,24 @@ func resolveMappingValue(ctx context.Context, store ArtifactStore, expressions V
 
 func resolveArtifactMapping(ctx context.Context, store ArtifactStore, spec *agentos.RunPlanSpec, status *agentos.RunPlanStatus, mapping *agentos.InputMapping) (any, error) {
 	if store == nil {
-		return nil, fmt.Errorf("%w: artifact store is required for mapping %q", agentos.ErrInvalidArtifact, mapping.Target)
+		return nil, fmt.Errorf("%w: artifact store is required for mapping %q", agentoscore.ErrInvalidArtifact, mapping.Target)
 	}
 
 	ref, ok := findArtifact(status.Artifacts, mapping.SourceNodeID, mapping.SourceArtifact)
 	if !ok {
 		if mapping.Required {
-			return nil, fmt.Errorf("%w: required artifact %q is missing", agentos.ErrArtifactNotFound, mapping.SourceArtifact)
+			return nil, fmt.Errorf("%w: required artifact %q is missing", agentoscore.ErrArtifactNotFound, mapping.SourceArtifact)
 		}
 
 		return nil, nil
 	}
 
 	if ref.PlanID != "" && ref.PlanID != spec.PlanID {
-		return nil, fmt.Errorf("%w: artifact %q belongs to plan %q", agentos.ErrInvalidArtifact, mapping.SourceArtifact, ref.PlanID)
+		return nil, fmt.Errorf("%w: artifact %q belongs to plan %q", agentoscore.ErrInvalidArtifact, mapping.SourceArtifact, ref.PlanID)
 	}
 
 	if ref.ArtifactID == "" {
-		return nil, fmt.Errorf("%w: artifact %q has no artifact id", agentos.ErrInvalidArtifact, mapping.SourceArtifact)
+		return nil, fmt.Errorf("%w: artifact %q has no artifact id", agentoscore.ErrInvalidArtifact, mapping.SourceArtifact)
 	}
 
 	scope := agentos.PlanArtifactScope{
@@ -126,7 +127,7 @@ func resolveArtifactMapping(ctx context.Context, store ArtifactStore, spec *agen
 	}
 
 	if payload == nil {
-		return nil, fmt.Errorf("%w: artifact %q has no payload", agentos.ErrArtifactNotFound, mapping.SourceArtifact)
+		return nil, fmt.Errorf("%w: artifact %q has no payload", agentoscore.ErrArtifactNotFound, mapping.SourceArtifact)
 	}
 
 	return selectSourcePath(payload, mapping.SourcePath, mapping.Required)
@@ -146,13 +147,13 @@ func selectSourcePath(source any, sourcePath string, required bool) (any, error)
 
 	data, err := json.Marshal(source)
 	if err != nil {
-		return nil, fmt.Errorf("%w: encode mapping source: %w", agentos.ErrInvalidRunPlan, err)
+		return nil, fmt.Errorf("%w: encode mapping source: %w", agentoscore.ErrInvalidRunPlan, err)
 	}
 
 	result := gjson.GetBytes(data, sourcePath)
 	if !result.Exists() {
 		if required {
-			return nil, fmt.Errorf("%w: required source path %q is missing", agentos.ErrInvalidRunPlan, sourcePath)
+			return nil, fmt.Errorf("%w: required source path %q is missing", agentoscore.ErrInvalidRunPlan, sourcePath)
 		}
 
 		return nil, nil
@@ -161,7 +162,7 @@ func selectSourcePath(source any, sourcePath string, required bool) (any, error)
 	return result.Value(), nil
 }
 
-func findArtifact(refs []agentos.ArtifactRef, nodeID, name string) (agentos.ArtifactRef, bool) {
+func findArtifact(refs []agentoscore.ArtifactRef, nodeID, name string) (agentoscore.ArtifactRef, bool) {
 	for i := range refs {
 		ref := refs[i]
 
@@ -176,7 +177,7 @@ func findArtifact(refs []agentos.ArtifactRef, nodeID, name string) (agentos.Arti
 		return ref, true
 	}
 
-	return agentos.ArtifactRef{}, false
+	return agentoscore.ArtifactRef{}, false
 }
 
 func cloneMap(input map[string]any) map[string]any {

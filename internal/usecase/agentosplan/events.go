@@ -7,7 +7,8 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/TekkenSteve/GoAgent/agentos"
+	agentos "github.com/TekkenSteve/GoAgent/agentos/control"
+	agentoscore "github.com/TekkenSteve/GoAgent/agentos/core"
 )
 
 const (
@@ -123,13 +124,13 @@ func PlanEventFromStateEvent(spec *agentos.RunPlanSpec, status *agentos.RunPlanS
 	}
 
 	if event.At.IsZero() {
-		return agentos.PlanEvent{}, "", fmt.Errorf("%w: state event timestamp is required", agentos.ErrInvalidPlanEvent)
+		return agentos.PlanEvent{}, "", fmt.Errorf("%w: state event timestamp is required", agentoscore.ErrInvalidPlanEvent)
 	}
 
 	payload := buildPlanEventPayload(spec, status, event)
 
 	planEvent := agentos.PlanEvent{
-		Event: agentos.Event{
+		Event: agentoscore.Event{
 			EventType: eventType,
 			RunID:     event.RunID,
 			ThreadID:  spec.ThreadID,
@@ -154,7 +155,7 @@ func PlanEventFromStateEvent(spec *agentos.RunPlanSpec, status *agentos.RunPlanS
 func idempotencyHash(planID string, payload any) (string, error) {
 	data, err := json.Marshal(payload)
 	if err != nil {
-		return "", fmt.Errorf("%w: marshal idempotency key: %w", agentos.ErrInvalidPlanEvent, err)
+		return "", fmt.Errorf("%w: marshal idempotency key: %w", agentoscore.ErrInvalidPlanEvent, err)
 	}
 
 	sum := sha256.Sum256(data)
@@ -166,7 +167,7 @@ func idempotencyHash(planID string, payload any) (string, error) {
 // workflow replays that attempt to persist the same reducer transition.
 func StateEventIdempotencyKey(planID string, event *StateEvent) (string, error) {
 	if planID == "" {
-		return "", fmt.Errorf("%w: plan id is required", agentos.ErrInvalidRunPlan)
+		return "", fmt.Errorf("%w: plan id is required", agentoscore.ErrInvalidRunPlan)
 	}
 
 	return idempotencyHash(planID, stateEventIdempotencyIdentity(event))
@@ -179,7 +180,7 @@ type stateEventIdempotencyFields struct {
 	Reason                 string                     `json:"reason,omitempty"`
 	Attempt                int32                      `json:"attempt,omitempty"`
 	Expansion              *PlanDelta                 `json:"expansion,omitempty"`
-	Artifacts              []agentos.ArtifactRef      `json:"artifacts,omitempty"`
+	Artifacts              []agentoscore.ArtifactRef  `json:"artifacts,omitempty"`
 	BudgetDelta            *agentos.PlanBudgetUsage   `json:"budget_delta,omitempty"`
 	InputTrace             *InputResolutionTrace      `json:"input_trace,omitempty"`
 	Capability             *CapabilitySelectionTrace  `json:"capability,omitempty"`
@@ -252,15 +253,15 @@ func idempotencyTime(at time.Time) *time.Time {
 // backend-owned child run.
 func NodeStartIdempotencyKey(planID, nodeID string, attempt int32) (string, error) {
 	if planID == "" {
-		return "", fmt.Errorf("%w: plan id is required", agentos.ErrInvalidRunPlan)
+		return "", fmt.Errorf("%w: plan id is required", agentoscore.ErrInvalidRunPlan)
 	}
 
 	if nodeID == "" {
-		return "", fmt.Errorf("%w: node id is required", agentos.ErrInvalidRunPlan)
+		return "", fmt.Errorf("%w: node id is required", agentoscore.ErrInvalidRunPlan)
 	}
 
 	if attempt <= 0 {
-		return "", fmt.Errorf("%w: node start attempt must be positive", agentos.ErrInvalidRunPlan)
+		return "", fmt.Errorf("%w: node start attempt must be positive", agentoscore.ErrInvalidRunPlan)
 	}
 
 	return idempotencyHash(planID, struct {
@@ -280,15 +281,15 @@ func NodeStartIdempotencyKey(planID, nodeID string, attempt int32) (string, erro
 // canceling a timed-out child run.
 func NodeTimeoutControlIdempotencyKey(planID, nodeID, runID string) (string, error) {
 	if planID == "" {
-		return "", fmt.Errorf("%w: plan id is required", agentos.ErrInvalidRunPlan)
+		return "", fmt.Errorf("%w: plan id is required", agentoscore.ErrInvalidRunPlan)
 	}
 
 	if nodeID == "" {
-		return "", fmt.Errorf("%w: node id is required", agentos.ErrInvalidRunPlan)
+		return "", fmt.Errorf("%w: node id is required", agentoscore.ErrInvalidRunPlan)
 	}
 
 	if runID == "" {
-		return "", fmt.Errorf("%w: run id is required", agentos.ErrInvalidRunSpec)
+		return "", fmt.Errorf("%w: run id is required", agentoscore.ErrInvalidRunSpec)
 	}
 
 	return idempotencyHash(planID, struct {
@@ -308,15 +309,15 @@ func NodeTimeoutControlIdempotencyKey(planID, nodeID, runID string) (string, err
 // propagating cancellation after a plan-level timeout guard trips.
 func PlanTimeoutControlIdempotencyKey(planID string, startedAt time.Time, timeoutSeconds int64) (string, error) {
 	if planID == "" {
-		return "", fmt.Errorf("%w: plan id is required", agentos.ErrInvalidRunPlan)
+		return "", fmt.Errorf("%w: plan id is required", agentoscore.ErrInvalidRunPlan)
 	}
 
 	if startedAt.IsZero() {
-		return "", fmt.Errorf("%w: plan started_at is required", agentos.ErrInvalidRunPlan)
+		return "", fmt.Errorf("%w: plan started_at is required", agentoscore.ErrInvalidRunPlan)
 	}
 
 	if timeoutSeconds <= 0 {
-		return "", fmt.Errorf("%w: plan timeout seconds must be positive", agentos.ErrInvalidRunPlan)
+		return "", fmt.Errorf("%w: plan timeout seconds must be positive", agentoscore.ErrInvalidRunPlan)
 	}
 
 	return idempotencyHash(planID, struct {
@@ -336,15 +337,15 @@ func PlanTimeoutControlIdempotencyKey(planID string, startedAt time.Time, timeou
 // one node output artifact.
 func ArtifactPublishIdempotencyKey(planID, nodeID, runID, artifactName string) (string, error) {
 	if planID == "" {
-		return "", fmt.Errorf("%w: plan id is required", agentos.ErrInvalidRunPlan)
+		return "", fmt.Errorf("%w: plan id is required", agentoscore.ErrInvalidRunPlan)
 	}
 
 	if nodeID == "" {
-		return "", fmt.Errorf("%w: node id is required", agentos.ErrInvalidRunPlan)
+		return "", fmt.Errorf("%w: node id is required", agentoscore.ErrInvalidRunPlan)
 	}
 
 	if artifactName == "" {
-		return "", fmt.Errorf("%w: artifact name is required", agentos.ErrInvalidArtifact)
+		return "", fmt.Errorf("%w: artifact name is required", agentoscore.ErrInvalidArtifact)
 	}
 
 	return idempotencyHash(planID, struct {
@@ -366,7 +367,7 @@ func ArtifactPublishIdempotencyKey(planID, nodeID, runID, artifactName string) (
 // propagating cancellation after a plan budget guard trips.
 func BudgetExceededControlIdempotencyKey(planID string, usage agentos.PlanBudgetUsage, budgetCents int64) (string, error) {
 	if planID == "" {
-		return "", fmt.Errorf("%w: plan id is required", agentos.ErrInvalidRunPlan)
+		return "", fmt.Errorf("%w: plan id is required", agentoscore.ErrInvalidRunPlan)
 	}
 
 	return idempotencyHash(planID, struct {
@@ -384,25 +385,25 @@ func BudgetExceededControlIdempotencyKey(planID string, usage agentos.PlanBudget
 
 // PlanSignalCancelControlIdempotencyKey creates the parent idempotency key for
 // cancellation propagated by a terminal plan signal such as operator reject.
-func PlanSignalCancelControlIdempotencyKey(planID string, signal *agentos.Signal) (string, error) {
+func PlanSignalCancelControlIdempotencyKey(planID string, signal *agentoscore.Signal) (string, error) {
 	if planID == "" {
-		return "", fmt.Errorf("%w: plan id is required", agentos.ErrInvalidRunPlan)
+		return "", fmt.Errorf("%w: plan id is required", agentoscore.ErrInvalidRunPlan)
 	}
 
 	if err := ValidatePlanSignal(signal); err != nil {
 		return "", err
 	}
 
-	if signal.Type != agentos.SignalPlanReject {
-		return "", fmt.Errorf("%w: signal %q does not cancel active plan nodes", agentos.ErrInvalidSignal, signal.Type)
+	if signal.Type != agentoscore.SignalPlanReject {
+		return "", fmt.Errorf("%w: signal %q does not cancel active plan nodes", agentoscore.ErrInvalidSignal, signal.Type)
 	}
 
 	return idempotencyHash(planID, struct {
-		Operation      string             `json:"operation"`
-		PlanID         string             `json:"plan_id"`
-		SignalType     agentos.SignalType `json:"signal_type"`
-		IdempotencyKey string             `json:"idempotency_key"`
-		ActorID        string             `json:"actor_id"`
+		Operation      string                 `json:"operation"`
+		PlanID         string                 `json:"plan_id"`
+		SignalType     agentoscore.SignalType `json:"signal_type"`
+		IdempotencyKey string                 `json:"idempotency_key"`
+		ActorID        string                 `json:"actor_id"`
 	}{
 		Operation:      idempotencyOperationPlanSignalCancel,
 		PlanID:         planID,
@@ -414,25 +415,25 @@ func PlanSignalCancelControlIdempotencyKey(planID string, signal *agentos.Signal
 
 // NodeControlIdempotencyKey creates the stable idempotency key for propagating
 // one plan-level control operation to one backend-owned child run.
-func NodeControlIdempotencyKey(planID, nodeID string, operation agentos.ControlOperation, parentKey string) (string, error) {
+func NodeControlIdempotencyKey(planID, nodeID string, operation agentoscore.ControlOperation, parentKey string) (string, error) {
 	if planID == "" {
-		return "", fmt.Errorf("%w: plan id is required", agentos.ErrInvalidRunPlan)
+		return "", fmt.Errorf("%w: plan id is required", agentoscore.ErrInvalidRunPlan)
 	}
 
 	if nodeID == "" {
-		return "", fmt.Errorf("%w: node id is required", agentos.ErrInvalidRunPlan)
+		return "", fmt.Errorf("%w: node id is required", agentoscore.ErrInvalidRunPlan)
 	}
 
-	if err := agentos.ValidateControlRequest(&agentos.ControlRequest{Operation: operation}); err != nil {
+	if err := agentoscore.ValidateControlRequest(&agentoscore.ControlRequest{Operation: operation}); err != nil {
 		return "", err
 	}
 
 	return idempotencyHash(planID, struct {
-		Operation string                   `json:"operation"`
-		PlanID    string                   `json:"plan_id"`
-		NodeID    string                   `json:"node_id"`
-		Control   agentos.ControlOperation `json:"control"`
-		ParentKey string                   `json:"parent_key,omitempty"`
+		Operation string                       `json:"operation"`
+		PlanID    string                       `json:"plan_id"`
+		NodeID    string                       `json:"node_id"`
+		Control   agentoscore.ControlOperation `json:"control"`
+		ParentKey string                       `json:"parent_key,omitempty"`
 	}{
 		Operation: idempotencyOperationNodeControl,
 		PlanID:    planID,
@@ -442,33 +443,33 @@ func NodeControlIdempotencyKey(planID, nodeID string, operation agentos.ControlO
 	})
 }
 
-func planEventType(kind EventKind) (agentos.EventType, error) {
-	eventTypes := map[EventKind]agentos.EventType{
-		EventPlanStarted:         agentos.EventPlanStarted,
-		EventPlanBlocked:         agentos.EventPlanBlocked,
-		EventPlanExpanded:        agentos.EventPlanExpanded,
-		EventPlanApproved:        agentos.EventPlanApproved,
-		EventPlanRejected:        agentos.EventPlanRejected,
-		EventPlanSucceeded:       agentos.EventPlanSucceeded,
-		EventPlanFailed:          agentos.EventPlanFailed,
-		EventPlanCanceled:        agentos.EventPlanCanceled,
-		EventNodeReady:           agentos.EventPlanNodeReady,
-		EventNodeStarted:         agentos.EventPlanNodeStarted,
-		EventNodeSucceeded:       agentos.EventPlanNodeSucceeded,
-		EventNodeFailed:          agentos.EventPlanNodeFailed,
-		EventNodeRetryScheduled:  agentos.EventPlanNodeRetryScheduled,
-		EventNodeSkipped:         agentos.EventPlanNodeSkipped,
-		EventNodeCanceled:        agentos.EventPlanNodeCanceled,
-		EventNodeInputResolved:   agentos.EventNodeInputResolved,
-		EventCapabilitySelected:  agentos.EventCapabilitySelected,
-		EventConditionsEvaluated: agentos.EventConditionEvaluated,
-		EventArtifactsPublished:  agentos.EventNodeOutputPublished,
-		EventBudgetReported:      agentos.EventUsageReported,
+func planEventType(kind EventKind) (agentoscore.EventType, error) {
+	eventTypes := map[EventKind]agentoscore.EventType{
+		EventPlanStarted:         agentoscore.EventPlanStarted,
+		EventPlanBlocked:         agentoscore.EventPlanBlocked,
+		EventPlanExpanded:        agentoscore.EventPlanExpanded,
+		EventPlanApproved:        agentoscore.EventPlanApproved,
+		EventPlanRejected:        agentoscore.EventPlanRejected,
+		EventPlanSucceeded:       agentoscore.EventPlanSucceeded,
+		EventPlanFailed:          agentoscore.EventPlanFailed,
+		EventPlanCanceled:        agentoscore.EventPlanCanceled,
+		EventNodeReady:           agentoscore.EventPlanNodeReady,
+		EventNodeStarted:         agentoscore.EventPlanNodeStarted,
+		EventNodeSucceeded:       agentoscore.EventPlanNodeSucceeded,
+		EventNodeFailed:          agentoscore.EventPlanNodeFailed,
+		EventNodeRetryScheduled:  agentoscore.EventPlanNodeRetryScheduled,
+		EventNodeSkipped:         agentoscore.EventPlanNodeSkipped,
+		EventNodeCanceled:        agentoscore.EventPlanNodeCanceled,
+		EventNodeInputResolved:   agentoscore.EventNodeInputResolved,
+		EventCapabilitySelected:  agentoscore.EventCapabilitySelected,
+		EventConditionsEvaluated: agentoscore.EventConditionEvaluated,
+		EventArtifactsPublished:  agentoscore.EventNodeOutputPublished,
+		EventBudgetReported:      agentoscore.EventUsageReported,
 	}
 
 	eventType, ok := eventTypes[kind]
 	if !ok {
-		return "", fmt.Errorf("%w: unknown plan event kind %q", agentos.ErrInvalidPlanEvent, kind)
+		return "", fmt.Errorf("%w: unknown plan event kind %q", agentoscore.ErrInvalidPlanEvent, kind)
 	}
 
 	return eventType, nil

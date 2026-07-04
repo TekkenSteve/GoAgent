@@ -15,7 +15,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/TekkenSteve/GoAgent/agentos"
+	agentos "github.com/TekkenSteve/GoAgent/agentos/control"
+	agentoscore "github.com/TekkenSteve/GoAgent/agentos/core"
 	"github.com/TekkenSteve/GoAgent/internal/pkg/postgres"
 	artifactblob "github.com/TekkenSteve/GoAgent/internal/repo/artifact"
 	"github.com/TekkenSteve/GoAgent/internal/usecase/agentosplan"
@@ -121,11 +122,11 @@ func TestAgentOSPlanPostgresDurablePersistence(t *testing.T) {
 	changedSpec := spec
 	changedSpec.Nodes = slices.Clone(spec.Nodes)
 	changedSpec.Nodes[0].NodeID = "changed"
-	if _, _, err := planRepo.CreatePlan(ctx, &changedSpec, &status); !errors.Is(err, agentos.ErrInvalidRunPlan) {
+	if _, _, err := planRepo.CreatePlan(ctx, &changedSpec, &status); !errors.Is(err, agentoscore.ErrInvalidRunPlan) {
 		t.Fatalf("CreatePlan changed spec error = %v, want ErrInvalidRunPlan", err)
 	}
 	changedSnapshot := agentosplan.PlanStateSnapshot{Spec: changedSpec, Status: status}
-	if err := planRepo.SavePlanState(ctx, &changedSnapshot); !errors.Is(err, agentos.ErrInvalidRunPlan) {
+	if err := planRepo.SavePlanState(ctx, &changedSnapshot); !errors.Is(err, agentoscore.ErrInvalidRunPlan) {
 		t.Fatalf("SavePlanState changed spec error = %v, want ErrInvalidRunPlan", err)
 	}
 	nodeStatus := status
@@ -235,8 +236,8 @@ INSERT INTO plan_commands (
 	}
 
 	event := agentos.PlanEvent{
-		Event: agentos.Event{
-			EventType: agentos.EventPlanStarted,
+		Event: agentoscore.Event{
+			EventType: agentoscore.EventPlanStarted,
 			Timestamp: time.Now().UTC(),
 			Payload:   map[string]any{"source": "postgres-integration"},
 		},
@@ -265,7 +266,7 @@ INSERT INTO plan_commands (
 		PlanID:    spec.PlanID,
 		AccountID: "acct-other",
 		ProjectID: spec.ProjectID,
-	}, 0); !errors.Is(err, agentos.ErrPlanRouteNotFound) {
+	}, 0); !errors.Is(err, agentoscore.ErrPlanRouteNotFound) {
 		t.Fatalf("ListPlanEvents mismatch error = %v, want ErrPlanRouteNotFound", err)
 	}
 
@@ -273,7 +274,7 @@ INSERT INTO plan_commands (
 		PlanID:         spec.PlanID,
 		Action:         agentosplan.AuditActionPlanControl,
 		IdempotencyKey: "audit-" + suffix,
-		Payload:        map[string]any{"operation": string(agentos.ControlCancel)},
+		Payload:        map[string]any{"operation": string(agentoscore.ControlCancel)},
 	})
 	if err != nil {
 		t.Fatalf("RecordAudit first: %v", err)
@@ -285,7 +286,7 @@ INSERT INTO plan_commands (
 		PlanID:         spec.PlanID,
 		Action:         agentosplan.AuditActionPlanControl,
 		IdempotencyKey: "audit-" + suffix,
-		Payload:        map[string]any{"operation": string(agentos.ControlCancel)},
+		Payload:        map[string]any{"operation": string(agentoscore.ControlCancel)},
 	})
 	if err != nil {
 		t.Fatalf("RecordAudit replay: %v", err)
@@ -312,7 +313,7 @@ INSERT INTO plan_commands (
 	if _, err := pg.Pool.Exec(ctx, `DELETE FROM audit_logs WHERE audit_id = $1`, audit.AuditID); err == nil {
 		t.Fatal("direct audit log delete succeeded, want append-only trigger rejection")
 	}
-	if _, err := planRepo.ListAuditRecords(ctx, agentos.PlanAuditScope{PlanID: spec.PlanID, AccountID: "acct-other", ProjectID: spec.ProjectID}); !errors.Is(err, agentos.ErrPlanRouteNotFound) {
+	if _, err := planRepo.ListAuditRecords(ctx, agentos.PlanAuditScope{PlanID: spec.PlanID, AccountID: "acct-other", ProjectID: spec.ProjectID}); !errors.Is(err, agentoscore.ErrPlanRouteNotFound) {
 		t.Fatalf("ListAuditRecords mismatch error = %v, want ErrPlanRouteNotFound", err)
 	}
 
@@ -321,7 +322,7 @@ INSERT INTO plan_commands (
 		ActorID:        "operator-1",
 		Action:         agentosplan.AuditActionPlanControl,
 		IdempotencyKey: "command-" + suffix,
-		Payload:        map[string]any{"operation": string(agentos.ControlCancel)},
+		Payload:        map[string]any{"operation": string(agentoscore.ControlCancel)},
 	})
 	if err != nil {
 		t.Fatalf("RecordPlanCommand first: %v", err)
@@ -334,7 +335,7 @@ INSERT INTO plan_commands (
 		ActorID:        "operator-1",
 		Action:         agentosplan.AuditActionPlanControl,
 		IdempotencyKey: "command-" + suffix,
-		Payload:        map[string]any{"operation": string(agentos.ControlCancel)},
+		Payload:        map[string]any{"operation": string(agentoscore.ControlCancel)},
 	})
 	if err != nil {
 		t.Fatalf("RecordPlanCommand replay: %v", err)
@@ -351,7 +352,7 @@ INSERT INTO plan_commands (
 	if _, err := pg.Pool.Exec(ctx, `DELETE FROM plan_commands WHERE command_id = $1`, command.CommandID); err == nil {
 		t.Fatal("direct plan command delete succeeded, want immutable identity trigger rejection")
 	}
-	if _, err := planRepo.MarkPlanCommandDelivered(ctx, agentosplan.PlanCommandRefFromRecord(&command)); !errors.Is(err, agentos.ErrInvalidRunPlan) {
+	if _, err := planRepo.MarkPlanCommandDelivered(ctx, agentosplan.PlanCommandRefFromRecord(&command)); !errors.Is(err, agentoscore.ErrInvalidRunPlan) {
 		t.Fatalf("MarkPlanCommandDelivered without audit error = %v, want ErrInvalidRunPlan", err)
 	}
 	if _, err := pg.Pool.Exec(ctx, `UPDATE plan_commands SET status = 'delivered' WHERE command_id = $1`, command.CommandID); err == nil {
@@ -369,7 +370,7 @@ INSERT INTO plan_commands (
 	if deliveredCommand.Status != agentosplan.PlanCommandDelivered || deliveredCommand.FailureReason != "" {
 		t.Fatalf("delivered command = %#v", deliveredCommand)
 	}
-	if _, err := planRepo.MarkPlanCommandFailed(ctx, agentosplan.PlanCommandRefFromRecord(&command), "late failure"); !errors.Is(err, agentos.ErrInvalidRunPlan) {
+	if _, err := planRepo.MarkPlanCommandFailed(ctx, agentosplan.PlanCommandRefFromRecord(&command), "late failure"); !errors.Is(err, agentoscore.ErrInvalidRunPlan) {
 		t.Fatalf("MarkPlanCommandFailed delivered command error = %v, want ErrInvalidRunPlan", err)
 	}
 	if _, err := pg.Pool.Exec(ctx, `UPDATE plan_commands SET failure_reason = 'late reason' WHERE command_id = $1`, command.CommandID); err == nil {
@@ -389,7 +390,7 @@ INSERT INTO plan_commands (
 		ActorID:        "operator-1",
 		Action:         agentosplan.AuditActionPlanSignal,
 		IdempotencyKey: "failed-command-" + suffix,
-		Payload:        map[string]any{"type": string(agentos.SignalPlanReject)},
+		Payload:        map[string]any{"type": string(agentoscore.SignalPlanReject)},
 	})
 	if err != nil {
 		t.Fatalf("RecordPlanCommand failed command: %v", err)
@@ -432,8 +433,8 @@ INSERT INTO plan_commands (
 		RunID:          runSpec.RunID,
 		Action:         agentosplan.AuditActionPlanSignal,
 		IdempotencyKey: "audit-missing-route-" + suffix,
-		Payload:        map[string]any{"type": string(agentos.SignalPlanApprove)},
-	}); !errors.Is(err, agentos.ErrRunRouteNotFound) {
+		Payload:        map[string]any{"type": string(agentoscore.SignalPlanApprove)},
+	}); !errors.Is(err, agentoscore.ErrRunRouteNotFound) {
 		t.Fatalf("RecordAudit missing run route error = %v, want ErrRunRouteNotFound", err)
 	}
 	if _, _, err := planRepo.RecordAudit(ctx, &agentosplan.AuditRecord{
@@ -441,8 +442,8 @@ INSERT INTO plan_commands (
 		NodeID:         spec.Nodes[0].NodeID,
 		Action:         agentosplan.AuditActionPlanSignal,
 		IdempotencyKey: "audit-unpaired-node-" + suffix,
-		Payload:        map[string]any{"type": string(agentos.SignalPlanApprove)},
-	}); !errors.Is(err, agentos.ErrInvalidRunPlan) {
+		Payload:        map[string]any{"type": string(agentoscore.SignalPlanApprove)},
+	}); !errors.Is(err, agentoscore.ErrInvalidRunPlan) {
 		t.Fatalf("RecordAudit unpaired node/run error = %v, want ErrInvalidRunPlan", err)
 	}
 	if _, _, err := planRepo.RecordAudit(ctx, &agentosplan.AuditRecord{
@@ -451,8 +452,8 @@ INSERT INTO plan_commands (
 		RunID:          runSpec.RunID,
 		Action:         agentosplan.AuditActionPlanSignal,
 		IdempotencyKey: "audit-missing-node-" + suffix,
-		Payload:        map[string]any{"type": string(agentos.SignalPlanApprove)},
-	}); !errors.Is(err, agentos.ErrInvalidRunPlan) {
+		Payload:        map[string]any{"type": string(agentoscore.SignalPlanApprove)},
+	}); !errors.Is(err, agentoscore.ErrInvalidRunPlan) {
 		t.Fatalf("RecordAudit missing node error = %v, want ErrInvalidRunPlan", err)
 	}
 	if err := routeIndex.BindPlanNode(ctx, spec.PlanID, spec.Nodes[0].NodeID, &runSpec, &runStatus); err != nil {
@@ -533,12 +534,12 @@ INSERT INTO run_backend_index (
 	changedRun := runSpec
 	changedRun.RunID = runSpec.RunID + "-changed"
 	changedRunStatus := agentos.RunStatus{RunID: changedRun.RunID}
-	if err := routeIndex.BindPlanNode(ctx, spec.PlanID, spec.Nodes[0].NodeID, &changedRun, &changedRunStatus); !errors.Is(err, agentos.ErrInvalidRunSpec) {
+	if err := routeIndex.BindPlanNode(ctx, spec.PlanID, spec.Nodes[0].NodeID, &changedRun, &changedRunStatus); !errors.Is(err, agentoscore.ErrInvalidRunSpec) {
 		t.Fatalf("BindPlanNode changed run error = %v, want ErrInvalidRunSpec", err)
 	}
 	changedKeyRun := runSpec
 	changedKeyRun.IdempotencyKey = runSpec.IdempotencyKey + "-changed"
-	if err := routeIndex.BindPlanNode(ctx, spec.PlanID, spec.Nodes[0].NodeID, &changedKeyRun, &runStatus); !errors.Is(err, agentos.ErrInvalidRunSpec) {
+	if err := routeIndex.BindPlanNode(ctx, spec.PlanID, spec.Nodes[0].NodeID, &changedKeyRun, &runStatus); !errors.Is(err, agentoscore.ErrInvalidRunSpec) {
 		t.Fatalf("BindPlanNode changed idempotency key error = %v, want ErrInvalidRunSpec", err)
 	}
 	missingKeyRun := agentos.RunSpec{
@@ -549,22 +550,22 @@ INSERT INTO run_backend_index (
 		Backend:   runSpec.Backend,
 	}
 	missingKeyStatus := agentos.RunStatus{RunID: "missing-node-start-key-" + suffix}
-	if err := routeIndex.BindPlanNode(ctx, spec.PlanID, spec.Nodes[0].NodeID, &missingKeyRun, &missingKeyStatus); !errors.Is(err, agentos.ErrInvalidRunSpec) {
+	if err := routeIndex.BindPlanNode(ctx, spec.PlanID, spec.Nodes[0].NodeID, &missingKeyRun, &missingKeyStatus); !errors.Is(err, agentoscore.ErrInvalidRunSpec) {
 		t.Fatalf("BindPlanNode missing idempotency key error = %v, want ErrInvalidRunSpec", err)
 	}
 	reusedNodeKey := runSpec
-	if err := routeIndex.BindPlanNode(ctx, spec.PlanID, "node-2", &reusedNodeKey, &runStatus); !errors.Is(err, agentos.ErrInvalidRunPlan) {
+	if err := routeIndex.BindPlanNode(ctx, spec.PlanID, "node-2", &reusedNodeKey, &runStatus); !errors.Is(err, agentoscore.ErrInvalidRunPlan) {
 		t.Fatalf("BindPlanNode reused node key error = %v, want ErrInvalidRunPlan", err)
 	}
-	if err := routeIndex.BindPlanNode(ctx, "missing-plan-"+suffix, spec.Nodes[0].NodeID, &runSpec, &runStatus); !errors.Is(err, agentos.ErrPlanRouteNotFound) {
+	if err := routeIndex.BindPlanNode(ctx, "missing-plan-"+suffix, spec.Nodes[0].NodeID, &runSpec, &runStatus); !errors.Is(err, agentoscore.ErrPlanRouteNotFound) {
 		t.Fatalf("BindPlanNode missing plan error = %v, want ErrPlanRouteNotFound", err)
 	}
-	if err := routeIndex.BindPlanNode(ctx, spec.PlanID, "missing-node", &runSpec, &runStatus); !errors.Is(err, agentos.ErrInvalidRunPlan) {
+	if err := routeIndex.BindPlanNode(ctx, spec.PlanID, "missing-node", &runSpec, &runStatus); !errors.Is(err, agentoscore.ErrInvalidRunPlan) {
 		t.Fatalf("BindPlanNode missing durable node error = %v, want ErrInvalidRunPlan", err)
 	}
 	wrongTenantRun := runSpec
 	wrongTenantRun.AccountID = "account-other-" + suffix
-	if err := routeIndex.BindPlanNode(ctx, spec.PlanID, spec.Nodes[0].NodeID, &wrongTenantRun, &runStatus); !errors.Is(err, agentos.ErrPlanRouteNotFound) {
+	if err := routeIndex.BindPlanNode(ctx, spec.PlanID, spec.Nodes[0].NodeID, &wrongTenantRun, &runStatus); !errors.Is(err, agentoscore.ErrPlanRouteNotFound) {
 		t.Fatalf("BindPlanNode tenant mismatch error = %v, want ErrPlanRouteNotFound", err)
 	}
 	nodeAudit, created, err := planRepo.RecordAudit(ctx, &agentosplan.AuditRecord{
@@ -573,7 +574,7 @@ INSERT INTO run_backend_index (
 		RunID:          runSpec.RunID,
 		Action:         agentosplan.AuditActionPlanSignal,
 		IdempotencyKey: "audit-node-" + suffix,
-		Payload:        map[string]any{"type": string(agentos.SignalPlanApprove)},
+		Payload:        map[string]any{"type": string(agentoscore.SignalPlanApprove)},
 	})
 	if err != nil {
 		t.Fatalf("RecordAudit node/run: %v", err)
@@ -587,8 +588,8 @@ INSERT INTO run_backend_index (
 		RunID:          "wrong-run-" + suffix,
 		Action:         agentosplan.AuditActionPlanSignal,
 		IdempotencyKey: "audit-wrong-run-" + suffix,
-		Payload:        map[string]any{"type": string(agentos.SignalPlanApprove)},
-	}); !errors.Is(err, agentos.ErrInvalidRunPlan) {
+		Payload:        map[string]any{"type": string(agentoscore.SignalPlanApprove)},
+	}); !errors.Is(err, agentoscore.ErrInvalidRunPlan) {
 		t.Fatalf("RecordAudit wrong run error = %v, want ErrInvalidRunPlan", err)
 	}
 	standaloneRun := agentos.RunSpec{
@@ -638,16 +639,16 @@ INSERT INTO run_backend_index (
 	})
 	standaloneChangedBackend := standaloneRun
 	standaloneChangedBackend.Backend = agentos.BackendRef{Kind: agentos.BackendKindHTTP, Name: "other-backend"}
-	if err := routeIndex.Bind(ctx, &standaloneChangedBackend, &standaloneStatus); !errors.Is(err, agentos.ErrInvalidBackendRef) {
+	if err := routeIndex.Bind(ctx, &standaloneChangedBackend, &standaloneStatus); !errors.Is(err, agentoscore.ErrInvalidBackendRef) {
 		t.Fatalf("Bind standalone changed backend error = %v, want ErrInvalidBackendRef", err)
 	}
 
-	artifactRef := agentos.ArtifactRef{
+	artifactRef := agentoscore.ArtifactRef{
 		PlanID:    spec.PlanID,
 		NodeID:    spec.Nodes[0].NodeID,
 		RunID:     runSpec.RunID,
 		Name:      "summary",
-		Kind:      agentos.ArtifactKindObject,
+		Kind:      agentoscore.ArtifactKindObject,
 		MediaType: "application/json",
 	}
 	storedArtifact, err := artifactStore.Put(ctx, &artifactRef, map[string]any{"summary": "ok"}, "artifact-"+suffix)
@@ -684,7 +685,7 @@ INSERT INTO run_backend_index (
 	capability := agentos.Capability{
 		Backend:  spec.Nodes[0].Run.Backend,
 		Name:     "run",
-		Controls: []agentos.ControlOperation{agentos.ControlCancel},
+		Controls: []agentoscore.ControlOperation{agentoscore.ControlCancel},
 	}
 	capabilityKey, err := agentosplan.CapabilityRegistrationIdempotencyKey(&capability)
 	if err != nil {
@@ -708,7 +709,7 @@ INSERT INTO run_backend_index (
 	if err != nil {
 		t.Fatalf("GetCapability: %v", err)
 	}
-	if !ok || len(loadedCapability.Controls) != 1 || loadedCapability.Controls[0] != agentos.ControlCancel {
+	if !ok || len(loadedCapability.Controls) != 1 || loadedCapability.Controls[0] != agentoscore.ControlCancel {
 		t.Fatalf("GetCapability = %#v ok=%v", loadedCapability, ok)
 	}
 	changedCapability := capability
@@ -717,7 +718,7 @@ INSERT INTO run_backend_index (
 	if err != nil {
 		t.Fatalf("CapabilityRegistrationIdempotencyKey changed: %v", err)
 	}
-	if _, _, err := capabilityCatalog.RegisterCapability(ctx, &changedCapability, changedKey); !errors.Is(err, agentos.ErrInvalidRunPlan) {
+	if _, _, err := capabilityCatalog.RegisterCapability(ctx, &changedCapability, changedKey); !errors.Is(err, agentoscore.ErrInvalidRunPlan) {
 		t.Fatalf("RegisterCapability changed error = %v, want ErrInvalidRunPlan", err)
 	}
 
@@ -757,7 +758,7 @@ INSERT INTO run_backend_index (
 	if err != nil {
 		t.Fatalf("ArtifactSchemaRegistrationIdempotencyKey changed: %v", err)
 	}
-	if _, _, err := artifactSchemaCatalog.RegisterArtifactSchema(ctx, changedSchema, changedSchemaKey); !errors.Is(err, agentos.ErrInvalidArtifact) {
+	if _, _, err := artifactSchemaCatalog.RegisterArtifactSchema(ctx, changedSchema, changedSchemaKey); !errors.Is(err, agentoscore.ErrInvalidArtifact) {
 		t.Fatalf("RegisterArtifactSchema changed error = %v, want ErrInvalidArtifact", err)
 	}
 }
@@ -772,7 +773,7 @@ func TestAgentOSPlanPostgresSavePlanStateRequiresIdempotencyKey(t *testing.T) {
 		Status: agentos.RunPlanStatus{PlanID: "plan-state-key-required-" + suffix},
 	}
 	err := planRepo.SavePlanState(ctx, &snapshot)
-	if !errors.Is(err, agentos.ErrInvalidRunPlan) {
+	if !errors.Is(err, agentoscore.ErrInvalidRunPlan) {
 		t.Fatalf("SavePlanState empty key error = %v, want ErrInvalidRunPlan", err)
 	}
 }
@@ -789,7 +790,7 @@ func TestAgentOSPlanPostgresSavePlanStateRejectsMissingPlan(t *testing.T) {
 		Status: status,
 	}
 	err := planRepo.SavePlanState(ctx, &snapshot)
-	if !errors.Is(err, agentos.ErrPlanRouteNotFound) {
+	if !errors.Is(err, agentoscore.ErrPlanRouteNotFound) {
 		t.Fatalf("SavePlanState missing plan error = %v, want ErrPlanRouteNotFound", err)
 	}
 }
@@ -804,10 +805,10 @@ func TestAgentOSPlanPostgresPersistPlanTransitionRejectsMissingPlan(t *testing.T
 		Spec:   spec,
 		Status: agentosplan.NewState(&spec, time.Now().UTC()).Status,
 	}, agentos.PlanEvent{
-		Event:  agentos.Event{EventType: agentos.EventPlanStarted},
+		Event:  agentoscore.Event{EventType: agentoscore.EventPlanStarted},
 		PlanID: spec.PlanID,
 	}, "plan-transition-missing-event-"+suffix)
-	if !errors.Is(err, agentos.ErrPlanRouteNotFound) {
+	if !errors.Is(err, agentoscore.ErrPlanRouteNotFound) {
 		t.Fatalf("PersistPlanTransition missing plan error = %v, want ErrPlanRouteNotFound", err)
 	}
 }
@@ -824,9 +825,9 @@ func TestAgentOSPlanPostgresPlanEventIdempotencyDoesNotAdvanceSequence(t *testin
 	}
 
 	event := agentos.PlanEvent{
-		Event: agentos.Event{
+		Event: agentoscore.Event{
 			EventID:   "caller-event-" + suffix,
-			EventType: agentos.EventPlanStarted,
+			EventType: agentoscore.EventPlanStarted,
 			Sequence:  99,
 			Timestamp: time.Date(2026, 6, 19, 12, 0, 0, 0, time.UTC),
 			Payload:   map[string]any{"state": "started"},
@@ -891,15 +892,15 @@ func TestAgentOSPlanPostgresPlanEventIdempotencyDoesNotAdvanceSequence(t *testin
 	)
 
 	changed := event
-	changed.EventType = agentos.EventPlanFailed
+	changed.EventType = agentoscore.EventPlanFailed
 	changed.Payload = map[string]any{"state": "failed"}
-	if _, err := planRepo.AppendPlanEvent(ctx, changed, "plan-event-key-"+suffix); !errors.Is(err, agentos.ErrInvalidPlanEvent) {
+	if _, err := planRepo.AppendPlanEvent(ctx, changed, "plan-event-key-"+suffix); !errors.Is(err, agentoscore.ErrInvalidPlanEvent) {
 		t.Fatalf("AppendPlanEvent changed replay error = %v, want ErrInvalidPlanEvent", err)
 	}
 
 	next, err := planRepo.AppendPlanEvent(ctx, agentos.PlanEvent{
-		Event: agentos.Event{
-			EventType: agentos.EventPlanSucceeded,
+		Event: agentoscore.Event{
+			EventType: agentoscore.EventPlanSucceeded,
 			Timestamp: time.Date(2026, 6, 19, 12, 1, 0, 0, time.UTC),
 			Payload:   map[string]any{"state": "succeeded"},
 		},
@@ -932,8 +933,8 @@ func TestAgentOSPlanPostgresPersistPlanTransitionIsAtomic(t *testing.T) {
 		t.Fatalf("CreatePlan: %v", err)
 	}
 	firstEvent := agentos.PlanEvent{
-		Event: agentos.Event{
-			EventType: agentos.EventPlanStarted,
+		Event: agentoscore.Event{
+			EventType: agentoscore.EventPlanStarted,
 			Payload:   map[string]any{"state": "running"},
 		},
 		PlanID: spec.PlanID,
@@ -946,8 +947,8 @@ func TestAgentOSPlanPostgresPersistPlanTransitionIsAtomic(t *testing.T) {
 	next.LifecycleState = agentos.PlanLifecycleFailed
 	next.Reason = "should not commit"
 	changedEvent := agentos.PlanEvent{
-		Event: agentos.Event{
-			EventType: agentos.EventPlanFailed,
+		Event: agentoscore.Event{
+			EventType: agentoscore.EventPlanFailed,
 			Payload:   map[string]any{"state": "failed"},
 		},
 		PlanID: spec.PlanID,
@@ -956,7 +957,7 @@ func TestAgentOSPlanPostgresPersistPlanTransitionIsAtomic(t *testing.T) {
 		Spec:   spec,
 		Status: next,
 	}, changedEvent, "transition-key-"+suffix)
-	if !errors.Is(err, agentos.ErrInvalidPlanEvent) {
+	if !errors.Is(err, agentoscore.ErrInvalidPlanEvent) {
 		t.Fatalf("PersistPlanTransition error = %v, want ErrInvalidPlanEvent", err)
 	}
 
@@ -971,7 +972,7 @@ func TestAgentOSPlanPostgresPersistPlanTransitionIsAtomic(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ListPlanEvents: %v", err)
 	}
-	if len(events) != 1 || events[0].EventType != agentos.EventPlanStarted {
+	if len(events) != 1 || events[0].EventType != agentoscore.EventPlanStarted {
 		t.Fatalf("events = %#v, want only original event", events)
 	}
 }
@@ -990,8 +991,8 @@ func TestAgentOSPlanPostgresPersistPlanTransitionRejectsSnapshotReplayMismatch(t
 	running := initial
 	running.LifecycleState = agentos.PlanLifecycleRunning
 	event := agentos.PlanEvent{
-		Event: agentos.Event{
-			EventType: agentos.EventPlanStarted,
+		Event: agentoscore.Event{
+			EventType: agentoscore.EventPlanStarted,
 			Payload:   map[string]any{"state": "running"},
 		},
 		PlanID: spec.PlanID,
@@ -1025,7 +1026,7 @@ WHERE plan_id = $1 AND idempotency_key = $2`,
 		Spec:   spec,
 		Status: changed,
 	}, event, "transition-replay-key-"+suffix)
-	if !errors.Is(err, agentos.ErrInvalidRunPlan) {
+	if !errors.Is(err, agentoscore.ErrInvalidRunPlan) {
 		t.Fatalf("PersistPlanTransition replay mismatch error = %v, want ErrInvalidRunPlan", err)
 	}
 
@@ -1040,7 +1041,7 @@ WHERE plan_id = $1 AND idempotency_key = $2`,
 	if err != nil {
 		t.Fatalf("ListPlanEvents: %v", err)
 	}
-	if len(events) != 1 || events[0].EventType != agentos.EventPlanStarted {
+	if len(events) != 1 || events[0].EventType != agentoscore.EventPlanStarted {
 		t.Fatalf("events = %#v, want only original event", events)
 	}
 }
@@ -1057,10 +1058,10 @@ func TestAgentOSPlanPostgresAppendPlanEventRequiresIdempotencyKey(t *testing.T) 
 	}
 
 	_, err := planRepo.AppendPlanEvent(ctx, agentos.PlanEvent{
-		Event:  agentos.Event{EventType: agentos.EventPlanStarted},
+		Event:  agentoscore.Event{EventType: agentoscore.EventPlanStarted},
 		PlanID: spec.PlanID,
 	}, "")
-	if !errors.Is(err, agentos.ErrInvalidPlanEvent) {
+	if !errors.Is(err, agentoscore.ErrInvalidPlanEvent) {
 		t.Fatalf("AppendPlanEvent empty key error = %v, want ErrInvalidPlanEvent", err)
 	}
 }
@@ -1105,7 +1106,7 @@ func TestAgentOSPlanPostgresPlanRefsAndMetricCheckpoints(t *testing.T) {
 		t.Fatalf("ListPlanRefs = %#v, want created plan ref", refs)
 	}
 	invalidScope := agentosplan.PlanRefScope{LifecycleStates: []string{""}}
-	if _, err := planRepo.ListPlanRefs(ctx, &invalidScope); !errors.Is(err, agentos.ErrInvalidPlanScope) {
+	if _, err := planRepo.ListPlanRefs(ctx, &invalidScope); !errors.Is(err, agentoscore.ErrInvalidPlanScope) {
 		t.Fatalf("ListPlanRefs empty lifecycle error = %v, want ErrInvalidPlanScope", err)
 	}
 
@@ -1144,12 +1145,12 @@ func TestAgentOSPlanPostgresPlanRefsAndMetricCheckpoints(t *testing.T) {
 	if err := planRepo.SavePlanMetricCheckpoint(ctx, advanced); err != nil {
 		t.Fatalf("SavePlanMetricCheckpoint advanced: %v", err)
 	}
-	if err := planRepo.SavePlanMetricCheckpoint(ctx, checkpoint); !errors.Is(err, agentos.ErrInvalidRunPlan) {
+	if err := planRepo.SavePlanMetricCheckpoint(ctx, checkpoint); !errors.Is(err, agentoscore.ErrInvalidRunPlan) {
 		t.Fatalf("SavePlanMetricCheckpoint rewind error = %v, want ErrInvalidRunPlan", err)
 	}
 	tenantMismatch := advanced
 	tenantMismatch.AccountID = "acct-other"
-	if err := planRepo.SavePlanMetricCheckpoint(ctx, tenantMismatch); !errors.Is(err, agentos.ErrPlanRouteNotFound) {
+	if err := planRepo.SavePlanMetricCheckpoint(ctx, tenantMismatch); !errors.Is(err, agentoscore.ErrPlanRouteNotFound) {
 		t.Fatalf("SavePlanMetricCheckpoint tenant mismatch error = %v, want ErrPlanRouteNotFound", err)
 	}
 
@@ -1186,14 +1187,14 @@ func TestAgentOSPlanPostgresPlanRefsAndMetricCheckpoints(t *testing.T) {
 	}
 	changedSample := sample
 	changedSample.Value = 2
-	if err := planRepo.RecordPlanMetric(ctx, &changedSample); !errors.Is(err, agentos.ErrInvalidRunPlan) {
+	if err := planRepo.RecordPlanMetric(ctx, &changedSample); !errors.Is(err, agentoscore.ErrInvalidRunPlan) {
 		t.Fatalf("RecordPlanMetric changed replay error = %v, want ErrInvalidRunPlan", err)
 	}
 	mismatchedSample := sample
 	mismatchedSample.Sequence = 2
 	mismatchedSample.EventID = spec.PlanID + ":2"
 	mismatchedSample.AccountID = "acct-other"
-	if err := planRepo.RecordPlanMetric(ctx, &mismatchedSample); !errors.Is(err, agentos.ErrPlanRouteNotFound) {
+	if err := planRepo.RecordPlanMetric(ctx, &mismatchedSample); !errors.Is(err, agentoscore.ErrPlanRouteNotFound) {
 		t.Fatalf("RecordPlanMetric tenant mismatch error = %v, want ErrPlanRouteNotFound", err)
 	}
 }
@@ -1221,26 +1222,26 @@ func TestAgentOSArtifactPostgresRejectsDifferentIdempotencyReplay(t *testing.T) 
 		t.Fatalf("NodeStartIdempotencyKey: %v", err)
 	}
 
-	ref := agentos.ArtifactRef{
+	ref := agentoscore.ArtifactRef{
 		PlanID:    spec.PlanID,
 		NodeID:    spec.Nodes[0].NodeID,
 		RunID:     runSpec.RunID,
 		Name:      "summary",
-		Kind:      agentos.ArtifactKindObject,
+		Kind:      agentoscore.ArtifactKindObject,
 		MediaType: "application/json",
 		Metadata:  map[string]string{"class": "summary"},
 	}
-	if _, err := artifactStore.Put(ctx, &ref, map[string]any{"summary": "ok"}, "artifact-missing-route-"+suffix); !errors.Is(err, agentos.ErrRunRouteNotFound) {
+	if _, err := artifactStore.Put(ctx, &ref, map[string]any{"summary": "ok"}, "artifact-missing-route-"+suffix); !errors.Is(err, agentoscore.ErrRunRouteNotFound) {
 		t.Fatalf("Artifact Put missing run route error = %v, want ErrRunRouteNotFound", err)
 	}
 	missingNodeRef := ref
 	missingNodeRef.NodeID = "missing-node"
-	if _, err := artifactStore.Put(ctx, &missingNodeRef, map[string]any{"summary": "ok"}, "artifact-missing-node-"+suffix); !errors.Is(err, agentos.ErrInvalidArtifact) {
+	if _, err := artifactStore.Put(ctx, &missingNodeRef, map[string]any{"summary": "ok"}, "artifact-missing-node-"+suffix); !errors.Is(err, agentoscore.ErrInvalidArtifact) {
 		t.Fatalf("Artifact Put missing node error = %v, want ErrInvalidArtifact", err)
 	}
 	unpairedRef := ref
 	unpairedRef.RunID = ""
-	if _, err := artifactStore.Put(ctx, &unpairedRef, map[string]any{"summary": "ok"}, "artifact-unpaired-node-"+suffix); !errors.Is(err, agentos.ErrInvalidArtifact) {
+	if _, err := artifactStore.Put(ctx, &unpairedRef, map[string]any{"summary": "ok"}, "artifact-unpaired-node-"+suffix); !errors.Is(err, agentoscore.ErrInvalidArtifact) {
 		t.Fatalf("Artifact Put unpaired node/run error = %v, want ErrInvalidArtifact", err)
 	}
 	artifactRouteStatus := agentos.RunStatus{RunID: runSpec.RunID, LifecycleState: "running"}
@@ -1252,7 +1253,7 @@ func TestAgentOSArtifactPostgresRejectsDifferentIdempotencyReplay(t *testing.T) 
 	refOnlyBlob.URI = "local://artifact/unowned"
 	refOnlyBlob.SizeBytes = 2
 	refOnlyBlob.Digest = agentosplan.DigestArtifactPayload([]byte("ok"))
-	if _, err := artifactStore.Put(ctx, &refOnlyBlob, nil, "artifact-ref-only-"+suffix); !errors.Is(err, agentos.ErrInvalidArtifact) {
+	if _, err := artifactStore.Put(ctx, &refOnlyBlob, nil, "artifact-ref-only-"+suffix); !errors.Is(err, agentoscore.ErrInvalidArtifact) {
 		t.Fatalf("Artifact Put ref-only blob metadata error = %v, want ErrInvalidArtifact", err)
 	}
 	first, err := artifactStore.Put(ctx, &ref, map[string]any{
@@ -1273,15 +1274,15 @@ func TestAgentOSArtifactPostgresRejectsDifferentIdempotencyReplay(t *testing.T) 
 		t.Fatalf("Artifact replay = %#v, want %#v", replay, first)
 	}
 
-	if _, err := artifactStore.Put(ctx, &ref, map[string]any{"summary": "changed"}, "artifact-key-"+suffix); !errors.Is(err, agentos.ErrInvalidArtifact) {
+	if _, err := artifactStore.Put(ctx, &ref, map[string]any{"summary": "changed"}, "artifact-key-"+suffix); !errors.Is(err, agentoscore.ErrInvalidArtifact) {
 		t.Fatalf("Artifact Put changed payload error = %v, want ErrInvalidArtifact", err)
 	}
 	changedID := ref
 	changedID.ArtifactID = "different-artifact-" + suffix
-	if _, err := artifactStore.Put(ctx, &changedID, map[string]any{"summary": "ok"}, "artifact-key-"+suffix); !errors.Is(err, agentos.ErrInvalidArtifact) {
+	if _, err := artifactStore.Put(ctx, &changedID, map[string]any{"summary": "ok"}, "artifact-key-"+suffix); !errors.Is(err, agentoscore.ErrInvalidArtifact) {
 		t.Fatalf("Artifact Put changed id error = %v, want ErrInvalidArtifact", err)
 	}
-	reusedRef := agentos.ArtifactRef{
+	reusedRef := agentoscore.ArtifactRef{
 		ArtifactID: first.ArtifactID,
 		PlanID:     ref.PlanID,
 		NodeID:     ref.NodeID,
@@ -1290,7 +1291,7 @@ func TestAgentOSArtifactPostgresRejectsDifferentIdempotencyReplay(t *testing.T) 
 		Kind:       ref.Kind,
 		MediaType:  ref.MediaType,
 	}
-	if _, err := artifactStore.Put(ctx, &reusedRef, map[string]any{"summary": "ok"}, "artifact-other-key-"+suffix); !errors.Is(err, agentos.ErrInvalidArtifact) {
+	if _, err := artifactStore.Put(ctx, &reusedRef, map[string]any{"summary": "ok"}, "artifact-other-key-"+suffix); !errors.Is(err, agentoscore.ErrInvalidArtifact) {
 		t.Fatalf("Artifact Put reused artifact id error = %v, want ErrInvalidArtifact", err)
 	}
 	conflictPayload, _, err := agentosplan.EncodeArtifactPayload(map[string]any{"summary": "ok"}, ref.MediaType)
@@ -1359,7 +1360,7 @@ func TestAgentOSArtifactPostgresRejectsDifferentIdempotencyReplay(t *testing.T) 
 		ProjectID:  spec.ProjectID,
 		ArtifactID: first.ArtifactID,
 	}
-	if _, _, err := metadataOnlyStore.Get(ctx, &metadataGetScope); !errors.Is(err, agentos.ErrInvalidArtifact) {
+	if _, _, err := metadataOnlyStore.Get(ctx, &metadataGetScope); !errors.Is(err, agentoscore.ErrInvalidArtifact) {
 		t.Fatalf("Artifact metadata-only Get error = %v, want ErrInvalidArtifact", err)
 	}
 	wrongTenantGetScope := agentos.PlanArtifactScope{
@@ -1368,7 +1369,7 @@ func TestAgentOSArtifactPostgresRejectsDifferentIdempotencyReplay(t *testing.T) 
 		ProjectID:  spec.ProjectID,
 		ArtifactID: first.ArtifactID,
 	}
-	if _, _, err := artifactStore.Get(ctx, &wrongTenantGetScope); !errors.Is(err, agentos.ErrArtifactNotFound) {
+	if _, _, err := artifactStore.Get(ctx, &wrongTenantGetScope); !errors.Is(err, agentoscore.ErrArtifactNotFound) {
 		t.Fatalf("Artifact Get tenant mismatch error = %v, want ErrArtifactNotFound", err)
 	}
 	wrongTenantListScope := agentos.PlanArtifactScope{
@@ -1396,7 +1397,7 @@ func TestAgentOSArtifactPostgresRejectsDifferentIdempotencyReplay(t *testing.T) 
 	}
 	status := agentos.RunPlanStatus{
 		PlanID:    spec.PlanID,
-		Artifacts: []agentos.ArtifactRef{first},
+		Artifacts: []agentoscore.ArtifactRef{first},
 	}
 	mapped, err := agentosplan.ResolveRunInput(ctx, artifactStore, nil, &spec, &status, &node, nil)
 	if err != nil {
@@ -1407,7 +1408,7 @@ func TestAgentOSArtifactPostgresRejectsDifferentIdempotencyReplay(t *testing.T) 
 		t.Fatalf("mapped artifact input = %#v, want summary payload", mapped)
 	}
 	missingStatus := agentos.RunPlanStatus{PlanID: spec.PlanID}
-	if _, err := agentosplan.ResolveRunInput(ctx, artifactStore, nil, &spec, &missingStatus, &node, nil); !errors.Is(err, agentos.ErrArtifactNotFound) {
+	if _, err := agentosplan.ResolveRunInput(ctx, artifactStore, nil, &spec, &missingStatus, &node, nil); !errors.Is(err, agentoscore.ErrArtifactNotFound) {
 		t.Fatalf("ResolveRunInput missing required artifact error = %v, want ErrArtifactNotFound", err)
 	}
 }
@@ -1812,7 +1813,7 @@ func assertPostgresPlanEventRawInsertRejected(
 	sequence int64,
 	nodeID string,
 	runID string,
-	eventType agentos.EventType,
+	eventType agentoscore.EventType,
 	payload map[string]any,
 	eventJSON []byte,
 	timestamp time.Time,

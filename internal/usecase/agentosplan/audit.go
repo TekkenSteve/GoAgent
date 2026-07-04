@@ -3,7 +3,8 @@ package agentosplan
 import (
 	"fmt"
 
-	"github.com/TekkenSteve/GoAgent/agentos"
+	agentos "github.com/TekkenSteve/GoAgent/agentos/control"
+	agentoscore "github.com/TekkenSteve/GoAgent/agentos/core"
 )
 
 // ValidateAuditNodeRunPair validates the control-plane ownership shape for
@@ -15,7 +16,7 @@ func ValidateAuditNodeRunPair(record *AuditRecord) error {
 	}
 
 	if record.NodeID == "" || record.RunID == "" {
-		return fmt.Errorf("%w: audit node id and run id must be provided together", agentos.ErrInvalidRunPlan)
+		return fmt.Errorf("%w: audit node id and run id must be provided together", agentoscore.ErrInvalidRunPlan)
 	}
 
 	return nil
@@ -34,15 +35,15 @@ func ValidateAuditNodeRunInPlan(record *AuditRecord, spec *agentos.RunPlanSpec, 
 
 	runID, exists := auditPlanNodeRunID(spec, status, record.NodeID)
 	if !exists {
-		return fmt.Errorf("%w: audit node %q is not durable", agentos.ErrInvalidRunPlan, record.NodeID)
+		return fmt.Errorf("%w: audit node %q is not durable", agentoscore.ErrInvalidRunPlan, record.NodeID)
 	}
 
 	if runID == "" {
-		return fmt.Errorf("%w: audit node %q has no durable run id", agentos.ErrInvalidRunPlan, record.NodeID)
+		return fmt.Errorf("%w: audit node %q has no durable run id", agentoscore.ErrInvalidRunPlan, record.NodeID)
 	}
 
 	if runID != record.RunID {
-		return fmt.Errorf("%w: audit node %q has durable run id %q, got %q", agentos.ErrInvalidRunPlan, record.NodeID, runID, record.RunID)
+		return fmt.Errorf("%w: audit node %q has durable run id %q, got %q", agentoscore.ErrInvalidRunPlan, record.NodeID, runID, record.RunID)
 	}
 
 	return nil

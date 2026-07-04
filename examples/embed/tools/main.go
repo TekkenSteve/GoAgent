@@ -12,7 +12,7 @@ import (
 	"os"
 	"time"
 
-	"github.com/TekkenSteve/GoAgent/agentos"
+	agentos "github.com/TekkenSteve/GoAgent/agentos/control"
 	agentostemporal "github.com/TekkenSteve/GoAgent/agentos/temporal"
 )
 

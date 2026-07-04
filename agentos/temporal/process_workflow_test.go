@@ -5,7 +5,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/TekkenSteve/GoAgent/agentos"
+	agentoscore "github.com/TekkenSteve/GoAgent/agentos/core"
+	agentosproc "github.com/TekkenSteve/GoAgent/agentos/process"
 	"github.com/TekkenSteve/GoAgent/internal/usecase/agentosprocess"
 	"github.com/stretchr/testify/require"
 	"go.temporal.io/sdk/activity"
@@ -19,20 +20,20 @@ func TestProcessWorkflowSignalResumesWaitingProcess(t *testing.T) {
 	spec := processWorkflowTestSpec("process-signal")
 	env := newProcessWorkflowTestEnv(t)
 	env.RegisterDelayedCallback(func() {
-		env.SignalWorkflow(ProcessControlSignalName, agentos.ControlRequest{
-			Operation:      agentos.ControlPause,
+		env.SignalWorkflow(ProcessControlSignalName, agentoscore.ControlRequest{
+			Operation:      agentoscore.ControlPause,
 			IdempotencyKey: "pause-1",
 		})
 	}, time.Second)
 	env.RegisterDelayedCallback(func() {
-		env.SignalWorkflow(ProcessSignalName, agentos.Signal{
+		env.SignalWorkflow(ProcessSignalName, agentoscore.Signal{
 			Type:           "external.update",
 			IdempotencyKey: "signal-1",
 		})
 	}, 2*time.Second)
 	env.RegisterDelayedCallback(func() {
-		env.SignalWorkflow(ProcessControlSignalName, agentos.ControlRequest{
-			Operation:      agentos.ControlCancel,
+		env.SignalWorkflow(ProcessControlSignalName, agentoscore.ControlRequest{
+			Operation:      agentoscore.ControlCancel,
 			IdempotencyKey: "cancel-1",
 		})
 	}, 3*time.Second)
@@ -42,9 +43,9 @@ func TestProcessWorkflowSignalResumesWaitingProcess(t *testing.T) {
 	require.True(t, env.IsWorkflowCompleted())
 	require.NoError(t, env.GetWorkflowError())
 
-	var result agentos.ProcessStatus
+	var result agentosproc.Status
 	require.NoError(t, env.GetWorkflowResult(&result))
-	require.Equal(t, agentos.ProcessCanceled, result.LifecycleState)
+	require.Equal(t, agentosproc.ProcessCanceled, result.LifecycleState)
 }
 
 func TestProcessWorkflowRequiresActivityTaskQueue(t *testing.T) {
@@ -76,14 +77,14 @@ func newProcessWorkflowTestEnv(t *testing.T) *testsuite.TestWorkflowEnvironment 
 	return env
 }
 
-func processWorkflowTestSpec(processID string) agentos.ProcessSpec {
-	return agentos.ProcessSpec{
+func processWorkflowTestSpec(processID string) agentosproc.Spec {
+	return agentosproc.Spec{
 		ProcessID:      processID,
 		Kind:           "resource-lifecycle",
 		AccountID:      "acct-1",
 		ProjectID:      "proj-1",
 		IdempotencyKey: "start-" + processID,
-		Resource: agentos.ResourceRef{
+		Resource: agentosproc.ResourceRef{
 			Kind:       "resource-kind",
 			ResourceID: "resource-" + processID,
 			AccountID:  "acct-1",
@@ -93,7 +94,7 @@ func processWorkflowTestSpec(processID string) agentos.ProcessSpec {
 	}
 }
 
-func processWorkflowInputForTest(spec *agentos.ProcessSpec) *processWorkflowInput {
+func processWorkflowInputForTest(spec *agentosproc.Spec) *processWorkflowInput {
 	return &processWorkflowInput{
 		Spec: *spec,
 		TaskQueues: processTaskQueues{
@@ -112,5 +113,5 @@ func TestProcessActivitiesUseDurableRuntime(t *testing.T) {
 	spec := processWorkflowTestSpec("process-activity")
 	status, err := activities.StartProcessActivity(context.Background(), &startProcessActivityInput{Spec: spec})
 	require.NoError(t, err)
-	require.Equal(t, agentos.ProcessRunning, status.LifecycleState)
+	require.Equal(t, agentosproc.ProcessRunning, status.LifecycleState)
 }

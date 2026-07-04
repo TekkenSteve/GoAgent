@@ -4,7 +4,8 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/TekkenSteve/GoAgent/agentos"
+	agentos "github.com/TekkenSteve/GoAgent/agentos/control"
+	agentoscore "github.com/TekkenSteve/GoAgent/agentos/core"
 	agentfwconfig "github.com/TekkenSteve/GoAgent/internal/agentfw/config"
 	"github.com/TekkenSteve/GoAgent/internal/entity"
 )
@@ -28,11 +29,11 @@ func temporalConfig(cfg *RuntimeConfig) agentfwconfig.Temporal {
 
 func executionRequestFromRunSpec(spec *agentos.RunSpec) (*entity.ExecuteRequest, error) {
 	if spec.RunID == "" {
-		return nil, fmt.Errorf("%w: run id is required", agentos.ErrInvalidRunSpec)
+		return nil, fmt.Errorf("%w: run id is required", agentoscore.ErrInvalidRunSpec)
 	}
 
 	if spec.UserMessage == "" {
-		return nil, fmt.Errorf("%w: user message is required", agentos.ErrInvalidRunSpec)
+		return nil, fmt.Errorf("%w: user message is required", agentoscore.ErrInvalidRunSpec)
 	}
 
 	requestedAt := spec.RequestedAt
@@ -63,7 +64,7 @@ func runStatusFromEntity(status *entity.RunStatus) agentos.RunStatus {
 		UpdatedAt:      status.UpdatedAt,
 	}
 	if status.Step > 0 {
-		mapped.Progress = &agentos.RunProgress{
+		mapped.Progress = &agentoscore.RunProgress{
 			Current: status.Step,
 		}
 	}
@@ -71,15 +72,15 @@ func runStatusFromEntity(status *entity.RunStatus) agentos.RunStatus {
 	return mapped
 }
 
-func controlOperationToEntity(op agentos.ControlOperation) (entity.ControlOperation, error) {
+func controlOperationToEntity(op agentoscore.ControlOperation) (entity.ControlOperation, error) {
 	switch op {
-	case agentos.ControlPause:
+	case agentoscore.ControlPause:
 		return entity.ControlPause, nil
-	case agentos.ControlResume:
+	case agentoscore.ControlResume:
 		return entity.ControlResume, nil
-	case agentos.ControlCancel:
+	case agentoscore.ControlCancel:
 		return entity.ControlCancel, nil
 	default:
-		return "", fmt.Errorf("%w: %s", agentos.ErrInvalidControlOperation, op)
+		return "", fmt.Errorf("%w: %s", agentoscore.ErrInvalidControlOperation, op)
 	}
 }

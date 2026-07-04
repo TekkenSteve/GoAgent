@@ -7,7 +7,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/TekkenSteve/GoAgent/agentos"
+	agentoscore "github.com/TekkenSteve/GoAgent/agentos/core"
+	agentos "github.com/TekkenSteve/GoAgent/agentos/process"
 )
 
 func TestAgentOSProcessPostgresDurablePersistence(t *testing.T) {
@@ -38,7 +39,7 @@ func TestAgentOSProcessPostgresDurablePersistence(t *testing.T) {
 
 	changed := spec
 	changed.Resource.ResourceID = "changed-resource"
-	if _, _, err := repo.CreateProcess(ctx, &changed, &status); !errors.Is(err, agentos.ErrInvalidProcess) {
+	if _, _, err := repo.CreateProcess(ctx, &changed, &status); !errors.Is(err, agentoscore.ErrInvalidProcess) {
 		t.Fatalf("CreateProcess changed error = %v, want ErrInvalidProcess", err)
 	}
 
@@ -61,7 +62,7 @@ func TestAgentOSProcessPostgresDurablePersistence(t *testing.T) {
 		t.Fatalf("replayed status = %#v, want first idempotent status", replayedStatus)
 	}
 
-	event := postgresIntegrationProcessEvent(&spec, agentos.EventProcessWaiting)
+	event := postgresIntegrationProcessEvent(&spec, agentoscore.EventProcessWaiting)
 	firstEvent, err := repo.AppendProcessEvent(ctx, &event, "event-"+suffix)
 	if err != nil {
 		t.Fatalf("AppendProcessEvent: %v", err)
@@ -78,7 +79,7 @@ func TestAgentOSProcessPostgresDurablePersistence(t *testing.T) {
 		t.Fatalf("replayed event = %#v, want %#v", replayedEvent, firstEvent)
 	}
 
-	events, err := repo.ListProcessEvents(ctx, &agentos.ProcessEventScope{
+	events, err := repo.ListProcessEvents(ctx, &agentos.EventScope{
 		ProcessID: spec.ProcessID,
 		AccountID: spec.AccountID,
 		ProjectID: spec.ProjectID,
@@ -86,15 +87,15 @@ func TestAgentOSProcessPostgresDurablePersistence(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ListProcessEvents: %v", err)
 	}
-	if len(events) != 1 || events[0].EventType != agentos.EventProcessWaiting {
+	if len(events) != 1 || events[0].EventType != agentoscore.EventProcessWaiting {
 		t.Fatalf("events = %#v, want one process.waiting event", events)
 	}
 }
 
-func postgresIntegrationProcessSpec(processID, idempotencyKey string) agentos.ProcessSpec {
+func postgresIntegrationProcessSpec(processID, idempotencyKey string) agentos.Spec {
 	now := time.Date(2026, 7, 4, 12, 0, 0, 0, time.UTC)
 
-	return agentos.ProcessSpec{
+	return agentos.Spec{
 		ProcessID:      processID,
 		Kind:           "resource-lifecycle",
 		AccountID:      "acct-process",
@@ -110,8 +111,8 @@ func postgresIntegrationProcessSpec(processID, idempotencyKey string) agentos.Pr
 	}
 }
 
-func postgresIntegrationProcessStatus(spec *agentos.ProcessSpec, lifecycle string) agentos.ProcessStatus {
-	return agentos.ProcessStatus{
+func postgresIntegrationProcessStatus(spec *agentos.Spec, lifecycle string) agentos.Status {
+	return agentos.Status{
 		ProcessID:      spec.ProcessID,
 		Kind:           spec.Kind,
 		AccountID:      spec.AccountID,
@@ -123,9 +124,9 @@ func postgresIntegrationProcessStatus(spec *agentos.ProcessSpec, lifecycle strin
 	}
 }
 
-func postgresIntegrationProcessEvent(spec *agentos.ProcessSpec, eventType agentos.EventType) agentos.ProcessEvent {
-	return agentos.ProcessEvent{
-		Event: agentos.Event{
+func postgresIntegrationProcessEvent(spec *agentos.Spec, eventType agentoscore.EventType) agentos.Event {
+	return agentos.Event{
+		Event: agentoscore.Event{
 			EventType: eventType,
 			ProcessID: spec.ProcessID,
 			Timestamp: spec.RequestedAt,

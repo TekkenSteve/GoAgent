@@ -1,9 +1,11 @@
-package agentos
+package control
 
 import (
 	"encoding/json"
 	"fmt"
 	"maps"
+
+	"github.com/TekkenSteve/GoAgent/agentos/core"
 )
 
 const planEventExtraFields = 4
@@ -21,7 +23,7 @@ func MarshalPlanEvent(event *PlanEvent) ([]byte, error) {
 func UnmarshalPlanEvent(data []byte) (PlanEvent, error) {
 	var event PlanEvent
 	if err := json.Unmarshal(data, &event); err != nil {
-		return PlanEvent{}, fmt.Errorf("%w: decode plan event: %w", ErrInvalidPlanEvent, err)
+		return PlanEvent{}, fmt.Errorf("%w: decode plan event: %w", core.ErrInvalidPlanEvent, err)
 	}
 
 	if err := validatePlanEvent(&event); err != nil {
@@ -33,35 +35,35 @@ func UnmarshalPlanEvent(data []byte) (PlanEvent, error) {
 
 func validatePlanEvent(event *PlanEvent) error {
 	if event == nil {
-		return fmt.Errorf("%w: plan event is required", ErrInvalidPlanEvent)
+		return fmt.Errorf("%w: plan event is required", core.ErrInvalidPlanEvent)
 	}
 
 	if event.PlanID == "" {
-		return fmt.Errorf("%w: plan id is required", ErrInvalidPlanEvent)
+		return fmt.Errorf("%w: plan id is required", core.ErrInvalidPlanEvent)
 	}
 
 	if event.AccountID == "" {
-		return fmt.Errorf("%w: account id is required", ErrInvalidPlanEvent)
+		return fmt.Errorf("%w: account id is required", core.ErrInvalidPlanEvent)
 	}
 
 	if event.ProjectID == "" {
-		return fmt.Errorf("%w: project id is required", ErrInvalidPlanEvent)
+		return fmt.Errorf("%w: project id is required", core.ErrInvalidPlanEvent)
 	}
 
 	if event.EventID == "" {
-		return fmt.Errorf("%w: event id is required", ErrInvalidPlanEvent)
+		return fmt.Errorf("%w: event id is required", core.ErrInvalidPlanEvent)
 	}
 
 	if event.EventType == "" {
-		return fmt.Errorf("%w: event type is required", ErrInvalidPlanEvent)
+		return fmt.Errorf("%w: event type is required", core.ErrInvalidPlanEvent)
 	}
 
 	if event.Sequence <= 0 {
-		return fmt.Errorf("%w: sequence must be positive", ErrInvalidPlanEvent)
+		return fmt.Errorf("%w: sequence must be positive", core.ErrInvalidPlanEvent)
 	}
 
 	if event.Timestamp.IsZero() {
-		return fmt.Errorf("%w: timestamp is required", ErrInvalidPlanEvent)
+		return fmt.Errorf("%w: timestamp is required", core.ErrInvalidPlanEvent)
 	}
 
 	return nil
@@ -70,9 +72,9 @@ func validatePlanEvent(event *PlanEvent) error {
 // ToEvent projects the plan-scoped event into the generic stream envelope used
 // by Subscription. The plan scope remains available in Payload so subscribers
 // do not need an out-of-band lookup to identify the event boundary.
-func (event *PlanEvent) ToEvent() Event {
+func (event *PlanEvent) ToEvent() core.Event {
 	if event == nil {
-		return Event{}
+		return core.Event{}
 	}
 
 	generic := event.Event

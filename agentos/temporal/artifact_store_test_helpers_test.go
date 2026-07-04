@@ -3,10 +3,10 @@ package temporal
 import (
 	"context"
 
-	"github.com/TekkenSteve/GoAgent/agentos"
+	agentoscore "github.com/TekkenSteve/GoAgent/agentos/core"
 	"github.com/TekkenSteve/GoAgent/internal/usecase/agentosplan"
 )
 
-func putArtifact(ctx context.Context, store agentosplan.ArtifactStore, artifact *agentos.ArtifactRef, payload any, idempotencyKey string) (agentos.ArtifactRef, error) {
+func putArtifact(ctx context.Context, store agentosplan.ArtifactStore, artifact *agentoscore.ArtifactRef, payload any, idempotencyKey string) (agentoscore.ArtifactRef, error) {
 	return store.Put(ctx, artifact, payload, idempotencyKey)
 }

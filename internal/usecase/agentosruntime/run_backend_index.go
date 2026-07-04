@@ -3,7 +3,8 @@ package agentosruntime
 import (
 	"fmt"
 
-	"github.com/TekkenSteve/GoAgent/agentos"
+	agentos "github.com/TekkenSteve/GoAgent/agentos/control"
+	agentoscore "github.com/TekkenSteve/GoAgent/agentos/core"
 	"github.com/TekkenSteve/GoAgent/internal/entity"
 )
 
@@ -150,27 +151,27 @@ func NormalizeRunBackendIndexRecord(record *entity.RunBackendIndexRecord) entity
 // index persists it.
 func ValidateRunBackendIndexRecord(record *entity.RunBackendIndexRecord, requireIdempotencyKey bool) error {
 	if record == nil {
-		return fmt.Errorf("%w: run backend index record is required", agentos.ErrInvalidRunSpec)
+		return fmt.Errorf("%w: run backend index record is required", agentoscore.ErrInvalidRunSpec)
 	}
 
 	if record.RunID == "" {
-		return fmt.Errorf("%w: run id is required", agentos.ErrInvalidRunSpec)
+		return fmt.Errorf("%w: run id is required", agentoscore.ErrInvalidRunSpec)
 	}
 
 	if record.AccountID == "" {
-		return fmt.Errorf("%w: account id is required", agentos.ErrInvalidRunSpec)
+		return fmt.Errorf("%w: account id is required", agentoscore.ErrInvalidRunSpec)
 	}
 
 	if record.ProjectID == "" {
-		return fmt.Errorf("%w: project id is required", agentos.ErrInvalidRunSpec)
+		return fmt.Errorf("%w: project id is required", agentoscore.ErrInvalidRunSpec)
 	}
 
 	if record.BackendKind == "" || record.BackendName == "" {
-		return fmt.Errorf("%w: kind and name are required", agentos.ErrInvalidBackendRef)
+		return fmt.Errorf("%w: kind and name are required", agentoscore.ErrInvalidBackendRef)
 	}
 
 	if requireIdempotencyKey && record.IdempotencyKey == "" {
-		return fmt.Errorf("%w: run backend idempotency key is required", agentos.ErrInvalidRunSpec)
+		return fmt.Errorf("%w: run backend idempotency key is required", agentoscore.ErrInvalidRunSpec)
 	}
 
 	return nil
@@ -180,11 +181,11 @@ func ValidateRunBackendIndexRecord(record *entity.RunBackendIndexRecord, require
 // describes the same backend-owned run.
 func ValidateRunBackendIndexIdempotency(existing, requested *entity.RunBackendIndexRecord) error {
 	if existing == nil || requested == nil {
-		return fmt.Errorf("%w: run backend index record is required", agentos.ErrInvalidRunSpec)
+		return fmt.Errorf("%w: run backend index record is required", agentoscore.ErrInvalidRunSpec)
 	}
 
 	if existing.RunID != requested.RunID {
-		return fmt.Errorf("%w: run backend idempotency key belongs to run %q", agentos.ErrInvalidRunSpec, existing.RunID)
+		return fmt.Errorf("%w: run backend idempotency key belongs to run %q", agentoscore.ErrInvalidRunSpec, existing.RunID)
 	}
 
 	if err := validateRunBackendIndexPlanNode(existing, requested); err != nil {
@@ -200,7 +201,7 @@ func ValidateRunBackendIndexIdempotency(existing, requested *entity.RunBackendIn
 	}
 
 	if existing.IdempotencyKey != "" && requested.IdempotencyKey != "" && existing.IdempotencyKey != requested.IdempotencyKey {
-		return fmt.Errorf("%w: run %q was already bound with a different idempotency key", agentos.ErrInvalidRunSpec, existing.RunID)
+		return fmt.Errorf("%w: run %q was already bound with a different idempotency key", agentoscore.ErrInvalidRunSpec, existing.RunID)
 	}
 
 	return nil
@@ -208,7 +209,7 @@ func ValidateRunBackendIndexIdempotency(existing, requested *entity.RunBackendIn
 
 func validateRunBackendIndexPlanNode(existing, requested *entity.RunBackendIndexRecord) error {
 	if existing.PlanID != requested.PlanID || existing.NodeID != requested.NodeID {
-		return fmt.Errorf("%w: run %q idempotency key was reused for a different plan node", agentos.ErrInvalidRunPlan, existing.RunID)
+		return fmt.Errorf("%w: run %q idempotency key was reused for a different plan node", agentoscore.ErrInvalidRunPlan, existing.RunID)
 	}
 
 	return nil
@@ -216,7 +217,7 @@ func validateRunBackendIndexPlanNode(existing, requested *entity.RunBackendIndex
 
 func validateRunBackendIndexScope(existing, requested *entity.RunBackendIndexRecord) error {
 	if existing.ThreadID != requested.ThreadID || existing.AccountID != requested.AccountID || existing.ProjectID != requested.ProjectID {
-		return fmt.Errorf("%w: run %q idempotency key was reused for a different scope", agentos.ErrInvalidRunSpec, existing.RunID)
+		return fmt.Errorf("%w: run %q idempotency key was reused for a different scope", agentoscore.ErrInvalidRunSpec, existing.RunID)
 	}
 
 	return nil
@@ -224,7 +225,7 @@ func validateRunBackendIndexScope(existing, requested *entity.RunBackendIndexRec
 
 func validateRunBackendIndexBackend(existing, requested *entity.RunBackendIndexRecord) error {
 	if existing.BackendKind != requested.BackendKind || existing.BackendName != requested.BackendName {
-		return fmt.Errorf("%w: run %q idempotency key was reused for a different backend", agentos.ErrInvalidBackendRef, existing.RunID)
+		return fmt.Errorf("%w: run %q idempotency key was reused for a different backend", agentoscore.ErrInvalidBackendRef, existing.RunID)
 	}
 
 	return nil

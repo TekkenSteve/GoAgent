@@ -1,8 +1,10 @@
-package agentos
+package process
 
 import (
 	"fmt"
 	"time"
+
+	"github.com/TekkenSteve/GoAgent/agentos/core"
 )
 
 // ActionKind identifies an application-defined governed action type without
@@ -97,12 +99,12 @@ type ActionApprovalDecision struct {
 // ActionExecutionResult records the execution outcome. Payloads stay outside
 // Temporal history and are referenced through data/artifact refs.
 type ActionExecutionResult struct {
-	IdempotencyKey string          `json:"idempotency_key"`
-	Succeeded      bool            `json:"succeeded"`
-	Summary        string          `json:"summary,omitempty"`
-	OutputRefs     []LedgerDataRef `json:"output_refs,omitempty"`
-	ArtifactRefs   []ArtifactRef   `json:"artifact_refs,omitempty"`
-	RecordedAt     time.Time       `json:"recorded_at,omitzero" schema:"optional"`
+	IdempotencyKey string             `json:"idempotency_key"`
+	Succeeded      bool               `json:"succeeded"`
+	Summary        string             `json:"summary,omitempty"`
+	OutputRefs     []LedgerDataRef    `json:"output_refs,omitempty"`
+	ArtifactRefs   []core.ArtifactRef `json:"artifact_refs,omitempty"`
+	RecordedAt     time.Time          `json:"recorded_at,omitzero" schema:"optional"`
 }
 
 // ActionCancelRequest records an operator or policy cancellation.
@@ -151,14 +153,14 @@ const (
 // ValidateGovernedActionSpec validates a governed action request.
 func ValidateGovernedActionSpec(spec *GovernedActionSpec) error {
 	if spec == nil {
-		return fmt.Errorf("%w: governed action spec is required", ErrInvalidGovernedAction)
+		return fmt.Errorf("%w: governed action spec is required", core.ErrInvalidGovernedAction)
 	}
 
 	if err := validateGovernedActionIdentity(spec); err != nil {
 		return err
 	}
 
-	if err := validateGovernedActionScope(spec.AccountID, spec.ProjectID, spec.ProcessID, spec.Resource, ErrInvalidGovernedAction); err != nil {
+	if err := validateGovernedActionScope(spec.AccountID, spec.ProjectID, spec.ProcessID, spec.Resource, core.ErrInvalidGovernedAction); err != nil {
 		return err
 	}
 
@@ -169,11 +171,11 @@ func ValidateGovernedActionSpec(spec *GovernedActionSpec) error {
 func ValidateActionRef(ref ActionRef) error {
 	switch {
 	case ref.ActionID == "":
-		return fmt.Errorf("%w: action id is required", ErrInvalidGovernedActionScope)
+		return fmt.Errorf("%w: action id is required", core.ErrInvalidGovernedActionScope)
 	case ref.AccountID == "":
-		return fmt.Errorf("%w: account id is required", ErrInvalidGovernedActionScope)
+		return fmt.Errorf("%w: account id is required", core.ErrInvalidGovernedActionScope)
 	case ref.ProjectID == "":
-		return fmt.Errorf("%w: project id is required", ErrInvalidGovernedActionScope)
+		return fmt.Errorf("%w: project id is required", core.ErrInvalidGovernedActionScope)
 	default:
 		return nil
 	}
@@ -182,33 +184,33 @@ func ValidateActionRef(ref ActionRef) error {
 // ValidateActionScope validates a governed action query scope.
 func ValidateActionScope(scope *ActionScope) error {
 	if scope == nil {
-		return fmt.Errorf("%w: action scope is required", ErrInvalidGovernedActionScope)
+		return fmt.Errorf("%w: action scope is required", core.ErrInvalidGovernedActionScope)
 	}
 
 	switch {
 	case scope.AccountID == "":
-		return fmt.Errorf("%w: account id is required", ErrInvalidGovernedActionScope)
+		return fmt.Errorf("%w: account id is required", core.ErrInvalidGovernedActionScope)
 	case scope.ProjectID == "":
-		return fmt.Errorf("%w: project id is required", ErrInvalidGovernedActionScope)
+		return fmt.Errorf("%w: project id is required", core.ErrInvalidGovernedActionScope)
 	case scope.Limit < 0:
-		return fmt.Errorf("%w: limit must be non-negative", ErrInvalidGovernedActionScope)
+		return fmt.Errorf("%w: limit must be non-negative", core.ErrInvalidGovernedActionScope)
 	default:
-		return validateGovernedActionResource(scope.AccountID, scope.ProjectID, scope.Resource, ErrInvalidGovernedActionScope)
+		return validateGovernedActionResource(scope.AccountID, scope.ProjectID, scope.Resource, core.ErrInvalidGovernedActionScope)
 	}
 }
 
 func validateGovernedActionIdentity(spec *GovernedActionSpec) error {
 	switch {
 	case spec.ActionID == "":
-		return fmt.Errorf("%w: action id is required", ErrInvalidGovernedAction)
+		return fmt.Errorf("%w: action id is required", core.ErrInvalidGovernedAction)
 	case spec.IdempotencyKey == "":
-		return fmt.Errorf("%w: idempotency key is required", ErrInvalidGovernedAction)
+		return fmt.Errorf("%w: idempotency key is required", core.ErrInvalidGovernedAction)
 	case spec.AccountID == "":
-		return fmt.Errorf("%w: account id is required", ErrInvalidGovernedAction)
+		return fmt.Errorf("%w: account id is required", core.ErrInvalidGovernedAction)
 	case spec.ProjectID == "":
-		return fmt.Errorf("%w: project id is required", ErrInvalidGovernedAction)
+		return fmt.Errorf("%w: project id is required", core.ErrInvalidGovernedAction)
 	case spec.Kind == "":
-		return fmt.Errorf("%w: kind is required", ErrInvalidGovernedAction)
+		return fmt.Errorf("%w: kind is required", core.ErrInvalidGovernedAction)
 	default:
 		return nil
 	}
@@ -265,9 +267,9 @@ func validateActionDataRefs(refs []LedgerDataRef) error {
 func validateActionDataRef(ref *LedgerDataRef) error {
 	switch {
 	case ref.Kind == "":
-		return fmt.Errorf("%w: data ref kind is required", ErrInvalidGovernedAction)
+		return fmt.Errorf("%w: data ref kind is required", core.ErrInvalidGovernedAction)
 	case ref.URI == "" && ref.ArtifactID == "":
-		return fmt.Errorf("%w: data ref uri or artifact id is required", ErrInvalidGovernedAction)
+		return fmt.Errorf("%w: data ref uri or artifact id is required", core.ErrInvalidGovernedAction)
 	default:
 		return nil
 	}

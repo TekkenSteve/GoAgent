@@ -3,7 +3,8 @@ package temporal
 import (
 	"testing"
 
-	"github.com/TekkenSteve/GoAgent/agentos"
+	agentoscore "github.com/TekkenSteve/GoAgent/agentos/core"
+	agentosproc "github.com/TekkenSteve/GoAgent/agentos/process"
 	"github.com/TekkenSteve/GoAgent/internal/usecase/agentosprocess"
 	"github.com/stretchr/testify/require"
 )
@@ -29,7 +30,7 @@ func TestProcessRuntimeStartsWorkflowOnProcessControlQueue(t *testing.T) {
 
 	status, err := runtime.StartProcess(t.Context(), &spec)
 	require.NoError(t, err)
-	require.Equal(t, agentos.ProcessRunning, status.LifecycleState)
+	require.Equal(t, agentosproc.ProcessRunning, status.LifecycleState)
 	require.Equal(t, processWorkflowID(spec.ProcessID), temporalClient.executeWorkflowID)
 	require.Equal(t, taskQueues.ProcessControl, temporalClient.executeTaskQueue)
 	require.Equal(t, 1, temporalClient.executeCount)
@@ -58,8 +59,8 @@ func TestProcessRuntimeSignalsWorkflowAfterTenantAuthorization(t *testing.T) {
 		t.Fatalf("StartProcess fixture: %v", err)
 	}
 
-	ref := agentos.ProcessRef{ProcessID: spec.ProcessID, AccountID: spec.AccountID, ProjectID: spec.ProjectID}
-	err = runtime.SignalProcess(t.Context(), ref, &agentos.Signal{
+	ref := agentosproc.Ref{ProcessID: spec.ProcessID, AccountID: spec.AccountID, ProjectID: spec.ProjectID}
+	err = runtime.SignalProcess(t.Context(), ref, &agentoscore.Signal{
 		Type:           "external.update",
 		IdempotencyKey: "signal-1",
 	})

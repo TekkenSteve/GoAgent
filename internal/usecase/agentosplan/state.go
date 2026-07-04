@@ -5,7 +5,8 @@ import (
 	"sort"
 	"time"
 
-	"github.com/TekkenSteve/GoAgent/agentos"
+	agentos "github.com/TekkenSteve/GoAgent/agentos/control"
+	agentoscore "github.com/TekkenSteve/GoAgent/agentos/core"
 )
 
 // State is the deterministic reducer state for a RunPlan.
@@ -44,7 +45,7 @@ func NewState(spec *agentos.RunPlanSpec, now time.Time) State {
 // NewStateFromStatus restores reducer state from a durable snapshot status.
 func NewStateFromStatus(spec *agentos.RunPlanSpec, status *agentos.RunPlanStatus) (State, error) {
 	if spec.PlanID == "" {
-		return State{}, fmt.Errorf("%w: plan id is required", agentos.ErrInvalidRunPlan)
+		return State{}, fmt.Errorf("%w: plan id is required", agentoscore.ErrInvalidRunPlan)
 	}
 
 	restored := *status
@@ -53,7 +54,7 @@ func NewStateFromStatus(spec *agentos.RunPlanSpec, status *agentos.RunPlanStatus
 	}
 
 	if restored.PlanID != spec.PlanID {
-		return State{}, fmt.Errorf("%w: snapshot plan id %q does not match spec plan id %q", agentos.ErrInvalidRunPlan, restored.PlanID, spec.PlanID)
+		return State{}, fmt.Errorf("%w: snapshot plan id %q does not match spec plan id %q", agentoscore.ErrInvalidRunPlan, restored.PlanID, spec.PlanID)
 	}
 
 	expectedNodes, err := expectedPlanNodeSet(spec)
@@ -77,11 +78,11 @@ func expectedPlanNodeSet(spec *agentos.RunPlanSpec) (map[string]struct{}, error)
 	for i := range spec.Nodes {
 		node := &spec.Nodes[i]
 		if node.NodeID == "" {
-			return nil, fmt.Errorf("%w: node id is required", agentos.ErrInvalidRunPlan)
+			return nil, fmt.Errorf("%w: node id is required", agentoscore.ErrInvalidRunPlan)
 		}
 
 		if _, exists := expectedNodes[node.NodeID]; exists {
-			return nil, fmt.Errorf("%w: duplicate node %q", agentos.ErrInvalidRunPlan, node.NodeID)
+			return nil, fmt.Errorf("%w: duplicate node %q", agentoscore.ErrInvalidRunPlan, node.NodeID)
 		}
 
 		expectedNodes[node.NodeID] = struct{}{}
@@ -101,7 +102,7 @@ func restorePlanNodeStatuses(status *agentos.RunPlanStatus, expectedNodes map[st
 
 	for nodeID := range expectedNodes {
 		if _, exists := nodes[nodeID]; !exists {
-			return nil, fmt.Errorf("%w: snapshot missing node %q", agentos.ErrInvalidRunPlan, nodeID)
+			return nil, fmt.Errorf("%w: snapshot missing node %q", agentoscore.ErrInvalidRunPlan, nodeID)
 		}
 	}
 
@@ -110,15 +111,15 @@ func restorePlanNodeStatuses(status *agentos.RunPlanStatus, expectedNodes map[st
 
 func restorePlanNodeStatus(nodes map[string]agentos.PlanNodeStatus, expectedNodes map[string]struct{}, node *agentos.PlanNodeStatus) error {
 	if node.NodeID == "" {
-		return fmt.Errorf("%w: snapshot node id is required", agentos.ErrInvalidRunPlan)
+		return fmt.Errorf("%w: snapshot node id is required", agentoscore.ErrInvalidRunPlan)
 	}
 
 	if _, expected := expectedNodes[node.NodeID]; !expected {
-		return fmt.Errorf("%w: snapshot contains unknown node %q", agentos.ErrInvalidRunPlan, node.NodeID)
+		return fmt.Errorf("%w: snapshot contains unknown node %q", agentoscore.ErrInvalidRunPlan, node.NodeID)
 	}
 
 	if _, exists := nodes[node.NodeID]; exists {
-		return fmt.Errorf("%w: snapshot contains duplicate node %q", agentos.ErrInvalidRunPlan, node.NodeID)
+		return fmt.Errorf("%w: snapshot contains duplicate node %q", agentoscore.ErrInvalidRunPlan, node.NodeID)
 	}
 
 	nodes[node.NodeID] = *node
@@ -160,7 +161,7 @@ type StateEvent struct {
 	Reason                 string                     `json:"reason,omitempty"`
 	Attempt                int32                      `json:"attempt,omitempty"`
 	Expansion              PlanDelta                  `json:"expansion"`
-	Artifacts              []agentos.ArtifactRef      `json:"artifacts,omitempty"`
+	Artifacts              []agentoscore.ArtifactRef  `json:"artifacts,omitempty"`
 	BudgetDelta            agentos.PlanBudgetUsage    `json:"budget_delta"`
 	InputTrace             InputResolutionTrace       `json:"input_trace"`
 	Capability             CapabilitySelectionTrace   `json:"capability"`
@@ -209,7 +210,7 @@ func (s *State) Apply(event *StateEvent) error {
 		return s.reportBudget(event, at)
 	}
 
-	return fmt.Errorf("%w: unknown plan event %q", agentos.ErrInvalidRunPlan, event.Kind)
+	return fmt.Errorf("%w: unknown plan event %q", agentoscore.ErrInvalidRunPlan, event.Kind)
 }
 
 func reducerPlanLifecycleForEvent(kind EventKind) (string, bool) {
@@ -262,7 +263,7 @@ func (s *State) publishArtifacts(event *StateEvent, at time.Time) error {
 	if event.NodeID != "" {
 		node, ok := s.nodes[event.NodeID]
 		if !ok {
-			return fmt.Errorf("%w: unknown node %q", agentos.ErrInvalidRunPlan, event.NodeID)
+			return fmt.Errorf("%w: unknown node %q", agentoscore.ErrInvalidRunPlan, event.NodeID)
 		}
 
 		node.Artifacts = append(node.Artifacts, event.Artifacts...)
@@ -281,7 +282,7 @@ func (s *State) touchNode(nodeID string, at time.Time) error {
 	if nodeID != "" {
 		node, ok := s.nodes[nodeID]
 		if !ok {
-			return fmt.Errorf("%w: unknown node %q", agentos.ErrInvalidRunPlan, nodeID)
+			return fmt.Errorf("%w: unknown node %q", agentoscore.ErrInvalidRunPlan, nodeID)
 		}
 
 		node.UpdatedAt = at
@@ -297,7 +298,7 @@ func (s *State) touchNode(nodeID string, at time.Time) error {
 func (s *State) transitionNode(nodeID, lifecycle string, event *StateEvent, at time.Time) error {
 	node, ok := s.nodes[nodeID]
 	if !ok {
-		return fmt.Errorf("%w: unknown node %q", agentos.ErrInvalidRunPlan, nodeID)
+		return fmt.Errorf("%w: unknown node %q", agentoscore.ErrInvalidRunPlan, nodeID)
 	}
 
 	previousLifecycle := node.LifecycleState
@@ -336,7 +337,7 @@ func (s *State) transitionNode(nodeID, lifecycle string, event *StateEvent, at t
 func (s *State) retryNode(nodeID string, event *StateEvent, at time.Time) error {
 	node, ok := s.nodes[nodeID]
 	if !ok {
-		return fmt.Errorf("%w: unknown node %q", agentos.ErrInvalidRunPlan, nodeID)
+		return fmt.Errorf("%w: unknown node %q", agentoscore.ErrInvalidRunPlan, nodeID)
 	}
 
 	if node.Attempts == 0 && event.Attempt > 1 {
@@ -358,13 +359,13 @@ func (s *State) retryNode(nodeID string, event *StateEvent, at time.Time) error 
 
 func (s *State) reportBudget(event *StateEvent, at time.Time) error {
 	if event.BudgetDelta.SpentCents < 0 {
-		return fmt.Errorf("%w: budget delta cannot be negative", agentos.ErrInvalidRunPlan)
+		return fmt.Errorf("%w: budget delta cannot be negative", agentoscore.ErrInvalidRunPlan)
 	}
 
 	if event.NodeID != "" {
 		node, ok := s.nodes[event.NodeID]
 		if !ok {
-			return fmt.Errorf("%w: unknown node %q", agentos.ErrInvalidRunPlan, event.NodeID)
+			return fmt.Errorf("%w: unknown node %q", agentoscore.ErrInvalidRunPlan, event.NodeID)
 		}
 
 		node.BudgetUsage.SpentCents += event.BudgetDelta.SpentCents
@@ -381,18 +382,18 @@ func (s *State) reportBudget(event *StateEvent, at time.Time) error {
 
 func (s *State) expand(delta PlanDelta, at time.Time) error {
 	if len(delta.Nodes) == 0 && len(delta.Edges) == 0 {
-		return fmt.Errorf("%w: expansion delta is empty", agentos.ErrInvalidRunPlan)
+		return fmt.Errorf("%w: expansion delta is empty", agentoscore.ErrInvalidRunPlan)
 	}
 
 	for i := range delta.Nodes {
 		node := &delta.Nodes[i]
 
 		if node.NodeID == "" {
-			return fmt.Errorf("%w: expansion node id is required", agentos.ErrInvalidRunPlan)
+			return fmt.Errorf("%w: expansion node id is required", agentoscore.ErrInvalidRunPlan)
 		}
 
 		if _, exists := s.nodes[node.NodeID]; exists {
-			return fmt.Errorf("%w: expansion node %q already exists", agentos.ErrInvalidRunPlan, node.NodeID)
+			return fmt.Errorf("%w: expansion node %q already exists", agentoscore.ErrInvalidRunPlan, node.NodeID)
 		}
 
 		s.nodes[node.NodeID] = agentos.PlanNodeStatus{

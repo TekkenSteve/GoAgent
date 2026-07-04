@@ -6,7 +6,8 @@ import (
 	"net/http"
 	"strconv"
 
-	"github.com/TekkenSteve/GoAgent/agentos"
+	agentos "github.com/TekkenSteve/GoAgent/agentos/control"
+	agentoscore "github.com/TekkenSteve/GoAgent/agentos/core"
 	"github.com/TekkenSteve/GoAgent/internal/controller/restapi/v1/request"
 	"github.com/TekkenSteve/GoAgent/pkg/sse"
 	"github.com/gofiber/fiber/v2"
@@ -151,7 +152,7 @@ func withPlanBody[T any](r *V1, ctx *fiber.Ctx, fn func(T) error) error {
 // @Router      /agentos/plans/{plan_id}/signals [post]
 func (r *V1) signalAgentOSPlan(ctx *fiber.Ctx) error {
 	return withPlanActionBody(r, ctx, func(req request.AgentOSPlanSignal, ref agentos.PlanRef) error {
-		signal := agentos.Signal{
+		signal := agentoscore.Signal{
 			Type:           req.Type,
 			IdempotencyKey: req.IdempotencyKey,
 			ActorID:        req.ActorID,
@@ -178,7 +179,7 @@ func (r *V1) signalAgentOSPlan(ctx *fiber.Ctx) error {
 // @Router      /agentos/plans/{plan_id}/control [post]
 func (r *V1) controlAgentOSPlan(ctx *fiber.Ctx) error {
 	return withPlanActionBody(r, ctx, func(req request.AgentOSPlanControl, ref agentos.PlanRef) error {
-		control := agentos.ControlRequest{
+		control := agentoscore.ControlRequest{
 			Operation:      req.Operation,
 			IdempotencyKey: req.IdempotencyKey,
 			RequestedAt:    req.RequestedAt,
@@ -277,7 +278,7 @@ func (r *V1) listAgentOSPlanAudits(ctx *fiber.Ctx) error {
 // @Param       node_id query string false "Node ID"
 // @Param       run_id query string false "Child run ID"
 // @Param       limit query int false "Maximum refs"
-// @Success     200 {array} agentos.ArtifactRef
+// @Success     200 {array} agentoscore.ArtifactRef
 // @Failure     400 {object} response.Error
 // @Failure     404 {object} response.Error
 // @Failure     500 {object} response.Error
@@ -305,7 +306,7 @@ func (r *V1) listAgentOSPlanArtifacts(ctx *fiber.Ctx) error {
 // @Param       artifact_id path string true "Artifact ID"
 // @Param       account_id query string true "Account ID"
 // @Param       project_id query string true "Project ID"
-// @Success     200 {object} agentos.Artifact
+// @Success     200 {object} agentoscore.Artifact
 // @Failure     400 {object} response.Error
 // @Failure     404 {object} response.Error
 // @Failure     500 {object} response.Error
@@ -442,7 +443,7 @@ func (r *V1) streamAgentOSPlanEvents(ctx *fiber.Ctx) error {
 	return nil
 }
 
-func writeAgentOSEventSSE(w *bufio.Writer, event *agentos.Event) bool {
+func writeAgentOSEventSSE(w *bufio.Writer, event *agentoscore.Event) bool {
 	data, err := json.Marshal(event)
 	if err != nil {
 		return writeAgentOSStreamError(w, err)
@@ -470,7 +471,7 @@ func writeAgentOSStreamError(w *bufio.Writer, err error) bool {
 	return w.Flush() == nil
 }
 
-func eventSSEID(event *agentos.Event) string {
+func eventSSEID(event *agentoscore.Event) string {
 	if event.EventID != "" {
 		return event.EventID
 	}

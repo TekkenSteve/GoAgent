@@ -6,7 +6,8 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/TekkenSteve/GoAgent/agentos"
+	agentos "github.com/TekkenSteve/GoAgent/agentos/control"
+	agentoscore "github.com/TekkenSteve/GoAgent/agentos/core"
 	"github.com/TekkenSteve/GoAgent/internal/agentfw/orchestration"
 	"github.com/TekkenSteve/GoAgent/internal/entity"
 	goredis "github.com/TekkenSteve/GoAgent/internal/pkg/redis"
@@ -189,7 +190,7 @@ func (r *runtime) StartPlanNode(ctx context.Context, planID, nodeID string, spec
 	return r.router.StartPlanNode(ctx, planID, nodeID, spec)
 }
 
-func (r *runtime) Signal(ctx context.Context, runID string, signal *agentos.Signal) error {
+func (r *runtime) Signal(ctx context.Context, runID string, signal *agentoscore.Signal) error {
 	if r == nil || r.router == nil {
 		return errRuntimeNotConfigured
 	}
@@ -205,7 +206,7 @@ func (r *runtime) Status(ctx context.Context, runID string) (agentos.RunStatus, 
 	return r.router.Status(ctx, runID)
 }
 
-func (r *runtime) Control(ctx context.Context, runID string, control *agentos.ControlRequest) error {
+func (r *runtime) Control(ctx context.Context, runID string, control *agentoscore.ControlRequest) error {
 	if r == nil || r.router == nil {
 		return errRuntimeNotConfigured
 	}
@@ -213,7 +214,7 @@ func (r *runtime) Control(ctx context.Context, runID string, control *agentos.Co
 	return r.router.Control(ctx, runID, control)
 }
 
-func (r *runtime) Subscribe(ctx context.Context, scope agentos.StreamScope) (agentos.Subscription, error) {
+func (r *runtime) Subscribe(ctx context.Context, scope agentoscore.StreamScope) (agentoscore.Subscription, error) {
 	if r == nil || r.router == nil {
 		return nil, errRuntimeNotConfigured
 	}
@@ -436,43 +437,43 @@ func (b *temporalNativeBackend) Start(ctx context.Context, spec *agentos.RunSpec
 	return runStatusFromEntity(&status), nil
 }
 
-func (b *temporalNativeBackend) Signal(ctx context.Context, runID string, signal *agentos.Signal) error {
+func (b *temporalNativeBackend) Signal(ctx context.Context, runID string, signal *agentoscore.Signal) error {
 	if signal.Type == "" {
-		return fmt.Errorf("%w: type is required", agentos.ErrInvalidSignal)
+		return fmt.Errorf("%w: type is required", agentoscore.ErrInvalidSignal)
 	}
 
 	switch signal.Type {
-	case agentos.SignalControlPause:
-		control := controlRequestFromSignal(agentos.ControlPause, signal)
+	case agentoscore.SignalControlPause:
+		control := controlRequestFromSignal(agentoscore.ControlPause, signal)
 
 		return b.Control(ctx, runID, &control)
-	case agentos.SignalControlResume:
-		control := controlRequestFromSignal(agentos.ControlResume, signal)
+	case agentoscore.SignalControlResume:
+		control := controlRequestFromSignal(agentoscore.ControlResume, signal)
 
 		return b.Control(ctx, runID, &control)
-	case agentos.SignalControlCancel:
-		control := controlRequestFromSignal(agentos.ControlCancel, signal)
+	case agentoscore.SignalControlCancel:
+		control := controlRequestFromSignal(agentoscore.ControlCancel, signal)
 
 		return b.Control(ctx, runID, &control)
-	case agentos.SignalUserMessage:
+	case agentoscore.SignalUserMessage:
 		message, err := userMessageSignalToNative(signal)
 		if err != nil {
 			return err
 		}
 
 		return b.executor.SignalUserMessage(ctx, runID, &message)
-	case agentos.SignalPlanNodeRetry, agentos.SignalPlanApprove, agentos.SignalPlanReject,
-		agentos.SignalUserApproval, agentos.SignalUserReject,
-		agentos.SignalToolResult, agentos.SignalHumanFeedback, agentos.SignalConfigPatch,
-		agentos.SignalMemoryPatch:
-		return fmt.Errorf("%w: unsupported by temporal native backend: %s", agentos.ErrInvalidSignal, signal.Type)
+	case agentoscore.SignalPlanNodeRetry, agentoscore.SignalPlanApprove, agentoscore.SignalPlanReject,
+		agentoscore.SignalUserApproval, agentoscore.SignalUserReject,
+		agentoscore.SignalToolResult, agentoscore.SignalHumanFeedback, agentoscore.SignalConfigPatch,
+		agentoscore.SignalMemoryPatch:
+		return fmt.Errorf("%w: unsupported by temporal native backend: %s", agentoscore.ErrInvalidSignal, signal.Type)
 	default:
-		return fmt.Errorf("%w: unsupported by temporal native backend: %s", agentos.ErrInvalidSignal, signal.Type)
+		return fmt.Errorf("%w: unsupported by temporal native backend: %s", agentoscore.ErrInvalidSignal, signal.Type)
 	}
 }
 
-func (b *temporalNativeBackend) Control(ctx context.Context, runID string, control *agentos.ControlRequest) error {
-	if err := agentos.ValidateControlRequest(control); err != nil {
+func (b *temporalNativeBackend) Control(ctx context.Context, runID string, control *agentoscore.ControlRequest) error {
+	if err := agentoscore.ValidateControlRequest(control); err != nil {
 		return err
 	}
 
@@ -489,7 +490,7 @@ func (b *temporalNativeBackend) Control(ctx context.Context, runID string, contr
 	case entity.ControlCancel:
 		return b.executor.Cancel(ctx, runID)
 	default:
-		return fmt.Errorf("%w: %s", agentos.ErrInvalidControlOperation, control.Operation)
+		return fmt.Errorf("%w: %s", agentoscore.ErrInvalidControlOperation, control.Operation)
 	}
 }
 
@@ -502,7 +503,7 @@ func (b *temporalNativeBackend) Status(ctx context.Context, runID string) (agent
 	return runStatusFromEntity(&status), nil
 }
 
-func (b *temporalNativeBackend) Subscribe(ctx context.Context, scope agentos.StreamScope) (agentos.Subscription, error) {
+func (b *temporalNativeBackend) Subscribe(ctx context.Context, scope agentoscore.StreamScope) (agentoscore.Subscription, error) {
 	if b.subscriber == nil {
 		return nil, errRuntimeNativeBackendNoRedisSubscriber
 	}
@@ -521,18 +522,18 @@ func (b *temporalNativeBackend) Capabilities() agentosruntime.BackendCapabilitie
 	}
 }
 
-func controlRequestFromSignal(operation agentos.ControlOperation, signal *agentos.Signal) agentos.ControlRequest {
-	return agentos.ControlRequest{
+func controlRequestFromSignal(operation agentoscore.ControlOperation, signal *agentoscore.Signal) agentoscore.ControlRequest {
+	return agentoscore.ControlRequest{
 		Operation:      operation,
 		IdempotencyKey: signal.IdempotencyKey,
 		RequestedAt:    signal.SentAt,
 	}
 }
 
-func userMessageSignalToNative(signal *agentos.Signal) (orchestration.UserMessageSignal, error) {
+func userMessageSignalToNative(signal *agentoscore.Signal) (orchestration.UserMessageSignal, error) {
 	content, ok := signal.Payload["content"].(string)
 	if !ok || content == "" {
-		return orchestration.UserMessageSignal{}, fmt.Errorf("%w: payload.content is required", agentos.ErrInvalidSignal)
+		return orchestration.UserMessageSignal{}, fmt.Errorf("%w: payload.content is required", agentoscore.ErrInvalidSignal)
 	}
 
 	sentAt := signal.SentAt

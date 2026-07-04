@@ -6,7 +6,8 @@ import (
 	"fmt"
 
 	sq "github.com/Masterminds/squirrel"
-	"github.com/TekkenSteve/GoAgent/agentos"
+	agentos "github.com/TekkenSteve/GoAgent/agentos/control"
+	agentoscore "github.com/TekkenSteve/GoAgent/agentos/core"
 	"github.com/TekkenSteve/GoAgent/internal/entity"
 	"github.com/TekkenSteve/GoAgent/internal/pkg/postgres"
 	"github.com/jackc/pgx/v5"
@@ -43,7 +44,7 @@ func (r *AgentOSRunRepo) Resolve(ctx context.Context, runID string) (agentos.Bac
 	}
 
 	if !exists {
-		return agentos.BackendRef{}, fmt.Errorf("%w: %s", agentos.ErrRunRouteNotFound, runID)
+		return agentos.BackendRef{}, fmt.Errorf("%w: %s", agentoscore.ErrRunRouteNotFound, runID)
 	}
 
 	return agentos.BackendRef{
@@ -55,11 +56,11 @@ func (r *AgentOSRunRepo) Resolve(ctx context.Context, runID string) (agentos.Bac
 // Upsert creates or updates the control-plane run record.
 func (r *AgentOSRunRepo) Upsert(ctx context.Context, record *entity.AgentOSRunRecord) error {
 	if record.RunID == "" {
-		return fmt.Errorf("%w: run id is required", agentos.ErrInvalidRunSpec)
+		return fmt.Errorf("%w: run id is required", agentoscore.ErrInvalidRunSpec)
 	}
 
 	if record.BackendKind == "" || record.BackendName == "" {
-		return fmt.Errorf("%w: kind and name are required", agentos.ErrInvalidBackendRef)
+		return fmt.Errorf("%w: kind and name are required", agentoscore.ErrInvalidBackendRef)
 	}
 
 	if record.LifecycleState == "" {

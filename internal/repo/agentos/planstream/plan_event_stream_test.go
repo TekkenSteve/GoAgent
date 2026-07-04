@@ -6,7 +6,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/TekkenSteve/GoAgent/agentos"
+	agentos "github.com/TekkenSteve/GoAgent/agentos/control"
+	agentoscore "github.com/TekkenSteve/GoAgent/agentos/core"
 	"github.com/TekkenSteve/GoAgent/internal/pkg/redis"
 	goredis "github.com/redis/go-redis/v9"
 )
@@ -85,7 +86,7 @@ func TestRedisPlanEventStreamPublishRequiresTenantScope(t *testing.T) {
 			t.Parallel()
 
 			err := stream.PublishPlanEvent(context.Background(), &event)
-			if !errors.Is(err, agentos.ErrInvalidPlanEvent) {
+			if !errors.Is(err, agentoscore.ErrInvalidPlanEvent) {
 				t.Fatalf("PublishPlanEvent error = %v, want ErrInvalidPlanEvent", err)
 			}
 		})
@@ -121,7 +122,7 @@ func TestRedisPlanEventStreamRejectsSequenceCollision(t *testing.T) {
 	event := testPlanEvent("evt-new")
 	err := stream.PublishPlanEvent(context.Background(), &event)
 
-	if !errors.Is(err, agentos.ErrInvalidPlanEvent) {
+	if !errors.Is(err, agentoscore.ErrInvalidPlanEvent) {
 		t.Fatalf("PublishPlanEvent error = %v, want ErrInvalidPlanEvent", err)
 	}
 }
@@ -137,7 +138,7 @@ func TestRedisPlanEventStreamRejectsSameSequenceWithDifferentPayload(t *testing.
 	changed.Payload = map[string]any{"ok": false}
 
 	err := stream.PublishPlanEvent(context.Background(), &changed)
-	if !errors.Is(err, agentos.ErrInvalidPlanEvent) {
+	if !errors.Is(err, agentoscore.ErrInvalidPlanEvent) {
 		t.Fatalf("PublishPlanEvent error = %v, want ErrInvalidPlanEvent", err)
 	}
 }
@@ -156,7 +157,7 @@ func TestRedisPlanEventStreamSubscribeRequiresTenantScope(t *testing.T) {
 			t.Fatalf("SubscribePlanEvents scope %#v returned subscription", scope)
 		}
 
-		if !errors.Is(err, agentos.ErrInvalidPlanScope) {
+		if !errors.Is(err, agentoscore.ErrInvalidPlanScope) {
 			t.Fatalf("SubscribePlanEvents scope %#v error = %v, want ErrInvalidPlanScope", scope, err)
 		}
 	}
@@ -215,9 +216,9 @@ func TestPlanEventStreamKeyIncludesTenantScope(t *testing.T) {
 
 func testPlanEvent(eventID string) agentos.PlanEvent {
 	return agentos.PlanEvent{
-		Event: agentos.Event{
+		Event: agentoscore.Event{
 			EventID:   eventID,
-			EventType: agentos.EventPlanNodeStarted,
+			EventType: agentoscore.EventPlanNodeStarted,
 			RunID:     "run-1",
 			Sequence:  7,
 			Timestamp: time.Date(2026, 6, 19, 10, 0, 0, 0, time.UTC),

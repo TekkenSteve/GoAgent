@@ -6,7 +6,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/TekkenSteve/GoAgent/agentos"
+	agentos "github.com/TekkenSteve/GoAgent/agentos/control"
+	agentoscore "github.com/TekkenSteve/GoAgent/agentos/core"
 	"github.com/TekkenSteve/GoAgent/internal/usecase/agentosruntime"
 )
 
@@ -72,7 +73,7 @@ func assertBackendStart(ctx context.Context, t *testing.T, backend agentosruntim
 func assertBackendSignal(ctx context.Context, t *testing.T, backend agentosruntime.AgentBackend, runID string) {
 	t.Helper()
 
-	signal := agentos.Signal{Type: agentos.SignalUserMessage, IdempotencyKey: "agentos-conformance-signal", Payload: map[string]any{"content": "continue"}, SentAt: time.Date(2026, 6, 16, 12, 0, 0, 0, time.UTC)}
+	signal := agentoscore.Signal{Type: agentoscore.SignalUserMessage, IdempotencyKey: "agentos-conformance-signal", Payload: map[string]any{"content": "continue"}, SentAt: time.Date(2026, 6, 16, 12, 0, 0, 0, time.UTC)}
 	if err := backend.Signal(ctx, runID, &signal); err != nil {
 		t.Fatalf("Signal user.message: %v", err)
 	}
@@ -81,7 +82,7 @@ func assertBackendSignal(ctx context.Context, t *testing.T, backend agentosrunti
 func assertBackendControl(ctx context.Context, t *testing.T, backend agentosruntime.AgentBackend, runID string) {
 	t.Helper()
 
-	control := agentos.ControlRequest{Operation: agentos.ControlCancel}
+	control := agentoscore.ControlRequest{Operation: agentoscore.ControlCancel}
 	if err := backend.Control(ctx, runID, &control); err != nil {
 		t.Fatalf("Control cancel: %v", err)
 	}
@@ -111,7 +112,7 @@ func assertBackendSubscribe(ctx context.Context, t *testing.T, tc *BackendConfor
 		return
 	}
 
-	subscription, err := tc.Backend.Subscribe(ctx, agentos.StreamScope{RunID: tc.RunID, ThreadID: "agentos-conformance-thread", AfterSequence: conformanceAfterSequence})
+	subscription, err := tc.Backend.Subscribe(ctx, agentoscore.StreamScope{RunID: tc.RunID, ThreadID: "agentos-conformance-thread", AfterSequence: conformanceAfterSequence})
 	if err != nil {
 		t.Fatalf("Subscribe: %v", err)
 	}
@@ -124,27 +125,27 @@ func assertBackendSubscribe(ctx context.Context, t *testing.T, tc *BackendConfor
 
 // SubscriberProbe records SubscribeAgentOS calls for backend conformance tests.
 type SubscriberProbe struct {
-	scope agentos.StreamScope
+	scope agentoscore.StreamScope
 }
 
 // SubscribeAgentOS implements EventSubscriber.
-func (s *SubscriberProbe) SubscribeAgentOS(_ context.Context, scope agentos.StreamScope) (agentos.Subscription, error) {
+func (s *SubscriberProbe) SubscribeAgentOS(_ context.Context, scope agentoscore.StreamScope) (agentoscore.Subscription, error) {
 	s.scope = scope
 
-	return &probeSubscription{events: make(chan agentos.Event)}, nil
+	return &probeSubscription{events: make(chan agentoscore.Event)}, nil
 }
 
 // LastScope returns the last stream scope received by the probe.
-func (s *SubscriberProbe) LastScope() agentos.StreamScope {
+func (s *SubscriberProbe) LastScope() agentoscore.StreamScope {
 	return s.scope
 }
 
 type probeSubscription struct {
-	events chan agentos.Event
+	events chan agentoscore.Event
 	closed bool
 }
 
-func (s *probeSubscription) Events() <-chan agentos.Event {
+func (s *probeSubscription) Events() <-chan agentoscore.Event {
 	return s.events
 }
 

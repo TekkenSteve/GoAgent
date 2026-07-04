@@ -6,7 +6,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/TekkenSteve/GoAgent/agentos"
+	agentos "github.com/TekkenSteve/GoAgent/agentos/control"
+	agentoscore "github.com/TekkenSteve/GoAgent/agentos/core"
 )
 
 func TestValidatePlanMetricSampleRequiresDurableIdentity(t *testing.T) {
@@ -16,7 +17,7 @@ func TestValidatePlanMetricSampleRequiresDurableIdentity(t *testing.T) {
 	sample.EventID = ""
 
 	err := ValidatePlanMetricSample(&sample)
-	if !errors.Is(err, agentos.ErrInvalidRunPlan) {
+	if !errors.Is(err, agentoscore.ErrInvalidRunPlan) {
 		t.Fatalf("ValidatePlanMetricSample error = %v, want ErrInvalidRunPlan", err)
 	}
 }
@@ -28,7 +29,7 @@ func TestValidatePlanMetricSampleRejectsNonFiniteValue(t *testing.T) {
 	sample.Value = math.Inf(1)
 
 	err := ValidatePlanMetricSample(&sample)
-	if !errors.Is(err, agentos.ErrInvalidRunPlan) {
+	if !errors.Is(err, agentoscore.ErrInvalidRunPlan) {
 		t.Fatalf("ValidatePlanMetricSample error = %v, want ErrInvalidRunPlan", err)
 	}
 }
@@ -55,7 +56,7 @@ func TestValidatePlanMetricSampleIdempotencyRejectsChangedValue(t *testing.T) {
 	replay.Value = 2
 
 	err := ValidatePlanMetricSampleIdempotency(&first, &replay)
-	if !errors.Is(err, agentos.ErrInvalidRunPlan) {
+	if !errors.Is(err, agentoscore.ErrInvalidRunPlan) {
 		t.Fatalf("ValidatePlanMetricSampleIdempotency error = %v, want ErrInvalidRunPlan", err)
 	}
 }

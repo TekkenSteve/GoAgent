@@ -6,7 +6,8 @@ import (
 	"sort"
 	"time"
 
-	"github.com/TekkenSteve/GoAgent/agentos"
+	agentos "github.com/TekkenSteve/GoAgent/agentos/control"
+	agentoscore "github.com/TekkenSteve/GoAgent/agentos/core"
 )
 
 // PlanMetricName identifies one durable RunPlan metric projection. Samples are
@@ -162,37 +163,37 @@ func newMetricProjection(spec *agentos.RunPlanSpec, state PlanMetricProjectionSt
 
 func (p *metricProjection) apply(event *agentos.PlanEvent, emit bool) error {
 	switch event.EventType {
-	case agentos.EventPlanStarted:
+	case agentoscore.EventPlanStarted:
 		p.recordPlanStarted(event, emit)
-	case agentos.EventPlanSucceeded, agentos.EventPlanFailed, agentos.EventPlanCanceled:
+	case agentoscore.EventPlanSucceeded, agentoscore.EventPlanFailed, agentoscore.EventPlanCanceled:
 		p.recordPlanCompleted(event, emit)
-	case agentos.EventPlanNodeStarted:
+	case agentoscore.EventPlanNodeStarted:
 		p.recordNodeStarted(event, emit)
-	case agentos.EventPlanNodeSucceeded, agentos.EventPlanNodeFailed, agentos.EventPlanNodeCanceled, agentos.EventPlanNodeSkipped:
+	case agentoscore.EventPlanNodeSucceeded, agentoscore.EventPlanNodeFailed, agentoscore.EventPlanNodeCanceled, agentoscore.EventPlanNodeSkipped:
 		p.recordNodeCompleted(event, emit)
-	case agentos.EventNodeOutputPublished:
+	case agentoscore.EventNodeOutputPublished:
 		return p.recordArtifactPublished(event, emit)
-	case agentos.EventUsageReported:
+	case agentoscore.EventUsageReported:
 		return p.recordUsageReported(event, emit)
-	case agentos.EventPlanExpanded:
+	case agentoscore.EventPlanExpanded:
 		p.recordPlanExpanded(event, emit)
-	case agentos.EventPlanNodeRetryScheduled:
+	case agentoscore.EventPlanNodeRetryScheduled:
 		p.recordNodeRetryScheduled(event, emit)
-	case agentos.EventRunStarted, agentos.EventRunCompleted, agentos.EventRunFailed,
-		agentos.EventRunCancelled, agentos.EventRunPaused, agentos.EventRunResumed,
-		agentos.EventAgentStepStarted, agentos.EventAgentStepCompleted, agentos.EventAgentStepFailed,
-		agentos.EventAgentMessageDelta, agentos.EventAgentMessageCompleted,
-		agentos.EventToolCallStarted, agentos.EventToolCallDelta, agentos.EventToolCallCompleted,
-		agentos.EventToolCallFailed,
-		agentos.EventApprovalRequested, agentos.EventApprovalResolved,
-		agentos.EventCheckpointCreated, agentos.EventArtifactCreated,
-		agentos.EventNodeInputResolved, agentos.EventCapabilitySelected, agentos.EventConditionEvaluated,
-		agentos.EventPlanBlocked, agentos.EventPlanApproved, agentos.EventPlanRejected,
-		agentos.EventPlanNodeReady,
-		agentos.EventProcessStarted, agentos.EventProcessWaiting, agentos.EventProcessBlocked,
-		agentos.EventProcessSucceeded, agentos.EventProcessFailed, agentos.EventProcessCanceled,
-		agentos.EventProcessTimerScheduled, agentos.EventProcessTimerFired,
-		agentos.EventProcessSignalReceived, agentos.EventProcessControlReceived:
+	case agentoscore.EventRunStarted, agentoscore.EventRunCompleted, agentoscore.EventRunFailed,
+		agentoscore.EventRunCancelled, agentoscore.EventRunPaused, agentoscore.EventRunResumed,
+		agentoscore.EventAgentStepStarted, agentoscore.EventAgentStepCompleted, agentoscore.EventAgentStepFailed,
+		agentoscore.EventAgentMessageDelta, agentoscore.EventAgentMessageCompleted,
+		agentoscore.EventToolCallStarted, agentoscore.EventToolCallDelta, agentoscore.EventToolCallCompleted,
+		agentoscore.EventToolCallFailed,
+		agentoscore.EventApprovalRequested, agentoscore.EventApprovalResolved,
+		agentoscore.EventCheckpointCreated, agentoscore.EventArtifactCreated,
+		agentoscore.EventNodeInputResolved, agentoscore.EventCapabilitySelected, agentoscore.EventConditionEvaluated,
+		agentoscore.EventPlanBlocked, agentoscore.EventPlanApproved, agentoscore.EventPlanRejected,
+		agentoscore.EventPlanNodeReady,
+		agentoscore.EventProcessStarted, agentoscore.EventProcessWaiting, agentoscore.EventProcessBlocked,
+		agentoscore.EventProcessSucceeded, agentoscore.EventProcessFailed, agentoscore.EventProcessCanceled,
+		agentoscore.EventProcessTimerScheduled, agentoscore.EventProcessTimerFired,
+		agentoscore.EventProcessSignalReceived, agentoscore.EventProcessControlReceived:
 		return nil
 	}
 
@@ -259,7 +260,7 @@ func (p *metricProjection) recordNodeCompleted(event *agentos.PlanEvent, emit bo
 
 	delete(p.nodeStarts, key)
 
-	if event.EventType == agentos.EventPlanNodeFailed {
+	if event.EventType == agentoscore.EventPlanNodeFailed {
 		p.samples = append(p.samples, metricSample(p.spec, event, PlanMetricBackendErrorsTotal, 1, metricUnitCount, backendLabels(node)))
 	}
 }
@@ -356,7 +357,7 @@ func artifactMetricSamples(spec *agentos.RunPlanSpec, event *agentos.PlanEvent) 
 		return nil, nil
 	}
 
-	artifacts, err := decodePlanDebugPayload[[]agentos.ArtifactRef](value, planEventPayloadArtifacts)
+	artifacts, err := decodePlanDebugPayload[[]agentoscore.ArtifactRef](value, planEventPayloadArtifacts)
 	if err != nil {
 		return nil, err
 	}
@@ -496,69 +497,69 @@ func cloneMetricLabels(input map[string]string) map[string]string {
 	return output
 }
 
-func planLifecycleForEvent(eventType agentos.EventType) string {
+func planLifecycleForEvent(eventType agentoscore.EventType) string {
 	switch eventType {
-	case agentos.EventPlanSucceeded:
+	case agentoscore.EventPlanSucceeded:
 		return agentos.PlanLifecycleSucceeded
-	case agentos.EventPlanFailed:
+	case agentoscore.EventPlanFailed:
 		return agentos.PlanLifecycleFailed
-	case agentos.EventPlanCanceled:
+	case agentoscore.EventPlanCanceled:
 		return agentos.PlanLifecycleCanceled
-	case agentos.EventProcessStarted, agentos.EventProcessWaiting, agentos.EventProcessBlocked,
-		agentos.EventProcessSucceeded, agentos.EventProcessFailed, agentos.EventProcessCanceled,
-		agentos.EventProcessTimerScheduled, agentos.EventProcessTimerFired,
-		agentos.EventProcessSignalReceived, agentos.EventProcessControlReceived:
+	case agentoscore.EventProcessStarted, agentoscore.EventProcessWaiting, agentoscore.EventProcessBlocked,
+		agentoscore.EventProcessSucceeded, agentoscore.EventProcessFailed, agentoscore.EventProcessCanceled,
+		agentoscore.EventProcessTimerScheduled, agentoscore.EventProcessTimerFired,
+		agentoscore.EventProcessSignalReceived, agentoscore.EventProcessControlReceived:
 		return ""
-	case agentos.EventRunStarted, agentos.EventRunCompleted, agentos.EventRunFailed,
-		agentos.EventRunCancelled, agentos.EventRunPaused, agentos.EventRunResumed,
-		agentos.EventAgentStepStarted, agentos.EventAgentStepCompleted, agentos.EventAgentStepFailed,
-		agentos.EventAgentMessageDelta, agentos.EventAgentMessageCompleted,
-		agentos.EventToolCallStarted, agentos.EventToolCallDelta, agentos.EventToolCallCompleted,
-		agentos.EventToolCallFailed, agentos.EventApprovalRequested, agentos.EventApprovalResolved,
-		agentos.EventUsageReported, agentos.EventCheckpointCreated, agentos.EventArtifactCreated,
-		agentos.EventNodeInputResolved, agentos.EventNodeOutputPublished,
-		agentos.EventCapabilitySelected, agentos.EventConditionEvaluated,
-		agentos.EventPlanStarted, agentos.EventPlanBlocked, agentos.EventPlanExpanded,
-		agentos.EventPlanApproved, agentos.EventPlanRejected,
-		agentos.EventPlanNodeReady, agentos.EventPlanNodeStarted,
-		agentos.EventPlanNodeSucceeded, agentos.EventPlanNodeFailed,
-		agentos.EventPlanNodeRetryScheduled, agentos.EventPlanNodeSkipped,
-		agentos.EventPlanNodeCanceled:
+	case agentoscore.EventRunStarted, agentoscore.EventRunCompleted, agentoscore.EventRunFailed,
+		agentoscore.EventRunCancelled, agentoscore.EventRunPaused, agentoscore.EventRunResumed,
+		agentoscore.EventAgentStepStarted, agentoscore.EventAgentStepCompleted, agentoscore.EventAgentStepFailed,
+		agentoscore.EventAgentMessageDelta, agentoscore.EventAgentMessageCompleted,
+		agentoscore.EventToolCallStarted, agentoscore.EventToolCallDelta, agentoscore.EventToolCallCompleted,
+		agentoscore.EventToolCallFailed, agentoscore.EventApprovalRequested, agentoscore.EventApprovalResolved,
+		agentoscore.EventUsageReported, agentoscore.EventCheckpointCreated, agentoscore.EventArtifactCreated,
+		agentoscore.EventNodeInputResolved, agentoscore.EventNodeOutputPublished,
+		agentoscore.EventCapabilitySelected, agentoscore.EventConditionEvaluated,
+		agentoscore.EventPlanStarted, agentoscore.EventPlanBlocked, agentoscore.EventPlanExpanded,
+		agentoscore.EventPlanApproved, agentoscore.EventPlanRejected,
+		agentoscore.EventPlanNodeReady, agentoscore.EventPlanNodeStarted,
+		agentoscore.EventPlanNodeSucceeded, agentoscore.EventPlanNodeFailed,
+		agentoscore.EventPlanNodeRetryScheduled, agentoscore.EventPlanNodeSkipped,
+		agentoscore.EventPlanNodeCanceled:
 		return ""
 	default:
 		return ""
 	}
 }
 
-func nodeLifecycleForEvent(eventType agentos.EventType) string {
+func nodeLifecycleForEvent(eventType agentoscore.EventType) string {
 	switch eventType {
-	case agentos.EventPlanNodeSucceeded:
+	case agentoscore.EventPlanNodeSucceeded:
 		return agentos.PlanNodeSucceeded
-	case agentos.EventPlanNodeFailed:
+	case agentoscore.EventPlanNodeFailed:
 		return agentos.PlanNodeFailed
-	case agentos.EventPlanNodeCanceled:
+	case agentoscore.EventPlanNodeCanceled:
 		return agentos.PlanNodeCanceled
-	case agentos.EventPlanNodeSkipped:
+	case agentoscore.EventPlanNodeSkipped:
 		return agentos.PlanNodeSkipped
-	case agentos.EventProcessStarted, agentos.EventProcessWaiting, agentos.EventProcessBlocked,
-		agentos.EventProcessSucceeded, agentos.EventProcessFailed, agentos.EventProcessCanceled,
-		agentos.EventProcessTimerScheduled, agentos.EventProcessTimerFired,
-		agentos.EventProcessSignalReceived, agentos.EventProcessControlReceived:
+	case agentoscore.EventProcessStarted, agentoscore.EventProcessWaiting, agentoscore.EventProcessBlocked,
+		agentoscore.EventProcessSucceeded, agentoscore.EventProcessFailed, agentoscore.EventProcessCanceled,
+		agentoscore.EventProcessTimerScheduled, agentoscore.EventProcessTimerFired,
+		agentoscore.EventProcessSignalReceived, agentoscore.EventProcessControlReceived:
 		return ""
-	case agentos.EventRunStarted, agentos.EventRunCompleted, agentos.EventRunFailed,
-		agentos.EventRunCancelled, agentos.EventRunPaused, agentos.EventRunResumed,
-		agentos.EventAgentStepStarted, agentos.EventAgentStepCompleted, agentos.EventAgentStepFailed,
-		agentos.EventAgentMessageDelta, agentos.EventAgentMessageCompleted,
-		agentos.EventToolCallStarted, agentos.EventToolCallDelta, agentos.EventToolCallCompleted,
-		agentos.EventToolCallFailed, agentos.EventApprovalRequested, agentos.EventApprovalResolved,
-		agentos.EventUsageReported, agentos.EventCheckpointCreated, agentos.EventArtifactCreated,
-		agentos.EventNodeInputResolved, agentos.EventNodeOutputPublished,
-		agentos.EventCapabilitySelected, agentos.EventConditionEvaluated,
-		agentos.EventPlanStarted, agentos.EventPlanBlocked, agentos.EventPlanExpanded,
-		agentos.EventPlanApproved, agentos.EventPlanRejected,
-		agentos.EventPlanSucceeded, agentos.EventPlanFailed, agentos.EventPlanCanceled,
-		agentos.EventPlanNodeReady, agentos.EventPlanNodeStarted,
-		agentos.EventPlanNodeRetryScheduled:
+	case agentoscore.EventRunStarted, agentoscore.EventRunCompleted, agentoscore.EventRunFailed,
+		agentoscore.EventRunCancelled, agentoscore.EventRunPaused, agentoscore.EventRunResumed,
+		agentoscore.EventAgentStepStarted, agentoscore.EventAgentStepCompleted, agentoscore.EventAgentStepFailed,
+		agentoscore.EventAgentMessageDelta, agentoscore.EventAgentMessageCompleted,
+		agentoscore.EventToolCallStarted, agentoscore.EventToolCallDelta, agentoscore.EventToolCallCompleted,
+		agentoscore.EventToolCallFailed, agentoscore.EventApprovalRequested, agentoscore.EventApprovalResolved,
+		agentoscore.EventUsageReported, agentoscore.EventCheckpointCreated, agentoscore.EventArtifactCreated,
+		agentoscore.EventNodeInputResolved, agentoscore.EventNodeOutputPublished,
+		agentoscore.EventCapabilitySelected, agentoscore.EventConditionEvaluated,
+		agentoscore.EventPlanStarted, agentoscore.EventPlanBlocked, agentoscore.EventPlanExpanded,
+		agentoscore.EventPlanApproved, agentoscore.EventPlanRejected,
+		agentoscore.EventPlanSucceeded, agentoscore.EventPlanFailed, agentoscore.EventPlanCanceled,
+		agentoscore.EventPlanNodeReady, agentoscore.EventPlanNodeStarted,
+		agentoscore.EventPlanNodeRetryScheduled:
 		return ""
 	default:
 		return ""

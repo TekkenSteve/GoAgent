@@ -12,7 +12,7 @@ import (
 	"path/filepath"
 	"strconv"
 
-	"github.com/TekkenSteve/GoAgent/agentos"
+	agentos "github.com/TekkenSteve/GoAgent/agentos/control"
 	"github.com/TekkenSteve/GoAgent/internal/usecase/agentosplan"
 	"github.com/TekkenSteve/GoAgent/internal/usecase/agentosplan/serverlessworkflow"
 	"sigs.k8s.io/yaml"

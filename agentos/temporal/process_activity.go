@@ -4,7 +4,8 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/TekkenSteve/GoAgent/agentos"
+	agentoscore "github.com/TekkenSteve/GoAgent/agentos/core"
+	agentosproc "github.com/TekkenSteve/GoAgent/agentos/process"
 	"github.com/TekkenSteve/GoAgent/internal/usecase/agentosprocess"
 )
 
@@ -24,73 +25,73 @@ func NewProcessActivities(index agentosprocess.ProcessIndex, events agentosproce
 }
 
 type startProcessActivityInput struct {
-	Spec agentos.ProcessSpec
+	Spec agentosproc.Spec
 }
 
-func (a *ProcessActivities) StartProcessActivity(ctx context.Context, input *startProcessActivityInput) (agentos.ProcessStatus, error) {
+func (a *ProcessActivities) StartProcessActivity(ctx context.Context, input *startProcessActivityInput) (agentosproc.Status, error) {
 	if a == nil || a.Runtime == nil {
-		return agentos.ProcessStatus{}, fmt.Errorf("%w: process activity runtime is required", agentos.ErrInvalidProcess)
+		return agentosproc.Status{}, fmt.Errorf("%w: process activity runtime is required", agentoscore.ErrInvalidProcess)
 	}
 
 	return a.Runtime.StartProcess(ctx, &input.Spec)
 }
 
 type signalProcessActivityInput struct {
-	Ref    agentos.ProcessRef
-	Signal agentos.Signal
+	Ref    agentosproc.Ref
+	Signal agentoscore.Signal
 }
 
-func (a *ProcessActivities) SignalProcessActivity(ctx context.Context, input *signalProcessActivityInput) (agentos.ProcessStatus, error) {
+func (a *ProcessActivities) SignalProcessActivity(ctx context.Context, input *signalProcessActivityInput) (agentosproc.Status, error) {
 	if a == nil || a.Runtime == nil {
-		return agentos.ProcessStatus{}, fmt.Errorf("%w: process activity runtime is required", agentos.ErrInvalidProcess)
+		return agentosproc.Status{}, fmt.Errorf("%w: process activity runtime is required", agentoscore.ErrInvalidProcess)
 	}
 
 	if err := a.Runtime.SignalProcess(ctx, input.Ref, &input.Signal); err != nil {
-		return agentos.ProcessStatus{}, err
+		return agentosproc.Status{}, err
 	}
 
 	return a.Runtime.StatusProcess(ctx, input.Ref)
 }
 
 type controlProcessActivityInput struct {
-	Ref     agentos.ProcessRef
-	Control agentos.ControlRequest
+	Ref     agentosproc.Ref
+	Control agentoscore.ControlRequest
 }
 
-func (a *ProcessActivities) ControlProcessActivity(ctx context.Context, input *controlProcessActivityInput) (agentos.ProcessStatus, error) {
+func (a *ProcessActivities) ControlProcessActivity(ctx context.Context, input *controlProcessActivityInput) (agentosproc.Status, error) {
 	if a == nil || a.Runtime == nil {
-		return agentos.ProcessStatus{}, fmt.Errorf("%w: process activity runtime is required", agentos.ErrInvalidProcess)
+		return agentosproc.Status{}, fmt.Errorf("%w: process activity runtime is required", agentoscore.ErrInvalidProcess)
 	}
 
 	if err := a.Runtime.ControlProcess(ctx, input.Ref, &input.Control); err != nil {
-		return agentos.ProcessStatus{}, err
+		return agentosproc.Status{}, err
 	}
 
 	return a.Runtime.StatusProcess(ctx, input.Ref)
 }
 
 type fireProcessTimerActivityInput struct {
-	Ref   agentos.ProcessRef
-	Timer agentos.ProcessTimerSpec
+	Ref   agentosproc.Ref
+	Timer agentosproc.TimerSpec
 	At    string
 }
 
-func (a *ProcessActivities) FireProcessTimerActivity(ctx context.Context, input *fireProcessTimerActivityInput) (agentos.ProcessStatus, error) {
+func (a *ProcessActivities) FireProcessTimerActivity(ctx context.Context, input *fireProcessTimerActivityInput) (agentosproc.Status, error) {
 	if a == nil || a.Runtime == nil {
-		return agentos.ProcessStatus{}, fmt.Errorf("%w: process activity runtime is required", agentos.ErrInvalidProcess)
+		return agentosproc.Status{}, fmt.Errorf("%w: process activity runtime is required", agentoscore.ErrInvalidProcess)
 	}
 
-	signal := agentos.Signal{
+	signal := agentoscore.Signal{
 		Type:           input.Timer.Signal,
 		IdempotencyKey: processTimerIdempotencyKey(input.Ref.ProcessID, input.Timer.TimerID, input.At),
 		Payload:        cloneAnyMap(input.Timer.Payload),
 	}
 	if signal.Type == "" {
-		signal.Type = agentos.SignalType("process.timer." + input.Timer.TimerID)
+		signal.Type = agentoscore.SignalType("process.timer." + input.Timer.TimerID)
 	}
 
 	if err := a.Runtime.SignalProcess(ctx, input.Ref, &signal); err != nil {
-		return agentos.ProcessStatus{}, err
+		return agentosproc.Status{}, err
 	}
 
 	return a.Runtime.StatusProcess(ctx, input.Ref)

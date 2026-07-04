@@ -7,7 +7,8 @@ import (
 	"maps"
 	"time"
 
-	"github.com/TekkenSteve/GoAgent/agentos"
+	agentos "github.com/TekkenSteve/GoAgent/agentos/control"
+	agentoscore "github.com/TekkenSteve/GoAgent/agentos/core"
 	"github.com/TekkenSteve/GoAgent/internal/pkg/postgres"
 	goredis "github.com/TekkenSteve/GoAgent/internal/pkg/redis"
 	"github.com/TekkenSteve/GoAgent/internal/repo/agentos/planstream"
@@ -185,23 +186,23 @@ func (r *planRuntime) validatePlanInput(spec *agentos.RunPlanSpec) error {
 	}
 
 	if spec == nil {
-		return fmt.Errorf("%w: run plan spec is required", agentos.ErrInvalidRunPlan)
+		return fmt.Errorf("%w: run plan spec is required", agentoscore.ErrInvalidRunPlan)
 	}
 
 	if spec.PlanID == "" {
-		return fmt.Errorf("%w: plan id is required", agentos.ErrInvalidRunPlan)
+		return fmt.Errorf("%w: plan id is required", agentoscore.ErrInvalidRunPlan)
 	}
 
 	if spec.AccountID == "" {
-		return fmt.Errorf("%w: account id is required", agentos.ErrInvalidPlanScope)
+		return fmt.Errorf("%w: account id is required", agentoscore.ErrInvalidPlanScope)
 	}
 
 	if spec.ProjectID == "" {
-		return fmt.Errorf("%w: project id is required", agentos.ErrInvalidPlanScope)
+		return fmt.Errorf("%w: project id is required", agentoscore.ErrInvalidPlanScope)
 	}
 
 	if spec.IdempotencyKey == "" {
-		return fmt.Errorf("%w: plan idempotency key is required", agentos.ErrInvalidRunPlan)
+		return fmt.Errorf("%w: plan idempotency key is required", agentoscore.ErrInvalidRunPlan)
 	}
 
 	if r.planIndex == nil {
@@ -299,13 +300,13 @@ func (r *planRuntime) authorizePlan(ctx context.Context, ref agentos.PlanRef) (a
 	}
 
 	if !exists {
-		return agentos.RunPlanSpec{}, agentos.RunPlanStatus{}, fmt.Errorf("%w: %s", agentos.ErrPlanRouteNotFound, ref.PlanID)
+		return agentos.RunPlanSpec{}, agentos.RunPlanStatus{}, fmt.Errorf("%w: %s", agentoscore.ErrPlanRouteNotFound, ref.PlanID)
 	}
 
 	return spec, status, nil
 }
 
-func (r *planRuntime) SignalPlan(ctx context.Context, ref agentos.PlanRef, signal *agentos.Signal) error {
+func (r *planRuntime) SignalPlan(ctx context.Context, ref agentos.PlanRef, signal *agentoscore.Signal) error {
 	if err := agentosplan.ValidatePlanRef(ref); err != nil {
 		return err
 	}
@@ -355,7 +356,7 @@ func (r *planRuntime) SignalPlan(ctx context.Context, ref agentos.PlanRef, signa
 	return nil
 }
 
-func (r *planRuntime) ControlPlan(ctx context.Context, ref agentos.PlanRef, control *agentos.ControlRequest) error {
+func (r *planRuntime) ControlPlan(ctx context.Context, ref agentos.PlanRef, control *agentoscore.ControlRequest) error {
 	if err := r.validateControlPlanRequest(ctx, ref, control); err != nil {
 		return err
 	}
@@ -388,21 +389,21 @@ func (r *planRuntime) ControlPlan(ctx context.Context, ref agentos.PlanRef, cont
 	return nil
 }
 
-func (r *planRuntime) validateControlPlanRequest(ctx context.Context, ref agentos.PlanRef, control *agentos.ControlRequest) error {
+func (r *planRuntime) validateControlPlanRequest(ctx context.Context, ref agentos.PlanRef, control *agentoscore.ControlRequest) error {
 	if err := agentosplan.ValidatePlanRef(ref); err != nil {
 		return err
 	}
 
-	if err := agentos.ValidateControlRequest(control); err != nil {
+	if err := agentoscore.ValidateControlRequest(control); err != nil {
 		return err
 	}
 
 	if control.IdempotencyKey == "" {
-		return fmt.Errorf("%w: control idempotency key is required", agentos.ErrInvalidControlOperation)
+		return fmt.Errorf("%w: control idempotency key is required", agentoscore.ErrInvalidControlOperation)
 	}
 
 	if control.ActorID == "" {
-		return fmt.Errorf("%w: control actor id is required", agentos.ErrInvalidControlOperation)
+		return fmt.Errorf("%w: control actor id is required", agentoscore.ErrInvalidControlOperation)
 	}
 
 	_, _, err := r.authorizePlan(ctx, ref)
@@ -410,7 +411,7 @@ func (r *planRuntime) validateControlPlanRequest(ctx context.Context, ref agento
 	return err
 }
 
-func (r *planRuntime) deliverControlPlanCommand(ctx context.Context, ref agentos.PlanRef, control *agentos.ControlRequest, command *agentosplan.PlanCommandRecord) error {
+func (r *planRuntime) deliverControlPlanCommand(ctx context.Context, ref agentos.PlanRef, control *agentoscore.ControlRequest, command *agentosplan.PlanCommandRecord) error {
 	if r.temporalClient == nil {
 		err := errPlanRuntimeTemporalClientNotConfigured
 		markErr := r.markPlanCommandFailed(ctx, command, err)
@@ -428,7 +429,7 @@ func (r *planRuntime) deliverControlPlanCommand(ctx context.Context, ref agentos
 	return errors.Join(fmt.Errorf("agentos temporal plan runtime - control plan workflow: %w", err), markErr)
 }
 
-func (r *planRuntime) SubscribePlan(ctx context.Context, scope *agentos.PlanStreamScope) (agentos.Subscription, error) {
+func (r *planRuntime) SubscribePlan(ctx context.Context, scope *agentos.PlanStreamScope) (agentoscore.Subscription, error) {
 	if r == nil {
 		return nil, errPlanRuntimeNotConfigured
 	}
@@ -553,7 +554,7 @@ func (r *planRuntime) ListPlanAudits(ctx context.Context, scope *agentos.PlanAud
 	return r.auditStore.ListAuditRecords(ctx, scope)
 }
 
-func (r *planRuntime) ListPlanArtifacts(ctx context.Context, scope *agentos.PlanArtifactScope) ([]agentos.ArtifactRef, error) {
+func (r *planRuntime) ListPlanArtifacts(ctx context.Context, scope *agentos.PlanArtifactScope) ([]agentoscore.ArtifactRef, error) {
 	if r == nil {
 		return nil, errPlanRuntimeNotConfigured
 	}
@@ -569,33 +570,33 @@ func (r *planRuntime) ListPlanArtifacts(ctx context.Context, scope *agentos.Plan
 	return r.artifactStore.List(ctx, scope)
 }
 
-func (r *planRuntime) GetPlanArtifact(ctx context.Context, scope *agentos.PlanArtifactScope) (agentos.Artifact, error) {
+func (r *planRuntime) GetPlanArtifact(ctx context.Context, scope *agentos.PlanArtifactScope) (agentoscore.Artifact, error) {
 	if r == nil {
-		return agentos.Artifact{}, errPlanRuntimeNotConfigured
+		return agentoscore.Artifact{}, errPlanRuntimeNotConfigured
 	}
 
 	if r.artifactStore == nil {
-		return agentos.Artifact{}, errPlanRuntimeArtifactStoreRequired
+		return agentoscore.Artifact{}, errPlanRuntimeArtifactStoreRequired
 	}
 
 	if scope == nil {
-		return agentos.Artifact{}, fmt.Errorf("%w: plan artifact scope is required", agentos.ErrInvalidPlanScope)
+		return agentoscore.Artifact{}, fmt.Errorf("%w: plan artifact scope is required", agentoscore.ErrInvalidPlanScope)
 	}
 
 	if scope.ArtifactID == "" {
-		return agentos.Artifact{}, fmt.Errorf("%w: artifact id is required", agentos.ErrInvalidArtifact)
+		return agentoscore.Artifact{}, fmt.Errorf("%w: artifact id is required", agentoscore.ErrInvalidArtifact)
 	}
 
 	if err := r.authorizePlanArtifactScope(ctx, scope); err != nil {
-		return agentos.Artifact{}, err
+		return agentoscore.Artifact{}, err
 	}
 
 	ref, payload, err := r.artifactStore.Get(ctx, scope)
 	if err != nil {
-		return agentos.Artifact{}, err
+		return agentoscore.Artifact{}, err
 	}
 
-	return agentos.Artifact{Ref: ref, Payload: payload}, nil
+	return agentoscore.Artifact{Ref: ref, Payload: payload}, nil
 }
 
 func (r *planRuntime) authorizePlanAuditScope(ctx context.Context, scope *agentos.PlanAuditScope) error {
@@ -729,14 +730,14 @@ func executePlanWorkflow(ctx context.Context, temporalClient planTemporalClient,
 	return nil
 }
 
-func clonePlanSignal(signal *agentos.Signal) agentos.Signal {
+func clonePlanSignal(signal *agentoscore.Signal) agentoscore.Signal {
 	clone := *signal
 	clone.Payload = cloneAnyMap(signal.Payload)
 
 	return clone
 }
 
-func clonePlanControlRequest(control *agentos.ControlRequest) agentos.ControlRequest {
+func clonePlanControlRequest(control *agentoscore.ControlRequest) agentoscore.ControlRequest {
 	clone := *control
 	clone.Metadata = cloneStringMap(control.Metadata)
 
@@ -869,7 +870,7 @@ func planStartAuditRecord(spec *agentos.RunPlanSpec) *agentosplan.AuditRecord {
 	}
 }
 
-func planSignalAuditRecord(ref agentos.PlanRef, signal *agentos.Signal) *agentosplan.AuditRecord {
+func planSignalAuditRecord(ref agentos.PlanRef, signal *agentoscore.Signal) *agentosplan.AuditRecord {
 	payload := map[string]any{
 		planCommandPayloadSignalType: signal.Type,
 		planCommandPayloadPayload:    signal.Payload,

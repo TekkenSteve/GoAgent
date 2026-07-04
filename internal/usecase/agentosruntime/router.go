@@ -5,7 +5,8 @@ import (
 	"fmt"
 	"maps"
 
-	"github.com/TekkenSteve/GoAgent/agentos"
+	agentos "github.com/TekkenSteve/GoAgent/agentos/control"
+	agentoscore "github.com/TekkenSteve/GoAgent/agentos/core"
 )
 
 // RunBackendIndex records which backend owns each run.
@@ -31,11 +32,11 @@ type Router struct {
 // NewRouter creates a backend router.
 func NewRouter(registry *Registry, index RunBackendIndex) (*Router, error) {
 	if registry == nil {
-		return nil, fmt.Errorf("%w: nil registry", agentos.ErrBackendNotFound)
+		return nil, fmt.Errorf("%w: nil registry", agentoscore.ErrBackendNotFound)
 	}
 
 	if index == nil {
-		return nil, fmt.Errorf("%w: nil run backend index", agentos.ErrRunRouteNotFound)
+		return nil, fmt.Errorf("%w: nil run backend index", agentoscore.ErrRunRouteNotFound)
 	}
 
 	return &Router{registry: registry, index: index}, nil
@@ -100,11 +101,11 @@ type planNodeRoute struct {
 
 func validatePlanNodeRoute(planID, nodeID string) error {
 	if planID == "" {
-		return fmt.Errorf("%w: plan id is required", agentos.ErrInvalidRunPlan)
+		return fmt.Errorf("%w: plan id is required", agentoscore.ErrInvalidRunPlan)
 	}
 
 	if nodeID == "" {
-		return fmt.Errorf("%w: node id is required", agentos.ErrInvalidRunPlan)
+		return fmt.Errorf("%w: node id is required", agentoscore.ErrInvalidRunPlan)
 	}
 
 	return nil
@@ -112,17 +113,17 @@ func validatePlanNodeRoute(planID, nodeID string) error {
 
 func (r *Router) prepareRunStart(ctx context.Context, spec *agentos.RunSpec) (agentos.RunSpec, AgentBackend, error) {
 	if spec == nil {
-		return agentos.RunSpec{}, nil, fmt.Errorf("%w: run spec is required", agentos.ErrInvalidRunSpec)
+		return agentos.RunSpec{}, nil, fmt.Errorf("%w: run spec is required", agentoscore.ErrInvalidRunSpec)
 	}
 
 	prepared := cloneRunSpec(spec)
 
 	if prepared.RunID == "" {
-		return agentos.RunSpec{}, nil, fmt.Errorf("%w: run id is required", agentos.ErrInvalidRunSpec)
+		return agentos.RunSpec{}, nil, fmt.Errorf("%w: run id is required", agentoscore.ErrInvalidRunSpec)
 	}
 
 	if prepared.IdempotencyKey == "" {
-		return agentos.RunSpec{}, nil, fmt.Errorf("%w: run idempotency key is required", agentos.ErrInvalidRunSpec)
+		return agentos.RunSpec{}, nil, fmt.Errorf("%w: run idempotency key is required", agentoscore.ErrInvalidRunSpec)
 	}
 
 	if err := validateRunSpecScope(&prepared); err != nil {
@@ -275,11 +276,11 @@ func (r *Router) resolveExistingPlanNodeStart(
 
 func validateRunSpecScope(spec *agentos.RunSpec) error {
 	if spec.AccountID == "" {
-		return fmt.Errorf("%w: account id is required", agentos.ErrInvalidRunSpec)
+		return fmt.Errorf("%w: account id is required", agentoscore.ErrInvalidRunSpec)
 	}
 
 	if spec.ProjectID == "" {
-		return fmt.Errorf("%w: project id is required", agentos.ErrInvalidRunSpec)
+		return fmt.Errorf("%w: project id is required", agentoscore.ErrInvalidRunSpec)
 	}
 
 	return nil
@@ -287,7 +288,7 @@ func validateRunSpecScope(spec *agentos.RunSpec) error {
 
 func normalizeOwnedRunStatus(runID string, status *agentos.RunStatus) (agentos.RunStatus, error) {
 	if status == nil {
-		return agentos.RunStatus{}, fmt.Errorf("%w: run status is required", agentos.ErrInvalidRunSpec)
+		return agentos.RunStatus{}, fmt.Errorf("%w: run status is required", agentoscore.ErrInvalidRunSpec)
 	}
 
 	if status.RunID == "" {
@@ -295,7 +296,7 @@ func normalizeOwnedRunStatus(runID string, status *agentos.RunStatus) (agentos.R
 	}
 
 	if status.RunID != runID {
-		return agentos.RunStatus{}, fmt.Errorf("%w: backend returned run id %q for requested run %q", agentos.ErrInvalidRunSpec, status.RunID, runID)
+		return agentos.RunStatus{}, fmt.Errorf("%w: backend returned run id %q for requested run %q", agentoscore.ErrInvalidRunSpec, status.RunID, runID)
 	}
 
 	return *status, nil
@@ -311,7 +312,7 @@ func (r *Router) selectBackend(ctx context.Context, spec *agentos.RunSpec) (agen
 	}
 
 	if r.backendSelector == nil {
-		return agentos.BackendRef{}, fmt.Errorf("%w: backend is required", agentos.ErrInvalidBackendRef)
+		return agentos.BackendRef{}, fmt.Errorf("%w: backend is required", agentoscore.ErrInvalidBackendRef)
 	}
 
 	ref, err := r.backendSelector.Select(ctx, spec)
@@ -327,9 +328,9 @@ func (r *Router) selectBackend(ctx context.Context, spec *agentos.RunSpec) (agen
 }
 
 // Signal sends a business signal to the backend that owns the run.
-func (r *Router) Signal(ctx context.Context, runID string, signal *agentos.Signal) error {
+func (r *Router) Signal(ctx context.Context, runID string, signal *agentoscore.Signal) error {
 	if signal == nil {
-		return fmt.Errorf("%w: signal is required", agentos.ErrInvalidSignal)
+		return fmt.Errorf("%w: signal is required", agentoscore.ErrInvalidSignal)
 	}
 
 	backend, err := r.backendForRun(ctx, runID)
@@ -343,8 +344,8 @@ func (r *Router) Signal(ctx context.Context, runID string, signal *agentos.Signa
 }
 
 // Control sends a lifecycle operation to the backend that owns the run.
-func (r *Router) Control(ctx context.Context, runID string, control *agentos.ControlRequest) error {
-	if err := agentos.ValidateControlRequest(control); err != nil {
+func (r *Router) Control(ctx context.Context, runID string, control *agentoscore.ControlRequest) error {
+	if err := agentoscore.ValidateControlRequest(control); err != nil {
 		return err
 	}
 
@@ -374,7 +375,7 @@ func (r *Router) Status(ctx context.Context, runID string) (agentos.RunStatus, e
 }
 
 // Subscribe opens a stream subscription through the backend selected by the scope.
-func (r *Router) Subscribe(ctx context.Context, scope agentos.StreamScope) (agentos.Subscription, error) {
+func (r *Router) Subscribe(ctx context.Context, scope agentoscore.StreamScope) (agentoscore.Subscription, error) {
 	ref, err := r.refForScope(ctx, scope)
 	if err != nil {
 		return nil, err
@@ -397,9 +398,9 @@ func (r *Router) backendForRun(ctx context.Context, runID string) (AgentBackend,
 	return r.registry.Get(ref)
 }
 
-func (r *Router) refForScope(ctx context.Context, scope agentos.StreamScope) (agentos.BackendRef, error) {
+func (r *Router) refForScope(ctx context.Context, scope agentoscore.StreamScope) (agentos.BackendRef, error) {
 	if scope.RunID == "" {
-		return agentos.BackendRef{}, fmt.Errorf("%w: run id is required for backend routing", agentos.ErrInvalidStreamScope)
+		return agentos.BackendRef{}, fmt.Errorf("%w: run id is required for backend routing", agentoscore.ErrInvalidStreamScope)
 	}
 
 	return r.index.Resolve(ctx, scope.RunID)
@@ -413,14 +414,14 @@ func cloneRunSpec(spec *agentos.RunSpec) agentos.RunSpec {
 	return clone
 }
 
-func cloneSignal(signal *agentos.Signal) agentos.Signal {
+func cloneSignal(signal *agentoscore.Signal) agentoscore.Signal {
 	clone := *signal
 	clone.Payload = cloneAnyMap(signal.Payload)
 
 	return clone
 }
 
-func cloneControlRequest(control *agentos.ControlRequest) agentos.ControlRequest {
+func cloneControlRequest(control *agentoscore.ControlRequest) agentoscore.ControlRequest {
 	clone := *control
 	clone.Metadata = cloneStringMap(control.Metadata)
 

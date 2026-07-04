@@ -5,7 +5,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/TekkenSteve/GoAgent/agentos"
+	agentos "github.com/TekkenSteve/GoAgent/agentos/control"
+	agentoscore "github.com/TekkenSteve/GoAgent/agentos/core"
 )
 
 func TestBuildPlanDebugTracesProjectsTypedDebugFields(t *testing.T) {
@@ -34,9 +35,9 @@ func debugTraceProjectionEvents() []agentos.PlanEvent {
 
 func capabilityDebugProjectionEvent() agentos.PlanEvent {
 	return agentos.PlanEvent{
-		Event: agentos.Event{
+		Event: agentoscore.Event{
 			EventID:   "evt-1",
-			EventType: agentos.EventCapabilitySelected,
+			EventType: agentoscore.EventCapabilitySelected,
 			Sequence:  1,
 			Timestamp: time.Date(2026, 6, 19, 12, 0, 0, 0, time.UTC),
 			Payload: map[string]any{
@@ -47,7 +48,7 @@ func capabilityDebugProjectionEvent() agentos.PlanEvent {
 				planEventPayloadCapability: CapabilitySelectionTrace{
 					Backend:         agentos.BackendRef{Kind: agentos.BackendKindHTTP, Name: "research-http"},
 					Capability:      "run",
-					Controls:        []agentos.ControlOperation{agentos.ControlCancel},
+					Controls:        []agentoscore.ControlOperation{agentoscore.ControlCancel},
 					HasOutputSchema: true,
 				},
 			},
@@ -59,9 +60,9 @@ func capabilityDebugProjectionEvent() agentos.PlanEvent {
 
 func conditionDebugProjectionEvent() agentos.PlanEvent {
 	return agentos.PlanEvent{
-		Event: agentos.Event{
+		Event: agentoscore.Event{
 			EventID:   "evt-2",
-			EventType: agentos.EventConditionEvaluated,
+			EventType: agentoscore.EventConditionEvaluated,
 			Sequence:  2,
 			Payload: map[string]any{
 				planEventPayloadInputResolution: debugInputResolutionPayload(),
@@ -101,7 +102,7 @@ func debugConditionTracePayload() []ConditionEvaluationTrace {
 
 func nonDebugProjectionEvent() agentos.PlanEvent {
 	return agentos.PlanEvent{
-		Event:  agentos.Event{EventID: "evt-3", EventType: agentos.EventPlanStarted, Sequence: 3},
+		Event:  agentoscore.Event{EventID: "evt-3", EventType: agentoscore.EventPlanStarted, Sequence: 3},
 		PlanID: "plan-1",
 	}
 }
@@ -139,16 +140,16 @@ func TestPlanDebugTraceFromEventRejectsInvalidDebugPayload(t *testing.T) {
 	t.Parallel()
 
 	_, _, err := PlanDebugTraceFromEvent(&agentos.PlanEvent{
-		Event: agentos.Event{
+		Event: agentoscore.Event{
 			EventID:   "evt-1",
-			EventType: agentos.EventConditionEvaluated,
+			EventType: agentoscore.EventConditionEvaluated,
 			Payload: map[string]any{
 				planEventPayloadConditions: map[string]any{"not": "a condition list"},
 			},
 		},
 		PlanID: "plan-1",
 	})
-	if !errors.Is(err, agentos.ErrInvalidPlanEvent) {
+	if !errors.Is(err, agentoscore.ErrInvalidPlanEvent) {
 		t.Fatalf("error = %v, want ErrInvalidPlanEvent", err)
 	}
 }

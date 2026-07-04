@@ -5,7 +5,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/TekkenSteve/GoAgent/agentos"
+	agentoscore "github.com/TekkenSteve/GoAgent/agentos/core"
+	agentos "github.com/TekkenSteve/GoAgent/agentos/process"
 )
 
 func TestMemoryStoreCreateProcessIsIdempotent(t *testing.T) {
@@ -49,7 +50,7 @@ func TestMemoryStoreRejectsProcessStartKeyReuseWithDifferentRequest(t *testing.T
 	status := sampleProcessStatus(&changed)
 
 	_, _, err := store.CreateProcess(t.Context(), &changed, &status)
-	if !errors.Is(err, agentos.ErrInvalidProcess) {
+	if !errors.Is(err, agentoscore.ErrInvalidProcess) {
 		t.Fatalf("CreateProcess changed error = %v, want ErrInvalidProcess", err)
 	}
 }
@@ -60,12 +61,12 @@ func TestMemoryStoreGetProcessByRefEnforcesTenantScope(t *testing.T) {
 	store := NewMemoryStore()
 	spec := createSampleProcess(t, store)
 
-	_, err := getProcessStatusByRef(t, store, agentos.ProcessRef{
+	_, err := getProcessStatusByRef(t, store, agentos.Ref{
 		ProcessID: spec.ProcessID,
 		AccountID: "acct-other",
 		ProjectID: spec.ProjectID,
 	})
-	if !errors.Is(err, agentos.ErrProcessRouteNotFound) {
+	if !errors.Is(err, agentoscore.ErrProcessRouteNotFound) {
 		t.Fatalf("GetProcessByRef tenant error = %v, want ErrProcessRouteNotFound", err)
 	}
 }
@@ -76,7 +77,7 @@ func TestMemoryStoreAppendProcessEventIsIdempotent(t *testing.T) {
 	store := NewMemoryStore()
 	spec := createSampleProcess(t, store)
 
-	event := sampleProcessEvent(&spec, agentos.EventProcessWaiting)
+	event := sampleProcessEvent(&spec, agentoscore.EventProcessWaiting)
 
 	first, err := store.AppendProcessEvent(t.Context(), &event, "event-key-1")
 	if err != nil {
@@ -103,15 +104,15 @@ func TestMemoryStoreRejectsProcessEventKeyReuseWithDifferentEvent(t *testing.T) 
 	store := NewMemoryStore()
 	spec := createSampleProcess(t, store)
 
-	event := sampleProcessEvent(&spec, agentos.EventProcessWaiting)
+	event := sampleProcessEvent(&spec, agentoscore.EventProcessWaiting)
 	if _, err := store.AppendProcessEvent(t.Context(), &event, "event-key-1"); err != nil {
 		t.Fatalf("AppendProcessEvent: %v", err)
 	}
 
-	changed := sampleProcessEvent(&spec, agentos.EventProcessBlocked)
+	changed := sampleProcessEvent(&spec, agentoscore.EventProcessBlocked)
 
 	_, err := store.AppendProcessEvent(t.Context(), &changed, "event-key-1")
-	if !errors.Is(err, agentos.ErrInvalidProcess) {
+	if !errors.Is(err, agentoscore.ErrInvalidProcess) {
 		t.Fatalf("AppendProcessEvent changed error = %v, want ErrInvalidProcess", err)
 	}
 }
@@ -122,10 +123,10 @@ func TestMemoryStoreListProcessEventsFiltersAndLimits(t *testing.T) {
 	store := NewMemoryStore()
 	spec := createSampleProcess(t, store)
 
-	events := []agentos.ProcessEvent{
-		sampleProcessEvent(&spec, agentos.EventProcessWaiting),
-		sampleProcessEvent(&spec, agentos.EventProcessBlocked),
-		sampleProcessEvent(&spec, agentos.EventProcessSucceeded),
+	events := []agentos.Event{
+		sampleProcessEvent(&spec, agentoscore.EventProcessWaiting),
+		sampleProcessEvent(&spec, agentoscore.EventProcessBlocked),
+		sampleProcessEvent(&spec, agentoscore.EventProcessSucceeded),
 	}
 	for i := range events {
 		if _, err := store.AppendProcessEvent(t.Context(), &events[i], string(events[i].EventType)); err != nil {
@@ -133,7 +134,7 @@ func TestMemoryStoreListProcessEventsFiltersAndLimits(t *testing.T) {
 		}
 	}
 
-	got, err := store.ListProcessEvents(t.Context(), &agentos.ProcessEventScope{
+	got, err := store.ListProcessEvents(t.Context(), &agentos.EventScope{
 		ProcessID:     spec.ProcessID,
 		AccountID:     spec.AccountID,
 		ProjectID:     spec.ProjectID,
@@ -149,8 +150,8 @@ func TestMemoryStoreListProcessEventsFiltersAndLimits(t *testing.T) {
 	}
 }
 
-func sampleProcessSpec() agentos.ProcessSpec {
-	return agentos.ProcessSpec{
+func sampleProcessSpec() agentos.Spec {
+	return agentos.Spec{
 		ProcessID:      "process-1",
 		Kind:           "resource-lifecycle",
 		AccountID:      "acct-1",
@@ -166,7 +167,7 @@ func sampleProcessSpec() agentos.ProcessSpec {
 	}
 }
 
-func createSampleProcess(t *testing.T, store *MemoryStore) agentos.ProcessSpec {
+func createSampleProcess(t *testing.T, store *MemoryStore) agentos.Spec {
 	t.Helper()
 
 	spec := sampleProcessSpec()
@@ -179,7 +180,7 @@ func createSampleProcess(t *testing.T, store *MemoryStore) agentos.ProcessSpec {
 	return spec
 }
 
-func getProcessStatusByRef(t *testing.T, store *MemoryStore, ref agentos.ProcessRef) (agentos.ProcessStatus, error) {
+func getProcessStatusByRef(t *testing.T, store *MemoryStore, ref agentos.Ref) (agentos.Status, error) {
 	t.Helper()
 
 	_, status, _, err := store.GetProcessByRef(t.Context(), ref)
@@ -187,8 +188,8 @@ func getProcessStatusByRef(t *testing.T, store *MemoryStore, ref agentos.Process
 	return status, err
 }
 
-func sampleProcessStatus(spec *agentos.ProcessSpec) agentos.ProcessStatus {
-	return agentos.ProcessStatus{
+func sampleProcessStatus(spec *agentos.Spec) agentos.Status {
+	return agentos.Status{
 		ProcessID:      spec.ProcessID,
 		LifecycleState: agentos.ProcessRunning,
 		StartedAt:      spec.RequestedAt,
@@ -196,9 +197,9 @@ func sampleProcessStatus(spec *agentos.ProcessSpec) agentos.ProcessStatus {
 	}
 }
 
-func sampleProcessEvent(spec *agentos.ProcessSpec, eventType agentos.EventType) agentos.ProcessEvent {
-	return agentos.ProcessEvent{
-		Event: agentos.Event{
+func sampleProcessEvent(spec *agentos.Spec, eventType agentoscore.EventType) agentos.Event {
+	return agentos.Event{
+		Event: agentoscore.Event{
 			EventType: eventType,
 			ProcessID: spec.ProcessID,
 			Timestamp: spec.RequestedAt,

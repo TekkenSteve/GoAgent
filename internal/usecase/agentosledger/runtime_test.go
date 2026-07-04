@@ -5,7 +5,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/TekkenSteve/GoAgent/agentos"
+	agentoscore "github.com/TekkenSteve/GoAgent/agentos/core"
+	agentos "github.com/TekkenSteve/GoAgent/agentos/process"
 )
 
 func TestRuntimeImplementsLedgerRuntime(t *testing.T) {
@@ -70,7 +71,7 @@ func TestRuntimeRejectsInvalidLedgerEntry(t *testing.T) {
 	spec.IdempotencyKey = ""
 
 	_, err := runtime.AppendLedgerEntry(t.Context(), &spec)
-	if !errors.Is(err, agentos.ErrInvalidLedgerEntry) {
+	if !errors.Is(err, agentoscore.ErrInvalidLedgerEntry) {
 		t.Fatalf("AppendLedgerEntry error = %v, want ErrInvalidLedgerEntry", err)
 	}
 }

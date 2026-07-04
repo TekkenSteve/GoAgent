@@ -4,7 +4,8 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/TekkenSteve/GoAgent/agentos"
+	agentoscore "github.com/TekkenSteve/GoAgent/agentos/core"
+	agentos "github.com/TekkenSteve/GoAgent/agentos/process"
 )
 
 const alternateActionID = "action-2"
@@ -55,7 +56,7 @@ func TestMemoryStoreRejectsActionKeyReuseWithDifferentRequest(t *testing.T) {
 	changedStatus := initialActionStatus(&changed)
 
 	_, _, err := store.CreateAction(t.Context(), &changed, &changedStatus)
-	if !errors.Is(err, agentos.ErrInvalidGovernedAction) {
+	if !errors.Is(err, agentoscore.ErrInvalidGovernedAction) {
 		t.Fatalf("CreateAction changed error = %v, want ErrInvalidGovernedAction", err)
 	}
 }
@@ -100,7 +101,7 @@ func TestMemoryStoreGetActionEnforcesTenantScope(t *testing.T) {
 		t.Fatal("GetAction exists = true, want false for tenant mismatch")
 	}
 
-	if !errors.Is(err, agentos.ErrInvalidGovernedActionScope) {
+	if !errors.Is(err, agentoscore.ErrInvalidGovernedActionScope) {
 		t.Fatalf("GetAction tenant error = %v, want ErrInvalidGovernedActionScope", err)
 	}
 }

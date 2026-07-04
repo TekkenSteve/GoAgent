@@ -5,7 +5,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/TekkenSteve/GoAgent/agentos"
+	agentoscore "github.com/TekkenSteve/GoAgent/agentos/core"
+	agentos "github.com/TekkenSteve/GoAgent/agentos/process"
 )
 
 func TestRuntimeImplementsBatchRuntime(t *testing.T) {
@@ -118,7 +119,7 @@ func TestRuntimeRejectsUnknownChunk(t *testing.T) {
 		IdempotencyKey: "chunk-key-1",
 		Succeeded:      true,
 	})
-	if !errors.Is(err, agentos.ErrInvalidWorkset) {
+	if !errors.Is(err, agentoscore.ErrInvalidWorkset) {
 		t.Fatalf("RecordWorksetChunk error = %v, want ErrInvalidWorkset", err)
 	}
 }
@@ -134,8 +135,8 @@ func TestRuntimeCancelWorkset(t *testing.T) {
 		t.Fatalf("StartWorkset: %v", err)
 	}
 
-	status, err := runtime.CancelWorkset(t.Context(), ref, &agentos.ControlRequest{
-		Operation:      agentos.ControlCancel,
+	status, err := runtime.CancelWorkset(t.Context(), ref, &agentoscore.ControlRequest{
+		Operation:      agentoscore.ControlCancel,
 		IdempotencyKey: "cancel-1",
 		RequestedAt:    spec.RequestedAt.Add(time.Minute),
 		Metadata:       map[string]string{"reason": "operator canceled"},

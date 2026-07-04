@@ -6,7 +6,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/TekkenSteve/GoAgent/agentos"
+	agentos "github.com/TekkenSteve/GoAgent/agentos/control"
+	agentoscore "github.com/TekkenSteve/GoAgent/agentos/core"
 	"github.com/TekkenSteve/GoAgent/internal/usecase/agentosruntime/agentosruntimetest"
 	"go.temporal.io/sdk/client"
 	"go.temporal.io/sdk/converter"
@@ -37,8 +38,8 @@ func TestBackendConformance(t *testing.T) {
 		QueryType:    "agentos_status",
 		Signals: SignalNames{
 			Cancel: "cancel",
-			Defaults: map[agentos.SignalType]string{
-				agentos.SignalUserMessage: "user_input",
+			Defaults: map[agentoscore.SignalType]string{
+				agentoscore.SignalUserMessage: "user_input",
 			},
 		},
 	}
@@ -94,7 +95,7 @@ func TestNewBackendRejectsNilConfig(t *testing.T) {
 	t.Parallel()
 
 	_, err := NewBackend(&fakeTemporalClient{}, nil, nil)
-	if !errors.Is(err, agentos.ErrInvalidBackendRef) {
+	if !errors.Is(err, agentoscore.ErrInvalidBackendRef) {
 		t.Fatalf("NewBackend nil config error = %v, want ErrInvalidBackendRef", err)
 	}
 }
@@ -109,11 +110,11 @@ func TestBackendRejectsNilRunInputs(t *testing.T) {
 		QueryType:    "agentos_status",
 	})
 
-	if _, err := backend.Start(context.Background(), nil); !errors.Is(err, agentos.ErrInvalidRunSpec) {
+	if _, err := backend.Start(context.Background(), nil); !errors.Is(err, agentoscore.ErrInvalidRunSpec) {
 		t.Fatalf("Start nil error = %v, want ErrInvalidRunSpec", err)
 	}
 
-	if err := backend.Signal(context.Background(), Run1, nil); !errors.Is(err, agentos.ErrInvalidSignal) {
+	if err := backend.Signal(context.Background(), Run1, nil); !errors.Is(err, agentoscore.ErrInvalidSignal) {
 		t.Fatalf("Signal nil error = %v, want ErrInvalidSignal", err)
 	}
 }
@@ -161,14 +162,14 @@ func TestBackendSignalUsesConfiguredSignalName(t *testing.T) {
 		WorkflowType: "langgraph.agent.v1",
 		QueryType:    "agentos_status",
 		Signals: SignalNames{
-			Defaults: map[agentos.SignalType]string{
-				agentos.SignalUserMessage: "user_input",
+			Defaults: map[agentoscore.SignalType]string{
+				agentoscore.SignalUserMessage: "user_input",
 			},
 		},
 	})
 
-	signal := agentos.Signal{
-		Type:           agentos.SignalUserMessage,
+	signal := agentoscore.Signal{
+		Type:           agentoscore.SignalUserMessage,
 		IdempotencyKey: "idem-1",
 		Payload: map[string]any{
 			"text": "continue",
@@ -189,7 +190,7 @@ func TestBackendSignalUsesConfiguredSignalName(t *testing.T) {
 		t.Fatalf("signal arg type = %T", temporalClient.signalArg)
 	}
 
-	if input.Type != agentos.SignalUserMessage || input.Payload["text"] != "continue" {
+	if input.Type != agentoscore.SignalUserMessage || input.Payload["text"] != "continue" {
 		t.Fatalf("unexpected signal input: %#v", input)
 	}
 }
@@ -205,10 +206,10 @@ func TestBackendControlCancelRequiresConfiguredSignal(t *testing.T) {
 		QueryType:    "agentos_status",
 	})
 
-	control := agentos.ControlRequest{Operation: agentos.ControlCancel}
+	control := agentoscore.ControlRequest{Operation: agentoscore.ControlCancel}
 
 	err := backend.Control(context.Background(), "run-1", &control)
-	if !errors.Is(err, agentos.ErrInvalidControlOperation) {
+	if !errors.Is(err, agentoscore.ErrInvalidControlOperation) {
 		t.Fatalf("Control cancel error = %v, want ErrInvalidControlOperation", err)
 	}
 }
@@ -227,7 +228,7 @@ func TestBackendControlCancelUsesConfiguredSignal(t *testing.T) {
 		},
 	})
 
-	control := agentos.ControlRequest{Operation: agentos.ControlCancel}
+	control := agentoscore.ControlRequest{Operation: agentoscore.ControlCancel}
 
 	err := backend.Control(context.Background(), "run-1", &control)
 	if err != nil {
@@ -246,7 +247,7 @@ func TestBackendStatusUsesQueryWhenConfigured(t *testing.T) {
 		queryValue: &encodedStatus{status: agentos.RunStatus{
 			RunID:          "run-1",
 			LifecycleState: "paused",
-			Progress:       &agentos.RunProgress{Current: 7, Total: 9, Label: "checkpoint"},
+			Progress:       &agentoscore.RunProgress{Current: 7, Total: 9, Label: "checkpoint"},
 		}},
 	}
 	backend := newTestBackend(t, temporalClient, &Config{
@@ -276,7 +277,7 @@ func TestBackendRequiresStatusQuery(t *testing.T) {
 	}
 
 	_, err := NewBackend(&fakeTemporalClient{}, nil, &config)
-	if !errors.Is(err, agentos.ErrInvalidBackendRef) {
+	if !errors.Is(err, agentoscore.ErrInvalidBackendRef) {
 		t.Fatalf("NewBackend error = %v, want ErrInvalidBackendRef", err)
 	}
 }

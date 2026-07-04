@@ -5,13 +5,14 @@ import (
 	"testing"
 	"time"
 
-	"github.com/TekkenSteve/GoAgent/agentos"
+	agentoscore "github.com/TekkenSteve/GoAgent/agentos/core"
+	agentos "github.com/TekkenSteve/GoAgent/agentos/process"
 )
 
 func TestRuntimeImplementsProcessRuntime(t *testing.T) {
 	t.Parallel()
 
-	var _ agentos.ProcessRuntime = (*Runtime)(nil)
+	var _ agentos.Runtime = (*Runtime)(nil)
 }
 
 func TestRuntimeStartProcessCreatesStatusAndStartedEvent(t *testing.T) {
@@ -29,7 +30,7 @@ func TestRuntimeStartProcessCreatesStatusAndStartedEvent(t *testing.T) {
 		t.Fatalf("status lifecycle = %q, want running", status.LifecycleState)
 	}
 
-	events, err := runtime.ListProcessEvents(t.Context(), &agentos.ProcessEventScope{
+	events, err := runtime.ListProcessEvents(t.Context(), &agentos.EventScope{
 		ProcessID: spec.ProcessID,
 		AccountID: spec.AccountID,
 		ProjectID: spec.ProjectID,
@@ -38,7 +39,7 @@ func TestRuntimeStartProcessCreatesStatusAndStartedEvent(t *testing.T) {
 		t.Fatalf("ListProcessEvents: %v", err)
 	}
 
-	if len(events) != 1 || events[0].EventType != agentos.EventProcessStarted {
+	if len(events) != 1 || events[0].EventType != agentoscore.EventProcessStarted {
 		t.Fatalf("events = %#v, want one process.started event", events)
 	}
 }
@@ -63,7 +64,7 @@ func TestRuntimeStartProcessIsIdempotent(t *testing.T) {
 		t.Fatalf("replayed updated_at = %v, want %v", second.UpdatedAt, first.UpdatedAt)
 	}
 
-	events, err := runtime.ListProcessEvents(t.Context(), &agentos.ProcessEventScope{
+	events, err := runtime.ListProcessEvents(t.Context(), &agentos.EventScope{
 		ProcessID: spec.ProcessID,
 		AccountID: spec.AccountID,
 		ProjectID: spec.ProjectID,
@@ -88,7 +89,7 @@ func TestRuntimeDescribeProcessReturnsSpecProjection(t *testing.T) {
 		t.Fatalf("StartProcess: %v", err)
 	}
 
-	description, err := runtime.DescribeProcess(t.Context(), agentos.ProcessRef{
+	description, err := runtime.DescribeProcess(t.Context(), agentos.Ref{
 		ProcessID: spec.ProcessID,
 		AccountID: spec.AccountID,
 		ProjectID: spec.ProjectID,
@@ -116,8 +117,8 @@ func TestRuntimeSignalProcessRecordsEventAndResumesWaitingProcess(t *testing.T) 
 		t.Fatalf("StartProcess: %v", err)
 	}
 
-	control := agentos.ControlRequest{
-		Operation:      agentos.ControlPause,
+	control := agentoscore.ControlRequest{
+		Operation:      agentoscore.ControlPause,
 		IdempotencyKey: "pause-1",
 		RequestedAt:    spec.RequestedAt.Add(time.Minute),
 	}
@@ -125,7 +126,7 @@ func TestRuntimeSignalProcessRecordsEventAndResumesWaitingProcess(t *testing.T) 
 		t.Fatalf("ControlProcess pause: %v", err)
 	}
 
-	signal := agentos.Signal{
+	signal := agentoscore.Signal{
 		Type:           "external.update",
 		IdempotencyKey: "signal-1",
 		SentAt:         spec.RequestedAt.Add(2 * time.Minute),
@@ -145,7 +146,7 @@ func TestRuntimeSignalProcessRecordsEventAndResumesWaitingProcess(t *testing.T) 
 	}
 
 	events := listProcessEvents(t, runtime, &spec)
-	if len(events) != 3 || events[2].EventType != agentos.EventProcessSignalReceived {
+	if len(events) != 3 || events[2].EventType != agentoscore.EventProcessSignalReceived {
 		t.Fatalf("events = %#v, want signal as third event", events)
 	}
 }
@@ -160,8 +161,8 @@ func TestRuntimeControlProcessCancelsProcess(t *testing.T) {
 		t.Fatalf("StartProcess: %v", err)
 	}
 
-	control := agentos.ControlRequest{
-		Operation:      agentos.ControlCancel,
+	control := agentoscore.ControlRequest{
+		Operation:      agentoscore.ControlCancel,
 		IdempotencyKey: "cancel-1",
 		RequestedAt:    spec.RequestedAt.Add(time.Minute),
 		ActorID:        "operator-1",
@@ -190,7 +191,7 @@ func TestRuntimeSubscribeProcessReplaysDurableEvents(t *testing.T) {
 		t.Fatalf("StartProcess: %v", err)
 	}
 
-	sub, err := runtime.SubscribeProcess(t.Context(), &agentos.ProcessStreamScope{
+	sub, err := runtime.SubscribeProcess(t.Context(), &agentos.StreamScope{
 		ProcessID: spec.ProcessID,
 		AccountID: spec.AccountID,
 		ProjectID: spec.ProjectID,
@@ -205,7 +206,7 @@ func TestRuntimeSubscribeProcessReplaysDurableEvents(t *testing.T) {
 		t.Fatal("subscription closed before replay event")
 	}
 
-	if event.ProcessID != spec.ProcessID || event.EventType != agentos.EventProcessStarted {
+	if event.ProcessID != spec.ProcessID || event.EventType != agentoscore.EventProcessStarted {
 		t.Fatalf("event = %#v, want process.started for %q", event, spec.ProcessID)
 	}
 }
@@ -215,20 +216,20 @@ func TestRuntimeStatusProcessReportsMissingRoute(t *testing.T) {
 
 	runtime := newSampleRuntime(t)
 
-	_, err := runtime.StatusProcess(t.Context(), agentos.ProcessRef{
+	_, err := runtime.StatusProcess(t.Context(), agentos.Ref{
 		ProcessID: "missing",
 		AccountID: "acct-1",
 		ProjectID: "proj-1",
 	})
-	if !errors.Is(err, agentos.ErrProcessRouteNotFound) {
+	if !errors.Is(err, agentoscore.ErrProcessRouteNotFound) {
 		t.Fatalf("StatusProcess error = %v, want ErrProcessRouteNotFound", err)
 	}
 }
 
-func listProcessEvents(t *testing.T, runtime *Runtime, spec *agentos.ProcessSpec) []agentos.ProcessEvent {
+func listProcessEvents(t *testing.T, runtime *Runtime, spec *agentos.Spec) []agentos.Event {
 	t.Helper()
 
-	events, err := runtime.ListProcessEvents(t.Context(), &agentos.ProcessEventScope{
+	events, err := runtime.ListProcessEvents(t.Context(), &agentos.EventScope{
 		ProcessID: spec.ProcessID,
 		AccountID: spec.AccountID,
 		ProjectID: spec.ProjectID,
@@ -240,8 +241,8 @@ func listProcessEvents(t *testing.T, runtime *Runtime, spec *agentos.ProcessSpec
 	return events
 }
 
-func processRefFromSpec(spec *agentos.ProcessSpec) agentos.ProcessRef {
-	return agentos.ProcessRef{
+func processRefFromSpec(spec *agentos.Spec) agentos.Ref {
+	return agentos.Ref{
 		ProcessID: spec.ProcessID,
 		AccountID: spec.AccountID,
 		ProjectID: spec.ProjectID,

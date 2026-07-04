@@ -12,7 +12,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/TekkenSteve/GoAgent/agentos"
+	agentos "github.com/TekkenSteve/GoAgent/agentos/control"
+	agentoscore "github.com/TekkenSteve/GoAgent/agentos/core"
 	"github.com/TekkenSteve/GoAgent/internal/controller/restapi/v1/request"
 	"github.com/gofiber/fiber/v2"
 )
@@ -120,7 +121,7 @@ type planConsoleData struct {
 	description agentos.RunPlanDescription
 	events      []agentos.PlanEvent
 	debugTraces []agentos.PlanDebugTrace
-	artifacts   []agentos.ArtifactRef
+	artifacts   []agentoscore.ArtifactRef
 	audits      []agentos.PlanAuditRecord
 }
 
@@ -197,7 +198,7 @@ type agentOSPlanConsoleView struct {
 	EventsEndpoint      string
 	DebugEndpoint       string
 	ArtifactsEndpoint   string
-	RetrySignalType     agentos.SignalType
+	RetrySignalType     agentoscore.SignalType
 	PayloadNodeIDKey    string
 	PayloadReasonKey    string
 	Controls            []agentOSPlanConsoleControlAction
@@ -291,18 +292,18 @@ type agentOSPlanConsoleAuditView struct {
 type agentOSPlanConsoleControlAction struct {
 	Label     string
 	Title     string
-	Operation agentos.ControlOperation
+	Operation agentoscore.ControlOperation
 	Class     string
 }
 
 type agentOSPlanConsoleSignalAction struct {
 	Label      string
 	Title      string
-	SignalType agentos.SignalType
+	SignalType agentoscore.SignalType
 	Class      string
 }
 
-func newAgentOSPlanConsoleView(ref *agentos.PlanRef, description *agentos.RunPlanDescription, events []agentos.PlanEvent, debugTraces []agentos.PlanDebugTrace, artifacts []agentos.ArtifactRef, audits []agentos.PlanAuditRecord) agentOSPlanConsoleView {
+func newAgentOSPlanConsoleView(ref *agentos.PlanRef, description *agentos.RunPlanDescription, events []agentos.PlanEvent, debugTraces []agentos.PlanDebugTrace, artifacts []agentoscore.ArtifactRef, audits []agentos.PlanAuditRecord) agentOSPlanConsoleView {
 	scopeQuery := agentOSPlanConsoleScopeQuery(ref)
 	status := description.Status
 
@@ -326,17 +327,17 @@ func newAgentOSPlanConsoleView(ref *agentos.PlanRef, description *agentos.RunPla
 		EventsEndpoint:      "events/history?" + scopeQuery,
 		DebugEndpoint:       "debug/traces?" + scopeQuery,
 		ArtifactsEndpoint:   "artifacts?" + scopeQuery,
-		RetrySignalType:     agentos.SignalPlanNodeRetry,
-		PayloadNodeIDKey:    agentos.SignalPayloadNodeID,
-		PayloadReasonKey:    agentos.SignalPayloadReason,
+		RetrySignalType:     agentoscore.SignalPlanNodeRetry,
+		PayloadNodeIDKey:    agentoscore.SignalPayloadNodeID,
+		PayloadReasonKey:    agentoscore.SignalPayloadReason,
 		Controls: []agentOSPlanConsoleControlAction{
-			{Label: "Pause", Title: "Pause plan", Operation: agentos.ControlPause, Class: NEUTRAL},
-			{Label: "Resume", Title: "Resume plan", Operation: agentos.ControlResume, Class: "primary"},
-			{Label: "Cancel", Title: "Cancel plan", Operation: agentos.ControlCancel, Class: "danger"},
+			{Label: "Pause", Title: "Pause plan", Operation: agentoscore.ControlPause, Class: NEUTRAL},
+			{Label: "Resume", Title: "Resume plan", Operation: agentoscore.ControlResume, Class: "primary"},
+			{Label: "Cancel", Title: "Cancel plan", Operation: agentoscore.ControlCancel, Class: "danger"},
 		},
 		PlanSignals: []agentOSPlanConsoleSignalAction{
-			{Label: "Approve", Title: "Approve blocked plan", SignalType: agentos.SignalPlanApprove, Class: "primary"},
-			{Label: "Reject", Title: "Reject blocked plan", SignalType: agentos.SignalPlanReject, Class: "danger"},
+			{Label: "Approve", Title: "Approve blocked plan", SignalType: agentoscore.SignalPlanApprove, Class: "primary"},
+			{Label: "Reject", Title: "Reject blocked plan", SignalType: agentoscore.SignalPlanReject, Class: "danger"},
 		},
 	}
 }
@@ -396,7 +397,7 @@ func newAgentOSPlanConsoleEdgeViews(edges []agentos.PlanTopologyEdge) []agentOSP
 	return views
 }
 
-func newAgentOSPlanConsoleArtifactViews(ref *agentos.PlanRef, artifacts []agentos.ArtifactRef) []agentOSPlanConsoleArtifactView {
+func newAgentOSPlanConsoleArtifactViews(ref *agentos.PlanRef, artifacts []agentoscore.ArtifactRef) []agentOSPlanConsoleArtifactView {
 	views := make([]agentOSPlanConsoleArtifactView, 0, len(artifacts))
 
 	scopeQuery := agentOSPlanConsoleScopeQuery(ref)

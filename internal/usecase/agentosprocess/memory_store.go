@@ -8,19 +8,20 @@ import (
 	"sync"
 	"time"
 
-	"github.com/TekkenSteve/GoAgent/agentos"
+	agentoscore "github.com/TekkenSteve/GoAgent/agentos/core"
+	agentos "github.com/TekkenSteve/GoAgent/agentos/process"
 )
 
 // MemoryStore is an explicit in-process ProcessIndex and ProcessEventStore for
 // unit tests and embedded demos.
 type MemoryStore struct {
 	mu         sync.RWMutex
-	specs      map[string]agentos.ProcessSpec
-	statuses   map[string]agentos.ProcessStatus
+	specs      map[string]agentos.Spec
+	statuses   map[string]agentos.Status
 	startKeys  map[processStartKey]string
-	statusKeys map[processEventIdempotencyKey]agentos.ProcessStatus
-	events     map[string][]agentos.ProcessEvent
-	eventKeys  map[processEventIdempotencyKey]agentos.ProcessEvent
+	statusKeys map[processEventIdempotencyKey]agentos.Status
+	events     map[string][]agentos.Event
+	eventKeys  map[processEventIdempotencyKey]agentos.Event
 }
 
 type processStartKey struct {
@@ -37,12 +38,12 @@ type processEventIdempotencyKey struct {
 // NewMemoryStore creates an empty in-memory process store.
 func NewMemoryStore() *MemoryStore {
 	return &MemoryStore{
-		specs:      make(map[string]agentos.ProcessSpec),
-		statuses:   make(map[string]agentos.ProcessStatus),
+		specs:      make(map[string]agentos.Spec),
+		statuses:   make(map[string]agentos.Status),
 		startKeys:  make(map[processStartKey]string),
-		statusKeys: make(map[processEventIdempotencyKey]agentos.ProcessStatus),
-		events:     make(map[string][]agentos.ProcessEvent),
-		eventKeys:  make(map[processEventIdempotencyKey]agentos.ProcessEvent),
+		statusKeys: make(map[processEventIdempotencyKey]agentos.Status),
+		events:     make(map[string][]agentos.Event),
+		eventKeys:  make(map[processEventIdempotencyKey]agentos.Event),
 	}
 }
 
@@ -50,11 +51,11 @@ func NewMemoryStore() *MemoryStore {
 // replay of the original status.
 func (s *MemoryStore) CreateProcess(
 	_ context.Context,
-	spec *agentos.ProcessSpec,
-	status *agentos.ProcessStatus,
-) (agentos.ProcessStatus, bool, error) {
+	spec *agentos.Spec,
+	status *agentos.Status,
+) (agentos.Status, bool, error) {
 	if err := validateCreateProcessInput(spec, status); err != nil {
-		return agentos.ProcessStatus{}, false, err
+		return agentos.Status{}, false, err
 	}
 
 	key := processStartKeyFromSpec(spec)
@@ -79,9 +80,9 @@ func (s *MemoryStore) CreateProcess(
 }
 
 // GetProcessByRef returns a tenant-scoped process projection.
-func (s *MemoryStore) GetProcessByRef(_ context.Context, ref agentos.ProcessRef) (agentos.ProcessSpec, agentos.ProcessStatus, bool, error) {
+func (s *MemoryStore) GetProcessByRef(_ context.Context, ref agentos.Ref) (agentos.Spec, agentos.Status, bool, error) {
 	if err := agentos.ValidateProcessRef(ref); err != nil {
-		return agentos.ProcessSpec{}, agentos.ProcessStatus{}, false, err
+		return agentos.Spec{}, agentos.Status{}, false, err
 	}
 
 	s.mu.RLock()
@@ -89,11 +90,11 @@ func (s *MemoryStore) GetProcessByRef(_ context.Context, ref agentos.ProcessRef)
 
 	spec, ok := s.specs[ref.ProcessID]
 	if !ok {
-		return agentos.ProcessSpec{}, agentos.ProcessStatus{}, false, nil
+		return agentos.Spec{}, agentos.Status{}, false, nil
 	}
 
 	if err := validateProcessTenantAccess(ref, &spec); err != nil {
-		return agentos.ProcessSpec{}, agentos.ProcessStatus{}, false, err
+		return agentos.Spec{}, agentos.Status{}, false, err
 	}
 
 	status := s.statuses[ref.ProcessID]
@@ -104,11 +105,11 @@ func (s *MemoryStore) GetProcessByRef(_ context.Context, ref agentos.ProcessRef)
 // UpdateProcessStatus updates the latest durable process projection.
 func (s *MemoryStore) UpdateProcessStatus(
 	_ context.Context,
-	status *agentos.ProcessStatus,
+	status *agentos.Status,
 	idempotencyKey string,
-) (agentos.ProcessStatus, error) {
+) (agentos.Status, error) {
 	if err := validateUpdateProcessStatusInput(status, idempotencyKey); err != nil {
-		return agentos.ProcessStatus{}, err
+		return agentos.Status{}, err
 	}
 
 	key := processEventIdempotencyKey{
@@ -125,11 +126,11 @@ func (s *MemoryStore) UpdateProcessStatus(
 
 	spec, exists := s.specs[status.ProcessID]
 	if !exists {
-		return agentos.ProcessStatus{}, fmt.Errorf("%w: process %q not found", agentos.ErrProcessRouteNotFound, status.ProcessID)
+		return agentos.Status{}, fmt.Errorf("%w: process %q not found", agentoscore.ErrProcessRouteNotFound, status.ProcessID)
 	}
 
 	if err := validateProcessStatusScope(status, &spec); err != nil {
-		return agentos.ProcessStatus{}, err
+		return agentos.Status{}, err
 	}
 
 	prepared := normalizeProcessStatus(&spec, status)
@@ -143,11 +144,11 @@ func (s *MemoryStore) UpdateProcessStatus(
 // identity fields.
 func (s *MemoryStore) AppendProcessEvent(
 	_ context.Context,
-	event *agentos.ProcessEvent,
+	event *agentos.Event,
 	idempotencyKey string,
-) (agentos.ProcessEvent, error) {
+) (agentos.Event, error) {
 	if err := validateAppendProcessEventInput(event, idempotencyKey); err != nil {
-		return agentos.ProcessEvent{}, err
+		return agentos.Event{}, err
 	}
 
 	key := processEventIdempotencyKey{
@@ -161,14 +162,14 @@ func (s *MemoryStore) AppendProcessEvent(
 	if existing, exists := s.eventKeys[key]; exists {
 		requested := prepareProcessEvent(event, existing.EventID, existing.Sequence)
 		if err := ValidateProcessEventIdempotency(&existing, &requested); err != nil {
-			return agentos.ProcessEvent{}, err
+			return agentos.Event{}, err
 		}
 
 		return cloneProcessEvent(&existing), nil
 	}
 
 	if _, exists := s.specs[event.ProcessID]; !exists {
-		return agentos.ProcessEvent{}, fmt.Errorf("%w: process %q not found", agentos.ErrProcessRouteNotFound, event.ProcessID)
+		return agentos.Event{}, fmt.Errorf("%w: process %q not found", agentoscore.ErrProcessRouteNotFound, event.ProcessID)
 	}
 
 	sequence := int64(len(s.events[event.ProcessID]) + 1)
@@ -180,7 +181,7 @@ func (s *MemoryStore) AppendProcessEvent(
 }
 
 // ListProcessEvents returns tenant-scoped durable events in sequence order.
-func (s *MemoryStore) ListProcessEvents(_ context.Context, scope *agentos.ProcessEventScope) ([]agentos.ProcessEvent, error) {
+func (s *MemoryStore) ListProcessEvents(_ context.Context, scope *agentos.EventScope) ([]agentos.Event, error) {
 	if err := agentos.ValidateProcessEventScope(scope); err != nil {
 		return nil, err
 	}
@@ -190,7 +191,7 @@ func (s *MemoryStore) ListProcessEvents(_ context.Context, scope *agentos.Proces
 
 	spec, ok := s.specs[scope.ProcessID]
 	if !ok {
-		return nil, fmt.Errorf("%w: process %q not found", agentos.ErrProcessRouteNotFound, scope.ProcessID)
+		return nil, fmt.Errorf("%w: process %q not found", agentoscore.ErrProcessRouteNotFound, scope.ProcessID)
 	}
 
 	if err := validateProcessTenantAccess(processRefFromEventScope(scope), &spec); err != nil {
@@ -199,7 +200,7 @@ func (s *MemoryStore) ListProcessEvents(_ context.Context, scope *agentos.Proces
 
 	events := s.events[scope.ProcessID]
 
-	filtered := make([]agentos.ProcessEvent, 0, len(events))
+	filtered := make([]agentos.Event, 0, len(events))
 	for i := range events {
 		event := events[i]
 		if event.Sequence <= scope.AfterSequence {
@@ -220,45 +221,45 @@ func (s *MemoryStore) ListProcessEvents(_ context.Context, scope *agentos.Proces
 	return filtered, nil
 }
 
-func validateCreateProcessInput(spec *agentos.ProcessSpec, status *agentos.ProcessStatus) error {
+func validateCreateProcessInput(spec *agentos.Spec, status *agentos.Status) error {
 	if err := agentos.ValidateProcessSpec(spec); err != nil {
 		return err
 	}
 
 	if status == nil {
-		return fmt.Errorf("%w: process status is required", agentos.ErrInvalidProcess)
+		return fmt.Errorf("%w: process status is required", agentoscore.ErrInvalidProcess)
 	}
 
 	if status.ProcessID != "" && status.ProcessID != spec.ProcessID {
-		return fmt.Errorf("%w: process status belongs to process %q", agentos.ErrInvalidProcess, status.ProcessID)
+		return fmt.Errorf("%w: process status belongs to process %q", agentoscore.ErrInvalidProcess, status.ProcessID)
 	}
 
 	return nil
 }
 
-func validateUpdateProcessStatusInput(status *agentos.ProcessStatus, idempotencyKey string) error {
+func validateUpdateProcessStatusInput(status *agentos.Status, idempotencyKey string) error {
 	if status == nil {
-		return fmt.Errorf("%w: process status is required", agentos.ErrInvalidProcess)
+		return fmt.Errorf("%w: process status is required", agentoscore.ErrInvalidProcess)
 	}
 
 	if idempotencyKey == "" {
-		return fmt.Errorf("%w: process status idempotency key is required", agentos.ErrInvalidProcess)
+		return fmt.Errorf("%w: process status idempotency key is required", agentoscore.ErrInvalidProcess)
 	}
 
 	if status.ProcessID == "" {
-		return fmt.Errorf("%w: process id is required", agentos.ErrInvalidProcess)
+		return fmt.Errorf("%w: process id is required", agentoscore.ErrInvalidProcess)
 	}
 
 	if status.AccountID == "" {
-		return fmt.Errorf("%w: account id is required", agentos.ErrInvalidProcess)
+		return fmt.Errorf("%w: account id is required", agentoscore.ErrInvalidProcess)
 	}
 
 	if status.ProjectID == "" {
-		return fmt.Errorf("%w: project id is required", agentos.ErrInvalidProcess)
+		return fmt.Errorf("%w: project id is required", agentoscore.ErrInvalidProcess)
 	}
 
 	if status.LifecycleState == "" {
-		return fmt.Errorf("%w: lifecycle state is required", agentos.ErrInvalidProcess)
+		return fmt.Errorf("%w: lifecycle state is required", agentoscore.ErrInvalidProcess)
 	}
 
 	if err := agentos.ValidateResourceRef(status.Resource); err != nil {
@@ -268,20 +269,20 @@ func validateUpdateProcessStatusInput(status *agentos.ProcessStatus, idempotency
 	return nil
 }
 
-func validateAppendProcessEventInput(event *agentos.ProcessEvent, idempotencyKey string) error {
+func validateAppendProcessEventInput(event *agentos.Event, idempotencyKey string) error {
 	if event == nil {
-		return fmt.Errorf("%w: process event is required", agentos.ErrInvalidProcess)
+		return fmt.Errorf("%w: process event is required", agentoscore.ErrInvalidProcess)
 	}
 
 	if idempotencyKey == "" {
-		return fmt.Errorf("%w: process event idempotency key is required", agentos.ErrInvalidProcess)
+		return fmt.Errorf("%w: process event idempotency key is required", agentoscore.ErrInvalidProcess)
 	}
 
 	if err := agentos.ValidateResourceRef(event.Resource); err != nil {
 		return err
 	}
 
-	ref := agentos.ProcessRef{
+	ref := agentos.Ref{
 		ProcessID: event.ProcessID,
 		AccountID: event.AccountID,
 		ProjectID: event.ProjectID,
@@ -291,21 +292,21 @@ func validateAppendProcessEventInput(event *agentos.ProcessEvent, idempotencyKey
 	}
 
 	if event.Resource.AccountID != event.AccountID {
-		return fmt.Errorf("%w: event resource account %q does not match event account %q", agentos.ErrInvalidProcess, event.Resource.AccountID, event.AccountID)
+		return fmt.Errorf("%w: event resource account %q does not match event account %q", agentoscore.ErrInvalidProcess, event.Resource.AccountID, event.AccountID)
 	}
 
 	if event.Resource.ProjectID != event.ProjectID {
-		return fmt.Errorf("%w: event resource project %q does not match event project %q", agentos.ErrInvalidProcess, event.Resource.ProjectID, event.ProjectID)
+		return fmt.Errorf("%w: event resource project %q does not match event project %q", agentoscore.ErrInvalidProcess, event.Resource.ProjectID, event.ProjectID)
 	}
 
 	if event.EventType == "" {
-		return fmt.Errorf("%w: process event type is required", agentos.ErrInvalidProcess)
+		return fmt.Errorf("%w: process event type is required", agentoscore.ErrInvalidProcess)
 	}
 
 	return nil
 }
 
-func processStartKeyFromSpec(spec *agentos.ProcessSpec) processStartKey {
+func processStartKeyFromSpec(spec *agentos.Spec) processStartKey {
 	return processStartKey{
 		AccountID:      spec.AccountID,
 		ProjectID:      spec.ProjectID,
@@ -313,8 +314,8 @@ func processStartKeyFromSpec(spec *agentos.ProcessSpec) processStartKey {
 	}
 }
 
-func processRefFromEventScope(scope *agentos.ProcessEventScope) agentos.ProcessRef {
-	return agentos.ProcessRef{
+func processRefFromEventScope(scope *agentos.EventScope) agentos.Ref {
+	return agentos.Ref{
 		ProcessID: scope.ProcessID,
 		AccountID: scope.AccountID,
 		ProjectID: scope.ProjectID,
@@ -323,16 +324,16 @@ func processRefFromEventScope(scope *agentos.ProcessEventScope) agentos.ProcessR
 
 func (s *MemoryStore) lookupExistingProcessLocked(
 	key processStartKey,
-	spec *agentos.ProcessSpec,
-) (agentos.ProcessStatus, bool, error) {
+	spec *agentos.Spec,
+) (agentos.Status, bool, error) {
 	existingProcessID, exists := s.startKeys[key]
 	if !exists {
-		return agentos.ProcessStatus{}, false, nil
+		return agentos.Status{}, false, nil
 	}
 
 	existingSpec := s.specs[existingProcessID]
 	if err := ValidateProcessStartIdempotency(&existingSpec, spec); err != nil {
-		return agentos.ProcessStatus{}, false, err
+		return agentos.Status{}, false, err
 	}
 
 	existingStatus := s.statuses[existingProcessID]
@@ -340,14 +341,14 @@ func (s *MemoryStore) lookupExistingProcessLocked(
 	return cloneProcessStatus(&existingStatus), true, nil
 }
 
-func (s *MemoryStore) lookupExistingProcessIDLocked(spec *agentos.ProcessSpec) (agentos.ProcessStatus, bool, error) {
+func (s *MemoryStore) lookupExistingProcessIDLocked(spec *agentos.Spec) (agentos.Status, bool, error) {
 	existingSpec, exists := s.specs[spec.ProcessID]
 	if !exists {
-		return agentos.ProcessStatus{}, false, nil
+		return agentos.Status{}, false, nil
 	}
 
 	if err := ValidateProcessStartIdempotency(&existingSpec, spec); err != nil {
-		return agentos.ProcessStatus{}, false, err
+		return agentos.Status{}, false, err
 	}
 
 	existingStatus := s.statuses[spec.ProcessID]
@@ -355,35 +356,35 @@ func (s *MemoryStore) lookupExistingProcessIDLocked(spec *agentos.ProcessSpec) (
 	return cloneProcessStatus(&existingStatus), true, nil
 }
 
-func validateProcessTenantAccess(ref agentos.ProcessRef, spec *agentos.ProcessSpec) error {
+func validateProcessTenantAccess(ref agentos.Ref, spec *agentos.Spec) error {
 	if ref.AccountID != spec.AccountID {
-		return fmt.Errorf("%w: process not found", agentos.ErrProcessRouteNotFound)
+		return fmt.Errorf("%w: process not found", agentoscore.ErrProcessRouteNotFound)
 	}
 
 	if ref.ProjectID != spec.ProjectID {
-		return fmt.Errorf("%w: process not found", agentos.ErrProcessRouteNotFound)
+		return fmt.Errorf("%w: process not found", agentoscore.ErrProcessRouteNotFound)
 	}
 
 	return nil
 }
 
-func validateProcessStatusScope(status *agentos.ProcessStatus, spec *agentos.ProcessSpec) error {
+func validateProcessStatusScope(status *agentos.Status, spec *agentos.Spec) error {
 	if status.AccountID != spec.AccountID {
-		return fmt.Errorf("%w: process not found", agentos.ErrProcessRouteNotFound)
+		return fmt.Errorf("%w: process not found", agentoscore.ErrProcessRouteNotFound)
 	}
 
 	if status.ProjectID != spec.ProjectID {
-		return fmt.Errorf("%w: process not found", agentos.ErrProcessRouteNotFound)
+		return fmt.Errorf("%w: process not found", agentoscore.ErrProcessRouteNotFound)
 	}
 
 	if status.Resource != spec.Resource {
-		return fmt.Errorf("%w: process resource scope changed", agentos.ErrInvalidProcess)
+		return fmt.Errorf("%w: process resource scope changed", agentoscore.ErrInvalidProcess)
 	}
 
 	return nil
 }
 
-func normalizeProcessStatus(spec *agentos.ProcessSpec, status *agentos.ProcessStatus) agentos.ProcessStatus {
+func normalizeProcessStatus(spec *agentos.Spec, status *agentos.Status) agentos.Status {
 	out := cloneProcessStatus(status)
 	out.ProcessID = spec.ProcessID
 	out.Kind = spec.Kind
@@ -407,7 +408,7 @@ func normalizeProcessStatus(spec *agentos.ProcessSpec, status *agentos.ProcessSt
 	return out
 }
 
-func prepareProcessEvent(event *agentos.ProcessEvent, eventID string, sequence int64) agentos.ProcessEvent {
+func prepareProcessEvent(event *agentos.Event, eventID string, sequence int64) agentos.Event {
 	out := cloneProcessEvent(event)
 	out.EventID = eventID
 	out.Sequence = sequence
@@ -421,22 +422,22 @@ func prepareProcessEvent(event *agentos.ProcessEvent, eventID string, sequence i
 	return out
 }
 
-func cloneProcessSpec(spec *agentos.ProcessSpec) agentos.ProcessSpec {
+func cloneProcessSpec(spec *agentos.Spec) agentos.Spec {
 	if spec == nil {
-		return agentos.ProcessSpec{}
+		return agentos.Spec{}
 	}
 
 	out := *spec
 	out.Inputs = cloneAnyMap(spec.Inputs)
 	out.Metadata = cloneStringMap(spec.Metadata)
-	out.Timers = append([]agentos.ProcessTimerSpec(nil), spec.Timers...)
+	out.Timers = append([]agentos.TimerSpec(nil), spec.Timers...)
 
 	return out
 }
 
-func cloneProcessStatus(status *agentos.ProcessStatus) agentos.ProcessStatus {
+func cloneProcessStatus(status *agentos.Status) agentos.Status {
 	if status == nil {
-		return agentos.ProcessStatus{}
+		return agentos.Status{}
 	}
 
 	out := *status
@@ -451,9 +452,9 @@ func cloneProcessStatus(status *agentos.ProcessStatus) agentos.ProcessStatus {
 	return out
 }
 
-func cloneProcessEvent(event *agentos.ProcessEvent) agentos.ProcessEvent {
+func cloneProcessEvent(event *agentos.Event) agentos.Event {
 	if event == nil {
-		return agentos.ProcessEvent{}
+		return agentos.Event{}
 	}
 
 	out := *event

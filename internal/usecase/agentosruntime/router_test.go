@@ -5,7 +5,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/TekkenSteve/GoAgent/agentos"
+	agentos "github.com/TekkenSteve/GoAgent/agentos/control"
+	agentoscore "github.com/TekkenSteve/GoAgent/agentos/core"
 )
 
 const Run1 = "run-1"
@@ -419,12 +420,12 @@ func TestRouterSignalAndControlDoNotShareCallerOwnedData(t *testing.T) {
 		t.Fatalf("new router: %v", err)
 	}
 
-	signal := agentos.Signal{Type: agentos.SignalUserMessage, Payload: map[string]any{"message": storedValue}}
+	signal := agentoscore.Signal{Type: agentoscore.SignalUserMessage, Payload: map[string]any{"message": storedValue}}
 	if err := router.Signal(ctx, spec.RunID, &signal); err != nil {
 		t.Fatalf("Signal: %v", err)
 	}
 
-	control := agentos.ControlRequest{Operation: agentos.ControlCancel, Metadata: map[string]string{"reason": storedValue}}
+	control := agentoscore.ControlRequest{Operation: agentoscore.ControlCancel, Metadata: map[string]string{"reason": storedValue}}
 	if err := router.Control(ctx, spec.RunID, &control); err != nil {
 		t.Fatalf("Control: %v", err)
 	}
@@ -690,11 +691,11 @@ func assertRoutesRunOperations(
 		t.Fatalf("status %s: %v", runID, err)
 	}
 
-	if err := controlRun(ctx, router, runID, agentos.ControlCancel); err != nil {
+	if err := controlRun(ctx, router, runID, agentoscore.ControlCancel); err != nil {
 		t.Fatalf("control %s: %v", runID, err)
 	}
 
-	if err := signalRun(ctx, router, runID, agentos.SignalUserMessage); err != nil {
+	if err := signalRun(ctx, router, runID, agentoscore.SignalUserMessage); err != nil {
 		t.Fatalf("signal %s: %v", runID, err)
 	}
 
@@ -747,8 +748,8 @@ type stubBackend struct {
 	statusRunID  string
 	controlRunID string
 	signalRunID  string
-	signal       agentos.Signal
-	control      agentos.ControlRequest
+	signal       agentoscore.Signal
+	control      agentoscore.ControlRequest
 	startBackend agentos.BackendRef
 	startCount   int
 	startStatus  agentos.RunStatus
@@ -769,14 +770,14 @@ func startPlanNode(
 	return router.StartPlanNode(ctx, planID, nodeID, spec)
 }
 
-func controlRun(ctx context.Context, router *Router, runID string, operation agentos.ControlOperation) error {
-	control := agentos.ControlRequest{Operation: operation}
+func controlRun(ctx context.Context, router *Router, runID string, operation agentoscore.ControlOperation) error {
+	control := agentoscore.ControlRequest{Operation: operation}
 
 	return router.Control(ctx, runID, &control)
 }
 
-func signalRun(ctx context.Context, router *Router, runID string, signalType agentos.SignalType) error {
-	signal := agentos.Signal{Type: signalType}
+func signalRun(ctx context.Context, router *Router, runID string, signalType agentoscore.SignalType) error {
+	signal := agentoscore.Signal{Type: signalType}
 
 	return router.Signal(ctx, runID, &signal)
 }
@@ -906,7 +907,7 @@ func (b *stubBackend) Start(_ context.Context, spec *agentos.RunSpec) (agentos.R
 	return agentos.RunStatus{RunID: spec.RunID, LifecycleState: "created", UpdatedAt: time.Now()}, nil
 }
 
-func (b *stubBackend) Signal(_ context.Context, runID string, signal *agentos.Signal) error {
+func (b *stubBackend) Signal(_ context.Context, runID string, signal *agentoscore.Signal) error {
 	b.signalRunID = runID
 	if signal != nil {
 		b.signal = *signal
@@ -915,7 +916,7 @@ func (b *stubBackend) Signal(_ context.Context, runID string, signal *agentos.Si
 	return nil
 }
 
-func (b *stubBackend) Control(_ context.Context, runID string, control *agentos.ControlRequest) error {
+func (b *stubBackend) Control(_ context.Context, runID string, control *agentoscore.ControlRequest) error {
 	b.controlRunID = runID
 	if control != nil {
 		b.control = *control
@@ -933,6 +934,6 @@ func (b *stubBackend) Status(_ context.Context, runID string) (agentos.RunStatus
 	return agentos.RunStatus{RunID: runID}, nil
 }
 
-func (b *stubBackend) Subscribe(context.Context, agentos.StreamScope) (agentos.Subscription, error) {
+func (b *stubBackend) Subscribe(context.Context, agentoscore.StreamScope) (agentoscore.Subscription, error) {
 	return nil, nil
 }

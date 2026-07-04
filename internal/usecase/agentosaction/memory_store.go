@@ -7,7 +7,8 @@ import (
 	"sort"
 	"sync"
 
-	"github.com/TekkenSteve/GoAgent/agentos"
+	agentoscore "github.com/TekkenSteve/GoAgent/agentos/core"
+	agentos "github.com/TekkenSteve/GoAgent/agentos/process"
 )
 
 // MemoryStore is an explicit in-process action store for unit tests and
@@ -145,7 +146,7 @@ func (s *MemoryStore) UpdateActionStatus(
 
 	spec, exists := s.specs[status.ActionID]
 	if !exists {
-		return agentos.GovernedActionStatus{}, fmt.Errorf("%w: action %q not found", agentos.ErrInvalidGovernedActionScope, status.ActionID)
+		return agentos.GovernedActionStatus{}, fmt.Errorf("%w: action %q not found", agentoscore.ErrInvalidGovernedActionScope, status.ActionID)
 	}
 
 	if err := validateActionStatusScope(status, &spec); err != nil {
@@ -165,7 +166,7 @@ func validateCreateActionInput(spec *agentos.GovernedActionSpec, status *agentos
 	}
 
 	if status == nil {
-		return fmt.Errorf("%w: action status is required", agentos.ErrInvalidGovernedAction)
+		return fmt.Errorf("%w: action status is required", agentoscore.ErrInvalidGovernedAction)
 	}
 
 	return nil
@@ -173,15 +174,15 @@ func validateCreateActionInput(spec *agentos.GovernedActionSpec, status *agentos
 
 func validateUpdateActionStatusInput(status *agentos.GovernedActionStatus, idempotencyKey string) error {
 	if status == nil {
-		return fmt.Errorf("%w: action status is required", agentos.ErrInvalidGovernedAction)
+		return fmt.Errorf("%w: action status is required", agentoscore.ErrInvalidGovernedAction)
 	}
 
 	if idempotencyKey == "" {
-		return fmt.Errorf("%w: status idempotency key is required", agentos.ErrInvalidGovernedAction)
+		return fmt.Errorf("%w: status idempotency key is required", agentoscore.ErrInvalidGovernedAction)
 	}
 
 	if status.ActionID == "" || status.AccountID == "" || status.ProjectID == "" {
-		return fmt.Errorf("%w: action status scope is required", agentos.ErrInvalidGovernedAction)
+		return fmt.Errorf("%w: action status scope is required", agentoscore.ErrInvalidGovernedAction)
 	}
 
 	return nil
@@ -231,7 +232,7 @@ func actionStartKeyFromSpec(spec *agentos.GovernedActionSpec) actionStartKey {
 
 func validateActionTenantAccess(ref agentos.ActionRef, spec *agentos.GovernedActionSpec) error {
 	if ref.AccountID != spec.AccountID || ref.ProjectID != spec.ProjectID {
-		return fmt.Errorf("%w: action %q is outside tenant scope", agentos.ErrInvalidGovernedActionScope, ref.ActionID)
+		return fmt.Errorf("%w: action %q is outside tenant scope", agentoscore.ErrInvalidGovernedActionScope, ref.ActionID)
 	}
 
 	return nil
@@ -239,7 +240,7 @@ func validateActionTenantAccess(ref agentos.ActionRef, spec *agentos.GovernedAct
 
 func validateActionStatusScope(status *agentos.GovernedActionStatus, spec *agentos.GovernedActionSpec) error {
 	if status.AccountID != spec.AccountID || status.ProjectID != spec.ProjectID {
-		return fmt.Errorf("%w: action %q status is outside tenant scope", agentos.ErrInvalidGovernedActionScope, status.ActionID)
+		return fmt.Errorf("%w: action %q status is outside tenant scope", agentoscore.ErrInvalidGovernedActionScope, status.ActionID)
 	}
 
 	return nil

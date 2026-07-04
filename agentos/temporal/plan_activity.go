@@ -5,7 +5,8 @@ import (
 	"fmt"
 	"io"
 
-	"github.com/TekkenSteve/GoAgent/agentos"
+	agentos "github.com/TekkenSteve/GoAgent/agentos/control"
+	agentoscore "github.com/TekkenSteve/GoAgent/agentos/core"
 	"github.com/TekkenSteve/GoAgent/internal/usecase/agentosplan"
 )
 
@@ -68,20 +69,20 @@ func NewPlanActivitiesWithCatalogAndSchemas(
 	artifactStore agentosplan.ArtifactStore,
 ) (*PlanActivities, error) {
 	if runtime == nil {
-		return nil, fmt.Errorf("%w: plan activity runtime is required", agentos.ErrInvalidRunPlan)
+		return nil, fmt.Errorf("%w: plan activity runtime is required", agentoscore.ErrInvalidRunPlan)
 	}
 
 	planNodeStarter, ok := runtime.(PlanNodeStarter)
 	if !ok {
-		return nil, fmt.Errorf("%w: plan activity runtime must support plan-node start", agentos.ErrInvalidRunPlan)
+		return nil, fmt.Errorf("%w: plan activity runtime must support plan-node start", agentoscore.ErrInvalidRunPlan)
 	}
 
 	if transitionStore == nil {
-		return nil, fmt.Errorf("%w: plan transition store is required", agentos.ErrInvalidRunPlan)
+		return nil, fmt.Errorf("%w: plan transition store is required", agentoscore.ErrInvalidRunPlan)
 	}
 
 	if artifactStore == nil {
-		return nil, fmt.Errorf("%w: artifact store is required", agentos.ErrInvalidArtifact)
+		return nil, fmt.Errorf("%w: artifact store is required", agentoscore.ErrInvalidArtifact)
 	}
 
 	compiler, err := agentosplan.NewCELCompiler()
@@ -112,7 +113,7 @@ type validatePlanInput struct {
 
 type ValidatePlanOutput struct {
 	Plan               agentosplan.ExecutablePlan
-	ControlsByNode     map[string][]agentos.ControlOperation
+	ControlsByNode     map[string][]agentoscore.ControlOperation
 	CapabilitiesByNode map[string]agentosplan.CapabilitySelectionTrace
 }
 
@@ -140,8 +141,8 @@ func (a *PlanActivities) ValidatePlanActivity(ctx context.Context, input *valida
 	}, nil
 }
 
-func (a *PlanActivities) controlsByNode(ctx context.Context, plan *agentosplan.ExecutablePlan) (map[string][]agentos.ControlOperation, error) {
-	controlsByNode := make(map[string][]agentos.ControlOperation, len(plan.Spec.Nodes))
+func (a *PlanActivities) controlsByNode(ctx context.Context, plan *agentosplan.ExecutablePlan) (map[string][]agentoscore.ControlOperation, error) {
+	controlsByNode := make(map[string][]agentoscore.ControlOperation, len(plan.Spec.Nodes))
 	for i := range plan.Spec.Nodes {
 		node := &plan.Spec.Nodes[i]
 		if node.Capability == "" || a.Validator.Capabilities == nil {
@@ -156,10 +157,10 @@ func (a *PlanActivities) controlsByNode(ctx context.Context, plan *agentosplan.E
 		}
 
 		if !ok {
-			return nil, fmt.Errorf("%w: node %q capability %s/%s/%s", agentos.ErrCapabilityNotFound, node.NodeID, node.Run.Backend.Kind, node.Run.Backend.Name, node.Capability)
+			return nil, fmt.Errorf("%w: node %q capability %s/%s/%s", agentoscore.ErrCapabilityNotFound, node.NodeID, node.Run.Backend.Kind, node.Run.Backend.Name, node.Capability)
 		}
 
-		controlsByNode[node.NodeID] = append([]agentos.ControlOperation(nil), capability.Controls...)
+		controlsByNode[node.NodeID] = append([]agentoscore.ControlOperation(nil), capability.Controls...)
 	}
 
 	return controlsByNode, nil
@@ -180,7 +181,7 @@ func (a *PlanActivities) capabilitiesByNode(ctx context.Context, plan *agentospl
 		}
 
 		if !ok {
-			return nil, fmt.Errorf("%w: node %q capability %s/%s/%s", agentos.ErrCapabilityNotFound, node.NodeID, node.Run.Backend.Kind, node.Run.Backend.Name, node.Capability)
+			return nil, fmt.Errorf("%w: node %q capability %s/%s/%s", agentoscore.ErrCapabilityNotFound, node.NodeID, node.Run.Backend.Kind, node.Run.Backend.Name, node.Capability)
 		}
 
 		capabilitiesByNode[node.NodeID] = agentosplan.NewCapabilitySelectionTrace(&capability)
@@ -233,7 +234,7 @@ type StartPlanNodeOutput struct {
 // StartPlanNodeActivity starts one backend-owned child run.
 func (a *PlanActivities) StartPlanNodeActivity(ctx context.Context, input *startPlanNodeInput) (StartPlanNodeOutput, error) {
 	if a.Runtime == nil {
-		return StartPlanNodeOutput{}, fmt.Errorf("%w: plan activity runtime is required", agentos.ErrInvalidRunPlan)
+		return StartPlanNodeOutput{}, fmt.Errorf("%w: plan activity runtime is required", agentoscore.ErrInvalidRunPlan)
 	}
 
 	attempt := input.Attempt
@@ -251,11 +252,11 @@ func (a *PlanActivities) StartPlanNodeActivity(ctx context.Context, input *start
 	}
 
 	if input.AccountID == "" {
-		return StartPlanNodeOutput{}, fmt.Errorf("%w: account id is required", agentos.ErrInvalidRunSpec)
+		return StartPlanNodeOutput{}, fmt.Errorf("%w: account id is required", agentoscore.ErrInvalidRunSpec)
 	}
 
 	if input.ProjectID == "" {
-		return StartPlanNodeOutput{}, fmt.Errorf("%w: project id is required", agentos.ErrInvalidRunSpec)
+		return StartPlanNodeOutput{}, fmt.Errorf("%w: project id is required", agentoscore.ErrInvalidRunSpec)
 	}
 
 	input.Node.Run.AccountID = input.AccountID
@@ -271,7 +272,7 @@ func (a *PlanActivities) StartPlanNodeActivity(ctx context.Context, input *start
 	}
 
 	if status.RunID != input.Node.Run.RunID {
-		return StartPlanNodeOutput{}, fmt.Errorf("%w: backend returned run id %q for requested run %q", agentos.ErrInvalidRunSpec, status.RunID, input.Node.Run.RunID)
+		return StartPlanNodeOutput{}, fmt.Errorf("%w: backend returned run id %q for requested run %q", agentoscore.ErrInvalidRunSpec, status.RunID, input.Node.Run.RunID)
 	}
 
 	return StartPlanNodeOutput{Status: status}, nil
@@ -292,7 +293,7 @@ type PersistPlanStateOutput struct {
 // corresponding public PlanEvent to the durable event source.
 func (a *PlanActivities) PersistPlanStateActivity(ctx context.Context, input *persistPlanStateInput) (PersistPlanStateOutput, error) {
 	if a.PlanTransitionStore == nil {
-		return PersistPlanStateOutput{}, fmt.Errorf("%w: plan transition store is required", agentos.ErrInvalidRunPlan)
+		return PersistPlanStateOutput{}, fmt.Errorf("%w: plan transition store is required", agentoscore.ErrInvalidRunPlan)
 	}
 
 	snapshot := agentosplan.PlanStateSnapshot{
@@ -324,7 +325,7 @@ type publishPlanArtifactsInput struct {
 }
 
 type PublishPlanArtifactsOutput struct {
-	Artifacts []agentos.ArtifactRef
+	Artifacts []agentoscore.ArtifactRef
 }
 
 // PublishPlanArtifactsActivity persists child-run artifact refs outside
@@ -333,7 +334,7 @@ type PublishPlanArtifactsOutput struct {
 // only claims the ref idempotently and returns metadata to the workflow.
 func (a *PlanActivities) PublishPlanArtifactsActivity(ctx context.Context, input *publishPlanArtifactsInput) (PublishPlanArtifactsOutput, error) {
 	if a.ArtifactStore == nil {
-		return PublishPlanArtifactsOutput{}, fmt.Errorf("%w: artifact store is required", agentos.ErrInvalidArtifact)
+		return PublishPlanArtifactsOutput{}, fmt.Errorf("%w: artifact store is required", agentoscore.ErrInvalidArtifact)
 	}
 
 	refs, err := normalizeRunArtifacts(input.Spec.PlanID, &input.Node, &input.Status)
@@ -347,7 +348,7 @@ func (a *PlanActivities) PublishPlanArtifactsActivity(ctx context.Context, input
 		}
 	}
 
-	stored := make([]agentos.ArtifactRef, 0, len(refs))
+	stored := make([]agentoscore.ArtifactRef, 0, len(refs))
 	for i := range refs {
 		ref := refs[i]
 
@@ -367,7 +368,7 @@ func (a *PlanActivities) PublishPlanArtifactsActivity(ctx context.Context, input
 	return PublishPlanArtifactsOutput{Artifacts: stored}, nil
 }
 
-func (a *PlanActivities) validatePublishedArtifacts(ctx context.Context, spec *agentos.RunPlanSpec, node *agentos.PlanNodeSpec, refs []agentos.ArtifactRef) error {
+func (a *PlanActivities) validatePublishedArtifacts(ctx context.Context, spec *agentos.RunPlanSpec, node *agentos.PlanNodeSpec, refs []agentoscore.ArtifactRef) error {
 	if err := agentosplan.ValidateArtifactsAgainstSpecs(node.NodeID, node.Outputs, refs); err != nil {
 		return err
 	}
@@ -386,7 +387,7 @@ func (a *PlanActivities) validatePublishedArtifacts(ctx context.Context, spec *a
 	}
 
 	if !ok {
-		return fmt.Errorf("%w: node %q capability %s/%s/%s", agentos.ErrCapabilityNotFound, node.NodeID, node.Run.Backend.Kind, node.Run.Backend.Name, node.Capability)
+		return fmt.Errorf("%w: node %q capability %s/%s/%s", agentoscore.ErrCapabilityNotFound, node.NodeID, node.Run.Backend.Kind, node.Run.Backend.Name, node.Capability)
 	}
 
 	if err := agentosplan.ValidateCapabilityOutputArtifacts(node.NodeID, capability.OutputSchema, refs); err != nil {
@@ -401,7 +402,7 @@ type evaluatePlanExpansionInput struct {
 	Status         agentos.RunPlanStatus
 	Node           agentos.PlanNodeSpec
 	RunStatus      agentos.RunStatus
-	Artifacts      []agentos.ArtifactRef
+	Artifacts      []agentoscore.ArtifactRef
 	ExpansionCount int32
 }
 
@@ -410,7 +411,7 @@ type EvaluatePlanExpansionOutput struct {
 	Delta              agentosplan.PlanDelta
 	Spec               agentos.RunPlanSpec
 	Plan               agentosplan.ExecutablePlan
-	ControlsByNode     map[string][]agentos.ControlOperation
+	ControlsByNode     map[string][]agentoscore.ControlOperation
 	CapabilitiesByNode map[string]agentosplan.CapabilitySelectionTrace
 }
 
@@ -419,7 +420,7 @@ type EvaluatePlanExpansionOutput struct {
 // artifacts.
 func (a *PlanActivities) EvaluatePlanExpansionActivity(ctx context.Context, input *evaluatePlanExpansionInput) (EvaluatePlanExpansionOutput, error) {
 	if a.PlanDeltaProvider == nil {
-		return EvaluatePlanExpansionOutput{}, fmt.Errorf("%w: plan delta provider is required", agentos.ErrInvalidRunPlan)
+		return EvaluatePlanExpansionOutput{}, fmt.Errorf("%w: plan delta provider is required", agentoscore.ErrInvalidRunPlan)
 	}
 
 	deltaInput := agentosplan.PlanDeltaInput{
@@ -472,7 +473,7 @@ type StatusPlanNodeOutput struct {
 // StatusPlanNodeActivity queries one backend-owned child run.
 func (a *PlanActivities) StatusPlanNodeActivity(ctx context.Context, input statusPlanNodeInput) (StatusPlanNodeOutput, error) {
 	if a.Runtime == nil {
-		return StatusPlanNodeOutput{}, fmt.Errorf("%w: plan activity runtime is required", agentos.ErrInvalidRunPlan)
+		return StatusPlanNodeOutput{}, fmt.Errorf("%w: plan activity runtime is required", agentoscore.ErrInvalidRunPlan)
 	}
 
 	status, err := a.Runtime.Status(ctx, input.RunID)
@@ -485,13 +486,13 @@ func (a *PlanActivities) StatusPlanNodeActivity(ctx context.Context, input statu
 
 type controlPlanNodeInput struct {
 	RunID   string
-	Control agentos.ControlRequest
+	Control agentoscore.ControlRequest
 }
 
 // ControlPlanNodeActivity sends lifecycle control to one child run.
 func (a *PlanActivities) ControlPlanNodeActivity(ctx context.Context, input *controlPlanNodeInput) error {
 	if a.Runtime == nil {
-		return fmt.Errorf("%w: plan activity runtime is required", agentos.ErrInvalidRunPlan)
+		return fmt.Errorf("%w: plan activity runtime is required", agentoscore.ErrInvalidRunPlan)
 	}
 
 	return a.Runtime.Control(ctx, input.RunID, &input.Control)

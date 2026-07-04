@@ -3,7 +3,8 @@ package temporal
 import (
 	"context"
 
-	"github.com/TekkenSteve/GoAgent/agentos"
+	agentos "github.com/TekkenSteve/GoAgent/agentos/control"
+	agentoscore "github.com/TekkenSteve/GoAgent/agentos/core"
 	agentosruntime "github.com/TekkenSteve/GoAgent/internal/usecase/agentosruntime"
 )
 
@@ -35,7 +36,7 @@ type ExternalSignalNames struct {
 	Pause    string
 	Resume   string
 	Cancel   string
-	Defaults map[agentos.SignalType]string
+	Defaults map[agentoscore.SignalType]string
 }
 
 // HTTPBackendConfig configures an HTTP AgentOS backend.

@@ -1,4 +1,4 @@
-package agentos
+package control
 
 import (
 	"bytes"
@@ -9,6 +9,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/TekkenSteve/GoAgent/agentos/core"
 )
 
 func TestRunPlanSpecJSONSchema(t *testing.T) {
@@ -119,8 +121,8 @@ func TestPlanJSONSchemaRejectsUnknownKind(t *testing.T) {
 	t.Parallel()
 
 	_, err := PlanJSONSchema("unknown")
-	if !errors.Is(err, ErrInvalidRunPlan) {
-		t.Fatalf("PlanJSONSchema unknown error = %v, want ErrInvalidRunPlan", err)
+	if !errors.Is(err, core.ErrInvalidRunPlan) {
+		t.Fatalf("PlanJSONSchema unknown error = %v, want core.ErrInvalidRunPlan", err)
 	}
 }
 
@@ -145,7 +147,7 @@ func TestRunPlanSpecJSONSchemaFileIsCurrent(t *testing.T) {
 		t.Fatalf("RunPlanSpecJSONSchema: %v", err)
 	}
 
-	stored, err := os.ReadFile("../docs/schemas/run_plan.schema.json")
+	stored, err := os.ReadFile("../../docs/schemas/run_plan.schema.json")
 	if err != nil {
 		t.Fatalf("ReadFile schema: %v", err)
 	}
@@ -231,7 +233,7 @@ func TestPlanDeltaSpecJSONSchemaFileIsCurrent(t *testing.T) {
 		t.Fatalf("PlanDeltaSpecJSONSchema: %v", err)
 	}
 
-	stored, err := os.ReadFile("../docs/schemas/plan_delta.schema.json")
+	stored, err := os.ReadFile("../../docs/schemas/plan_delta.schema.json")
 	if err != nil {
 		t.Fatalf("ReadFile schema: %v", err)
 	}
@@ -249,7 +251,7 @@ func TestCapabilityCatalogSpecJSONSchemaFileIsCurrent(t *testing.T) {
 		t.Fatalf("CapabilityCatalogSpecJSONSchema: %v", err)
 	}
 
-	stored, err := os.ReadFile("../docs/schemas/capability_catalog.schema.json")
+	stored, err := os.ReadFile("../../docs/schemas/capability_catalog.schema.json")
 	if err != nil {
 		t.Fatalf("ReadFile schema: %v", err)
 	}
@@ -267,7 +269,7 @@ func TestArtifactSchemaCatalogSpecJSONSchemaFileIsCurrent(t *testing.T) {
 		t.Fatalf("ArtifactSchemaCatalogSpecJSONSchema: %v", err)
 	}
 
-	stored, err := os.ReadFile("../docs/schemas/artifact_schema_catalog.schema.json")
+	stored, err := os.ReadFile("../../docs/schemas/artifact_schema_catalog.schema.json")
 	if err != nil {
 		t.Fatalf("ReadFile schema: %v", err)
 	}
@@ -307,9 +309,9 @@ func TestPlanEventCodecRoundTrip(t *testing.T) {
 	t.Parallel()
 
 	event := PlanEvent{
-		Event: Event{
+		Event: core.Event{
 			EventID:   "evt-1",
-			EventType: EventPlanStarted,
+			EventType: core.EventPlanStarted,
 			Sequence:  7,
 			Timestamp: time.Date(2026, 6, 17, 12, 0, 0, 0, time.UTC),
 			Payload: map[string]any{
@@ -339,11 +341,11 @@ func TestPlanEventCodecRoundTrip(t *testing.T) {
 func TestPlanEventCodecRejectsMissingPlanID(t *testing.T) {
 	t.Parallel()
 
-	event := PlanEvent{Event: Event{EventType: EventPlanStarted}}
+	event := PlanEvent{Event: core.Event{EventType: core.EventPlanStarted}}
 	_, err := MarshalPlanEvent(&event)
 
-	if !errors.Is(err, ErrInvalidPlanEvent) {
-		t.Fatalf("error = %v, want ErrInvalidPlanEvent", err)
+	if !errors.Is(err, core.ErrInvalidPlanEvent) {
+		t.Fatalf("error = %v, want core.ErrInvalidPlanEvent", err)
 	}
 }
 
@@ -351,8 +353,8 @@ func TestPlanEventCodecRejectsNilEvent(t *testing.T) {
 	t.Parallel()
 
 	_, err := MarshalPlanEvent(nil)
-	if !errors.Is(err, ErrInvalidPlanEvent) {
-		t.Fatalf("error = %v, want ErrInvalidPlanEvent", err)
+	if !errors.Is(err, core.ErrInvalidPlanEvent) {
+		t.Fatalf("error = %v, want core.ErrInvalidPlanEvent", err)
 	}
 }
 
@@ -360,9 +362,9 @@ func TestPlanEventCodecRejectsMissingTenantScope(t *testing.T) {
 	t.Parallel()
 
 	valid := PlanEvent{
-		Event: Event{
+		Event: core.Event{
 			EventID:   "evt-1",
-			EventType: EventPlanStarted,
+			EventType: core.EventPlanStarted,
 			Sequence:  1,
 			Timestamp: time.Date(2026, 6, 20, 12, 0, 0, 0, time.UTC),
 		},
@@ -389,8 +391,8 @@ func TestPlanEventCodecRejectsMissingTenantScope(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			if _, err := MarshalPlanEvent(&event); !errors.Is(err, ErrInvalidPlanEvent) {
-				t.Fatalf("MarshalPlanEvent error = %v, want ErrInvalidPlanEvent", err)
+			if _, err := MarshalPlanEvent(&event); !errors.Is(err, core.ErrInvalidPlanEvent) {
+				t.Fatalf("MarshalPlanEvent error = %v, want core.ErrInvalidPlanEvent", err)
 			}
 		})
 	}
@@ -400,9 +402,9 @@ func TestPlanEventCodecRequiresStoredEventIdentity(t *testing.T) {
 	t.Parallel()
 
 	valid := PlanEvent{
-		Event: Event{
+		Event: core.Event{
 			EventID:   "evt-1",
-			EventType: EventPlanStarted,
+			EventType: core.EventPlanStarted,
 			Sequence:  1,
 			Timestamp: time.Date(2026, 6, 19, 12, 0, 0, 0, time.UTC),
 		},
@@ -435,8 +437,8 @@ func TestPlanEventCodecRequiresStoredEventIdentity(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			if _, err := MarshalPlanEvent(&event); !errors.Is(err, ErrInvalidPlanEvent) {
-				t.Fatalf("MarshalPlanEvent error = %v, want ErrInvalidPlanEvent", err)
+			if _, err := MarshalPlanEvent(&event); !errors.Is(err, core.ErrInvalidPlanEvent) {
+				t.Fatalf("MarshalPlanEvent error = %v, want core.ErrInvalidPlanEvent", err)
 			}
 		})
 	}
@@ -446,9 +448,9 @@ func TestPlanEventToEventCarriesPlanScopeInPayload(t *testing.T) {
 	t.Parallel()
 
 	event := PlanEvent{
-		Event: Event{
+		Event: core.Event{
 			EventID:   "evt-1",
-			EventType: EventPlanNodeStarted,
+			EventType: core.EventPlanNodeStarted,
 			RunID:     "run-1",
 			Sequence:  3,
 			Timestamp: time.Date(2026, 6, 20, 12, 0, 0, 0, time.UTC),
@@ -484,8 +486,8 @@ func TestSignalJSONUsesPublicWireFieldNames(t *testing.T) {
 
 	sentAt := time.Date(2026, 6, 20, 12, 30, 0, 0, time.UTC)
 
-	data, err := json.Marshal(Signal{
-		Type:           SignalPlanApprove,
+	data, err := json.Marshal(core.Signal{
+		Type:           core.SignalPlanApprove,
 		IdempotencyKey: "approve-1",
 		ActorID:        "operator-1",
 		Payload:        map[string]any{"reason": "looks good"},
@@ -508,7 +510,7 @@ func TestSignalJSONUsesPublicWireFieldNames(t *testing.T) {
 		}
 	}
 
-	var got Signal
+	var got core.Signal
 	if err := json.Unmarshal(data, &got); err != nil {
 		t.Fatalf("Unmarshal signal: %v", err)
 	}
@@ -516,10 +518,10 @@ func TestSignalJSONUsesPublicWireFieldNames(t *testing.T) {
 	assertSignalRoundTrip(t, &got, sentAt)
 }
 
-func assertSignalRoundTrip(t *testing.T, got *Signal, sentAt time.Time) {
+func assertSignalRoundTrip(t *testing.T, got *core.Signal, sentAt time.Time) {
 	t.Helper()
 
-	if got.Type != SignalPlanApprove ||
+	if got.Type != core.SignalPlanApprove ||
 		got.IdempotencyKey != "approve-1" ||
 		got.ActorID != "operator-1" ||
 		!got.SentAt.Equal(sentAt) ||

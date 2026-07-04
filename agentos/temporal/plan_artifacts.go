@@ -3,7 +3,8 @@ package temporal
 import (
 	"fmt"
 
-	"github.com/TekkenSteve/GoAgent/agentos"
+	agentos "github.com/TekkenSteve/GoAgent/agentos/control"
+	agentoscore "github.com/TekkenSteve/GoAgent/agentos/core"
 	"github.com/TekkenSteve/GoAgent/internal/usecase/agentosplan"
 )
 
@@ -12,8 +13,8 @@ const (
 	SUCCEEDED = "succeeded"
 )
 
-func normalizeRunArtifacts(planID string, node *agentos.PlanNodeSpec, status *agentos.RunStatus) ([]agentos.ArtifactRef, error) {
-	refs := make([]agentos.ArtifactRef, 0, len(status.Artifacts))
+func normalizeRunArtifacts(planID string, node *agentos.PlanNodeSpec, status *agentos.RunStatus) ([]agentoscore.ArtifactRef, error) {
+	refs := make([]agentoscore.ArtifactRef, 0, len(status.Artifacts))
 	for i := range status.Artifacts {
 		ref := status.Artifacts[i]
 
@@ -28,21 +29,21 @@ func normalizeRunArtifacts(planID string, node *agentos.PlanNodeSpec, status *ag
 	return refs, nil
 }
 
-func normalizeArtifactRef(planID string, node *agentos.PlanNodeSpec, status *agentos.RunStatus, ref *agentos.ArtifactRef) (agentos.ArtifactRef, error) {
+func normalizeArtifactRef(planID string, node *agentos.PlanNodeSpec, status *agentos.RunStatus, ref *agentoscore.ArtifactRef) (agentoscore.ArtifactRef, error) {
 	if ref.Name == "" {
-		return agentos.ArtifactRef{}, fmt.Errorf("%w: node %q returned artifact without name", agentos.ErrInvalidArtifact, node.NodeID)
+		return agentoscore.ArtifactRef{}, fmt.Errorf("%w: node %q returned artifact without name", agentoscore.ErrInvalidArtifact, node.NodeID)
 	}
 
 	if ref.Kind == "" {
-		return agentos.ArtifactRef{}, fmt.Errorf("%w: node %q artifact %q kind is required", agentos.ErrInvalidArtifact, node.NodeID, ref.Name)
+		return agentoscore.ArtifactRef{}, fmt.Errorf("%w: node %q artifact %q kind is required", agentoscore.ErrInvalidArtifact, node.NodeID, ref.Name)
 	}
 
 	if ref.ArtifactID == "" {
-		return agentos.ArtifactRef{}, fmt.Errorf("%w: node %q artifact %q requires artifact id", agentos.ErrInvalidArtifact, node.NodeID, ref.Name)
+		return agentoscore.ArtifactRef{}, fmt.Errorf("%w: node %q artifact %q requires artifact id", agentoscore.ErrInvalidArtifact, node.NodeID, ref.Name)
 	}
 
 	if err := validateArtifactOwnership(planID, node, status, ref); err != nil {
-		return agentos.ArtifactRef{}, err
+		return agentoscore.ArtifactRef{}, err
 	}
 
 	applyArtifactOwnership(planID, node, status, ref)
@@ -50,23 +51,23 @@ func normalizeArtifactRef(planID string, node *agentos.PlanNodeSpec, status *age
 	return *ref, nil
 }
 
-func validateArtifactOwnership(planID string, node *agentos.PlanNodeSpec, status *agentos.RunStatus, ref *agentos.ArtifactRef) error {
+func validateArtifactOwnership(planID string, node *agentos.PlanNodeSpec, status *agentos.RunStatus, ref *agentoscore.ArtifactRef) error {
 	if ref.PlanID != "" && ref.PlanID != planID {
-		return fmt.Errorf("%w: node %q artifact %q belongs to plan %q", agentos.ErrInvalidArtifact, node.NodeID, ref.Name, ref.PlanID)
+		return fmt.Errorf("%w: node %q artifact %q belongs to plan %q", agentoscore.ErrInvalidArtifact, node.NodeID, ref.Name, ref.PlanID)
 	}
 
 	if ref.NodeID != "" && ref.NodeID != node.NodeID {
-		return fmt.Errorf("%w: node %q artifact %q belongs to node %q", agentos.ErrInvalidArtifact, node.NodeID, ref.Name, ref.NodeID)
+		return fmt.Errorf("%w: node %q artifact %q belongs to node %q", agentoscore.ErrInvalidArtifact, node.NodeID, ref.Name, ref.NodeID)
 	}
 
 	if ref.RunID != "" && status.RunID != "" && ref.RunID != status.RunID {
-		return fmt.Errorf("%w: node %q artifact %q belongs to run %q", agentos.ErrInvalidArtifact, node.NodeID, ref.Name, ref.RunID)
+		return fmt.Errorf("%w: node %q artifact %q belongs to run %q", agentoscore.ErrInvalidArtifact, node.NodeID, ref.Name, ref.RunID)
 	}
 
 	return nil
 }
 
-func applyArtifactOwnership(planID string, node *agentos.PlanNodeSpec, status *agentos.RunStatus, ref *agentos.ArtifactRef) {
+func applyArtifactOwnership(planID string, node *agentos.PlanNodeSpec, status *agentos.RunStatus, ref *agentoscore.ArtifactRef) {
 	if ref.PlanID == "" {
 		ref.PlanID = planID
 	}
@@ -80,7 +81,7 @@ func applyArtifactOwnership(planID string, node *agentos.PlanNodeSpec, status *a
 	}
 }
 
-func validateRequiredArtifacts(outputs []agentos.ArtifactSpec, refs []agentos.ArtifactRef) error {
+func validateRequiredArtifacts(outputs []agentos.ArtifactSpec, refs []agentoscore.ArtifactRef) error {
 	return agentosplan.ValidateArtifactsAgainstSpecs("", outputs, refs)
 }
 

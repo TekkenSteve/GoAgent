@@ -1,13 +1,16 @@
 package agentosprocess
 
-import "github.com/TekkenSteve/GoAgent/agentos"
+import (
+	agentoscore "github.com/TekkenSteve/GoAgent/agentos/core"
+	agentos "github.com/TekkenSteve/GoAgent/agentos/process"
+)
 
 type replaySubscription struct {
-	events <-chan agentos.Event
+	events <-chan agentoscore.Event
 }
 
-func newReplaySubscription(processEvents []agentos.ProcessEvent) agentos.Subscription {
-	out := make(chan agentos.Event, len(processEvents))
+func newReplaySubscription(processEvents []agentos.Event) agentoscore.Subscription {
+	out := make(chan agentoscore.Event, len(processEvents))
 	for i := range processEvents {
 		out <- processEvents[i].ToEvent()
 	}
@@ -17,7 +20,7 @@ func newReplaySubscription(processEvents []agentos.ProcessEvent) agentos.Subscri
 	return &replaySubscription{events: out}
 }
 
-func (s *replaySubscription) Events() <-chan agentos.Event {
+func (s *replaySubscription) Events() <-chan agentoscore.Event {
 	return s.events
 }
 

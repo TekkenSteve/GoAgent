@@ -11,7 +11,8 @@ import (
 	"io"
 	"sync"
 
-	"github.com/TekkenSteve/GoAgent/agentos"
+	agentos "github.com/TekkenSteve/GoAgent/agentos/control"
+	agentoscore "github.com/TekkenSteve/GoAgent/agentos/core"
 )
 
 var errCanonicalJSONMultipleValues = errors.New("contains multiple JSON values")
@@ -41,20 +42,20 @@ func NewStaticArtifactSchemaCatalog(schemas []agentos.ArtifactSchema) (*StaticAr
 // canonical JSON representation for stable hashing and durable storage.
 func NormalizeArtifactSchema(schema agentos.ArtifactSchema) (agentos.ArtifactSchema, error) {
 	if schema.Ref == "" {
-		return agentos.ArtifactSchema{}, fmt.Errorf("%w: artifact schema ref is required", agentos.ErrInvalidArtifact)
+		return agentos.ArtifactSchema{}, fmt.Errorf("%w: artifact schema ref is required", agentoscore.ErrInvalidArtifact)
 	}
 
 	if len(schema.Schema) == 0 {
-		return agentos.ArtifactSchema{}, fmt.Errorf("%w: artifact schema %q is empty", agentos.ErrInvalidArtifact, schema.Ref)
+		return agentos.ArtifactSchema{}, fmt.Errorf("%w: artifact schema %q is empty", agentoscore.ErrInvalidArtifact, schema.Ref)
 	}
 
 	normalizedSchema, err := canonicalRawJSON(schema.Schema)
 	if err != nil {
-		return agentos.ArtifactSchema{}, fmt.Errorf("%w: artifact schema %q: %w", agentos.ErrInvalidArtifact, schema.Ref, err)
+		return agentos.ArtifactSchema{}, fmt.Errorf("%w: artifact schema %q: %w", agentoscore.ErrInvalidArtifact, schema.Ref, err)
 	}
 
 	if err := validateRawSchemaSyntax(normalizedSchema); err != nil {
-		return agentos.ArtifactSchema{}, fmt.Errorf("%w: artifact schema %q: %w", agentos.ErrInvalidArtifact, schema.Ref, err)
+		return agentos.ArtifactSchema{}, fmt.Errorf("%w: artifact schema %q: %w", agentoscore.ErrInvalidArtifact, schema.Ref, err)
 	}
 
 	schema.Schema = normalizedSchema
@@ -73,7 +74,7 @@ func ValidateArtifactSchema(schema agentos.ArtifactSchema) error {
 // content-addressed idempotency keys.
 func RegisterArtifactSchemas(ctx context.Context, registry ArtifactSchemaRegistry, schemas []agentos.ArtifactSchema) error {
 	if registry == nil {
-		return fmt.Errorf("%w: artifact schema registry is required", agentos.ErrInvalidArtifact)
+		return fmt.Errorf("%w: artifact schema registry is required", agentoscore.ErrInvalidArtifact)
 	}
 
 	for _, schema := range schemas {
@@ -95,7 +96,7 @@ func RegisterArtifactSchemas(ctx context.Context, registry ArtifactSchemaRegistr
 func ArtifactSchemaRegistrationIdempotencyKey(schema agentos.ArtifactSchema) (string, error) {
 	data, err := artifactSchemaDeclarationJSON(schema)
 	if err != nil {
-		return "", fmt.Errorf("%w: marshal artifact schema registration: %w", agentos.ErrInvalidArtifact, err)
+		return "", fmt.Errorf("%w: marshal artifact schema registration: %w", agentoscore.ErrInvalidArtifact, err)
 	}
 
 	sum := sha256.Sum256(data)
@@ -108,16 +109,16 @@ func ArtifactSchemaRegistrationIdempotencyKey(schema agentos.ArtifactSchema) (st
 func ValidateArtifactSchemaRegistrationIdempotency(existing, requested agentos.ArtifactSchema) error {
 	existingJSON, err := artifactSchemaDeclarationJSON(existing)
 	if err != nil {
-		return fmt.Errorf("%w: marshal existing artifact schema: %w", agentos.ErrInvalidArtifact, err)
+		return fmt.Errorf("%w: marshal existing artifact schema: %w", agentoscore.ErrInvalidArtifact, err)
 	}
 
 	requestedJSON, err := artifactSchemaDeclarationJSON(requested)
 	if err != nil {
-		return fmt.Errorf("%w: marshal requested artifact schema: %w", agentos.ErrInvalidArtifact, err)
+		return fmt.Errorf("%w: marshal requested artifact schema: %w", agentoscore.ErrInvalidArtifact, err)
 	}
 
 	if !bytes.Equal(existingJSON, requestedJSON) {
-		return fmt.Errorf("%w: artifact schema registration idempotency key reused with different declaration", agentos.ErrInvalidArtifact)
+		return fmt.Errorf("%w: artifact schema registration idempotency key reused with different declaration", agentoscore.ErrInvalidArtifact)
 	}
 
 	return nil
@@ -126,7 +127,7 @@ func ValidateArtifactSchemaRegistrationIdempotency(existing, requested agentos.A
 // RegisterArtifactSchema adds or replaces one schema declaration.
 func (c *StaticArtifactSchemaCatalog) RegisterArtifactSchema(_ context.Context, schema agentos.ArtifactSchema, idempotencyKey string) (agentos.ArtifactSchema, bool, error) {
 	if c == nil {
-		return agentos.ArtifactSchema{}, false, fmt.Errorf("%w: artifact schema catalog is nil", agentos.ErrInvalidArtifact)
+		return agentos.ArtifactSchema{}, false, fmt.Errorf("%w: artifact schema catalog is nil", agentoscore.ErrInvalidArtifact)
 	}
 
 	normalized, err := NormalizeArtifactSchema(schema)
@@ -141,7 +142,7 @@ func (c *StaticArtifactSchemaCatalog) RegisterArtifactSchema(_ context.Context, 
 		}
 
 		if idempotencyKey != expectedKey {
-			return agentos.ArtifactSchema{}, false, fmt.Errorf("%w: artifact schema registration idempotency key must match declaration", agentos.ErrInvalidArtifact)
+			return agentos.ArtifactSchema{}, false, fmt.Errorf("%w: artifact schema registration idempotency key must match declaration", agentoscore.ErrInvalidArtifact)
 		}
 	}
 

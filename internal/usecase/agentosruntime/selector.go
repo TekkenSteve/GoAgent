@@ -5,7 +5,8 @@ import (
 	"fmt"
 	"reflect"
 
-	"github.com/TekkenSteve/GoAgent/agentos"
+	agentos "github.com/TekkenSteve/GoAgent/agentos/control"
+	agentoscore "github.com/TekkenSteve/GoAgent/agentos/core"
 )
 
 // BackendSelectionRule maps generic RunSpec attributes to a backend.
@@ -25,7 +26,7 @@ type RuleBackendSelector struct {
 // NewRuleBackendSelector creates a deterministic selector from ordered rules.
 func NewRuleBackendSelector(rules []BackendSelectionRule) (*RuleBackendSelector, error) {
 	if len(rules) == 0 {
-		return nil, fmt.Errorf("%w: backend selection rules are required", agentos.ErrInvalidBackendRef)
+		return nil, fmt.Errorf("%w: backend selection rules are required", agentoscore.ErrInvalidBackendRef)
 	}
 
 	copied := make([]BackendSelectionRule, 0, len(rules))
@@ -35,7 +36,7 @@ func NewRuleBackendSelector(rules []BackendSelectionRule) (*RuleBackendSelector,
 		}
 
 		if rule.AgentID == "" && len(rule.Metadata) == 0 && len(rule.Input) == 0 {
-			return nil, fmt.Errorf("%w: backend selection rule %q has no match criteria", agentos.ErrInvalidBackendRef, rule.Name)
+			return nil, fmt.Errorf("%w: backend selection rule %q has no match criteria", agentoscore.ErrInvalidBackendRef, rule.Name)
 		}
 
 		copied = append(copied, rule)
@@ -52,7 +53,7 @@ func (s *RuleBackendSelector) Select(_ context.Context, spec *agentos.RunSpec) (
 		}
 	}
 
-	return agentos.BackendRef{}, fmt.Errorf("%w: no backend selection rule matched run %q", agentos.ErrInvalidBackendRef, spec.RunID)
+	return agentos.BackendRef{}, fmt.Errorf("%w: no backend selection rule matched run %q", agentoscore.ErrInvalidBackendRef, spec.RunID)
 }
 
 func ruleMatches(rule *BackendSelectionRule, spec *agentos.RunSpec) bool {

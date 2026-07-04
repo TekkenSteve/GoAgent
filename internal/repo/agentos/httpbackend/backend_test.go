@@ -10,7 +10,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/TekkenSteve/GoAgent/agentos"
+	agentos "github.com/TekkenSteve/GoAgent/agentos/control"
+	agentoscore "github.com/TekkenSteve/GoAgent/agentos/core"
 	"github.com/TekkenSteve/GoAgent/internal/usecase/agentosruntime/agentosruntimetest"
 )
 
@@ -183,8 +184,8 @@ func TestBackendSignalPostsSignal(t *testing.T) {
 
 	backend := newTestBackend(t, server)
 
-	signal := agentos.Signal{
-		Type: agentos.SignalUserMessage,
+	signal := agentoscore.Signal{
+		Type: agentoscore.SignalUserMessage,
 		Payload: map[string]any{
 			"content": "continue",
 		},
@@ -195,7 +196,7 @@ func TestBackendSignalPostsSignal(t *testing.T) {
 		t.Fatalf("Signal: %v", err)
 	}
 
-	if got.Type != agentos.SignalUserMessage || got.Payload["content"] != "continue" {
+	if got.Type != agentoscore.SignalUserMessage || got.Payload["content"] != "continue" {
 		t.Fatalf("unexpected signal: %#v", got)
 	}
 }
@@ -219,13 +220,13 @@ func TestBackendControlPostsOperation(t *testing.T) {
 	defer server.Close()
 
 	backend := newTestBackend(t, server)
-	control := agentos.ControlRequest{Operation: agentos.ControlCancel, IdempotencyKey: "control-1"}
+	control := agentoscore.ControlRequest{Operation: agentoscore.ControlCancel, IdempotencyKey: "control-1"}
 
 	if err := backend.Control(context.Background(), Run1, &control); err != nil {
 		t.Fatalf("Control: %v", err)
 	}
 
-	if got.Operation != agentos.ControlCancel {
+	if got.Operation != agentoscore.ControlCancel {
 		t.Fatalf("operation = %q", got.Operation)
 	}
 
@@ -239,11 +240,11 @@ func TestBackendRejectsNilRunInputs(t *testing.T) {
 
 	backend := &Backend{config: Config{Name: "http-test"}}
 
-	if _, err := backend.Start(context.Background(), nil); !errors.Is(err, agentos.ErrInvalidRunSpec) {
+	if _, err := backend.Start(context.Background(), nil); !errors.Is(err, agentoscore.ErrInvalidRunSpec) {
 		t.Fatalf("Start nil error = %v, want ErrInvalidRunSpec", err)
 	}
 
-	if err := backend.Signal(context.Background(), Run1, nil); !errors.Is(err, agentos.ErrInvalidSignal) {
+	if err := backend.Signal(context.Background(), Run1, nil); !errors.Is(err, agentoscore.ErrInvalidSignal) {
 		t.Fatalf("Signal nil error = %v, want ErrInvalidSignal", err)
 	}
 }
@@ -259,7 +260,7 @@ func TestBackendStatusGetsRunStatus(t *testing.T) {
 		if err := json.NewEncoder(w).Encode(agentos.RunStatus{
 			RunID:          Run1,
 			LifecycleState: "running",
-			Progress:       &agentos.RunProgress{Current: 3, Total: 10, Label: "draft"},
+			Progress:       &agentoscore.RunProgress{Current: 3, Total: 10, Label: "draft"},
 		}); err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 

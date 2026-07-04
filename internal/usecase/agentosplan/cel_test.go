@@ -5,7 +5,7 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/TekkenSteve/GoAgent/agentos"
+	agentoscore "github.com/TekkenSteve/GoAgent/agentos/core"
 )
 
 func TestCELCompilerRejectsNonDeterministicAndExternalCapabilities(t *testing.T) {
@@ -28,7 +28,7 @@ func TestCELCompilerRejectsNonDeterministicAndExternalCapabilities(t *testing.T)
 			t.Parallel()
 
 			_, err := compiler.CompileValue(expression)
-			if !errors.Is(err, agentos.ErrInvalidExpression) {
+			if !errors.Is(err, agentoscore.ErrInvalidExpression) {
 				t.Fatalf("CompileValue error = %v, want ErrInvalidExpression", err)
 			}
 		})

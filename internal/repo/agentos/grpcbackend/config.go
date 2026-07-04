@@ -4,7 +4,8 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/TekkenSteve/GoAgent/agentos"
+	agentos "github.com/TekkenSteve/GoAgent/agentos/control"
+	agentoscore "github.com/TekkenSteve/GoAgent/agentos/core"
 )
 
 const defaultService = "agentos.v1.AgentBackend"
@@ -41,15 +42,15 @@ func (c *Config) Ref() agentos.BackendRef {
 
 func (c *Config) normalize() error {
 	if c == nil {
-		return fmt.Errorf("%w: grpc backend config is required", agentos.ErrInvalidBackendRef)
+		return fmt.Errorf("%w: grpc backend config is required", agentoscore.ErrInvalidBackendRef)
 	}
 
 	if c.Name == "" {
-		return fmt.Errorf("%w: grpc backend name is required", agentos.ErrInvalidBackendRef)
+		return fmt.Errorf("%w: grpc backend name is required", agentoscore.ErrInvalidBackendRef)
 	}
 
 	if c.Target == "" {
-		return fmt.Errorf("%w: grpc backend target is required", agentos.ErrInvalidBackendRef)
+		return fmt.Errorf("%w: grpc backend target is required", agentoscore.ErrInvalidBackendRef)
 	}
 
 	if c.Service == "" {

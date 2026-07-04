@@ -8,7 +8,8 @@ import (
 	"sort"
 	"time"
 
-	"github.com/TekkenSteve/GoAgent/agentos"
+	agentos "github.com/TekkenSteve/GoAgent/agentos/control"
+	agentoscore "github.com/TekkenSteve/GoAgent/agentos/core"
 	"github.com/TekkenSteve/GoAgent/internal/usecase/agentosplan"
 	"go.temporal.io/sdk/temporal"
 	"go.temporal.io/sdk/workflow"
@@ -466,7 +467,7 @@ func finishPlanWorkflowIteration(
 			return *result, err
 		}
 
-		return *result, fmt.Errorf("%w: %s", agentos.ErrInvalidRunPlan, reason)
+		return *result, fmt.Errorf("%w: %s", agentoscore.ErrInvalidRunPlan, reason)
 	}
 
 	if err := continuePlanWorkflowIfNeeded(runtime.WorkflowCtx, input, spec, state, *expansionCount, iterationCount, runtime.ProcessedControls, runtime.ProcessedSignals); err != nil {
@@ -564,7 +565,7 @@ func applyPlanIterationGuard(activityCtx, workflowCtx workflow.Context, spec *ag
 	evt9 := agentosplan.StateEvent{Kind: agentosplan.EventPlanFailed, Reason: reason}
 	persistErr := applyPlanStateEvent(activityCtx, workflowCtx, spec, state, &evt9)
 
-	return errors.Join(fmt.Errorf("%w: %s", agentos.ErrInvalidRunPlan, reason), persistErr)
+	return errors.Join(fmt.Errorf("%w: %s", agentoscore.ErrInvalidRunPlan, reason), persistErr)
 }
 
 func applyPlanStateEvent(activityCtx, workflowCtx workflow.Context, spec *agentos.RunPlanSpec, state *agentosplan.State, event *agentosplan.StateEvent) error {
@@ -723,7 +724,7 @@ func pollRunningPlanNodes(activityCtx, workflowCtx workflow.Context, spec *agent
 func pollRunningPlanNode(activityCtx, workflowCtx workflow.Context, spec *agentos.RunPlanSpec, state *agentosplan.State, validation *ValidatePlanOutput, expansionCount *int32, now time.Time, node *agentos.PlanNodeStatus) (bool, error) {
 	nodeSpec, ok := validation.Plan.NodeByID[node.NodeID]
 	if !ok {
-		return false, fmt.Errorf("%w: unknown node %q", agentos.ErrInvalidRunPlan, node.NodeID)
+		return false, fmt.Errorf("%w: unknown node %q", agentoscore.ErrInvalidRunPlan, node.NodeID)
 	}
 
 	if nodeTimedOut(now, node, &nodeSpec) {
@@ -829,7 +830,7 @@ func applyNodeRunTerminal(activityCtx, workflowCtx workflow.Context, spec *agent
 	return nil
 }
 
-func applyPlanExpansion(activityCtx, workflowCtx workflow.Context, spec *agentos.RunPlanSpec, state *agentosplan.State, validation *ValidatePlanOutput, expansionCount *int32, node *agentos.PlanNodeSpec, status *agentos.RunStatus, artifacts []agentos.ArtifactRef) error {
+func applyPlanExpansion(activityCtx, workflowCtx workflow.Context, spec *agentos.RunPlanSpec, state *agentosplan.State, validation *ValidatePlanOutput, expansionCount *int32, node *agentos.PlanNodeSpec, status *agentos.RunStatus, artifacts []agentoscore.ArtifactRef) error {
 	if !hasPlanDeltaArtifact(artifacts) {
 		return nil
 	}
@@ -866,9 +867,9 @@ func applyPlanExpansion(activityCtx, workflowCtx workflow.Context, spec *agentos
 	return nil
 }
 
-func hasPlanDeltaArtifact(artifacts []agentos.ArtifactRef) bool {
+func hasPlanDeltaArtifact(artifacts []agentoscore.ArtifactRef) bool {
 	for i := range artifacts {
-		if artifacts[i].Kind == agentos.ArtifactKindPlanDelta {
+		if artifacts[i].Kind == agentoscore.ArtifactKindPlanDelta {
 			return true
 		}
 	}
@@ -882,7 +883,7 @@ func applyRunBudgetUsage(activityCtx, workflowCtx workflow.Context, spec *agento
 	}
 
 	if status.BudgetUsage.SpentCents < 0 {
-		return fmt.Errorf("%w: run %q reported negative budget usage", agentos.ErrInvalidRunPlan, status.RunID)
+		return fmt.Errorf("%w: run %q reported negative budget usage", agentoscore.ErrInvalidRunPlan, status.RunID)
 	}
 
 	evt21 := agentosplan.StateEvent{
@@ -902,7 +903,7 @@ func applyNodeAttemptFailure(activityCtx, workflowCtx workflow.Context, spec *ag
 
 	current, ok := state.NodeStatus(node.NodeID)
 	if !ok {
-		return fmt.Errorf("%w: unknown node %q", agentos.ErrInvalidRunPlan, node.NodeID)
+		return fmt.Errorf("%w: unknown node %q", agentoscore.ErrInvalidRunPlan, node.NodeID)
 	}
 
 	failedAttempt := current.Attempts
@@ -935,7 +936,7 @@ func applyNodeAttemptFailure(activityCtx, workflowCtx workflow.Context, spec *ag
 
 func cancelTimedOutNode(activityCtx workflow.Context, planID string, node *agentos.PlanNodeStatus) error {
 	if node.RunID == "" {
-		return fmt.Errorf("%w: timed out node %q has no active run id", agentos.ErrInvalidRunPlan, node.NodeID)
+		return fmt.Errorf("%w: timed out node %q has no active run id", agentoscore.ErrInvalidRunPlan, node.NodeID)
 	}
 
 	key, err := agentosplan.NodeTimeoutControlIdempotencyKey(planID, node.NodeID, node.RunID)
@@ -943,8 +944,8 @@ func cancelTimedOutNode(activityCtx workflow.Context, planID string, node *agent
 		return err
 	}
 
-	control := agentos.ControlRequest{
-		Operation:      agentos.ControlCancel,
+	control := agentoscore.ControlRequest{
+		Operation:      agentoscore.ControlCancel,
 		IdempotencyKey: key,
 	}
 	if err := workflow.ExecuteActivity(activityCtx, ControlPlanNodeActivityName, controlPlanNodeInput{RunID: node.RunID, Control: control}).Get(activityCtx, nil); err != nil {
@@ -954,7 +955,7 @@ func cancelTimedOutNode(activityCtx workflow.Context, planID string, node *agent
 	return nil
 }
 
-func applyPlanBudgetGuard(activityCtx, workflowCtx workflow.Context, spec *agentos.RunPlanSpec, state *agentosplan.State, controlsByNode map[string][]agentos.ControlOperation) (bool, error) {
+func applyPlanBudgetGuard(activityCtx, workflowCtx workflow.Context, spec *agentos.RunPlanSpec, state *agentosplan.State, controlsByNode map[string][]agentoscore.ControlOperation) (bool, error) {
 	if !agentosplan.BudgetExceeded(spec.Policy, state.Status.BudgetUsage) {
 		return false, nil
 	}
@@ -964,8 +965,8 @@ func applyPlanBudgetGuard(activityCtx, workflowCtx workflow.Context, spec *agent
 		return false, err
 	}
 
-	control := agentos.ControlRequest{
-		Operation:      agentos.ControlCancel,
+	control := agentoscore.ControlRequest{
+		Operation:      agentoscore.ControlCancel,
 		IdempotencyKey: key,
 	}
 	if err := controlActivePlanNodes(activityCtx, spec.PlanID, &state.Status, &control, controlsByNode); err != nil {
@@ -985,7 +986,7 @@ func applyPlanBudgetGuard(activityCtx, workflowCtx workflow.Context, spec *agent
 	return true, nil
 }
 
-func applyPlanTimeoutGuard(activityCtx, workflowCtx workflow.Context, spec *agentos.RunPlanSpec, state *agentosplan.State, controlsByNode map[string][]agentos.ControlOperation) (bool, error) {
+func applyPlanTimeoutGuard(activityCtx, workflowCtx workflow.Context, spec *agentos.RunPlanSpec, state *agentosplan.State, controlsByNode map[string][]agentoscore.ControlOperation) (bool, error) {
 	if !agentosplan.PlanTimedOut(spec.Policy, state.Status.StartedAt, workflow.Now(workflowCtx)) {
 		return false, nil
 	}
@@ -995,8 +996,8 @@ func applyPlanTimeoutGuard(activityCtx, workflowCtx workflow.Context, spec *agen
 		return false, err
 	}
 
-	control := agentos.ControlRequest{
-		Operation:      agentos.ControlCancel,
+	control := agentoscore.ControlRequest{
+		Operation:      agentoscore.ControlCancel,
 		IdempotencyKey: key,
 	}
 	if err := controlActivePlanNodes(activityCtx, spec.PlanID, &state.Status, &control, controlsByNode); err != nil {
@@ -1035,7 +1036,7 @@ func nextNodeAttempt(state *agentosplan.State, nodeID string) int32 {
 
 func nodeForAttempt(planID string, node *agentos.PlanNodeSpec, attempt int32) (agentos.PlanNodeSpec, error) {
 	if attempt <= 0 {
-		return agentos.PlanNodeSpec{}, fmt.Errorf("%w: node start attempt must be positive", agentos.ErrInvalidRunPlan)
+		return agentos.PlanNodeSpec{}, fmt.Errorf("%w: node start attempt must be positive", agentoscore.ErrInvalidRunPlan)
 	}
 
 	node.Run.RunID = nodeRunIDForAttempt(node.Run.RunID, attempt)
@@ -1071,15 +1072,15 @@ type planControlDrainResult struct {
 	Paused   bool
 }
 
-func drainPlanControl(activityCtx, workflowCtx workflow.Context, spec *agentos.RunPlanSpec, ch workflow.ReceiveChannel, state *agentosplan.State, paused bool, controlsByNode map[string][]agentos.ControlOperation, processed map[string]bool) (canceled, pausedOut bool, err error) {
-	var control agentos.ControlRequest
+func drainPlanControl(activityCtx, workflowCtx workflow.Context, spec *agentos.RunPlanSpec, ch workflow.ReceiveChannel, state *agentosplan.State, paused bool, controlsByNode map[string][]agentoscore.ControlOperation, processed map[string]bool) (canceled, pausedOut bool, err error) {
+	var control agentoscore.ControlRequest
 	for ch.ReceiveAsync(&control) {
-		if err := agentos.ValidateControlRequest(&control); err != nil {
+		if err := agentoscore.ValidateControlRequest(&control); err != nil {
 			return false, paused, err
 		}
 
 		if control.IdempotencyKey == "" {
-			return false, paused, fmt.Errorf("%w: control idempotency key is required", agentos.ErrInvalidControlOperation)
+			return false, paused, fmt.Errorf("%w: control idempotency key is required", agentoscore.ErrInvalidControlOperation)
 		}
 
 		if processed[control.IdempotencyKey] {
@@ -1102,22 +1103,22 @@ func drainPlanControl(activityCtx, workflowCtx workflow.Context, spec *agentos.R
 	return false, paused, nil
 }
 
-func applyPlanControl(activityCtx, workflowCtx workflow.Context, spec *agentos.RunPlanSpec, state *agentosplan.State, paused bool, control *agentos.ControlRequest, controlsByNode map[string][]agentos.ControlOperation) (planControlDrainResult, error) {
+func applyPlanControl(activityCtx, workflowCtx workflow.Context, spec *agentos.RunPlanSpec, state *agentosplan.State, paused bool, control *agentoscore.ControlRequest, controlsByNode map[string][]agentoscore.ControlOperation) (planControlDrainResult, error) {
 	result := planControlDrainResult{Paused: paused}
 
 	switch control.Operation {
-	case agentos.ControlCancel:
+	case agentoscore.ControlCancel:
 		return cancelPlanFromControl(activityCtx, workflowCtx, spec, state, control, controlsByNode, result)
-	case agentos.ControlPause:
+	case agentoscore.ControlPause:
 		return pausePlanFromControl(activityCtx, workflowCtx, spec, state, control, controlsByNode, result)
-	case agentos.ControlResume:
+	case agentoscore.ControlResume:
 		return resumePlanFromControl(activityCtx, workflowCtx, spec, state, control, controlsByNode, result)
 	default:
 		return result, nil
 	}
 }
 
-func cancelPlanFromControl(activityCtx, workflowCtx workflow.Context, spec *agentos.RunPlanSpec, state *agentosplan.State, control *agentos.ControlRequest, controlsByNode map[string][]agentos.ControlOperation, result planControlDrainResult) (planControlDrainResult, error) {
+func cancelPlanFromControl(activityCtx, workflowCtx workflow.Context, spec *agentos.RunPlanSpec, state *agentosplan.State, control *agentoscore.ControlRequest, controlsByNode map[string][]agentoscore.ControlOperation, result planControlDrainResult) (planControlDrainResult, error) {
 	if err := controlActivePlanNodes(activityCtx, spec.PlanID, &state.Status, control, controlsByNode); err != nil {
 		return result, err
 	}
@@ -1136,7 +1137,7 @@ func cancelPlanFromControl(activityCtx, workflowCtx workflow.Context, spec *agen
 	return result, nil
 }
 
-func pausePlanFromControl(activityCtx, workflowCtx workflow.Context, spec *agentos.RunPlanSpec, state *agentosplan.State, control *agentos.ControlRequest, controlsByNode map[string][]agentos.ControlOperation, result planControlDrainResult) (planControlDrainResult, error) {
+func pausePlanFromControl(activityCtx, workflowCtx workflow.Context, spec *agentos.RunPlanSpec, state *agentosplan.State, control *agentoscore.ControlRequest, controlsByNode map[string][]agentoscore.ControlOperation, result planControlDrainResult) (planControlDrainResult, error) {
 	if err := controlActivePlanNodes(activityCtx, spec.PlanID, &state.Status, control, controlsByNode); err != nil {
 		return blockPlanAfterControlFailure(activityCtx, workflowCtx, spec, state, err)
 	}
@@ -1151,7 +1152,7 @@ func pausePlanFromControl(activityCtx, workflowCtx workflow.Context, spec *agent
 	return result, nil
 }
 
-func resumePlanFromControl(activityCtx, workflowCtx workflow.Context, spec *agentos.RunPlanSpec, state *agentosplan.State, control *agentos.ControlRequest, controlsByNode map[string][]agentos.ControlOperation, result planControlDrainResult) (planControlDrainResult, error) {
+func resumePlanFromControl(activityCtx, workflowCtx workflow.Context, spec *agentos.RunPlanSpec, state *agentosplan.State, control *agentoscore.ControlRequest, controlsByNode map[string][]agentoscore.ControlOperation, result planControlDrainResult) (planControlDrainResult, error) {
 	if err := controlActivePlanNodes(activityCtx, spec.PlanID, &state.Status, control, controlsByNode); err != nil {
 		return blockPlanAfterControlFailure(activityCtx, workflowCtx, spec, state, err)
 	}
@@ -1204,7 +1205,7 @@ func markActivePlanNodesCanceled(activityCtx, workflowCtx workflow.Context, spec
 	return nil
 }
 
-func controlActivePlanNodes(activityCtx workflow.Context, planID string, status *agentos.RunPlanStatus, control *agentos.ControlRequest, controlsByNode map[string][]agentos.ControlOperation) error {
+func controlActivePlanNodes(activityCtx workflow.Context, planID string, status *agentos.RunPlanStatus, control *agentoscore.ControlRequest, controlsByNode map[string][]agentoscore.ControlOperation) error {
 	inputs, err := activePlanNodeControlInputs(planID, status, control, controlsByNode)
 	if err != nil {
 		return err
@@ -1219,7 +1220,7 @@ func controlActivePlanNodes(activityCtx workflow.Context, planID string, status 
 	return nil
 }
 
-func activePlanNodeControlInputs(planID string, status *agentos.RunPlanStatus, control *agentos.ControlRequest, controlsByNode map[string][]agentos.ControlOperation) ([]controlPlanNodeInput, error) {
+func activePlanNodeControlInputs(planID string, status *agentos.RunPlanStatus, control *agentoscore.ControlRequest, controlsByNode map[string][]agentoscore.ControlOperation) ([]controlPlanNodeInput, error) {
 	inputs := make([]controlPlanNodeInput, 0, len(status.Nodes))
 	for i := range status.Nodes {
 		node := &status.Nodes[i]
@@ -1227,8 +1228,8 @@ func activePlanNodeControlInputs(planID string, status *agentos.RunPlanStatus, c
 			continue
 		}
 
-		if control.Operation != agentos.ControlCancel && !nodeSupportsControl(controlsByNode, node.NodeID, control.Operation) {
-			return nil, fmt.Errorf("%w: node %q does not declare support for %s", agentos.ErrInvalidControlOperation, node.NodeID, control.Operation)
+		if control.Operation != agentoscore.ControlCancel && !nodeSupportsControl(controlsByNode, node.NodeID, control.Operation) {
+			return nil, fmt.Errorf("%w: node %q does not declare support for %s", agentoscore.ErrInvalidControlOperation, node.NodeID, control.Operation)
 		}
 
 		childControl := *control
@@ -1245,7 +1246,7 @@ func activePlanNodeControlInputs(planID string, status *agentos.RunPlanStatus, c
 	return inputs, nil
 }
 
-func nodeSupportsControl(controlsByNode map[string][]agentos.ControlOperation, nodeID string, op agentos.ControlOperation) bool {
+func nodeSupportsControl(controlsByNode map[string][]agentoscore.ControlOperation, nodeID string, op agentoscore.ControlOperation) bool {
 	return slices.Contains(controlsByNode[nodeID], op)
 }
 
@@ -1255,8 +1256,8 @@ type planSignalDrainResult struct {
 	Progressed bool
 }
 
-func drainPlanSignals(activityCtx, workflowCtx workflow.Context, spec *agentos.RunPlanSpec, ch workflow.ReceiveChannel, state *agentosplan.State, paused bool, nodes map[string]agentos.PlanNodeSpec, controlsByNode map[string][]agentos.ControlOperation, processed map[string]bool) (rejected, pausedOut, progressedOut bool, err error) {
-	var signal agentos.Signal
+func drainPlanSignals(activityCtx, workflowCtx workflow.Context, spec *agentos.RunPlanSpec, ch workflow.ReceiveChannel, state *agentosplan.State, paused bool, nodes map[string]agentos.PlanNodeSpec, controlsByNode map[string][]agentoscore.ControlOperation, processed map[string]bool) (rejected, pausedOut, progressedOut bool, err error) {
+	var signal agentoscore.Signal
 
 	progressed := false
 
@@ -1287,27 +1288,27 @@ func drainPlanSignals(activityCtx, workflowCtx workflow.Context, spec *agentos.R
 	return false, paused, progressed, nil
 }
 
-func applyPlanSignal(activityCtx, workflowCtx workflow.Context, spec *agentos.RunPlanSpec, state *agentosplan.State, paused bool, nodes map[string]agentos.PlanNodeSpec, controlsByNode map[string][]agentos.ControlOperation, signal *agentos.Signal) (planSignalDrainResult, error) {
+func applyPlanSignal(activityCtx, workflowCtx workflow.Context, spec *agentos.RunPlanSpec, state *agentosplan.State, paused bool, nodes map[string]agentos.PlanNodeSpec, controlsByNode map[string][]agentoscore.ControlOperation, signal *agentoscore.Signal) (planSignalDrainResult, error) {
 	result := planSignalDrainResult{Paused: paused}
 
 	switch signal.Type {
-	case agentos.SignalPlanNodeRetry:
+	case agentoscore.SignalPlanNodeRetry:
 		return retryPlanNodeFromSignal(activityCtx, workflowCtx, spec, state, nodes, signal, result)
-	case agentos.SignalPlanApprove:
+	case agentoscore.SignalPlanApprove:
 		return approvePlanFromSignal(activityCtx, workflowCtx, spec, state, signal, result)
-	case agentos.SignalPlanReject:
+	case agentoscore.SignalPlanReject:
 		return rejectPlanFromSignal(activityCtx, workflowCtx, spec, state, controlsByNode, signal, result)
-	case agentos.SignalControlPause, agentos.SignalControlResume, agentos.SignalControlCancel,
-		agentos.SignalUserMessage, agentos.SignalUserApproval, agentos.SignalUserReject,
-		agentos.SignalToolResult, agentos.SignalHumanFeedback, agentos.SignalConfigPatch,
-		agentos.SignalMemoryPatch:
+	case agentoscore.SignalControlPause, agentoscore.SignalControlResume, agentoscore.SignalControlCancel,
+		agentoscore.SignalUserMessage, agentoscore.SignalUserApproval, agentoscore.SignalUserReject,
+		agentoscore.SignalToolResult, agentoscore.SignalHumanFeedback, agentoscore.SignalConfigPatch,
+		agentoscore.SignalMemoryPatch:
 		return result, nil
 	default:
 		return result, nil
 	}
 }
 
-func retryPlanNodeFromSignal(activityCtx, workflowCtx workflow.Context, spec *agentos.RunPlanSpec, state *agentosplan.State, nodes map[string]agentos.PlanNodeSpec, signal *agentos.Signal, result planSignalDrainResult) (planSignalDrainResult, error) {
+func retryPlanNodeFromSignal(activityCtx, workflowCtx workflow.Context, spec *agentos.RunPlanSpec, state *agentosplan.State, nodes map[string]agentos.PlanNodeSpec, signal *agentoscore.Signal, result planSignalDrainResult) (planSignalDrainResult, error) {
 	if err := applyManualNodeRetry(activityCtx, workflowCtx, spec, state, nodes, signal); err != nil {
 		return result, err
 	}
@@ -1318,9 +1319,9 @@ func retryPlanNodeFromSignal(activityCtx, workflowCtx workflow.Context, spec *ag
 	return result, nil
 }
 
-func approvePlanFromSignal(activityCtx, workflowCtx workflow.Context, spec *agentos.RunPlanSpec, state *agentosplan.State, signal *agentos.Signal, result planSignalDrainResult) (planSignalDrainResult, error) {
+func approvePlanFromSignal(activityCtx, workflowCtx workflow.Context, spec *agentos.RunPlanSpec, state *agentosplan.State, signal *agentoscore.Signal, result planSignalDrainResult) (planSignalDrainResult, error) {
 	if state.Status.LifecycleState != agentos.PlanLifecycleBlocked {
-		return result, fmt.Errorf("%w: approve requires blocked plan state", agentos.ErrInvalidSignal)
+		return result, fmt.Errorf("%w: approve requires blocked plan state", agentoscore.ErrInvalidSignal)
 	}
 
 	reason := agentosplan.PlanSignalReason(signal)
@@ -1336,7 +1337,7 @@ func approvePlanFromSignal(activityCtx, workflowCtx workflow.Context, spec *agen
 	return result, nil
 }
 
-func rejectPlanFromSignal(activityCtx, workflowCtx workflow.Context, spec *agentos.RunPlanSpec, state *agentosplan.State, controlsByNode map[string][]agentos.ControlOperation, signal *agentos.Signal, result planSignalDrainResult) (planSignalDrainResult, error) {
+func rejectPlanFromSignal(activityCtx, workflowCtx workflow.Context, spec *agentos.RunPlanSpec, state *agentosplan.State, controlsByNode map[string][]agentoscore.ControlOperation, signal *agentoscore.Signal, result planSignalDrainResult) (planSignalDrainResult, error) {
 	reason := agentosplan.PlanSignalReason(signal)
 	if reason == "" {
 		reason = "plan rejected"
@@ -1347,8 +1348,8 @@ func rejectPlanFromSignal(activityCtx, workflowCtx workflow.Context, spec *agent
 		return result, err
 	}
 
-	control := agentos.ControlRequest{
-		Operation:      agentos.ControlCancel,
+	control := agentoscore.ControlRequest{
+		Operation:      agentoscore.ControlCancel,
 		IdempotencyKey: key,
 	}
 	if err := controlActivePlanNodes(activityCtx, spec.PlanID, &state.Status, &control, controlsByNode); err != nil {
@@ -1370,7 +1371,7 @@ func rejectPlanFromSignal(activityCtx, workflowCtx workflow.Context, spec *agent
 	return result, nil
 }
 
-func applyManualNodeRetry(activityCtx, workflowCtx workflow.Context, spec *agentos.RunPlanSpec, state *agentosplan.State, nodes map[string]agentos.PlanNodeSpec, signal *agentos.Signal) error {
+func applyManualNodeRetry(activityCtx, workflowCtx workflow.Context, spec *agentos.RunPlanSpec, state *agentosplan.State, nodes map[string]agentos.PlanNodeSpec, signal *agentoscore.Signal) error {
 	retry, err := manualNodeRetry(signal, state, nodes)
 	if err != nil {
 		return err
@@ -1401,7 +1402,7 @@ type manualRetryRequest struct {
 	nextAttempt int32
 }
 
-func manualNodeRetry(signal *agentos.Signal, state *agentosplan.State, nodes map[string]agentos.PlanNodeSpec) (manualRetryRequest, error) {
+func manualNodeRetry(signal *agentoscore.Signal, state *agentosplan.State, nodes map[string]agentos.PlanNodeSpec) (manualRetryRequest, error) {
 	nodeID, err := agentosplan.PlanSignalNodeID(signal)
 	if err != nil {
 		return manualRetryRequest{}, err
@@ -1409,12 +1410,12 @@ func manualNodeRetry(signal *agentos.Signal, state *agentosplan.State, nodes map
 
 	nodeSpec, ok := nodes[nodeID]
 	if !ok {
-		return manualRetryRequest{}, fmt.Errorf("%w: unknown node %q", agentos.ErrInvalidRunPlan, nodeID)
+		return manualRetryRequest{}, fmt.Errorf("%w: unknown node %q", agentoscore.ErrInvalidRunPlan, nodeID)
 	}
 
 	current, ok := state.NodeStatus(nodeID)
 	if !ok {
-		return manualRetryRequest{}, fmt.Errorf("%w: unknown node %q", agentos.ErrInvalidRunPlan, nodeID)
+		return manualRetryRequest{}, fmt.Errorf("%w: unknown node %q", agentoscore.ErrInvalidRunPlan, nodeID)
 	}
 
 	reason := agentosplan.PlanSignalReason(signal)
@@ -1441,12 +1442,12 @@ func nextManualRetryAttempt(current *agentos.PlanNodeStatus) int32 {
 
 func validateManualRetryAttempt(nodeID string, policy agentos.NodePolicy, current *agentos.PlanNodeStatus, nextAttempt int32) error {
 	if current.LifecycleState != agentos.PlanNodeFailed {
-		return fmt.Errorf("%w: node %q is %s, not failed", agentos.ErrInvalidSignal, nodeID, current.LifecycleState)
+		return fmt.Errorf("%w: node %q is %s, not failed", agentoscore.ErrInvalidSignal, nodeID, current.LifecycleState)
 	}
 
 	maxAttempts := maxNodeAttempts(policy)
 	if nextAttempt > maxAttempts {
-		return fmt.Errorf("%w: node %q retry attempt %d exceeds max attempts %d", agentos.ErrInvalidSignal, nodeID, nextAttempt, maxAttempts)
+		return fmt.Errorf("%w: node %q retry attempt %d exceeds max attempts %d", agentoscore.ErrInvalidSignal, nodeID, nextAttempt, maxAttempts)
 	}
 
 	return nil

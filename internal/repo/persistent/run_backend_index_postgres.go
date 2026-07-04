@@ -7,7 +7,8 @@ import (
 	"fmt"
 
 	sq "github.com/Masterminds/squirrel"
-	"github.com/TekkenSteve/GoAgent/agentos"
+	agentos "github.com/TekkenSteve/GoAgent/agentos/control"
+	agentoscore "github.com/TekkenSteve/GoAgent/agentos/core"
 	"github.com/TekkenSteve/GoAgent/internal/entity"
 	"github.com/TekkenSteve/GoAgent/internal/pkg/postgres"
 	"github.com/TekkenSteve/GoAgent/internal/usecase/agentosruntime"
@@ -48,7 +49,7 @@ func (r *RunBackendIndexRepo) Resolve(ctx context.Context, runID string) (agento
 	}
 
 	if !exists {
-		return agentos.BackendRef{}, fmt.Errorf("%w: %s", agentos.ErrRunRouteNotFound, runID)
+		return agentos.BackendRef{}, fmt.Errorf("%w: %s", agentoscore.ErrRunRouteNotFound, runID)
 	}
 
 	return agentos.BackendRef{
@@ -87,7 +88,7 @@ func (r *RunBackendIndexRepo) GetRunBackend(ctx context.Context, runID string) (
 func (r *RunBackendIndexRepo) runByIdempotencyKey(ctx context.Context, record *entity.RunBackendIndexRecord) (entity.RunBackendIndexRecord, bool, error) {
 	idempotencyKey := record.IdempotencyKey
 	if idempotencyKey == "" {
-		return entity.RunBackendIndexRecord{}, false, fmt.Errorf("%w: run backend idempotency key is required", agentos.ErrInvalidRunSpec)
+		return entity.RunBackendIndexRecord{}, false, fmt.Errorf("%w: run backend idempotency key is required", agentoscore.ErrInvalidRunSpec)
 	}
 
 	query, args, err := r.Builder.
@@ -220,7 +221,7 @@ func (r *RunBackendIndexRepo) handleUpsertConflict(ctx context.Context, record *
 	}
 
 	if !exists {
-		return fmt.Errorf("%w: run %q conflict did not leave an ownership record", agentos.ErrRunRouteNotFound, record.RunID)
+		return fmt.Errorf("%w: run %q conflict did not leave an ownership record", agentoscore.ErrRunRouteNotFound, record.RunID)
 	}
 
 	if err := agentosruntime.ValidateRunBackendIndexIdempotency(&existing, record); err != nil {
@@ -252,11 +253,11 @@ func validatePlanNodeOwnershipRecord(record *entity.RunBackendIndexRecord) error
 	}
 
 	if record.PlanID == "" {
-		return fmt.Errorf("%w: plan id is required", agentos.ErrInvalidRunPlan)
+		return fmt.Errorf("%w: plan id is required", agentoscore.ErrInvalidRunPlan)
 	}
 
 	if record.NodeID == "" {
-		return fmt.Errorf("%w: node id is required", agentos.ErrInvalidRunPlan)
+		return fmt.Errorf("%w: node id is required", agentoscore.ErrInvalidRunPlan)
 	}
 
 	return nil
@@ -281,7 +282,7 @@ LEFT JOIN plan_nodes n
 WHERE p.plan_id = $1`, planID, nodeID).Scan(&owner.accountID, &owner.projectID, &owner.nodeID, &owner.runID)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
-			return planNodeOwner{}, fmt.Errorf("%w: %s", agentos.ErrPlanRouteNotFound, planID)
+			return planNodeOwner{}, fmt.Errorf("%w: %s", agentoscore.ErrPlanRouteNotFound, planID)
 		}
 
 		return planNodeOwner{}, fmt.Errorf("RunBackendIndexRepo - validatePlanNodeOwnership - query: %w", err)
@@ -292,15 +293,15 @@ WHERE p.plan_id = $1`, planID, nodeID).Scan(&owner.accountID, &owner.projectID, 
 
 func (o *planNodeOwner) validate(record *entity.RunBackendIndexRecord) error {
 	if o.accountID != record.AccountID || o.projectID != record.ProjectID {
-		return fmt.Errorf("%w: %s", agentos.ErrPlanRouteNotFound, record.PlanID)
+		return fmt.Errorf("%w: %s", agentoscore.ErrPlanRouteNotFound, record.PlanID)
 	}
 
 	if !o.nodeID.Valid || o.nodeID.String == "" {
-		return fmt.Errorf("%w: plan node %q is not durable", agentos.ErrInvalidRunPlan, record.NodeID)
+		return fmt.Errorf("%w: plan node %q is not durable", agentoscore.ErrInvalidRunPlan, record.NodeID)
 	}
 
 	if o.runID.Valid && o.runID.String != "" && o.runID.String != record.RunID {
-		return fmt.Errorf("%w: plan node %q has durable run id %q, got %q", agentos.ErrInvalidRunSpec, record.NodeID, o.runID.String, record.RunID)
+		return fmt.Errorf("%w: plan node %q has durable run id %q, got %q", agentoscore.ErrInvalidRunSpec, record.NodeID, o.runID.String, record.RunID)
 	}
 
 	return nil

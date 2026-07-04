@@ -4,7 +4,8 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/TekkenSteve/GoAgent/agentos"
+	agentoscore "github.com/TekkenSteve/GoAgent/agentos/core"
+	agentos "github.com/TekkenSteve/GoAgent/agentos/process"
 )
 
 const alternateWorksetID = "workset-2"
@@ -55,7 +56,7 @@ func TestMemoryStoreRejectsWorksetKeyReuseWithDifferentRequest(t *testing.T) {
 	changedStatus := initialWorksetStatus(&changed)
 
 	_, _, err := store.CreateWorkset(t.Context(), &changed, &changedStatus)
-	if !errors.Is(err, agentos.ErrInvalidWorkset) {
+	if !errors.Is(err, agentoscore.ErrInvalidWorkset) {
 		t.Fatalf("CreateWorkset changed error = %v, want ErrInvalidWorkset", err)
 	}
 }
@@ -104,7 +105,7 @@ func TestMemoryStoreGetWorksetEnforcesTenantScope(t *testing.T) {
 		t.Fatal("GetWorkset exists = true, want false for tenant mismatch")
 	}
 
-	if !errors.Is(err, agentos.ErrInvalidWorksetScope) {
+	if !errors.Is(err, agentoscore.ErrInvalidWorksetScope) {
 		t.Fatalf("GetWorkset tenant error = %v, want ErrInvalidWorksetScope", err)
 	}
 }

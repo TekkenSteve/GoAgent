@@ -3,7 +3,7 @@ package agentosplan
 import (
 	"context"
 
-	"github.com/TekkenSteve/GoAgent/agentos"
+	agentos "github.com/TekkenSteve/GoAgent/agentos/control"
 )
 
 func appendPlanEvent(ctx context.Context, store PlanEventStore, event *agentos.PlanEvent, idempotencyKey string) (agentos.PlanEvent, error) {

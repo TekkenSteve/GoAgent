@@ -4,7 +4,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/TekkenSteve/GoAgent/agentos"
+	agentos "github.com/TekkenSteve/GoAgent/agentos/control"
 )
 
 func TestStateRetryScheduledKeepsAttemptsAndClearsActiveRun(t *testing.T) {

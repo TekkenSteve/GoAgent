@@ -10,7 +10,8 @@ import (
 	"time"
 
 	sq "github.com/Masterminds/squirrel"
-	"github.com/TekkenSteve/GoAgent/agentos"
+	agentos "github.com/TekkenSteve/GoAgent/agentos/control"
+	agentoscore "github.com/TekkenSteve/GoAgent/agentos/core"
 	"github.com/TekkenSteve/GoAgent/internal/pkg/postgres"
 	"github.com/TekkenSteve/GoAgent/internal/usecase/agentosplan"
 	"github.com/jackc/pgx/v5"
@@ -31,11 +32,11 @@ func NewAgentOSPlanRepo(pg *postgres.Postgres) *AgentOSPlanRepo {
 
 func (r *AgentOSPlanRepo) CreatePlan(ctx context.Context, spec *agentos.RunPlanSpec, status *agentos.RunPlanStatus) (agentos.RunPlanStatus, bool, error) {
 	if spec.PlanID == "" {
-		return agentos.RunPlanStatus{}, false, fmt.Errorf("%w: plan id is required", agentos.ErrInvalidRunPlan)
+		return agentos.RunPlanStatus{}, false, fmt.Errorf("%w: plan id is required", agentoscore.ErrInvalidRunPlan)
 	}
 
 	if spec.IdempotencyKey == "" {
-		return agentos.RunPlanStatus{}, false, fmt.Errorf("%w: plan idempotency key is required", agentos.ErrInvalidRunPlan)
+		return agentos.RunPlanStatus{}, false, fmt.Errorf("%w: plan idempotency key is required", agentoscore.ErrInvalidRunPlan)
 	}
 
 	normalizedStatus := *status
@@ -208,11 +209,11 @@ func (r *AgentOSPlanRepo) ListPlanRefs(ctx context.Context, scope *agentosplan.P
 
 func (r *AgentOSPlanRepo) planRefsBuilder(scope *agentosplan.PlanRefScope) (sq.SelectBuilder, error) {
 	if scope.Limit < 0 {
-		return sq.SelectBuilder{}, fmt.Errorf("%w: plan ref limit must be non-negative", agentos.ErrInvalidPlanScope)
+		return sq.SelectBuilder{}, fmt.Errorf("%w: plan ref limit must be non-negative", agentoscore.ErrInvalidPlanScope)
 	}
 
 	if slices.Contains(scope.LifecycleStates, "") {
-		return sq.SelectBuilder{}, fmt.Errorf("%w: lifecycle state is required", agentos.ErrInvalidPlanScope)
+		return sq.SelectBuilder{}, fmt.Errorf("%w: lifecycle state is required", agentoscore.ErrInvalidPlanScope)
 	}
 
 	builder := r.Builder.
@@ -267,7 +268,7 @@ func normalizePlanStateSnapshotForPostgres(snapshot *agentosplan.PlanStateSnapsh
 
 	normalized := *snapshot
 	if snapshot.Spec.IdempotencyKey == "" {
-		return agentosplan.PlanStateSnapshot{}, fmt.Errorf("%w: plan idempotency key is required", agentos.ErrInvalidRunPlan)
+		return agentosplan.PlanStateSnapshot{}, fmt.Errorf("%w: plan idempotency key is required", agentoscore.ErrInvalidRunPlan)
 	}
 
 	normalized.Spec.RequestedAt = agentosplan.NormalizeDurableTimestamp(normalized.Spec.RequestedAt)
@@ -339,7 +340,7 @@ func validatePlanStateSaveTarget(existingSpec, spec *agentos.RunPlanSpec, exists
 	}
 
 	if !allowCreate {
-		return fmt.Errorf("%w: %s", agentos.ErrPlanRouteNotFound, spec.PlanID)
+		return fmt.Errorf("%w: %s", agentoscore.ErrPlanRouteNotFound, spec.PlanID)
 	}
 
 	return nil
@@ -522,7 +523,7 @@ func (r *AgentOSPlanRepo) deleteStalePlanNodes(ctx context.Context, tx pgx.Tx, p
 
 func (r *AgentOSPlanRepo) LoadPlanState(ctx context.Context, planID string) (agentosplan.PlanStateSnapshot, bool, error) {
 	if planID == "" {
-		return agentosplan.PlanStateSnapshot{}, false, fmt.Errorf("%w: plan id is required", agentos.ErrInvalidRunPlan)
+		return agentosplan.PlanStateSnapshot{}, false, fmt.Errorf("%w: plan id is required", agentoscore.ErrInvalidRunPlan)
 	}
 
 	return r.loadPlanStateByWhere(ctx, sq.Eq{"plan_id": planID}, "LoadPlanState")
@@ -624,7 +625,7 @@ func (r *AgentOSPlanRepo) loadPlanNodeStatuses(ctx context.Context, planID strin
 
 func (r *AgentOSPlanRepo) planByIdempotencyKey(ctx context.Context, accountID, projectID, idempotencyKey string) (agentos.RunPlanSpec, agentos.RunPlanStatus, bool, error) {
 	if idempotencyKey == "" {
-		return agentos.RunPlanSpec{}, agentos.RunPlanStatus{}, false, fmt.Errorf("%w: plan idempotency key is required", agentos.ErrInvalidRunPlan)
+		return agentos.RunPlanSpec{}, agentos.RunPlanStatus{}, false, fmt.Errorf("%w: plan idempotency key is required", agentoscore.ErrInvalidRunPlan)
 	}
 
 	query, args, err := r.Builder.
@@ -743,7 +744,7 @@ func normalizePlanTransitionForPostgres(snapshot *agentosplan.PlanStateSnapshot,
 	}
 
 	if normalizedEvent.PlanID != normalizedSnapshot.Spec.PlanID {
-		return agentosplan.PlanStateSnapshot{}, agentos.PlanEvent{}, agentosplan.PlanTransitionSnapshotIdentity{}, fmt.Errorf("%w: event plan %q does not match snapshot plan %q", agentos.ErrInvalidPlanEvent, normalizedEvent.PlanID, normalizedSnapshot.Spec.PlanID)
+		return agentosplan.PlanStateSnapshot{}, agentos.PlanEvent{}, agentosplan.PlanTransitionSnapshotIdentity{}, fmt.Errorf("%w: event plan %q does not match snapshot plan %q", agentoscore.ErrInvalidPlanEvent, normalizedEvent.PlanID, normalizedSnapshot.Spec.PlanID)
 	}
 
 	transitionIdentity, err := agentosplan.NewPlanTransitionSnapshotIdentity(&normalizedSnapshot, idempotencyKey)
@@ -830,11 +831,11 @@ func (r *AgentOSPlanRepo) AppendPlanEvent(ctx context.Context, event *agentos.Pl
 
 func normalizePlanEventAppendForPostgres(event *agentos.PlanEvent, idempotencyKey string) (agentos.PlanEvent, error) {
 	if event.PlanID == "" {
-		return agentos.PlanEvent{}, fmt.Errorf("%w: plan id is required", agentos.ErrInvalidPlanEvent)
+		return agentos.PlanEvent{}, fmt.Errorf("%w: plan id is required", agentoscore.ErrInvalidPlanEvent)
 	}
 
 	if idempotencyKey == "" {
-		return agentos.PlanEvent{}, fmt.Errorf("%w: plan event idempotency key is required", agentos.ErrInvalidPlanEvent)
+		return agentos.PlanEvent{}, fmt.Errorf("%w: plan event idempotency key is required", agentoscore.ErrInvalidPlanEvent)
 	}
 
 	return agentosplan.NormalizePlanEventAppendRequest(event), nil
@@ -855,7 +856,7 @@ WHERE plan_id = $1
 FOR UPDATE`, event.PlanID).Scan(&currentSequence, &scope.AccountID, &scope.ProjectID)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
-			return agentos.PlanEvent{}, fmt.Errorf("%w: %s", agentos.ErrPlanRouteNotFound, event.PlanID)
+			return agentos.PlanEvent{}, fmt.Errorf("%w: %s", agentoscore.ErrPlanRouteNotFound, event.PlanID)
 		}
 
 		return agentos.PlanEvent{}, fmt.Errorf("AgentOSPlanRepo - AppendPlanEvent - lock plan: %w", err)
@@ -1108,7 +1109,7 @@ func (r *AgentOSPlanRepo) authorizePlanStreamScope(ctx context.Context, scope *a
 	}
 
 	if !exists {
-		return fmt.Errorf("%w: %s", agentos.ErrPlanRouteNotFound, scope.PlanID)
+		return fmt.Errorf("%w: %s", agentoscore.ErrPlanRouteNotFound, scope.PlanID)
 	}
 
 	return agentosplan.ValidatePlanTenantAccess(agentos.PlanRef{PlanID: scope.PlanID, AccountID: scope.AccountID, ProjectID: scope.ProjectID}, &spec)
@@ -1132,7 +1133,7 @@ func (r *AgentOSPlanRepo) planEventsBuilder(scope *agentos.PlanStreamScope, limi
 
 func (r *AgentOSPlanRepo) GetPlanMetricCheckpoint(ctx context.Context, exporterID string, ref agentos.PlanRef) (agentosplan.PlanMetricCheckpoint, bool, error) {
 	if exporterID == "" {
-		return agentosplan.PlanMetricCheckpoint{}, false, fmt.Errorf("%w: metrics exporter id is required", agentos.ErrInvalidRunPlan)
+		return agentosplan.PlanMetricCheckpoint{}, false, fmt.Errorf("%w: metrics exporter id is required", agentoscore.ErrInvalidRunPlan)
 	}
 
 	if err := agentosplan.ValidatePlanRef(ref); err != nil {
@@ -1204,11 +1205,11 @@ func (r *AgentOSPlanRepo) SavePlanMetricCheckpoint(ctx context.Context, checkpoi
 	}
 
 	if !exists {
-		return fmt.Errorf("%w: %s", agentos.ErrPlanRouteNotFound, checkpoint.PlanID)
+		return fmt.Errorf("%w: %s", agentoscore.ErrPlanRouteNotFound, checkpoint.PlanID)
 	}
 
 	if scope.AccountID != checkpoint.AccountID || scope.ProjectID != checkpoint.ProjectID {
-		return fmt.Errorf("%w: %s", agentos.ErrPlanRouteNotFound, checkpoint.PlanID)
+		return fmt.Errorf("%w: %s", agentoscore.ErrPlanRouteNotFound, checkpoint.PlanID)
 	}
 
 	projectionJSON, err := json.Marshal(checkpoint.Projection)
@@ -1246,7 +1247,7 @@ WHERE plan_metric_checkpoints.sequence <= EXCLUDED.sequence`,
 	}
 
 	if result.RowsAffected() == 0 {
-		return fmt.Errorf("%w: metrics checkpoint sequence moved backward for plan %q", agentos.ErrInvalidRunPlan, checkpoint.PlanID)
+		return fmt.Errorf("%w: metrics checkpoint sequence moved backward for plan %q", agentoscore.ErrInvalidRunPlan, checkpoint.PlanID)
 	}
 
 	return nil
@@ -1291,11 +1292,11 @@ func (r *AgentOSPlanRepo) RecordPlanMetric(ctx context.Context, sample *agentosp
 
 func validatePlanMetricScope(sample *agentosplan.PlanMetricSample, scope planTenantScope, exists bool) error {
 	if !exists {
-		return fmt.Errorf("%w: %s", agentos.ErrPlanRouteNotFound, sample.PlanID)
+		return fmt.Errorf("%w: %s", agentoscore.ErrPlanRouteNotFound, sample.PlanID)
 	}
 
 	if scope.AccountID != sample.AccountID || scope.ProjectID != sample.ProjectID {
-		return fmt.Errorf("%w: %s", agentos.ErrPlanRouteNotFound, sample.PlanID)
+		return fmt.Errorf("%w: %s", agentoscore.ErrPlanRouteNotFound, sample.PlanID)
 	}
 
 	return nil
@@ -1310,7 +1311,7 @@ func (r *AgentOSPlanRepo) validateMetricSampleConflict(ctx context.Context, samp
 	}
 
 	if !exists {
-		return fmt.Errorf("%w: metric sample identity conflict for plan %q event %q", agentos.ErrInvalidRunPlan, sample.PlanID, sample.EventID)
+		return fmt.Errorf("%w: metric sample identity conflict for plan %q event %q", agentoscore.ErrInvalidRunPlan, sample.PlanID, sample.EventID)
 	}
 
 	return agentosplan.ValidatePlanMetricSampleIdempotency(&existing, sample)
@@ -1383,15 +1384,15 @@ func (r *AgentOSPlanRepo) RecordAudit(ctx context.Context, record *agentosplan.A
 
 func (r *AgentOSPlanRepo) prepareAuditRecord(ctx context.Context, record *agentosplan.AuditRecord) (agentosplan.AuditRef, planTenantScope, error) {
 	if record.PlanID == "" {
-		return agentosplan.AuditRef{}, planTenantScope{}, fmt.Errorf("%w: plan id is required", agentos.ErrInvalidRunPlan)
+		return agentosplan.AuditRef{}, planTenantScope{}, fmt.Errorf("%w: plan id is required", agentoscore.ErrInvalidRunPlan)
 	}
 
 	if record.Action == "" {
-		return agentosplan.AuditRef{}, planTenantScope{}, fmt.Errorf("%w: audit action is required", agentos.ErrInvalidRunPlan)
+		return agentosplan.AuditRef{}, planTenantScope{}, fmt.Errorf("%w: audit action is required", agentoscore.ErrInvalidRunPlan)
 	}
 
 	if record.IdempotencyKey == "" {
-		return agentosplan.AuditRef{}, planTenantScope{}, fmt.Errorf("%w: audit idempotency key is required", agentos.ErrInvalidRunPlan)
+		return agentosplan.AuditRef{}, planTenantScope{}, fmt.Errorf("%w: audit idempotency key is required", agentoscore.ErrInvalidRunPlan)
 	}
 
 	scope, exists, err := planTenantScopeByPlanID(ctx, r.Pool, record.PlanID)
@@ -1400,7 +1401,7 @@ func (r *AgentOSPlanRepo) prepareAuditRecord(ctx context.Context, record *agento
 	}
 
 	if !exists {
-		return agentosplan.AuditRef{}, planTenantScope{}, fmt.Errorf("%w: %s", agentos.ErrPlanRouteNotFound, record.PlanID)
+		return agentosplan.AuditRef{}, planTenantScope{}, fmt.Errorf("%w: %s", agentoscore.ErrPlanRouteNotFound, record.PlanID)
 	}
 
 	record.AccountID = scope.AccountID
@@ -1574,7 +1575,7 @@ func (r *AgentOSPlanRepo) ListAuditRecords(ctx context.Context, scope *agentos.P
 	}
 
 	if !exists {
-		return nil, fmt.Errorf("%w: %s", agentos.ErrPlanRouteNotFound, scope.PlanID)
+		return nil, fmt.Errorf("%w: %s", agentoscore.ErrPlanRouteNotFound, scope.PlanID)
 	}
 
 	if err := agentosplan.ValidatePlanTenantAccess(agentos.PlanRef{PlanID: scope.PlanID, AccountID: scope.AccountID, ProjectID: scope.ProjectID}, &spec); err != nil {
@@ -1690,18 +1691,18 @@ WHERE n.plan_id = $1
   AND n.node_id = $2`, record.PlanID, record.NodeID, record.RunID, scope.AccountID, scope.ProjectID).Scan(&nodeRunID, &ownedRunID)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
-			return fmt.Errorf("%w: audit node %q is not durable", agentos.ErrInvalidRunPlan, record.NodeID)
+			return fmt.Errorf("%w: audit node %q is not durable", agentoscore.ErrInvalidRunPlan, record.NodeID)
 		}
 
 		return fmt.Errorf("AgentOSPlanRepo - validateAuditOwnership - query: %w", err)
 	}
 
 	if nodeRunID != record.RunID {
-		return fmt.Errorf("%w: audit node %q has durable run id %q, got %q", agentos.ErrInvalidRunPlan, record.NodeID, nodeRunID, record.RunID)
+		return fmt.Errorf("%w: audit node %q has durable run id %q, got %q", agentoscore.ErrInvalidRunPlan, record.NodeID, nodeRunID, record.RunID)
 	}
 
 	if !ownedRunID.Valid || ownedRunID.String == "" {
-		return fmt.Errorf("%w: %s", agentos.ErrRunRouteNotFound, record.RunID)
+		return fmt.Errorf("%w: %s", agentoscore.ErrRunRouteNotFound, record.RunID)
 	}
 
 	return nil
@@ -1732,15 +1733,15 @@ func (r *AgentOSPlanRepo) RecordPlanCommand(ctx context.Context, command *agento
 
 func (r *AgentOSPlanRepo) preparePlanCommandRecord(ctx context.Context, command *agentosplan.PlanCommandRecord) (agentosplan.PlanCommandRef, error) {
 	if command.PlanID == "" {
-		return agentosplan.PlanCommandRef{}, fmt.Errorf("%w: plan id is required", agentos.ErrInvalidRunPlan)
+		return agentosplan.PlanCommandRef{}, fmt.Errorf("%w: plan id is required", agentoscore.ErrInvalidRunPlan)
 	}
 
 	if command.Action == "" {
-		return agentosplan.PlanCommandRef{}, fmt.Errorf("%w: command action is required", agentos.ErrInvalidRunPlan)
+		return agentosplan.PlanCommandRef{}, fmt.Errorf("%w: command action is required", agentoscore.ErrInvalidRunPlan)
 	}
 
 	if command.IdempotencyKey == "" {
-		return agentosplan.PlanCommandRef{}, fmt.Errorf("%w: command idempotency key is required", agentos.ErrInvalidRunPlan)
+		return agentosplan.PlanCommandRef{}, fmt.Errorf("%w: command idempotency key is required", agentoscore.ErrInvalidRunPlan)
 	}
 
 	scope, exists, err := planTenantScopeByPlanID(ctx, r.Pool, command.PlanID)
@@ -1749,7 +1750,7 @@ func (r *AgentOSPlanRepo) preparePlanCommandRecord(ctx context.Context, command 
 	}
 
 	if !exists {
-		return agentosplan.PlanCommandRef{}, fmt.Errorf("%w: %s", agentos.ErrPlanRouteNotFound, command.PlanID)
+		return agentosplan.PlanCommandRef{}, fmt.Errorf("%w: %s", agentoscore.ErrPlanRouteNotFound, command.PlanID)
 	}
 
 	command.AccountID = scope.AccountID
@@ -1954,7 +1955,7 @@ func (r *AgentOSPlanRepo) updatePlanCommandStatus(ctx context.Context, ref agent
 	}
 
 	if !exists {
-		return agentosplan.PlanCommandRecord{}, fmt.Errorf("%w: command %q", agentos.ErrInvalidRunPlan, ref.IdempotencyKey)
+		return agentosplan.PlanCommandRecord{}, fmt.Errorf("%w: command %q", agentoscore.ErrInvalidRunPlan, ref.IdempotencyKey)
 	}
 
 	if err := agentosplan.ValidatePlanCommandStatusTransition(command.Status, status); err != nil {
@@ -1995,7 +1996,7 @@ func (r *AgentOSPlanRepo) validatePlanCommandDeliveredAudit(ctx context.Context,
 	}
 
 	if !exists {
-		return fmt.Errorf("%w: delivered command requires durable audit %q", agentos.ErrInvalidRunPlan, command.IdempotencyKey)
+		return fmt.Errorf("%w: delivered command requires durable audit %q", agentoscore.ErrInvalidRunPlan, command.IdempotencyKey)
 	}
 
 	return agentosplan.ValidatePlanCommandDeliveredAudit(command, &audit)

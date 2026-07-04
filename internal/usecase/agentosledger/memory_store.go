@@ -8,7 +8,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/TekkenSteve/GoAgent/agentos"
+	agentoscore "github.com/TekkenSteve/GoAgent/agentos/core"
+	agentos "github.com/TekkenSteve/GoAgent/agentos/process"
 )
 
 // MemoryStore is an explicit in-process ledger store for unit tests and
@@ -55,7 +56,7 @@ func (s *MemoryStore) AppendLedgerEntry(_ context.Context, spec *agentos.LedgerE
 	}
 
 	if existing, exists := s.entryByID[spec.EntryID]; exists {
-		return agentos.LedgerEntry{}, fmt.Errorf("%w: ledger entry %q already exists with idempotency key %q", agentos.ErrInvalidLedgerEntry, existing.EntryID, existing.IdempotencyKey)
+		return agentos.LedgerEntry{}, fmt.Errorf("%w: ledger entry %q already exists with idempotency key %q", agentoscore.ErrInvalidLedgerEntry, existing.EntryID, existing.IdempotencyKey)
 	}
 
 	createdAt := spec.OccurredAt
@@ -185,12 +186,12 @@ func cloneLedgerDataRefs(refs []agentos.LedgerDataRef) []agentos.LedgerDataRef {
 	return clone
 }
 
-func cloneArtifactRefs(refs []agentos.ArtifactRef) []agentos.ArtifactRef {
+func cloneArtifactRefs(refs []agentoscore.ArtifactRef) []agentoscore.ArtifactRef {
 	if len(refs) == 0 {
 		return nil
 	}
 
-	clone := make([]agentos.ArtifactRef, len(refs))
+	clone := make([]agentoscore.ArtifactRef, len(refs))
 	for i := range refs {
 		clone[i] = refs[i]
 		clone[i].Metadata = maps.Clone(refs[i].Metadata)

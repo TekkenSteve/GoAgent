@@ -6,18 +6,18 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/TekkenSteve/GoAgent/agentos"
+	agentoscore "github.com/TekkenSteve/GoAgent/agentos/core"
 	agentfwstream "github.com/TekkenSteve/GoAgent/internal/agentfw/stream"
 	"github.com/TekkenSteve/GoAgent/internal/entity"
 	repostream "github.com/TekkenSteve/GoAgent/internal/repo/stream"
 )
 
 type subscription struct {
-	events <-chan agentos.Event
+	events <-chan agentoscore.Event
 	close  func() error
 }
 
-func (s *subscription) Events() <-chan agentos.Event {
+func (s *subscription) Events() <-chan agentoscore.Event {
 	return s.events
 }
 
@@ -29,8 +29,8 @@ func (s *subscription) Close() error {
 	return s.close()
 }
 
-func newSubscription(internalSub *agentfwstream.Subscription) agentos.Subscription {
-	out := make(chan agentos.Event)
+func newSubscription(internalSub *agentfwstream.Subscription) agentoscore.Subscription {
+	out := make(chan agentoscore.Event)
 
 	go func() {
 		defer close(out)
@@ -64,7 +64,7 @@ func newAgentOSSubscriber(subscriber *repostream.RedisSubscriber) *agentOSSubscr
 	return &agentOSSubscriber{subscriber: subscriber}
 }
 
-func (s *agentOSSubscriber) SubscribeAgentOS(ctx context.Context, scope agentos.StreamScope) (agentos.Subscription, error) {
+func (s *agentOSSubscriber) SubscribeAgentOS(ctx context.Context, scope agentoscore.StreamScope) (agentoscore.Subscription, error) {
 	if s == nil || s.subscriber == nil {
 		return nil, errAgentOSSubscriberNotConfigured
 	}
@@ -75,7 +75,7 @@ func (s *agentOSSubscriber) SubscribeAgentOS(ctx context.Context, scope agentos.
 	}
 
 	if sessionID == "" {
-		return nil, fmt.Errorf("%w: run id or thread id is required", agentos.ErrInvalidStreamScope)
+		return nil, fmt.Errorf("%w: run id or thread id is required", agentoscore.ErrInvalidStreamScope)
 	}
 
 	sub, err := s.subscriber.Subscribe(ctx, sessionID, scope.AfterSequence)
@@ -86,12 +86,12 @@ func (s *agentOSSubscriber) SubscribeAgentOS(ctx context.Context, scope agentos.
 	return newSubscription(sub), nil
 }
 
-func eventFromStored(stored agentfwstream.StoredEvent) agentos.Event {
+func eventFromStored(stored agentfwstream.StoredEvent) agentoscore.Event {
 	base := stored.Event.Base()
 
-	return agentos.Event{
+	return agentoscore.Event{
 		EventID:   base.EventID,
-		EventType: agentos.EventType(stored.Event.EventType()),
+		EventType: agentoscore.EventType(stored.Event.EventType()),
 		RunID:     base.RunID,
 		ThreadID:  base.SessionID,
 		Sequence:  stored.Sequence,

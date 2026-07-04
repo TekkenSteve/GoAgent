@@ -3,7 +3,8 @@ package request
 import (
 	"time"
 
-	"github.com/TekkenSteve/GoAgent/agentos"
+	agentos "github.com/TekkenSteve/GoAgent/agentos/control"
+	agentoscore "github.com/TekkenSteve/GoAgent/agentos/core"
 )
 
 // AgentOSStart starts a generic AgentOS run.
@@ -25,31 +26,31 @@ type AgentOSStart struct {
 
 // AgentOSSignal sends business input to a generic AgentOS run.
 type AgentOSSignal struct {
-	Type           agentos.SignalType `json:"type" validate:"required"`
-	IdempotencyKey string             `json:"idempotency_key,omitempty"`
-	ActorID        string             `json:"actor_id,omitempty"`
-	Payload        map[string]any     `json:"payload,omitempty"`
-	SentAt         time.Time          `json:"sent_at,omitzero"`
+	Type           agentoscore.SignalType `json:"type" validate:"required"`
+	IdempotencyKey string                 `json:"idempotency_key,omitempty"`
+	ActorID        string                 `json:"actor_id,omitempty"`
+	Payload        map[string]any         `json:"payload,omitempty"`
+	SentAt         time.Time              `json:"sent_at,omitzero"`
 }
 
 // AgentOSControl sends a lifecycle control operation to a generic AgentOS run.
 type AgentOSControl struct {
-	Operation      agentos.ControlOperation `json:"operation" validate:"required"`
-	IdempotencyKey string                   `json:"idempotency_key,omitempty"`
-	RequestedAt    time.Time                `json:"requested_at,omitzero"`
-	ActorID        string                   `json:"actor_id,omitempty"`
-	Metadata       map[string]string        `json:"metadata,omitempty"`
+	Operation      agentoscore.ControlOperation `json:"operation" validate:"required"`
+	IdempotencyKey string                       `json:"idempotency_key,omitempty"`
+	RequestedAt    time.Time                    `json:"requested_at,omitzero"`
+	ActorID        string                       `json:"actor_id,omitempty"`
+	Metadata       map[string]string            `json:"metadata,omitempty"`
 }
 
 // AgentOSPlanSignal sends business input to a RunPlan inside tenant scope.
 type AgentOSPlanSignal struct {
-	Type           agentos.SignalType `json:"type" validate:"required"`
-	AccountID      string             `json:"account_id" validate:"required"`
-	ProjectID      string             `json:"project_id" validate:"required"`
-	IdempotencyKey string             `json:"idempotency_key,omitempty"`
-	ActorID        string             `json:"actor_id,omitempty"`
-	Payload        map[string]any     `json:"payload,omitempty"`
-	SentAt         time.Time          `json:"sent_at,omitzero"`
+	Type           agentoscore.SignalType `json:"type" validate:"required"`
+	AccountID      string                 `json:"account_id" validate:"required"`
+	ProjectID      string                 `json:"project_id" validate:"required"`
+	IdempotencyKey string                 `json:"idempotency_key,omitempty"`
+	ActorID        string                 `json:"actor_id,omitempty"`
+	Payload        map[string]any         `json:"payload,omitempty"`
+	SentAt         time.Time              `json:"sent_at,omitzero"`
 }
 
 func (r *AgentOSPlanSignal) GetAccountID() string {
@@ -62,13 +63,13 @@ func (r *AgentOSPlanSignal) GetProjectID() string {
 
 // AgentOSPlanControl sends a lifecycle control operation to a RunPlan inside tenant scope.
 type AgentOSPlanControl struct {
-	Operation      agentos.ControlOperation `json:"operation" validate:"required"`
-	AccountID      string                   `json:"account_id" validate:"required"`
-	ProjectID      string                   `json:"project_id" validate:"required"`
-	IdempotencyKey string                   `json:"idempotency_key,omitempty"`
-	RequestedAt    time.Time                `json:"requested_at,omitzero"`
-	ActorID        string                   `json:"actor_id,omitempty"`
-	Metadata       map[string]string        `json:"metadata,omitempty"`
+	Operation      agentoscore.ControlOperation `json:"operation" validate:"required"`
+	AccountID      string                       `json:"account_id" validate:"required"`
+	ProjectID      string                       `json:"project_id" validate:"required"`
+	IdempotencyKey string                       `json:"idempotency_key,omitempty"`
+	RequestedAt    time.Time                    `json:"requested_at,omitzero"`
+	ActorID        string                       `json:"actor_id,omitempty"`
+	Metadata       map[string]string            `json:"metadata,omitempty"`
 }
 
 func (r *AgentOSPlanControl) GetAccountID() string {
@@ -144,14 +145,14 @@ type AgentOSPlanConsoleScope struct {
 
 // AgentOSEvent is the public REST envelope for external backend event ingest.
 type AgentOSEvent struct {
-	EventID   string            `json:"event_id" validate:"required"`
-	RunID     string            `json:"run_id,omitempty"`
-	ThreadID  string            `json:"thread_id,omitempty"`
-	Sequence  int64             `json:"sequence,omitempty"`
-	EventType agentos.EventType `json:"event_type" validate:"required"`
-	Source    string            `json:"source" validate:"required"`
-	Timestamp time.Time         `json:"timestamp"`
-	TraceID   string            `json:"trace_id,omitempty"`
-	Tags      map[string]string `json:"tags,omitempty"`
-	Payload   map[string]any    `json:"payload,omitempty"`
+	EventID   string                `json:"event_id" validate:"required"`
+	RunID     string                `json:"run_id,omitempty"`
+	ThreadID  string                `json:"thread_id,omitempty"`
+	Sequence  int64                 `json:"sequence,omitempty"`
+	EventType agentoscore.EventType `json:"event_type" validate:"required"`
+	Source    string                `json:"source" validate:"required"`
+	Timestamp time.Time             `json:"timestamp"`
+	TraceID   string                `json:"trace_id,omitempty"`
+	Tags      map[string]string     `json:"tags,omitempty"`
+	Payload   map[string]any        `json:"payload,omitempty"`
 }

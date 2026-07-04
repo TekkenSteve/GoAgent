@@ -7,7 +7,8 @@ import (
 	"sort"
 	"sync"
 
-	"github.com/TekkenSteve/GoAgent/agentos"
+	agentoscore "github.com/TekkenSteve/GoAgent/agentos/core"
+	agentos "github.com/TekkenSteve/GoAgent/agentos/process"
 )
 
 // MemoryStore is an explicit in-process workset store for unit tests and
@@ -157,7 +158,7 @@ func (s *MemoryStore) ApplyChunkResult(
 
 	spec, exists := s.specs[ref.WorksetID]
 	if !exists {
-		return agentos.WorksetStatus{}, fmt.Errorf("%w: workset %q not found", agentos.ErrInvalidWorksetScope, ref.WorksetID)
+		return agentos.WorksetStatus{}, fmt.Errorf("%w: workset %q not found", agentoscore.ErrInvalidWorksetScope, ref.WorksetID)
 	}
 
 	if err := validateWorksetTenantAccess(ref, &spec); err != nil {
@@ -191,7 +192,7 @@ func (s *MemoryStore) UpdateWorksetStatus(
 
 	spec, exists := s.specs[status.WorksetID]
 	if !exists {
-		return agentos.WorksetStatus{}, fmt.Errorf("%w: workset %q not found", agentos.ErrInvalidWorksetScope, status.WorksetID)
+		return agentos.WorksetStatus{}, fmt.Errorf("%w: workset %q not found", agentoscore.ErrInvalidWorksetScope, status.WorksetID)
 	}
 
 	prepared := normalizeWorksetStatus(&spec, status)
@@ -207,7 +208,7 @@ func validateCreateWorksetInput(spec *agentos.WorksetSpec, status *agentos.Works
 	}
 
 	if status == nil {
-		return fmt.Errorf("%w: workset status is required", agentos.ErrInvalidWorkset)
+		return fmt.Errorf("%w: workset status is required", agentoscore.ErrInvalidWorkset)
 	}
 
 	return nil
@@ -231,15 +232,15 @@ func validateApplyChunkInput(
 
 func validateUpdateWorksetStatusInput(status *agentos.WorksetStatus, idempotencyKey string) error {
 	if status == nil {
-		return fmt.Errorf("%w: workset status is required", agentos.ErrInvalidWorkset)
+		return fmt.Errorf("%w: workset status is required", agentoscore.ErrInvalidWorkset)
 	}
 
 	if idempotencyKey == "" {
-		return fmt.Errorf("%w: status idempotency key is required", agentos.ErrInvalidWorkset)
+		return fmt.Errorf("%w: status idempotency key is required", agentoscore.ErrInvalidWorkset)
 	}
 
 	if status.WorksetID == "" || status.AccountID == "" || status.ProjectID == "" {
-		return fmt.Errorf("%w: workset status scope is required", agentos.ErrInvalidWorkset)
+		return fmt.Errorf("%w: workset status scope is required", agentoscore.ErrInvalidWorkset)
 	}
 
 	return nil
@@ -289,7 +290,7 @@ func worksetStartKeyFromSpec(spec *agentos.WorksetSpec) worksetStartKey {
 
 func validateWorksetTenantAccess(ref agentos.WorksetRef, spec *agentos.WorksetSpec) error {
 	if ref.AccountID != spec.AccountID || ref.ProjectID != spec.ProjectID {
-		return fmt.Errorf("%w: workset %q is outside tenant scope", agentos.ErrInvalidWorksetScope, ref.WorksetID)
+		return fmt.Errorf("%w: workset %q is outside tenant scope", agentoscore.ErrInvalidWorksetScope, ref.WorksetID)
 	}
 
 	return nil

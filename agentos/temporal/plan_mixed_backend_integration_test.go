@@ -12,7 +12,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/TekkenSteve/GoAgent/agentos"
+	agentos "github.com/TekkenSteve/GoAgent/agentos/control"
+	agentoscore "github.com/TekkenSteve/GoAgent/agentos/core"
 	"github.com/TekkenSteve/GoAgent/internal/repo/agentos/grpcbackend"
 	"github.com/TekkenSteve/GoAgent/internal/repo/agentos/httpbackend"
 	"github.com/TekkenSteve/GoAgent/internal/repo/agentos/temporalexternal"
@@ -101,7 +102,7 @@ func newMixedBackendAdapter(t *testing.T, planID, httpNodeID, summaryArtifact st
 	grpcRef := agentos.BackendRef{Kind: agentos.BackendKindGRPC, Name: "grpc-agent"}
 	nativeBackend := &mixedAdapterNativeBackend{}
 	temporalClient := &mixedAdapterTemporalClient{runID: "temporal-run-id", queryValue: &mixedAdapterEncodedStatus{status: agentos.RunStatus{RunID: "run-temporal", LifecycleState: "completed", UpdatedAt: time.Date(2026, 6, 19, 12, 0, 0, 0, time.UTC)}}}
-	temporalConfig := temporalexternal.Config{Name: temporalRef.Name, TaskQueue: "langgraph-task-queue", WorkflowType: "langgraph.agent.v1", QueryType: "agentos_status", Signals: temporalexternal.SignalNames{Cancel: "cancel", Defaults: map[agentos.SignalType]string{agentos.SignalUserMessage: "user_input"}}}
+	temporalConfig := temporalexternal.Config{Name: temporalRef.Name, TaskQueue: "langgraph-task-queue", WorkflowType: "langgraph.agent.v1", QueryType: "agentos_status", Signals: temporalexternal.SignalNames{Cancel: "cancel", Defaults: map[agentoscore.SignalType]string{agentoscore.SignalUserMessage: "user_input"}}}
 	temporalBackend, err := temporalexternal.NewBackend(temporalClient, nil, &temporalConfig)
 	require.NoError(t, err)
 
@@ -146,7 +147,7 @@ func specForMixedBackend(planID, httpNodeID, summaryArtifact string, nativeRef, 
 			{NodeID: "temporal", Capability: "run", Run: agentos.RunSpec{RunID: "run-temporal", Backend: temporalRef}},
 			{
 				NodeID: httpNodeID, Capability: "run", Run: agentos.RunSpec{RunID: "run-http", Backend: httpRef},
-				Outputs: []agentos.ArtifactSpec{{Name: summaryArtifact, Kind: agentos.ArtifactKindObject, Required: true}},
+				Outputs: []agentos.ArtifactSpec{{Name: summaryArtifact, Kind: agentoscore.ArtifactKindObject, Required: true}},
 			},
 			{NodeID: "grpc", Capability: "run", Run: agentos.RunSpec{RunID: "run-grpc", Backend: grpcRef}},
 		},
@@ -175,7 +176,7 @@ func (r routerRuntime) StartPlanNode(ctx context.Context, planID, nodeID string,
 	return r.router.StartPlanNode(ctx, planID, nodeID, spec)
 }
 
-func (r routerRuntime) Signal(ctx context.Context, runID string, signal *agentos.Signal) error {
+func (r routerRuntime) Signal(ctx context.Context, runID string, signal *agentoscore.Signal) error {
 	return r.router.Signal(ctx, runID, signal)
 }
 
@@ -183,11 +184,11 @@ func (r routerRuntime) Status(ctx context.Context, runID string) (agentos.RunSta
 	return r.router.Status(ctx, runID)
 }
 
-func (r routerRuntime) Control(ctx context.Context, runID string, control *agentos.ControlRequest) error {
+func (r routerRuntime) Control(ctx context.Context, runID string, control *agentoscore.ControlRequest) error {
 	return r.router.Control(ctx, runID, control)
 }
 
-func (r routerRuntime) Subscribe(ctx context.Context, scope agentos.StreamScope) (agentos.Subscription, error) {
+func (r routerRuntime) Subscribe(ctx context.Context, scope agentoscore.StreamScope) (agentoscore.Subscription, error) {
 	return r.router.Subscribe(ctx, scope)
 }
 
@@ -209,11 +210,11 @@ func (b *mixedAdapterNativeBackend) Start(_ context.Context, spec *agentos.RunSp
 	return agentos.RunStatus{RunID: spec.RunID, LifecycleState: "completed"}, nil
 }
 
-func (b *mixedAdapterNativeBackend) Signal(context.Context, string, *agentos.Signal) error {
+func (b *mixedAdapterNativeBackend) Signal(context.Context, string, *agentoscore.Signal) error {
 	return nil
 }
 
-func (b *mixedAdapterNativeBackend) Control(context.Context, string, *agentos.ControlRequest) error {
+func (b *mixedAdapterNativeBackend) Control(context.Context, string, *agentoscore.ControlRequest) error {
 	return nil
 }
 
@@ -221,7 +222,7 @@ func (b *mixedAdapterNativeBackend) Status(_ context.Context, runID string) (age
 	return agentos.RunStatus{RunID: runID, LifecycleState: "completed"}, nil
 }
 
-func (b *mixedAdapterNativeBackend) Subscribe(context.Context, agentos.StreamScope) (agentos.Subscription, error) {
+func (b *mixedAdapterNativeBackend) Subscribe(context.Context, agentoscore.StreamScope) (agentoscore.Subscription, error) {
 	return nil, nil
 }
 
@@ -291,20 +292,20 @@ func handleMixedAdapterRunStart(t *testing.T, w http.ResponseWriter, r *http.Req
 
 	key, err := agentosplan.ArtifactPublishIdempotencyKey(output.PlanID, output.NodeID, request.RunID, output.ArtifactName)
 	require.NoError(t, err)
-	ref, err := putArtifact(r.Context(), artifactStore, &agentos.ArtifactRef{
+	ref, err := putArtifact(r.Context(), artifactStore, &agentoscore.ArtifactRef{
 		ArtifactID: output.ArtifactID,
 		PlanID:     output.PlanID,
 		NodeID:     output.NodeID,
 		RunID:      request.RunID,
 		Name:       output.ArtifactName,
-		Kind:       agentos.ArtifactKindObject,
+		Kind:       agentoscore.ArtifactKindObject,
 	}, output.Payload, key)
 	require.NoError(t, err)
 
 	if err := json.NewEncoder(w).Encode(agentos.RunStatus{
 		RunID:          request.RunID,
 		LifecycleState: "completed",
-		Artifacts:      []agentos.ArtifactRef{ref},
+		Artifacts:      []agentoscore.ArtifactRef{ref},
 	}); err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 

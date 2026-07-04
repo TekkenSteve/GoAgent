@@ -3,7 +3,7 @@ package agentosbatch
 import (
 	"context"
 
-	"github.com/TekkenSteve/GoAgent/agentos"
+	agentos "github.com/TekkenSteve/GoAgent/agentos/process"
 )
 
 // Store persists workset specs, latest projections, and processed chunk keys.

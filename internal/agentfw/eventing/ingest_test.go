@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/TekkenSteve/GoAgent/agentos"
+	agentoscore "github.com/TekkenSteve/GoAgent/agentos/core"
 	"github.com/TekkenSteve/GoAgent/internal/entity"
 )
 
@@ -27,7 +27,7 @@ func TestServiceIngestAppendsNormalizedEvent(t *testing.T) {
 		EventID:   "evt-1",
 		RunID:     "run-1",
 		ThreadID:  "thread-1",
-		EventType: agentos.EventAgentMessageDelta,
+		EventType: agentoscore.EventAgentMessageDelta,
 		Source:    "langgraph",
 		Payload: map[string]any{
 			"text": "hello",
@@ -95,7 +95,7 @@ func TestServiceIngestIgnoresDuplicateEvent(t *testing.T) {
 	input := IngestEvent{
 		EventID:   "evt-1",
 		RunID:     "run-1",
-		EventType: agentos.EventRunStarted,
+		EventType: agentoscore.EventRunStarted,
 		Source:    "python-agent",
 	}
 

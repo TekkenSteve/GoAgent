@@ -1,9 +1,11 @@
-package agentos
+package process
 
 import (
 	"errors"
 	"testing"
 	"time"
+
+	"github.com/TekkenSteve/GoAgent/agentos/core"
 )
 
 func TestValidateWorksetSpecAcceptsReferencedBatch(t *testing.T) {
@@ -23,24 +25,24 @@ func TestValidateWorksetSpecRequiresIdentity(t *testing.T) {
 	missingID.WorksetID = ""
 
 	idErr := ValidateWorksetSpec(&missingID)
-	if !errors.Is(idErr, ErrInvalidWorkset) {
-		t.Fatalf("missing workset id error = %v, want ErrInvalidWorkset", idErr)
+	if !errors.Is(idErr, core.ErrInvalidWorkset) {
+		t.Fatalf("missing workset id error = %v, want core.ErrInvalidWorkset", idErr)
 	}
 
 	missingKey := validWorksetSpec()
 	missingKey.IdempotencyKey = ""
 
 	keyErr := ValidateWorksetSpec(&missingKey)
-	if !errors.Is(keyErr, ErrInvalidWorkset) {
-		t.Fatalf("missing idempotency key error = %v, want ErrInvalidWorkset", keyErr)
+	if !errors.Is(keyErr, core.ErrInvalidWorkset) {
+		t.Fatalf("missing idempotency key error = %v, want core.ErrInvalidWorkset", keyErr)
 	}
 
 	missingKind := validWorksetSpec()
 	missingKind.Kind = ""
 
 	kindErr := ValidateWorksetSpec(&missingKind)
-	if !errors.Is(kindErr, ErrInvalidWorkset) {
-		t.Fatalf("missing kind error = %v, want ErrInvalidWorkset", kindErr)
+	if !errors.Is(kindErr, core.ErrInvalidWorkset) {
+		t.Fatalf("missing kind error = %v, want core.ErrInvalidWorkset", kindErr)
 	}
 }
 
@@ -51,8 +53,8 @@ func TestValidateWorksetSpecRequiresTenantAndProcessOrResourceScope(t *testing.T
 	account.AccountID = ""
 
 	accountErr := ValidateWorksetSpec(&account)
-	if !errors.Is(accountErr, ErrInvalidWorkset) {
-		t.Fatalf("account scope error = %v, want ErrInvalidWorkset", accountErr)
+	if !errors.Is(accountErr, core.ErrInvalidWorkset) {
+		t.Fatalf("account scope error = %v, want core.ErrInvalidWorkset", accountErr)
 	}
 
 	scope := validWorksetSpec()
@@ -60,8 +62,8 @@ func TestValidateWorksetSpecRequiresTenantAndProcessOrResourceScope(t *testing.T
 	scope.Resource = ResourceRef{}
 
 	scopeErr := ValidateWorksetSpec(&scope)
-	if !errors.Is(scopeErr, ErrInvalidWorkset) {
-		t.Fatalf("process/resource scope error = %v, want ErrInvalidWorkset", scopeErr)
+	if !errors.Is(scopeErr, core.ErrInvalidWorkset) {
+		t.Fatalf("process/resource scope error = %v, want core.ErrInvalidWorkset", scopeErr)
 	}
 }
 
@@ -88,8 +90,8 @@ func TestValidateWorksetSpecRejectsInvalidItemsRef(t *testing.T) {
 			tt.edit(&spec.ItemsRef)
 
 			err := ValidateWorksetSpec(&spec)
-			if !errors.Is(err, ErrInvalidWorkset) {
-				t.Fatalf("ValidateWorksetSpec error = %v, want ErrInvalidWorkset", err)
+			if !errors.Is(err, core.ErrInvalidWorkset) {
+				t.Fatalf("ValidateWorksetSpec error = %v, want core.ErrInvalidWorkset", err)
 			}
 		})
 	}
@@ -106,23 +108,23 @@ func TestValidateWorksetSpecEnforcesChunkPolicy(t *testing.T) {
 	}
 
 	err := ValidateWorksetSpec(&spec)
-	if !errors.Is(err, ErrInvalidWorkset) {
-		t.Fatalf("chunk count error = %v, want ErrInvalidWorkset", err)
+	if !errors.Is(err, core.ErrInvalidWorkset) {
+		t.Fatalf("chunk count error = %v, want core.ErrInvalidWorkset", err)
 	}
 
 	spec.Chunks = []WorksetChunkSpec{validWorksetChunk("chunk-1", 6)}
 
 	err = ValidateWorksetSpec(&spec)
-	if !errors.Is(err, ErrInvalidWorkset) {
-		t.Fatalf("chunk size error = %v, want ErrInvalidWorkset", err)
+	if !errors.Is(err, core.ErrInvalidWorkset) {
+		t.Fatalf("chunk size error = %v, want core.ErrInvalidWorkset", err)
 	}
 
 	spec.Chunks = []WorksetChunkSpec{validWorksetChunk("chunk-1", 4)}
 	spec.Chunks[0].Concurrency = 3
 
 	err = ValidateWorksetSpec(&spec)
-	if !errors.Is(err, ErrInvalidWorkset) {
-		t.Fatalf("chunk concurrency error = %v, want ErrInvalidWorkset", err)
+	if !errors.Is(err, core.ErrInvalidWorkset) {
+		t.Fatalf("chunk concurrency error = %v, want core.ErrInvalidWorkset", err)
 	}
 }
 
@@ -130,8 +132,8 @@ func TestValidateWorksetScopeRequiresTenantScope(t *testing.T) {
 	t.Parallel()
 
 	err := ValidateWorksetScope(&WorksetScope{AccountID: "acct-1", Limit: -1})
-	if !errors.Is(err, ErrInvalidWorksetScope) {
-		t.Fatalf("ValidateWorksetScope error = %v, want ErrInvalidWorksetScope", err)
+	if !errors.Is(err, core.ErrInvalidWorksetScope) {
+		t.Fatalf("ValidateWorksetScope error = %v, want core.ErrInvalidWorksetScope", err)
 	}
 }
 

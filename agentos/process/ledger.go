@@ -1,8 +1,10 @@
-package agentos
+package process
 
 import (
 	"fmt"
 	"time"
+
+	"github.com/TekkenSteve/GoAgent/agentos/core"
 )
 
 // LedgerEntryKind identifies a durable audit fact without binding AgentOS to a
@@ -41,20 +43,20 @@ type LedgerDataRef struct {
 // resource timelines. Large payloads must be referenced through DataRefs or
 // ArtifactRefs rather than embedded into Temporal history.
 type LedgerEntrySpec struct {
-	EntryID        string            `json:"entry_id"`
-	IdempotencyKey string            `json:"idempotency_key"`
-	AccountID      string            `json:"account_id"`
-	ProjectID      string            `json:"project_id"`
-	ProcessID      string            `json:"process_id,omitempty"`
-	Resource       ResourceRef       `json:"resource,omitzero" schema:"optional"`
-	Kind           LedgerEntryKind   `json:"kind"`
-	Actor          ActorRef          `json:"actor,omitzero" schema:"optional"`
-	OccurredAt     time.Time         `json:"occurred_at,omitzero" schema:"optional"`
-	Summary        string            `json:"summary,omitempty"`
-	Rationale      string            `json:"rationale,omitempty"`
-	DataRefs       []LedgerDataRef   `json:"data_refs,omitempty"`
-	ArtifactRefs   []ArtifactRef     `json:"artifact_refs,omitempty"`
-	Metadata       map[string]string `json:"metadata,omitempty"`
+	EntryID        string             `json:"entry_id"`
+	IdempotencyKey string             `json:"idempotency_key"`
+	AccountID      string             `json:"account_id"`
+	ProjectID      string             `json:"project_id"`
+	ProcessID      string             `json:"process_id,omitempty"`
+	Resource       ResourceRef        `json:"resource,omitzero" schema:"optional"`
+	Kind           LedgerEntryKind    `json:"kind"`
+	Actor          ActorRef           `json:"actor,omitzero" schema:"optional"`
+	OccurredAt     time.Time          `json:"occurred_at,omitzero" schema:"optional"`
+	Summary        string             `json:"summary,omitempty"`
+	Rationale      string             `json:"rationale,omitempty"`
+	DataRefs       []LedgerDataRef    `json:"data_refs,omitempty"`
+	ArtifactRefs   []core.ArtifactRef `json:"artifact_refs,omitempty"`
+	Metadata       map[string]string  `json:"metadata,omitempty"`
 }
 
 // LedgerEntry is a durable append-only audit record with store-owned ordering.
@@ -78,7 +80,7 @@ type LedgerScope struct {
 // ValidateLedgerEntrySpec validates one append-only ledger record.
 func ValidateLedgerEntrySpec(spec *LedgerEntrySpec) error {
 	if spec == nil {
-		return fmt.Errorf("%w: ledger entry is required", ErrInvalidLedgerEntry)
+		return fmt.Errorf("%w: ledger entry is required", core.ErrInvalidLedgerEntry)
 	}
 
 	if err := validateLedgerEntryIdentity(spec); err != nil {
@@ -95,45 +97,45 @@ func ValidateLedgerEntrySpec(spec *LedgerEntrySpec) error {
 // ValidateLedgerScope validates a ledger query scope.
 func ValidateLedgerScope(scope *LedgerScope) error {
 	if scope == nil {
-		return fmt.Errorf("%w: ledger scope is required", ErrInvalidLedgerScope)
+		return fmt.Errorf("%w: ledger scope is required", core.ErrInvalidLedgerScope)
 	}
 
 	switch {
 	case scope.AccountID == "":
-		return fmt.Errorf("%w: account id is required", ErrInvalidLedgerScope)
+		return fmt.Errorf("%w: account id is required", core.ErrInvalidLedgerScope)
 	case scope.ProjectID == "":
-		return fmt.Errorf("%w: project id is required", ErrInvalidLedgerScope)
+		return fmt.Errorf("%w: project id is required", core.ErrInvalidLedgerScope)
 	case scope.Limit < 0:
-		return fmt.Errorf("%w: limit must be non-negative", ErrInvalidLedgerScope)
+		return fmt.Errorf("%w: limit must be non-negative", core.ErrInvalidLedgerScope)
 	}
 
-	return validateLedgerResource(scope.AccountID, scope.ProjectID, scope.Resource, ErrInvalidLedgerScope)
+	return validateLedgerResource(scope.AccountID, scope.ProjectID, scope.Resource, core.ErrInvalidLedgerScope)
 }
 
 func validateLedgerEntryIdentity(spec *LedgerEntrySpec) error {
 	switch {
 	case spec.EntryID == "":
-		return fmt.Errorf("%w: entry id is required", ErrInvalidLedgerEntry)
+		return fmt.Errorf("%w: entry id is required", core.ErrInvalidLedgerEntry)
 	case spec.IdempotencyKey == "":
-		return fmt.Errorf("%w: idempotency key is required", ErrInvalidLedgerEntry)
+		return fmt.Errorf("%w: idempotency key is required", core.ErrInvalidLedgerEntry)
 	case spec.AccountID == "":
-		return fmt.Errorf("%w: account id is required", ErrInvalidLedgerEntry)
+		return fmt.Errorf("%w: account id is required", core.ErrInvalidLedgerEntry)
 	case spec.ProjectID == "":
-		return fmt.Errorf("%w: project id is required", ErrInvalidLedgerEntry)
+		return fmt.Errorf("%w: project id is required", core.ErrInvalidLedgerEntry)
 	case spec.Kind == "":
-		return fmt.Errorf("%w: kind is required", ErrInvalidLedgerEntry)
+		return fmt.Errorf("%w: kind is required", core.ErrInvalidLedgerEntry)
 	}
 
 	return nil
 }
 
 func validateLedgerEntryScope(spec *LedgerEntrySpec) error {
-	if err := validateLedgerResource(spec.AccountID, spec.ProjectID, spec.Resource, ErrInvalidLedgerEntry); err != nil {
+	if err := validateLedgerResource(spec.AccountID, spec.ProjectID, spec.Resource, core.ErrInvalidLedgerEntry); err != nil {
 		return err
 	}
 
 	if spec.ProcessID == "" && spec.Resource.Kind == "" {
-		return fmt.Errorf("%w: process id or resource ref is required", ErrInvalidLedgerEntry)
+		return fmt.Errorf("%w: process id or resource ref is required", core.ErrInvalidLedgerEntry)
 	}
 
 	return nil
@@ -168,9 +170,9 @@ func validateLedgerDataRefs(refs []LedgerDataRef) error {
 func validateLedgerDataRef(ref *LedgerDataRef) error {
 	switch {
 	case ref.Kind == "":
-		return fmt.Errorf("%w: data ref kind is required", ErrInvalidLedgerEntry)
+		return fmt.Errorf("%w: data ref kind is required", core.ErrInvalidLedgerEntry)
 	case ref.URI == "" && ref.ArtifactID == "":
-		return fmt.Errorf("%w: data ref uri or artifact id is required", ErrInvalidLedgerEntry)
+		return fmt.Errorf("%w: data ref uri or artifact id is required", core.ErrInvalidLedgerEntry)
 	default:
 		return nil
 	}

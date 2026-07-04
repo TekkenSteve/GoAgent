@@ -5,7 +5,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/TekkenSteve/GoAgent/agentos"
+	agentos "github.com/TekkenSteve/GoAgent/agentos/control"
+	agentoscore "github.com/TekkenSteve/GoAgent/agentos/core"
 	"github.com/TekkenSteve/GoAgent/internal/agentfw/orchestration"
 	"github.com/TekkenSteve/GoAgent/internal/entity"
 	"github.com/TekkenSteve/GoAgent/internal/usecase/agentosruntime/agentosruntimetest"
@@ -50,8 +51,8 @@ func TestTemporalNativeBackendSignalUserMessage(t *testing.T) {
 	backend := newTemporalNativeBackend(executor, nil)
 	sentAt := time.Date(2026, 6, 16, 12, 0, 0, 0, time.UTC)
 
-	signal := agentos.Signal{
-		Type:           agentos.SignalUserMessage,
+	signal := agentoscore.Signal{
+		Type:           agentoscore.SignalUserMessage,
 		IdempotencyKey: "idem-1",
 		SentAt:         sentAt,
 		Payload: map[string]any{
@@ -90,8 +91,8 @@ func TestTemporalNativeBackendRejectsEmptyUserMessageContent(t *testing.T) {
 
 	backend := newTemporalNativeBackend(&fakeNativeExecutor{}, nil)
 
-	signal := agentos.Signal{
-		Type:    agentos.SignalUserMessage,
+	signal := agentoscore.Signal{
+		Type:    agentoscore.SignalUserMessage,
 		Payload: map[string]any{},
 	}
 

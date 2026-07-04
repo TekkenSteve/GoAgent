@@ -7,7 +7,8 @@ import (
 	"fmt"
 
 	sq "github.com/Masterminds/squirrel"
-	"github.com/TekkenSteve/GoAgent/agentos"
+	agentos "github.com/TekkenSteve/GoAgent/agentos/control"
+	agentoscore "github.com/TekkenSteve/GoAgent/agentos/core"
 	"github.com/TekkenSteve/GoAgent/internal/pkg/postgres"
 	"github.com/TekkenSteve/GoAgent/internal/usecase/agentosplan"
 	"github.com/jackc/pgx/v5"
@@ -84,7 +85,7 @@ func validateCapabilityRegistrationRequest(capability *agentos.Capability, idemp
 	}
 
 	if idempotencyKey != expectedKey {
-		return fmt.Errorf("%w: capability registration idempotency key must match declaration", agentos.ErrInvalidRunPlan)
+		return fmt.Errorf("%w: capability registration idempotency key must match declaration", agentoscore.ErrInvalidRunPlan)
 	}
 
 	return nil
@@ -137,7 +138,7 @@ RETURNING capability_json`,
 
 func (r *AgentOSCapabilityCatalogRepo) handleCapabilityScanErr(ctx context.Context, scanErr error, capability *agentos.Capability, idempotencyKey string) (agentos.Capability, bool, error) {
 	if errors.Is(scanErr, pgx.ErrNoRows) {
-		return agentos.Capability{}, false, fmt.Errorf("%w: capability %s/%s/%s already exists with a different declaration", agentos.ErrInvalidRunPlan, capability.Backend.Kind, capability.Backend.Name, capability.Name)
+		return agentos.Capability{}, false, fmt.Errorf("%w: capability %s/%s/%s already exists with a different declaration", agentoscore.ErrInvalidRunPlan, capability.Backend.Kind, capability.Backend.Name, capability.Name)
 	}
 
 	if isPostgresUniqueViolation(scanErr) {

@@ -3,7 +3,8 @@ package temporalexternal
 import (
 	"fmt"
 
-	"github.com/TekkenSteve/GoAgent/agentos"
+	agentos "github.com/TekkenSteve/GoAgent/agentos/control"
+	agentoscore "github.com/TekkenSteve/GoAgent/agentos/core"
 )
 
 // Config describes one external Temporal workflow backend.
@@ -20,7 +21,7 @@ type SignalNames struct {
 	Pause    string
 	Resume   string
 	Cancel   string
-	Defaults map[agentos.SignalType]string
+	Defaults map[agentoscore.SignalType]string
 }
 
 // Ref returns the public AgentOS backend reference for this backend.
@@ -37,23 +38,23 @@ func (c *Config) Ref() agentos.BackendRef {
 
 func (c *Config) validate() error {
 	if c == nil {
-		return fmt.Errorf("%w: temporal external backend config is required", agentos.ErrInvalidBackendRef)
+		return fmt.Errorf("%w: temporal external backend config is required", agentoscore.ErrInvalidBackendRef)
 	}
 
 	if c.Name == "" {
-		return fmt.Errorf("%w: temporal external backend name is required", agentos.ErrInvalidBackendRef)
+		return fmt.Errorf("%w: temporal external backend name is required", agentoscore.ErrInvalidBackendRef)
 	}
 
 	if c.TaskQueue == "" {
-		return fmt.Errorf("%w: temporal external task queue is required", agentos.ErrInvalidBackendRef)
+		return fmt.Errorf("%w: temporal external task queue is required", agentoscore.ErrInvalidBackendRef)
 	}
 
 	if c.WorkflowType == "" {
-		return fmt.Errorf("%w: temporal external workflow type is required", agentos.ErrInvalidBackendRef)
+		return fmt.Errorf("%w: temporal external workflow type is required", agentoscore.ErrInvalidBackendRef)
 	}
 
 	if c.QueryType == "" {
-		return fmt.Errorf("%w: temporal external status query type is required", agentos.ErrInvalidBackendRef)
+		return fmt.Errorf("%w: temporal external status query type is required", agentoscore.ErrInvalidBackendRef)
 	}
 
 	return nil

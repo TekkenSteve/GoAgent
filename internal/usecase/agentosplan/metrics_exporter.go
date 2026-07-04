@@ -4,7 +4,8 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/TekkenSteve/GoAgent/agentos"
+	agentos "github.com/TekkenSteve/GoAgent/agentos/control"
+	agentoscore "github.com/TekkenSteve/GoAgent/agentos/core"
 )
 
 // PlanMetricsExporterConfig wires the durable RunPlan metric exporter.
@@ -44,31 +45,31 @@ type PlanMetricsExportResult struct {
 // their event history and sink throughput.
 func NewPlanMetricsExporter(cfg *PlanMetricsExporterConfig) (*PlanMetricsExporter, error) {
 	if cfg.ExporterID == "" {
-		return nil, fmt.Errorf("%w: metrics exporter id is required", agentos.ErrInvalidRunPlan)
+		return nil, fmt.Errorf("%w: metrics exporter id is required", agentoscore.ErrInvalidRunPlan)
 	}
 
 	if cfg.PlanRefs == nil {
-		return nil, fmt.Errorf("%w: metrics plan ref store is required", agentos.ErrInvalidRunPlan)
+		return nil, fmt.Errorf("%w: metrics plan ref store is required", agentoscore.ErrInvalidRunPlan)
 	}
 
 	if cfg.Plans == nil {
-		return nil, fmt.Errorf("%w: metrics plan index is required", agentos.ErrInvalidRunPlan)
+		return nil, fmt.Errorf("%w: metrics plan index is required", agentoscore.ErrInvalidRunPlan)
 	}
 
 	if cfg.PlanEvents == nil {
-		return nil, fmt.Errorf("%w: metrics plan event store is required", agentos.ErrInvalidRunPlan)
+		return nil, fmt.Errorf("%w: metrics plan event store is required", agentoscore.ErrInvalidRunPlan)
 	}
 
 	if cfg.Checkpoints == nil {
-		return nil, fmt.Errorf("%w: metrics checkpoint store is required", agentos.ErrInvalidRunPlan)
+		return nil, fmt.Errorf("%w: metrics checkpoint store is required", agentoscore.ErrInvalidRunPlan)
 	}
 
 	if cfg.Sink == nil {
-		return nil, fmt.Errorf("%w: metrics sink is required", agentos.ErrInvalidRunPlan)
+		return nil, fmt.Errorf("%w: metrics sink is required", agentoscore.ErrInvalidRunPlan)
 	}
 
 	if cfg.BatchSize <= 0 {
-		return nil, fmt.Errorf("%w: metrics batch size must be positive", agentos.ErrInvalidRunPlan)
+		return nil, fmt.Errorf("%w: metrics batch size must be positive", agentoscore.ErrInvalidRunPlan)
 	}
 
 	return &PlanMetricsExporter{
@@ -87,7 +88,7 @@ func NewPlanMetricsExporter(cfg *PlanMetricsExporterConfig) (*PlanMetricsExporte
 // sample batch.
 func (e *PlanMetricsExporter) Export(ctx context.Context, scope *PlanRefScope) (PlanMetricsExportResult, error) {
 	if scope.Limit < 0 {
-		return PlanMetricsExportResult{}, fmt.Errorf("%w: plan ref limit must be non-negative", agentos.ErrInvalidPlanScope)
+		return PlanMetricsExportResult{}, fmt.Errorf("%w: plan ref limit must be non-negative", agentoscore.ErrInvalidPlanScope)
 	}
 
 	refs, err := e.planRefs.ListPlanRefs(ctx, scope)
@@ -117,7 +118,7 @@ func (e *PlanMetricsExporter) exportPlan(ctx context.Context, ref agentos.PlanRe
 	}
 
 	if !exists {
-		return PlanMetricsExportResult{}, fmt.Errorf("%w: %s", agentos.ErrPlanRouteNotFound, ref.PlanID)
+		return PlanMetricsExportResult{}, fmt.Errorf("%w: %s", agentoscore.ErrPlanRouteNotFound, ref.PlanID)
 	}
 
 	if err := ValidatePlanTenantAccess(ref, &spec); err != nil {
@@ -221,7 +222,7 @@ func (e *PlanMetricsExporter) exportMetricEventBatch(ctx context.Context, spec *
 // scope before exporter state is trusted.
 func ValidatePlanMetricCheckpointRef(checkpoint *PlanMetricCheckpoint, exporterID string, ref agentos.PlanRef) error {
 	if exporterID == "" {
-		return fmt.Errorf("%w: metrics exporter id is required", agentos.ErrInvalidRunPlan)
+		return fmt.Errorf("%w: metrics exporter id is required", agentoscore.ErrInvalidRunPlan)
 	}
 
 	if err := ValidatePlanRef(ref); err != nil {
@@ -229,23 +230,23 @@ func ValidatePlanMetricCheckpointRef(checkpoint *PlanMetricCheckpoint, exporterI
 	}
 
 	if checkpoint.ExporterID != exporterID {
-		return fmt.Errorf("%w: metrics checkpoint belongs to exporter %q", agentos.ErrInvalidRunPlan, checkpoint.ExporterID)
+		return fmt.Errorf("%w: metrics checkpoint belongs to exporter %q", agentoscore.ErrInvalidRunPlan, checkpoint.ExporterID)
 	}
 
 	if checkpoint.PlanID != ref.PlanID {
-		return fmt.Errorf("%w: metrics checkpoint belongs to plan %q", agentos.ErrInvalidRunPlan, checkpoint.PlanID)
+		return fmt.Errorf("%w: metrics checkpoint belongs to plan %q", agentoscore.ErrInvalidRunPlan, checkpoint.PlanID)
 	}
 
 	if checkpoint.AccountID != ref.AccountID {
-		return fmt.Errorf("%w: metrics checkpoint belongs to account %q", agentos.ErrInvalidRunPlan, checkpoint.AccountID)
+		return fmt.Errorf("%w: metrics checkpoint belongs to account %q", agentoscore.ErrInvalidRunPlan, checkpoint.AccountID)
 	}
 
 	if checkpoint.ProjectID != ref.ProjectID {
-		return fmt.Errorf("%w: metrics checkpoint belongs to project %q", agentos.ErrInvalidRunPlan, checkpoint.ProjectID)
+		return fmt.Errorf("%w: metrics checkpoint belongs to project %q", agentoscore.ErrInvalidRunPlan, checkpoint.ProjectID)
 	}
 
 	if checkpoint.Sequence < 0 {
-		return fmt.Errorf("%w: metrics checkpoint sequence must be non-negative", agentos.ErrInvalidRunPlan)
+		return fmt.Errorf("%w: metrics checkpoint sequence must be non-negative", agentoscore.ErrInvalidRunPlan)
 	}
 
 	return nil

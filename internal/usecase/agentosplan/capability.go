@@ -8,18 +8,19 @@ import (
 	"encoding/json"
 	"fmt"
 
-	"github.com/TekkenSteve/GoAgent/agentos"
+	agentos "github.com/TekkenSteve/GoAgent/agentos/control"
+	agentoscore "github.com/TekkenSteve/GoAgent/agentos/core"
 )
 
 // ValidateCapability checks the public capability declaration before it is
 // inserted into a catalog or used by a RunPlan validator.
 func ValidateCapability(capability *agentos.Capability) error {
 	if capability.Backend.Kind == "" || capability.Backend.Name == "" {
-		return fmt.Errorf("%w: capability backend is required", agentos.ErrInvalidBackendRef)
+		return fmt.Errorf("%w: capability backend is required", agentoscore.ErrInvalidBackendRef)
 	}
 
 	if capability.Name == "" {
-		return fmt.Errorf("%w: capability name is required", agentos.ErrCapabilityNotFound)
+		return fmt.Errorf("%w: capability name is required", agentoscore.ErrCapabilityNotFound)
 	}
 
 	if err := validateRawJSON("input schema", capability.InputSchema); err != nil {
@@ -37,7 +38,7 @@ func ValidateCapability(capability *agentos.Capability) error {
 // durable catalog using content-addressed idempotency keys.
 func RegisterCapabilities(ctx context.Context, registry CapabilityRegistry, capabilities []agentos.Capability) error {
 	if registry == nil {
-		return fmt.Errorf("%w: capability registry is required", agentos.ErrCapabilityNotFound)
+		return fmt.Errorf("%w: capability registry is required", agentoscore.ErrCapabilityNotFound)
 	}
 
 	for i := range capabilities {
@@ -65,7 +66,7 @@ func CapabilityRegistrationIdempotencyKey(capability *agentos.Capability) (strin
 
 	data, err := json.Marshal(capability)
 	if err != nil {
-		return "", fmt.Errorf("%w: marshal capability registration: %w", agentos.ErrInvalidRunPlan, err)
+		return "", fmt.Errorf("%w: marshal capability registration: %w", agentoscore.ErrInvalidRunPlan, err)
 	}
 
 	sum := sha256.Sum256(data)
@@ -78,16 +79,16 @@ func CapabilityRegistrationIdempotencyKey(capability *agentos.Capability) (strin
 func ValidateCapabilityRegistrationIdempotency(existing, requested *agentos.Capability) error {
 	existingJSON, err := json.Marshal(existing)
 	if err != nil {
-		return fmt.Errorf("%w: marshal existing capability: %w", agentos.ErrInvalidRunPlan, err)
+		return fmt.Errorf("%w: marshal existing capability: %w", agentoscore.ErrInvalidRunPlan, err)
 	}
 
 	requestedJSON, err := json.Marshal(requested)
 	if err != nil {
-		return fmt.Errorf("%w: marshal requested capability: %w", agentos.ErrInvalidRunPlan, err)
+		return fmt.Errorf("%w: marshal requested capability: %w", agentoscore.ErrInvalidRunPlan, err)
 	}
 
 	if !bytes.Equal(existingJSON, requestedJSON) {
-		return fmt.Errorf("%w: capability registration idempotency key reused with different declaration", agentos.ErrInvalidRunPlan)
+		return fmt.Errorf("%w: capability registration idempotency key reused with different declaration", agentoscore.ErrInvalidRunPlan)
 	}
 
 	return nil
@@ -99,7 +100,7 @@ func validateRawJSON(label string, raw json.RawMessage) error {
 	}
 
 	if !json.Valid(raw) {
-		return fmt.Errorf("%w: invalid capability %s", agentos.ErrInvalidRunPlan, label)
+		return fmt.Errorf("%w: invalid capability %s", agentoscore.ErrInvalidRunPlan, label)
 	}
 
 	return nil

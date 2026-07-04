@@ -5,7 +5,7 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/TekkenSteve/GoAgent/agentos"
+	agentos "github.com/TekkenSteve/GoAgent/agentos/control"
 )
 
 var errTestRuntimePostgresUnavailable = errors.New("postgres unavailable")

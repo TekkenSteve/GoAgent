@@ -3,7 +3,7 @@ package restapi
 import (
 	"net/http"
 
-	"github.com/TekkenSteve/GoAgent/agentos"
+	agentos "github.com/TekkenSteve/GoAgent/agentos/control"
 	"github.com/TekkenSteve/GoAgent/config"
 	_ "github.com/TekkenSteve/GoAgent/docs" // Swagger docs.
 	"github.com/TekkenSteve/GoAgent/internal/agentfw/eventing"

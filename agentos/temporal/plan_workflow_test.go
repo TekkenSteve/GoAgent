@@ -6,7 +6,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/TekkenSteve/GoAgent/agentos"
+	agentos "github.com/TekkenSteve/GoAgent/agentos/control"
+	agentoscore "github.com/TekkenSteve/GoAgent/agentos/core"
 	"github.com/TekkenSteve/GoAgent/internal/usecase/agentosplan"
 	"github.com/stretchr/testify/require"
 	"go.temporal.io/sdk/activity"
@@ -31,7 +32,7 @@ func TestPlanWorkflowExecutesSuccessEdgeAndPublishesArtifacts(t *testing.T) {
 				NodeID: "research",
 				Run:    agentos.RunSpec{RunID: "run-research", Backend: ref},
 				Outputs: []agentos.ArtifactSpec{
-					{Name: "summary", Kind: agentos.ArtifactKindObject, Required: true},
+					{Name: "summary", Kind: agentoscore.ArtifactKindObject, Required: true},
 				},
 			},
 			{NodeID: "verify", Run: agentos.RunSpec{RunID: "run-verify", Backend: ref}},
@@ -45,8 +46,8 @@ func TestPlanWorkflowExecutesSuccessEdgeAndPublishesArtifacts(t *testing.T) {
 			"run-research": {
 				RunID:          "run-research",
 				LifecycleState: "completed",
-				Artifacts: []agentos.ArtifactRef{
-					{ArtifactID: "artifact-summary", Name: "summary", Kind: agentos.ArtifactKindObject},
+				Artifacts: []agentoscore.ArtifactRef{
+					{ArtifactID: "artifact-summary", Name: "summary", Kind: agentoscore.ArtifactKindObject},
 				},
 			},
 			"run-verify": {RunID: "run-verify", LifecycleState: "completed"},
@@ -83,7 +84,7 @@ func TestPlanWorkflowFailsNodeWhenRequiredInputArtifactIsMissing(t *testing.T) {
 				NodeID: "research",
 				Run:    agentos.RunSpec{RunID: "run-research", Backend: ref},
 				Outputs: []agentos.ArtifactSpec{
-					{Name: "summary", Kind: agentos.ArtifactKindObject},
+					{Name: "summary", Kind: agentoscore.ArtifactKindObject},
 				},
 			},
 			{NodeID: "verify", Run: agentos.RunSpec{RunID: "run-verify", Backend: ref}},
@@ -122,7 +123,7 @@ func TestPlanWorkflowFailsNodeWhenRequiredInputArtifactIsMissing(t *testing.T) {
 	var result agentos.RunPlanStatus
 	require.NoError(t, env.GetWorkflowResult(&result))
 	require.Equal(t, agentos.PlanLifecycleFailed, result.LifecycleState)
-	require.Contains(t, result.Reason, agentos.ErrArtifactNotFound.Error())
+	require.Contains(t, result.Reason, agentoscore.ErrArtifactNotFound.Error())
 	require.Equal(t, []string{"run-research"}, mocks.started)
 
 	verify := findPlanNodeStatus(result.Nodes, "verify")
@@ -163,7 +164,7 @@ func TestPlanWorkflowPublishesDebugTraceEvents(t *testing.T) {
 	mocks := &planWorkflowMocks{statuses: map[string]agentos.RunStatus{"run-research": {RunID: "run-research", LifecycleState: "completed"}}}
 
 	planWorkflowTestSpec(&spec)
-	env := newPlanWorkflowTestEnvWithStores(t, mocks, []agentos.Capability{{Backend: ref, Name: "run", Controls: []agentos.ControlOperation{agentos.ControlCancel}}}, store, agentosplan.NewMemoryArtifactStore(), &spec)
+	env := newPlanWorkflowTestEnvWithStores(t, mocks, []agentos.Capability{{Backend: ref, Name: "run", Controls: []agentoscore.ControlOperation{agentoscore.ControlCancel}}}, store, agentosplan.NewMemoryArtifactStore(), &spec)
 	env.ExecuteWorkflow(PlanWorkflow, planWorkflowInputForTest(&spec))
 	require.True(t, env.IsWorkflowCompleted())
 	require.NoError(t, env.GetWorkflowError())
@@ -173,17 +174,17 @@ func TestPlanWorkflowPublishesDebugTraceEvents(t *testing.T) {
 	events, err := store.ListPlanEvents(context.Background(), planWorkflowEventScopePtr(&spec), 0)
 	require.NoError(t, err)
 
-	capabilityEvent := findPlanEventByType(events, agentos.EventCapabilitySelected)
+	capabilityEvent := findPlanEventByType(events, agentoscore.EventCapabilitySelected)
 	require.NotNil(t, capabilityEvent)
 	require.NotNil(t, capabilityEvent.Payload["capability"])
 	require.NotNil(t, capabilityEvent.Payload["transition"])
 
-	inputEvent := findPlanEventByType(events, agentos.EventNodeInputResolved)
+	inputEvent := findPlanEventByType(events, agentoscore.EventNodeInputResolved)
 	require.NotNil(t, inputEvent)
 	require.NotNil(t, inputEvent.Payload["input_resolution"])
 	require.NotNil(t, inputEvent.Payload["transition"])
 
-	conditionEvent := findPlanEventByType(events, agentos.EventConditionEvaluated)
+	conditionEvent := findPlanEventByType(events, agentoscore.EventConditionEvaluated)
 	require.NotNil(t, conditionEvent)
 	require.NotNil(t, conditionEvent.Payload["conditions"])
 }
@@ -276,14 +277,14 @@ func TestPlanWorkflowAppliesPlanDeltaArtifact(t *testing.T) {
 	}
 	store := agentosplan.NewMemoryPlanStore()
 	artifactStore := agentosplan.NewMemoryArtifactStore()
-	deltaRef, err := putArtifact(context.Background(), artifactStore, &agentos.ArtifactRef{ArtifactID: "delta-1", PlanID: spec.PlanID, NodeID: "seed", RunID: "run-seed", Name: "expand", Kind: agentos.ArtifactKindPlanDelta}, agentosplan.PlanDelta{
+	deltaRef, err := putArtifact(context.Background(), artifactStore, &agentoscore.ArtifactRef{ArtifactID: "delta-1", PlanID: spec.PlanID, NodeID: "seed", RunID: "run-seed", Name: "expand", Kind: agentoscore.ArtifactKindPlanDelta}, agentosplan.PlanDelta{
 		Nodes: []agentos.PlanNodeSpec{{NodeID: "expanded", Capability: "expand", Run: agentos.RunSpec{RunID: "run-expanded", Backend: ref}}},
 		Edges: []agentos.PlanEdgeSpec{{EdgeID: "seed-expanded", From: "seed", To: "expanded", On: agentos.EdgeOnSuccess}},
 	}, "delta-key")
 	require.NoError(t, err)
 
 	mocks := &planWorkflowMocks{statuses: map[string]agentos.RunStatus{
-		"run-seed":     {RunID: "run-seed", LifecycleState: "completed", Artifacts: []agentos.ArtifactRef{deltaRef}},
+		"run-seed":     {RunID: "run-seed", LifecycleState: "completed", Artifacts: []agentoscore.ArtifactRef{deltaRef}},
 		"run-expanded": {RunID: "run-expanded", LifecycleState: "completed"},
 	}}
 
@@ -304,17 +305,17 @@ func TestPlanWorkflowAppliesPlanDeltaArtifact(t *testing.T) {
 	events, err := store.ListPlanEvents(context.Background(), planWorkflowEventScopePtr(&spec), 0)
 	require.NoError(t, err)
 
-	eventTypes := make([]agentos.EventType, 0, len(events))
+	eventTypes := make([]agentoscore.EventType, 0, len(events))
 	expandedCapabilitySelected := false
 
 	for _, event := range events {
 		eventTypes = append(eventTypes, event.EventType)
-		if event.EventType == agentos.EventCapabilitySelected && event.NodeID == "expanded" {
+		if event.EventType == agentoscore.EventCapabilitySelected && event.NodeID == "expanded" {
 			expandedCapabilitySelected = true
 		}
 	}
 
-	require.Contains(t, eventTypes, agentos.EventPlanExpanded)
+	require.Contains(t, eventTypes, agentoscore.EventPlanExpanded)
 	require.True(t, expandedCapabilitySelected)
 }
 
@@ -356,7 +357,7 @@ func TestPlanWorkflowCancelsTimedOutNode(t *testing.T) {
 	require.Equal(t, []string{"run-slow"}, mocks.started)
 	require.Len(t, mocks.controls, 1)
 	require.Equal(t, "run-slow", mocks.controls[0].RunID)
-	require.Equal(t, agentos.ControlCancel, mocks.controls[0].Control.Operation)
+	require.Equal(t, agentoscore.ControlCancel, mocks.controls[0].Control.Operation)
 	require.NotEmpty(t, mocks.controls[0].Control.IdempotencyKey)
 }
 
@@ -396,7 +397,7 @@ func TestPlanWorkflowCancelsActiveNodesWhenPlanTimesOut(t *testing.T) {
 	require.Equal(t, []string{"run-slow"}, mocks.started)
 	require.Len(t, mocks.controls, 1)
 	require.Equal(t, "run-slow", mocks.controls[0].RunID)
-	require.Equal(t, agentos.ControlCancel, mocks.controls[0].Control.Operation)
+	require.Equal(t, agentoscore.ControlCancel, mocks.controls[0].Control.Operation)
 	require.NotEmpty(t, mocks.controls[0].Control.IdempotencyKey)
 }
 
@@ -443,7 +444,7 @@ func TestPlanWorkflowCancelsActiveNodesWhenBudgetExceeded(t *testing.T) {
 	require.Equal(t, []string{"run-expensive", "run-slow"}, mocks.started)
 	require.Len(t, mocks.controls, 1)
 	require.Equal(t, "run-slow", mocks.controls[0].RunID)
-	require.Equal(t, agentos.ControlCancel, mocks.controls[0].Control.Operation)
+	require.Equal(t, agentoscore.ControlCancel, mocks.controls[0].Control.Operation)
 }
 
 func TestPlanWorkflowOrchestratesMixedBackendsThroughRuntime(t *testing.T) {
@@ -507,8 +508,8 @@ func TestPlanWorkflowOrchestratesMixedBackendsThroughRuntime(t *testing.T) {
 	events, err := store.ListPlanEvents(context.Background(), planWorkflowEventScopePtr(&spec), 0)
 	require.NoError(t, err)
 	require.NotEmpty(t, events)
-	require.Equal(t, agentos.EventPlanStarted, events[0].EventType)
-	require.Equal(t, agentos.EventPlanSucceeded, events[len(events)-1].EventType)
+	require.Equal(t, agentoscore.EventPlanStarted, events[0].EventType)
+	require.Equal(t, agentoscore.EventPlanSucceeded, events[len(events)-1].EventType)
 }
 
 func TestPlanWorkflowRetriesFailedNodeFromSignal(t *testing.T) {
@@ -546,8 +547,8 @@ func TestPlanWorkflowRetriesFailedNodeFromSignal(t *testing.T) {
 	planWorkflowTestSpec(&spec)
 	env := newPlanWorkflowTestEnv(t, mocks, &spec)
 	env.RegisterDelayedCallback(func() {
-		env.SignalWorkflow(PlanSignalName, agentos.Signal{
-			Type:           agentos.SignalPlanNodeRetry,
+		env.SignalWorkflow(PlanSignalName, agentoscore.Signal{
+			Type:           agentoscore.SignalPlanNodeRetry,
 			IdempotencyKey: "retry-flaky",
 			ActorID:        "operator-1",
 			Payload: map[string]any{
@@ -598,8 +599,8 @@ func TestPlanWorkflowRejectsManualRetryBeyondMaxAttempts(t *testing.T) {
 	planWorkflowTestSpec(&spec)
 	env := newPlanWorkflowTestEnvWithStores(t, mocks, nil, store, agentosplan.NewMemoryArtifactStore(), &spec)
 	env.RegisterDelayedCallback(func() {
-		env.SignalWorkflow(PlanSignalName, agentos.Signal{
-			Type:           agentos.SignalPlanNodeRetry,
+		env.SignalWorkflow(PlanSignalName, agentoscore.Signal{
+			Type:           agentoscore.SignalPlanNodeRetry,
 			IdempotencyKey: "retry-flaky",
 			ActorID:        "operator-1",
 			Payload: map[string]any{
@@ -648,8 +649,8 @@ func TestPlanWorkflowRejectSignalFailsRunningPlan(t *testing.T) {
 	planWorkflowTestSpec(&spec)
 	env := newPlanWorkflowTestEnv(t, mocks, &spec)
 	env.RegisterDelayedCallback(func() {
-		env.SignalWorkflow(PlanSignalName, agentos.Signal{
-			Type:           agentos.SignalPlanReject,
+		env.SignalWorkflow(PlanSignalName, agentoscore.Signal{
+			Type:           agentoscore.SignalPlanReject,
 			IdempotencyKey: "reject-plan",
 			ActorID:        "operator-1",
 			Payload: map[string]any{
@@ -675,7 +676,7 @@ func TestPlanWorkflowRejectSignalFailsRunningPlan(t *testing.T) {
 	require.Equal(t, "run-slow", slow.RunID)
 	require.Len(t, mocks.controls, 1)
 	require.Equal(t, "run-slow", mocks.controls[0].RunID)
-	require.Equal(t, agentos.ControlCancel, mocks.controls[0].Control.Operation)
+	require.Equal(t, agentoscore.ControlCancel, mocks.controls[0].Control.Operation)
 	require.NotEmpty(t, mocks.controls[0].Control.IdempotencyKey)
 }
 
@@ -702,17 +703,17 @@ func TestPlanWorkflowApproveSignalUnblocksPausedPlan(t *testing.T) {
 
 	planWorkflowTestSpec(&spec)
 	env := newPlanWorkflowTestEnvWithCapabilities(t, mocks, []agentos.Capability{
-		{Backend: ref, Name: "pausable", Controls: []agentos.ControlOperation{agentos.ControlPause}},
+		{Backend: ref, Name: "pausable", Controls: []agentoscore.ControlOperation{agentoscore.ControlPause}},
 	}, &spec)
 	env.RegisterDelayedCallback(func() {
-		env.SignalWorkflow(PlanControlSignalName, agentos.ControlRequest{
-			Operation:      agentos.ControlPause,
+		env.SignalWorkflow(PlanControlSignalName, agentoscore.ControlRequest{
+			Operation:      agentoscore.ControlPause,
 			IdempotencyKey: "pause-plan",
 		})
 	}, time.Second)
 	env.RegisterDelayedCallback(func() {
-		env.SignalWorkflow(PlanSignalName, agentos.Signal{
-			Type:           agentos.SignalPlanApprove,
+		env.SignalWorkflow(PlanSignalName, agentoscore.Signal{
+			Type:           agentoscore.SignalPlanApprove,
 			IdempotencyKey: "approve-plan",
 			ActorID:        "operator-1",
 		})
@@ -728,7 +729,7 @@ func TestPlanWorkflowApproveSignalUnblocksPausedPlan(t *testing.T) {
 	require.Equal(t, agentos.PlanLifecycleSucceeded, result.LifecycleState)
 	require.Equal(t, []string{"run-slow"}, mocks.started)
 	require.Len(t, mocks.controls, 1)
-	require.Equal(t, agentos.ControlPause, mocks.controls[0].Control.Operation)
+	require.Equal(t, agentoscore.ControlPause, mocks.controls[0].Control.Operation)
 }
 
 func TestPlanWorkflowPauseControlPreflightsUnsupportedRunningNodes(t *testing.T) {
@@ -753,14 +754,14 @@ func TestPlanWorkflowPauseControlPreflightsUnsupportedRunningNodes(t *testing.T)
 
 	planWorkflowTestSpec(&spec)
 	env := newPlanWorkflowTestEnvWithStores(t, mocks, []agentos.Capability{
-		{Backend: ref, Name: "pausable", Controls: []agentos.ControlOperation{agentos.ControlPause}},
+		{Backend: ref, Name: "pausable", Controls: []agentoscore.ControlOperation{agentoscore.ControlPause}},
 		{Backend: ref, Name: "plain"},
 	}, store, agentosplan.NewMemoryArtifactStore(), &spec)
 	env.RegisterDelayedCallback(func() {
-		env.SignalWorkflow(PlanControlSignalName, agentos.ControlRequest{Operation: agentos.ControlPause, IdempotencyKey: "pause-plan"})
+		env.SignalWorkflow(PlanControlSignalName, agentoscore.ControlRequest{Operation: agentoscore.ControlPause, IdempotencyKey: "pause-plan"})
 	}, time.Second)
 	env.RegisterDelayedCallback(func() {
-		env.SignalWorkflow(PlanSignalName, agentos.Signal{Type: agentos.SignalPlanReject, IdempotencyKey: "reject-plan", ActorID: "operator-1", Payload: map[string]any{agentosplan.SignalPayloadReason: "end preflight test"}})
+		env.SignalWorkflow(PlanSignalName, agentoscore.Signal{Type: agentoscore.SignalPlanReject, IdempotencyKey: "reject-plan", ActorID: "operator-1", Payload: map[string]any{agentosplan.SignalPayloadReason: "end preflight test"}})
 	}, 2*time.Second)
 	env.ExecuteWorkflow(PlanWorkflow, planWorkflowInputForTest(&spec))
 	require.True(t, env.IsWorkflowCompleted())
@@ -772,17 +773,17 @@ func TestPlanWorkflowPauseControlPreflightsUnsupportedRunningNodes(t *testing.T)
 	require.Equal(t, []string{"run-pausable", "run-plain"}, mocks.started)
 
 	for _, control := range mocks.controls {
-		require.NotEqual(t, agentos.ControlPause, control.Control.Operation)
+		require.NotEqual(t, agentoscore.ControlPause, control.Control.Operation)
 	}
 
 	require.Len(t, mocks.controls, 2)
-	require.Equal(t, agentos.ControlCancel, mocks.controls[0].Control.Operation)
-	require.Equal(t, agentos.ControlCancel, mocks.controls[1].Control.Operation)
+	require.Equal(t, agentoscore.ControlCancel, mocks.controls[0].Control.Operation)
+	require.Equal(t, agentoscore.ControlCancel, mocks.controls[1].Control.Operation)
 
 	events, err := store.ListPlanEvents(context.Background(), planWorkflowEventScopePtr(&spec), 0)
 	require.NoError(t, err)
 
-	blocked := findPlanEventByType(events, agentos.EventPlanBlocked)
+	blocked := findPlanEventByType(events, agentoscore.EventPlanBlocked)
 	require.NotNil(t, blocked)
 	reason, ok := blocked.Payload["reason"].(string)
 	require.True(t, ok)
@@ -821,17 +822,17 @@ func TestPlanWorkflowPauseControlPropagatesToAllSupportedRunningNodes(t *testing
 
 	planWorkflowTestSpec(&spec)
 	env := newPlanWorkflowTestEnvWithCapabilities(t, mocks, []agentos.Capability{
-		{Backend: ref, Name: "pausable", Controls: []agentos.ControlOperation{agentos.ControlPause}},
+		{Backend: ref, Name: "pausable", Controls: []agentoscore.ControlOperation{agentoscore.ControlPause}},
 	}, &spec)
 	env.RegisterDelayedCallback(func() {
-		env.SignalWorkflow(PlanControlSignalName, agentos.ControlRequest{
-			Operation:      agentos.ControlPause,
+		env.SignalWorkflow(PlanControlSignalName, agentoscore.ControlRequest{
+			Operation:      agentoscore.ControlPause,
 			IdempotencyKey: "pause-plan",
 		})
 	}, time.Second)
 	env.RegisterDelayedCallback(func() {
-		env.SignalWorkflow(PlanSignalName, agentos.Signal{
-			Type:           agentos.SignalPlanApprove,
+		env.SignalWorkflow(PlanSignalName, agentoscore.Signal{
+			Type:           agentoscore.SignalPlanApprove,
 			IdempotencyKey: "approve-plan",
 			ActorID:        "operator-1",
 		})
@@ -848,9 +849,9 @@ func TestPlanWorkflowPauseControlPropagatesToAllSupportedRunningNodes(t *testing
 	require.Equal(t, []string{"run-left", "run-right"}, mocks.started)
 	require.Len(t, mocks.controls, 2)
 	require.Equal(t, "run-left", mocks.controls[0].RunID)
-	require.Equal(t, agentos.ControlPause, mocks.controls[0].Control.Operation)
+	require.Equal(t, agentoscore.ControlPause, mocks.controls[0].Control.Operation)
 	require.Equal(t, "run-right", mocks.controls[1].RunID)
-	require.Equal(t, agentos.ControlPause, mocks.controls[1].Control.Operation)
+	require.Equal(t, agentoscore.ControlPause, mocks.controls[1].Control.Operation)
 }
 
 func TestPlanWorkflowContinuedInputRestoresSnapshotStatus(t *testing.T) {
@@ -1156,7 +1157,7 @@ func (r *mixedBackendRuntime) StartPlanNode(ctx context.Context, _, _ string, sp
 	return r.Start(ctx, spec)
 }
 
-func (r *mixedBackendRuntime) Signal(context.Context, string, *agentos.Signal) error {
+func (r *mixedBackendRuntime) Signal(context.Context, string, *agentoscore.Signal) error {
 	return nil
 }
 
@@ -1176,11 +1177,11 @@ func (r *mixedBackendRuntime) Status(_ context.Context, runID string) (agentos.R
 	return status, nil
 }
 
-func (r *mixedBackendRuntime) Control(context.Context, string, *agentos.ControlRequest) error {
+func (r *mixedBackendRuntime) Control(context.Context, string, *agentoscore.ControlRequest) error {
 	return nil
 }
 
-func (r *mixedBackendRuntime) Subscribe(context.Context, agentos.StreamScope) (agentos.Subscription, error) {
+func (r *mixedBackendRuntime) Subscribe(context.Context, agentoscore.StreamScope) (agentoscore.Subscription, error) {
 	return nil, nil
 }
 
@@ -1212,7 +1213,7 @@ func mixedBackendCapabilities(refs []agentos.BackendRef) []agentos.Capability {
 	return capabilities
 }
 
-func findPlanEventByType(events []agentos.PlanEvent, eventType agentos.EventType) *agentos.PlanEvent {
+func findPlanEventByType(events []agentos.PlanEvent, eventType agentoscore.EventType) *agentos.PlanEvent {
 	for i := range events {
 		if events[i].EventType == eventType {
 			return &events[i]

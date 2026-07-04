@@ -6,7 +6,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/TekkenSteve/GoAgent/agentos"
+	agentos "github.com/TekkenSteve/GoAgent/agentos/control"
+	agentoscore "github.com/TekkenSteve/GoAgent/agentos/core"
 )
 
 func TestValidatePlanStartIdempotencyRejectsDifferentPlanID(t *testing.T) {
@@ -16,7 +17,7 @@ func TestValidatePlanStartIdempotencyRejectsDifferentPlanID(t *testing.T) {
 	requested := agentos.RunPlanSpec{PlanID: "plan-2", IdempotencyKey: "start-key"}
 
 	err := ValidatePlanStartIdempotency(&existing, &requested)
-	if !errors.Is(err, agentos.ErrInvalidRunPlan) {
+	if !errors.Is(err, agentoscore.ErrInvalidRunPlan) {
 		t.Fatalf("error = %v, want ErrInvalidRunPlan", err)
 	}
 }
@@ -38,7 +39,7 @@ func TestValidatePlanStartIdempotencyRejectsDifferentRequest(t *testing.T) {
 	}
 
 	err := ValidatePlanStartIdempotency(&existing, &requested)
-	if !errors.Is(err, agentos.ErrInvalidRunPlan) {
+	if !errors.Is(err, agentoscore.ErrInvalidRunPlan) {
 		t.Fatalf("error = %v, want ErrInvalidRunPlan", err)
 	}
 }
@@ -84,7 +85,7 @@ func TestValidatePlanStateIdentityRejectsTopologyShrink(t *testing.T) {
 	requested.Nodes = requested.Nodes[:1]
 
 	err := ValidatePlanStateIdentity(&existing, &requested)
-	if !errors.Is(err, agentos.ErrInvalidRunPlan) {
+	if !errors.Is(err, agentoscore.ErrInvalidRunPlan) {
 		t.Fatalf("error = %v, want ErrInvalidRunPlan", err)
 	}
 }
@@ -107,7 +108,7 @@ func TestValidatePlanStateIdentityRejectsExistingNodeMutation(t *testing.T) {
 	requested.Nodes[0].Run.Backend = agentos.BackendRef{Kind: agentos.BackendKindHTTP, Name: "other"}
 
 	err := ValidatePlanStateIdentity(&existing, &requested)
-	if !errors.Is(err, agentos.ErrInvalidRunPlan) {
+	if !errors.Is(err, agentoscore.ErrInvalidRunPlan) {
 		t.Fatalf("error = %v, want ErrInvalidRunPlan", err)
 	}
 }
@@ -125,7 +126,7 @@ func TestValidatePlanStateIdentityRejectsImmutableFieldChange(t *testing.T) {
 	requested.Inputs = map[string]any{"topic": "changed"}
 
 	err := ValidatePlanStateIdentity(&existing, &requested)
-	if !errors.Is(err, agentos.ErrInvalidRunPlan) {
+	if !errors.Is(err, agentoscore.ErrInvalidRunPlan) {
 		t.Fatalf("error = %v, want ErrInvalidRunPlan", err)
 	}
 }
@@ -189,7 +190,7 @@ func TestValidatePlanTransitionIdempotencyRequiresTransitionSnapshot(t *testing.
 	identity := PlanTransitionSnapshotIdentity{Digest: "sha256:abc"}
 
 	err := ValidatePlanTransitionIdempotency("", identity)
-	if !errors.Is(err, agentos.ErrInvalidRunPlan) {
+	if !errors.Is(err, agentoscore.ErrInvalidRunPlan) {
 		t.Fatalf("error = %v, want ErrInvalidRunPlan", err)
 	}
 }
@@ -201,13 +202,13 @@ func TestValidateAuditIdempotencyRejectsDifferentPayload(t *testing.T) {
 		PlanID:         "plan-1",
 		Action:         AuditActionPlanSignal,
 		IdempotencyKey: "signal-key",
-		Payload:        map[string]any{"type": string(agentos.SignalPlanApprove)},
+		Payload:        map[string]any{"type": string(agentoscore.SignalPlanApprove)},
 	}
 	requested := existing
-	requested.Payload = map[string]any{"type": string(agentos.SignalPlanReject)}
+	requested.Payload = map[string]any{"type": string(agentoscore.SignalPlanReject)}
 
 	err := ValidateAuditIdempotency(&existing, &requested)
-	if !errors.Is(err, agentos.ErrInvalidRunPlan) {
+	if !errors.Is(err, agentoscore.ErrInvalidRunPlan) {
 		t.Fatalf("error = %v, want ErrInvalidRunPlan", err)
 	}
 }
@@ -221,13 +222,13 @@ func TestValidateAuditIdempotencyRejectsDifferentTenantScope(t *testing.T) {
 		ProjectID:      "project-1",
 		Action:         AuditActionPlanSignal,
 		IdempotencyKey: "signal-key",
-		Payload:        map[string]any{"type": string(agentos.SignalPlanApprove)},
+		Payload:        map[string]any{"type": string(agentoscore.SignalPlanApprove)},
 	}
 	requested := existing
 	requested.AccountID = "account-2"
 
 	err := ValidateAuditIdempotency(&existing, &requested)
-	if !errors.Is(err, agentos.ErrInvalidRunPlan) {
+	if !errors.Is(err, agentoscore.ErrInvalidRunPlan) {
 		t.Fatalf("error = %v, want ErrInvalidRunPlan", err)
 	}
 }
@@ -239,13 +240,13 @@ func TestValidatePlanCommandIdempotencyRejectsDifferentPayload(t *testing.T) {
 		PlanID:         "plan-1",
 		Action:         AuditActionPlanControl,
 		IdempotencyKey: "control-key",
-		Payload:        map[string]any{"operation": string(agentos.ControlCancel)},
+		Payload:        map[string]any{"operation": string(agentoscore.ControlCancel)},
 	}
 	requested := existing
-	requested.Payload = map[string]any{"operation": string(agentos.ControlPause)}
+	requested.Payload = map[string]any{"operation": string(agentoscore.ControlPause)}
 
 	err := ValidatePlanCommandIdempotency(&existing, &requested)
-	if !errors.Is(err, agentos.ErrInvalidRunPlan) {
+	if !errors.Is(err, agentoscore.ErrInvalidRunPlan) {
 		t.Fatalf("error = %v, want ErrInvalidRunPlan", err)
 	}
 }
@@ -259,13 +260,13 @@ func TestValidatePlanCommandIdempotencyRejectsDifferentTenantScope(t *testing.T)
 		ProjectID:      "project-1",
 		Action:         AuditActionPlanControl,
 		IdempotencyKey: "control-key",
-		Payload:        map[string]any{"operation": string(agentos.ControlCancel)},
+		Payload:        map[string]any{"operation": string(agentoscore.ControlCancel)},
 	}
 	requested := existing
 	requested.ProjectID = "project-2"
 
 	err := ValidatePlanCommandIdempotency(&existing, &requested)
-	if !errors.Is(err, agentos.ErrInvalidRunPlan) {
+	if !errors.Is(err, agentoscore.ErrInvalidRunPlan) {
 		t.Fatalf("error = %v, want ErrInvalidRunPlan", err)
 	}
 }
@@ -281,12 +282,12 @@ func TestPlanAuditRecordFromAuditRecordUsesPublicAction(t *testing.T) {
 		ActorID:        "operator-1",
 		Action:         AuditActionPlanControl,
 		IdempotencyKey: "control-1",
-		Payload:        map[string]any{"operation": string(agentos.ControlCancel)},
+		Payload:        map[string]any{"operation": string(agentoscore.ControlCancel)},
 	})
 	if record.Action != agentos.PlanAuditActionControl ||
 		record.AccountID != "account-1" ||
 		record.ProjectID != "project-1" ||
-		record.Payload["operation"] != string(agentos.ControlCancel) {
+		record.Payload["operation"] != string(agentoscore.ControlCancel) {
 		t.Fatalf("record = %#v", record)
 	}
 }
@@ -295,24 +296,24 @@ func TestValidatePlanEventIdempotencyRejectsDifferentPayload(t *testing.T) {
 	t.Parallel()
 
 	existing := agentos.PlanEvent{
-		Event: agentos.Event{
+		Event: agentoscore.Event{
 			EventID:   "plan-1:1",
-			EventType: agentos.EventPlanStarted,
+			EventType: agentoscore.EventPlanStarted,
 			Sequence:  1,
 			Payload:   map[string]any{"state": "started"},
 		},
 		PlanID: "plan-1",
 	}
 	requested := agentos.PlanEvent{
-		Event: agentos.Event{
-			EventType: agentos.EventPlanStarted,
+		Event: agentoscore.Event{
+			EventType: agentoscore.EventPlanStarted,
 			Payload:   map[string]any{"state": "failed"},
 		},
 		PlanID: "plan-1",
 	}
 
 	err := ValidatePlanEventIdempotency(&existing, &requested)
-	if !errors.Is(err, agentos.ErrInvalidPlanEvent) {
+	if !errors.Is(err, agentoscore.ErrInvalidPlanEvent) {
 		t.Fatalf("error = %v, want ErrInvalidPlanEvent", err)
 	}
 }
@@ -321,9 +322,9 @@ func TestValidatePlanEventIdempotencyRejectsDifferentTimestamp(t *testing.T) {
 	t.Parallel()
 
 	existing := agentos.PlanEvent{
-		Event: agentos.Event{
+		Event: agentoscore.Event{
 			EventID:   "plan-1:1",
-			EventType: agentos.EventPlanStarted,
+			EventType: agentoscore.EventPlanStarted,
 			Sequence:  1,
 			Timestamp: time.Date(2026, 6, 20, 12, 0, 0, 0, time.UTC),
 		},
@@ -332,8 +333,8 @@ func TestValidatePlanEventIdempotencyRejectsDifferentTimestamp(t *testing.T) {
 		ProjectID: "proj-1",
 	}
 	requested := agentos.PlanEvent{
-		Event: agentos.Event{
-			EventType: agentos.EventPlanStarted,
+		Event: agentoscore.Event{
+			EventType: agentoscore.EventPlanStarted,
 			Timestamp: time.Date(2026, 6, 20, 12, 1, 0, 0, time.UTC),
 		},
 		PlanID:    "plan-1",
@@ -342,7 +343,7 @@ func TestValidatePlanEventIdempotencyRejectsDifferentTimestamp(t *testing.T) {
 	}
 
 	err := ValidatePlanEventIdempotency(&existing, &requested)
-	if !errors.Is(err, agentos.ErrInvalidPlanEvent) {
+	if !errors.Is(err, agentoscore.ErrInvalidPlanEvent) {
 		t.Fatalf("error = %v, want ErrInvalidPlanEvent", err)
 	}
 }
@@ -351,9 +352,9 @@ func TestNormalizePlanEventAppendRequestCanonicalizesTimestampPrecision(t *testi
 	t.Parallel()
 
 	requested := agentos.PlanEvent{
-		Event: agentos.Event{
+		Event: agentoscore.Event{
 			EventID:   "plan-1:9",
-			EventType: agentos.EventPlanStarted,
+			EventType: agentoscore.EventPlanStarted,
 			Sequence:  9,
 			Timestamp: time.Date(2026, 6, 20, 12, 0, 0, 123456789, time.UTC),
 		},
@@ -375,11 +376,11 @@ func TestNormalizePlanEventAppendRequestCanonicalizesTimestampPrecision(t *testi
 func TestValidateArtifactPublishIdempotencyRejectsDifferentDigest(t *testing.T) {
 	t.Parallel()
 
-	existing := agentos.ArtifactRef{
+	existing := agentoscore.ArtifactRef{
 		ArtifactID: "artifact-1",
 		PlanID:     "plan-1",
 		Name:       "summary",
-		Kind:       agentos.ArtifactKindObject,
+		Kind:       agentoscore.ArtifactKindObject,
 		MediaType:  "application/json",
 		SizeBytes:  12,
 		Digest:     "sha256:first",
@@ -388,7 +389,7 @@ func TestValidateArtifactPublishIdempotencyRejectsDifferentDigest(t *testing.T) 
 	requested.Digest = "sha256:second"
 
 	err := ValidateArtifactPublishIdempotency(&existing, &requested)
-	if !errors.Is(err, agentos.ErrInvalidArtifact) {
+	if !errors.Is(err, agentoscore.ErrInvalidArtifact) {
 		t.Fatalf("error = %v, want ErrInvalidArtifact", err)
 	}
 }

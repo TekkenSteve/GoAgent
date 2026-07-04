@@ -5,7 +5,8 @@ import (
 	"encoding/json"
 	"fmt"
 
-	"github.com/TekkenSteve/GoAgent/agentos"
+	agentos "github.com/TekkenSteve/GoAgent/agentos/control"
+	agentoscore "github.com/TekkenSteve/GoAgent/agentos/core"
 )
 
 // PlanDeltaInput is deterministic context for workflow-owned dynamic expansion.
@@ -14,7 +15,7 @@ type PlanDeltaInput struct {
 	Status         agentos.RunPlanStatus
 	Node           agentos.PlanNodeSpec
 	RunStatus      agentos.RunStatus
-	Artifacts      []agentos.ArtifactRef
+	Artifacts      []agentoscore.ArtifactRef
 	ExpansionCount int32
 }
 
@@ -41,7 +42,7 @@ func (p ArtifactPlanDeltaProvider) NextPlanDelta(ctx context.Context, input *Pla
 	}
 
 	if p.Store == nil {
-		return PlanDelta{}, false, fmt.Errorf("%w: artifact store is required for plan expansion", agentos.ErrInvalidArtifact)
+		return PlanDelta{}, false, fmt.Errorf("%w: artifact store is required for plan expansion", agentoscore.ErrInvalidArtifact)
 	}
 
 	var combined PlanDelta
@@ -50,7 +51,7 @@ func (p ArtifactPlanDeltaProvider) NextPlanDelta(ctx context.Context, input *Pla
 		ref := refs[i]
 
 		if ref.ArtifactID == "" {
-			return PlanDelta{}, false, fmt.Errorf("%w: plan delta artifact %q has no artifact id", agentos.ErrInvalidArtifact, ref.Name)
+			return PlanDelta{}, false, fmt.Errorf("%w: plan delta artifact %q has no artifact id", agentoscore.ErrInvalidArtifact, ref.Name)
 		}
 
 		scope := agentos.PlanArtifactScope{
@@ -66,12 +67,12 @@ func (p ArtifactPlanDeltaProvider) NextPlanDelta(ctx context.Context, input *Pla
 		}
 
 		if payload == nil {
-			return PlanDelta{}, false, fmt.Errorf("%w: plan delta artifact %q has no payload", agentos.ErrArtifactNotFound, ref.Name)
+			return PlanDelta{}, false, fmt.Errorf("%w: plan delta artifact %q has no payload", agentoscore.ErrArtifactNotFound, ref.Name)
 		}
 
 		delta, err := DecodePlanDeltaPayload(payload)
 		if err != nil {
-			return PlanDelta{}, false, fmt.Errorf("%w: plan delta artifact %q: %w", agentos.ErrInvalidRunPlan, ref.Name, err)
+			return PlanDelta{}, false, fmt.Errorf("%w: plan delta artifact %q: %w", agentoscore.ErrInvalidRunPlan, ref.Name, err)
 		}
 
 		combined.Nodes = append(combined.Nodes, delta.Nodes...)
@@ -79,7 +80,7 @@ func (p ArtifactPlanDeltaProvider) NextPlanDelta(ctx context.Context, input *Pla
 	}
 
 	if len(combined.Nodes) == 0 && len(combined.Edges) == 0 {
-		return PlanDelta{}, false, fmt.Errorf("%w: plan delta artifacts produced an empty delta", agentos.ErrInvalidRunPlan)
+		return PlanDelta{}, false, fmt.Errorf("%w: plan delta artifacts produced an empty delta", agentoscore.ErrInvalidRunPlan)
 	}
 
 	return combined, true, nil
@@ -103,13 +104,13 @@ func DecodePlanDeltaPayload(payload any) (PlanDelta, error) {
 	return delta, nil
 }
 
-func planDeltaArtifacts(refs []agentos.ArtifactRef) []agentos.ArtifactRef {
-	result := make([]agentos.ArtifactRef, 0)
+func planDeltaArtifacts(refs []agentoscore.ArtifactRef) []agentoscore.ArtifactRef {
+	result := make([]agentoscore.ArtifactRef, 0)
 
 	for i := range refs {
 		ref := refs[i]
 
-		if ref.Kind == agentos.ArtifactKindPlanDelta {
+		if ref.Kind == agentoscore.ArtifactKindPlanDelta {
 			result = append(result, ref)
 		}
 	}

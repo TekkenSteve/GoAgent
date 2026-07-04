@@ -4,7 +4,8 @@ import (
 	"fmt"
 	"maps"
 
-	"github.com/TekkenSteve/GoAgent/agentos"
+	agentos "github.com/TekkenSteve/GoAgent/agentos/control"
+	agentoscore "github.com/TekkenSteve/GoAgent/agentos/core"
 )
 
 // DescribeRunPlan builds the public topology/control-plane view from the latest
@@ -70,7 +71,7 @@ func DescribeRunPlan(spec *agentos.RunPlanSpec, status *agentos.RunPlanStatus) (
 
 func validateDescribePlanInput(spec *agentos.RunPlanSpec, status *agentos.RunPlanStatus) error {
 	if spec.PlanID == "" {
-		return fmt.Errorf("%w: plan id is required", agentos.ErrInvalidRunPlan)
+		return fmt.Errorf("%w: plan id is required", agentoscore.ErrInvalidRunPlan)
 	}
 
 	if status.PlanID == "" {
@@ -78,7 +79,7 @@ func validateDescribePlanInput(spec *agentos.RunPlanSpec, status *agentos.RunPla
 	}
 
 	if status.PlanID != spec.PlanID {
-		return fmt.Errorf("%w: status plan id %q does not match spec plan id %q", agentos.ErrInvalidRunPlan, status.PlanID, spec.PlanID)
+		return fmt.Errorf("%w: status plan id %q does not match spec plan id %q", agentoscore.ErrInvalidRunPlan, status.PlanID, spec.PlanID)
 	}
 
 	return nil
@@ -89,22 +90,22 @@ func buildNodeIDMap(spec *agentos.RunPlanSpec, statusByNode map[string]agentos.P
 	for i := range spec.Nodes {
 		node := spec.Nodes[i]
 		if node.NodeID == "" {
-			return nil, fmt.Errorf("%w: node id is required", agentos.ErrInvalidRunPlan)
+			return nil, fmt.Errorf("%w: node id is required", agentoscore.ErrInvalidRunPlan)
 		}
 
 		if _, exists := nodeByID[node.NodeID]; exists {
-			return nil, fmt.Errorf("%w: duplicate node %q", agentos.ErrInvalidRunPlan, node.NodeID)
+			return nil, fmt.Errorf("%w: duplicate node %q", agentoscore.ErrInvalidRunPlan, node.NodeID)
 		}
 
 		nodeByID[node.NodeID] = node
 		if _, ok := statusByNode[node.NodeID]; !ok {
-			return nil, fmt.Errorf("%w: status missing node %q", agentos.ErrInvalidRunPlan, node.NodeID)
+			return nil, fmt.Errorf("%w: status missing node %q", agentoscore.ErrInvalidRunPlan, node.NodeID)
 		}
 	}
 
 	for nodeID := range statusByNode {
 		if _, ok := nodeByID[nodeID]; !ok {
-			return nil, fmt.Errorf("%w: status contains unknown node %q", agentos.ErrInvalidRunPlan, nodeID)
+			return nil, fmt.Errorf("%w: status contains unknown node %q", agentoscore.ErrInvalidRunPlan, nodeID)
 		}
 	}
 
@@ -126,11 +127,11 @@ func planStatusByNode(status *agentos.RunPlanStatus) (map[string]agentos.PlanNod
 	for i := range status.Nodes {
 		node := status.Nodes[i]
 		if node.NodeID == "" {
-			return nil, fmt.Errorf("%w: status node id is required", agentos.ErrInvalidRunPlan)
+			return nil, fmt.Errorf("%w: status node id is required", agentoscore.ErrInvalidRunPlan)
 		}
 
 		if _, exists := statusByNode[node.NodeID]; exists {
-			return nil, fmt.Errorf("%w: status contains duplicate node %q", agentos.ErrInvalidRunPlan, node.NodeID)
+			return nil, fmt.Errorf("%w: status contains duplicate node %q", agentoscore.ErrInvalidRunPlan, node.NodeID)
 		}
 
 		statusByNode[node.NodeID] = node
@@ -141,19 +142,19 @@ func planStatusByNode(status *agentos.RunPlanStatus) (map[string]agentos.PlanNod
 
 func validateTopologyEdge(edge *agentos.PlanEdgeSpec, nodeByID map[string]agentos.PlanNodeSpec) error {
 	if edge.From == "" || edge.To == "" {
-		return fmt.Errorf("%w: edge endpoints are required", agentos.ErrInvalidRunPlan)
+		return fmt.Errorf("%w: edge endpoints are required", agentoscore.ErrInvalidRunPlan)
 	}
 
 	if _, ok := nodeByID[edge.From]; !ok {
-		return fmt.Errorf("%w: edge from unknown node %q", agentos.ErrInvalidRunPlan, edge.From)
+		return fmt.Errorf("%w: edge from unknown node %q", agentoscore.ErrInvalidRunPlan, edge.From)
 	}
 
 	if _, ok := nodeByID[edge.To]; !ok {
-		return fmt.Errorf("%w: edge to unknown node %q", agentos.ErrInvalidRunPlan, edge.To)
+		return fmt.Errorf("%w: edge to unknown node %q", agentoscore.ErrInvalidRunPlan, edge.To)
 	}
 
 	if edge.From == edge.To {
-		return fmt.Errorf("%w: self edge on node %q", agentos.ErrInvalidRunPlan, edge.From)
+		return fmt.Errorf("%w: self edge on node %q", agentoscore.ErrInvalidRunPlan, edge.From)
 	}
 
 	return nil

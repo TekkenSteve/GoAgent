@@ -3,7 +3,8 @@ package grpcbackend
 import (
 	"time"
 
-	"github.com/TekkenSteve/GoAgent/agentos"
+	agentos "github.com/TekkenSteve/GoAgent/agentos/control"
+	agentoscore "github.com/TekkenSteve/GoAgent/agentos/core"
 )
 
 type startRequest struct {
@@ -23,18 +24,18 @@ type startRequest struct {
 }
 
 type signalRequest struct {
-	RunID          string             `json:"run_id"`
-	Type           agentos.SignalType `json:"type"`
-	IdempotencyKey string             `json:"idempotency_key,omitempty"`
-	Payload        map[string]any     `json:"payload,omitempty"`
-	SentAt         time.Time          `json:"sent_at"`
+	RunID          string                 `json:"run_id"`
+	Type           agentoscore.SignalType `json:"type"`
+	IdempotencyKey string                 `json:"idempotency_key,omitempty"`
+	Payload        map[string]any         `json:"payload,omitempty"`
+	SentAt         time.Time              `json:"sent_at"`
 }
 
 type controlRequest struct {
-	RunID          string                   `json:"run_id"`
-	Operation      agentos.ControlOperation `json:"operation"`
-	IdempotencyKey string                   `json:"idempotency_key,omitempty"`
-	RequestedAt    time.Time                `json:"requested_at"`
+	RunID          string                       `json:"run_id"`
+	Operation      agentoscore.ControlOperation `json:"operation"`
+	IdempotencyKey string                       `json:"idempotency_key,omitempty"`
+	RequestedAt    time.Time                    `json:"requested_at"`
 }
 
 type statusRequest struct {
@@ -66,7 +67,7 @@ func startRequestFromSpec(spec *agentos.RunSpec) startRequest {
 	}
 }
 
-func signalRequestFromSignal(runID string, signal *agentos.Signal) signalRequest {
+func signalRequestFromSignal(runID string, signal *agentoscore.Signal) signalRequest {
 	sentAt := signal.SentAt
 	if sentAt.IsZero() {
 		sentAt = time.Now().UTC()
@@ -81,7 +82,7 @@ func signalRequestFromSignal(runID string, signal *agentos.Signal) signalRequest
 	}
 }
 
-func controlRequestFromControl(runID string, control *agentos.ControlRequest) controlRequest {
+func controlRequestFromControl(runID string, control *agentoscore.ControlRequest) controlRequest {
 	requestedAt := control.RequestedAt
 	if requestedAt.IsZero() {
 		requestedAt = time.Now().UTC()

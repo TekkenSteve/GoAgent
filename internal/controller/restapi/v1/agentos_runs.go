@@ -4,7 +4,8 @@ import (
 	"errors"
 	"net/http"
 
-	"github.com/TekkenSteve/GoAgent/agentos"
+	agentos "github.com/TekkenSteve/GoAgent/agentos/control"
+	agentoscore "github.com/TekkenSteve/GoAgent/agentos/core"
 	"github.com/TekkenSteve/GoAgent/internal/controller/restapi/v1/request"
 	"github.com/gofiber/fiber/v2"
 )
@@ -94,7 +95,7 @@ func (r *V1) signalAgentOSRun(ctx *fiber.Ctx) error {
 		return errorResponse(ctx, http.StatusBadRequest, err.Error())
 	}
 
-	signal := agentos.Signal{
+	signal := agentoscore.Signal{
 		Type:           req.Type,
 		IdempotencyKey: req.IdempotencyKey,
 		ActorID:        req.ActorID,
@@ -137,7 +138,7 @@ func (r *V1) controlAgentOSRun(ctx *fiber.Ctx) error {
 		return errorResponse(ctx, http.StatusBadRequest, err.Error())
 	}
 
-	control := agentos.ControlRequest{
+	control := agentoscore.ControlRequest{
 		Operation:      req.Operation,
 		IdempotencyKey: req.IdempotencyKey,
 		RequestedAt:    req.RequestedAt,
@@ -177,22 +178,22 @@ func (r *V1) statusAgentOSRun(ctx *fiber.Ctx) error {
 
 func agentOSError(ctx *fiber.Ctx, err error) error {
 	switch {
-	case errors.Is(err, agentos.ErrInvalidRunSpec),
-		errors.Is(err, agentos.ErrInvalidBackendRef),
-		errors.Is(err, agentos.ErrInvalidSignal),
-		errors.Is(err, agentos.ErrInvalidControlOperation),
-		errors.Is(err, agentos.ErrInvalidStreamScope),
-		errors.Is(err, agentos.ErrInvalidPlanScope),
-		errors.Is(err, agentos.ErrInvalidRunPlan),
-		errors.Is(err, agentos.ErrInvalidArtifact),
-		errors.Is(err, agentos.ErrInvalidExpression),
-		errors.Is(err, agentos.ErrInvalidPlanEvent):
+	case errors.Is(err, agentoscore.ErrInvalidRunSpec),
+		errors.Is(err, agentoscore.ErrInvalidBackendRef),
+		errors.Is(err, agentoscore.ErrInvalidSignal),
+		errors.Is(err, agentoscore.ErrInvalidControlOperation),
+		errors.Is(err, agentoscore.ErrInvalidStreamScope),
+		errors.Is(err, agentoscore.ErrInvalidPlanScope),
+		errors.Is(err, agentoscore.ErrInvalidRunPlan),
+		errors.Is(err, agentoscore.ErrInvalidArtifact),
+		errors.Is(err, agentoscore.ErrInvalidExpression),
+		errors.Is(err, agentoscore.ErrInvalidPlanEvent):
 		return errorResponse(ctx, http.StatusBadRequest, err.Error())
-	case errors.Is(err, agentos.ErrBackendNotFound),
-		errors.Is(err, agentos.ErrRunRouteNotFound),
-		errors.Is(err, agentos.ErrPlanRouteNotFound),
-		errors.Is(err, agentos.ErrCapabilityNotFound),
-		errors.Is(err, agentos.ErrArtifactNotFound):
+	case errors.Is(err, agentoscore.ErrBackendNotFound),
+		errors.Is(err, agentoscore.ErrRunRouteNotFound),
+		errors.Is(err, agentoscore.ErrPlanRouteNotFound),
+		errors.Is(err, agentoscore.ErrCapabilityNotFound),
+		errors.Is(err, agentoscore.ErrArtifactNotFound):
 		return errorResponse(ctx, http.StatusNotFound, err.Error())
 	default:
 		return errorResponse(ctx, http.StatusInternalServerError, err.Error())

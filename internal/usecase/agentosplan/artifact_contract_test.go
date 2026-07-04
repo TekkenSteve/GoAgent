@@ -6,17 +6,18 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/TekkenSteve/GoAgent/agentos"
+	agentos "github.com/TekkenSteve/GoAgent/agentos/control"
+	agentoscore "github.com/TekkenSteve/GoAgent/agentos/core"
 )
 
 func TestValidateArtifactSpecsRejectsDuplicateNames(t *testing.T) {
 	t.Parallel()
 
 	err := ValidateArtifactSpecs("node-1", []agentos.ArtifactSpec{
-		{Name: "summary", Kind: agentos.ArtifactKindObject},
-		{Name: "summary", Kind: agentos.ArtifactKindText},
+		{Name: "summary", Kind: agentoscore.ArtifactKindObject},
+		{Name: "summary", Kind: agentoscore.ArtifactKindText},
 	})
-	if !errors.Is(err, agentos.ErrInvalidArtifact) {
+	if !errors.Is(err, agentoscore.ErrInvalidArtifact) {
 		t.Fatalf("error = %v, want ErrInvalidArtifact", err)
 	}
 }
@@ -25,21 +26,21 @@ func TestValidateArtifactsAgainstSpecsRejectsUndeclaredAndMediaMismatch(t *testi
 	t.Parallel()
 
 	specs := []agentos.ArtifactSpec{
-		{Name: "summary", Kind: agentos.ArtifactKindObject, MediaType: "application/json", Required: true},
+		{Name: "summary", Kind: agentoscore.ArtifactKindObject, MediaType: "application/json", Required: true},
 	}
 
-	err := ValidateArtifactsAgainstSpecs("node-1", specs, []agentos.ArtifactRef{
-		{Name: "summary", Kind: agentos.ArtifactKindObject, MediaType: "text/plain"},
+	err := ValidateArtifactsAgainstSpecs("node-1", specs, []agentoscore.ArtifactRef{
+		{Name: "summary", Kind: agentoscore.ArtifactKindObject, MediaType: "text/plain"},
 	})
-	if !errors.Is(err, agentos.ErrInvalidArtifact) {
+	if !errors.Is(err, agentoscore.ErrInvalidArtifact) {
 		t.Fatalf("media mismatch error = %v, want ErrInvalidArtifact", err)
 	}
 
-	err = ValidateArtifactsAgainstSpecs("node-1", specs, []agentos.ArtifactRef{
-		{Name: "summary", Kind: agentos.ArtifactKindObject, MediaType: "application/json"},
-		{Name: "extra", Kind: agentos.ArtifactKindText},
+	err = ValidateArtifactsAgainstSpecs("node-1", specs, []agentoscore.ArtifactRef{
+		{Name: "summary", Kind: agentoscore.ArtifactKindObject, MediaType: "application/json"},
+		{Name: "extra", Kind: agentoscore.ArtifactKindText},
 	})
-	if !errors.Is(err, agentos.ErrInvalidArtifact) {
+	if !errors.Is(err, agentoscore.ErrInvalidArtifact) {
 		t.Fatalf("undeclared error = %v, want ErrInvalidArtifact", err)
 	}
 }
@@ -71,15 +72,15 @@ func TestValidateCapabilityOutputArtifactsUsesStableDocumentShape(t *testing.T) 
 		"required": ["artifacts"]
 	}`)
 
-	err := ValidateCapabilityOutputArtifacts("node-1", schema, []agentos.ArtifactRef{
-		{Name: "summary", Kind: agentos.ArtifactKindObject, Metadata: map[string]string{"quality": "draft"}},
+	err := ValidateCapabilityOutputArtifacts("node-1", schema, []agentoscore.ArtifactRef{
+		{Name: "summary", Kind: agentoscore.ArtifactKindObject, Metadata: map[string]string{"quality": "draft"}},
 	})
-	if !errors.Is(err, agentos.ErrInvalidArtifact) {
+	if !errors.Is(err, agentoscore.ErrInvalidArtifact) {
 		t.Fatalf("schema mismatch error = %v, want ErrInvalidArtifact", err)
 	}
 
-	if err := ValidateCapabilityOutputArtifacts("node-1", schema, []agentos.ArtifactRef{
-		{Name: "summary", Kind: agentos.ArtifactKindObject, Metadata: map[string]string{"quality": "approved"}},
+	if err := ValidateCapabilityOutputArtifacts("node-1", schema, []agentoscore.ArtifactRef{
+		{Name: "summary", Kind: agentoscore.ArtifactKindObject, Metadata: map[string]string{"quality": "approved"}},
 	}); err != nil {
 		t.Fatalf("schema match error = %v", err)
 	}
@@ -88,10 +89,10 @@ func TestValidateCapabilityOutputArtifactsUsesStableDocumentShape(t *testing.T) 
 func TestValidateArtifactSchemaRefsRequiresCatalog(t *testing.T) {
 	t.Parallel()
 
-	specs := []agentos.ArtifactSpec{{Name: "summary", Kind: agentos.ArtifactKindObject, SchemaRef: "schema:summary"}}
+	specs := []agentos.ArtifactSpec{{Name: "summary", Kind: agentoscore.ArtifactKindObject, SchemaRef: "schema:summary"}}
 
 	err := ValidateArtifactSchemaRefs(context.Background(), nil, "node-1", specs)
-	if !errors.Is(err, agentos.ErrInvalidArtifact) {
+	if !errors.Is(err, agentoscore.ErrInvalidArtifact) {
 		t.Fatalf("missing catalog error = %v, want ErrInvalidArtifact", err)
 	}
 
@@ -128,40 +129,40 @@ func TestValidateArtifactPayloadsAgainstSchemas(t *testing.T) {
 	node := agentos.PlanNodeSpec{
 		NodeID: "node-1",
 		Outputs: []agentos.ArtifactSpec{
-			{Name: "summary", Kind: agentos.ArtifactKindObject, SchemaRef: "schema:summary"},
+			{Name: "summary", Kind: agentoscore.ArtifactKindObject, SchemaRef: "schema:summary"},
 		},
 	}
 
-	badRef, err := putArtifact(ctx, store, &agentos.ArtifactRef{
+	badRef, err := putArtifact(ctx, store, &agentoscore.ArtifactRef{
 		ArtifactID: "artifact-bad",
 		PlanID:     plan.PlanID,
 		NodeID:     node.NodeID,
 		RunID:      "run-1",
 		Name:       "summary",
-		Kind:       agentos.ArtifactKindObject,
+		Kind:       agentoscore.ArtifactKindObject,
 	}, map[string]any{"score": "high"}, "artifact-bad-key")
 	if err != nil {
 		t.Fatalf("Put bad artifact: %v", err)
 	}
 
-	err = ValidateArtifactPayloadsAgainstSchemas(ctx, store, catalog, &plan, &node, []agentos.ArtifactRef{badRef})
-	if !errors.Is(err, agentos.ErrInvalidArtifact) {
+	err = ValidateArtifactPayloadsAgainstSchemas(ctx, store, catalog, &plan, &node, []agentoscore.ArtifactRef{badRef})
+	if !errors.Is(err, agentoscore.ErrInvalidArtifact) {
 		t.Fatalf("schema mismatch error = %v, want ErrInvalidArtifact", err)
 	}
 
-	goodRef, err := putArtifact(ctx, store, &agentos.ArtifactRef{
+	goodRef, err := putArtifact(ctx, store, &agentoscore.ArtifactRef{
 		ArtifactID: "artifact-good",
 		PlanID:     plan.PlanID,
 		NodeID:     node.NodeID,
 		RunID:      "run-1",
 		Name:       "summary",
-		Kind:       agentos.ArtifactKindObject,
+		Kind:       agentoscore.ArtifactKindObject,
 	}, map[string]any{"score": 1.0}, "artifact-good-key")
 	if err != nil {
 		t.Fatalf("Put good artifact: %v", err)
 	}
 
-	if err := ValidateArtifactPayloadsAgainstSchemas(ctx, store, catalog, &plan, &node, []agentos.ArtifactRef{goodRef}); err != nil {
+	if err := ValidateArtifactPayloadsAgainstSchemas(ctx, store, catalog, &plan, &node, []agentoscore.ArtifactRef{goodRef}); err != nil {
 		t.Fatalf("ValidateArtifactPayloadsAgainstSchemas: %v", err)
 	}
 }

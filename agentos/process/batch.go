@@ -1,9 +1,11 @@
-package agentos
+package process
 
 import (
 	"fmt"
 	"math"
 	"time"
+
+	"github.com/TekkenSteve/GoAgent/agentos/core"
 )
 
 // WorksetKind identifies an application-defined batch work category without
@@ -123,14 +125,14 @@ const (
 // ValidateWorksetSpec validates a batch workset request.
 func ValidateWorksetSpec(spec *WorksetSpec) error {
 	if spec == nil {
-		return fmt.Errorf("%w: workset spec is required", ErrInvalidWorkset)
+		return fmt.Errorf("%w: workset spec is required", core.ErrInvalidWorkset)
 	}
 
 	if err := validateWorksetIdentity(spec); err != nil {
 		return err
 	}
 
-	if err := validateWorksetScope(spec.AccountID, spec.ProjectID, spec.ProcessID, spec.Resource, ErrInvalidWorkset); err != nil {
+	if err := validateWorksetScope(spec.AccountID, spec.ProjectID, spec.ProcessID, spec.Resource, core.ErrInvalidWorkset); err != nil {
 		return err
 	}
 
@@ -145,11 +147,11 @@ func ValidateWorksetSpec(spec *WorksetSpec) error {
 func ValidateWorksetRef(ref WorksetRef) error {
 	switch {
 	case ref.WorksetID == "":
-		return fmt.Errorf("%w: workset id is required", ErrInvalidWorksetScope)
+		return fmt.Errorf("%w: workset id is required", core.ErrInvalidWorksetScope)
 	case ref.AccountID == "":
-		return fmt.Errorf("%w: account id is required", ErrInvalidWorksetScope)
+		return fmt.Errorf("%w: account id is required", core.ErrInvalidWorksetScope)
 	case ref.ProjectID == "":
-		return fmt.Errorf("%w: project id is required", ErrInvalidWorksetScope)
+		return fmt.Errorf("%w: project id is required", core.ErrInvalidWorksetScope)
 	default:
 		return nil
 	}
@@ -158,33 +160,33 @@ func ValidateWorksetRef(ref WorksetRef) error {
 // ValidateWorksetScope validates a workset query scope.
 func ValidateWorksetScope(scope *WorksetScope) error {
 	if scope == nil {
-		return fmt.Errorf("%w: workset scope is required", ErrInvalidWorksetScope)
+		return fmt.Errorf("%w: workset scope is required", core.ErrInvalidWorksetScope)
 	}
 
 	switch {
 	case scope.AccountID == "":
-		return fmt.Errorf("%w: account id is required", ErrInvalidWorksetScope)
+		return fmt.Errorf("%w: account id is required", core.ErrInvalidWorksetScope)
 	case scope.ProjectID == "":
-		return fmt.Errorf("%w: project id is required", ErrInvalidWorksetScope)
+		return fmt.Errorf("%w: project id is required", core.ErrInvalidWorksetScope)
 	case scope.Limit < 0:
-		return fmt.Errorf("%w: limit must be non-negative", ErrInvalidWorksetScope)
+		return fmt.Errorf("%w: limit must be non-negative", core.ErrInvalidWorksetScope)
 	default:
-		return validateWorksetResource(scope.AccountID, scope.ProjectID, scope.Resource, ErrInvalidWorksetScope)
+		return validateWorksetResource(scope.AccountID, scope.ProjectID, scope.Resource, core.ErrInvalidWorksetScope)
 	}
 }
 
 func validateWorksetIdentity(spec *WorksetSpec) error {
 	switch {
 	case spec.WorksetID == "":
-		return fmt.Errorf("%w: workset id is required", ErrInvalidWorkset)
+		return fmt.Errorf("%w: workset id is required", core.ErrInvalidWorkset)
 	case spec.IdempotencyKey == "":
-		return fmt.Errorf("%w: idempotency key is required", ErrInvalidWorkset)
+		return fmt.Errorf("%w: idempotency key is required", core.ErrInvalidWorkset)
 	case spec.AccountID == "":
-		return fmt.Errorf("%w: account id is required", ErrInvalidWorkset)
+		return fmt.Errorf("%w: account id is required", core.ErrInvalidWorkset)
 	case spec.ProjectID == "":
-		return fmt.Errorf("%w: project id is required", ErrInvalidWorkset)
+		return fmt.Errorf("%w: project id is required", core.ErrInvalidWorkset)
 	case spec.Kind == "":
-		return fmt.Errorf("%w: kind is required", ErrInvalidWorkset)
+		return fmt.Errorf("%w: kind is required", core.ErrInvalidWorkset)
 	default:
 		return nil
 	}
@@ -217,11 +219,11 @@ func validateWorksetResource(accountID, projectID string, resource ResourceRef, 
 func validateWorksetItemsRef(ref *WorksetItemsRef) error {
 	switch {
 	case ref.Kind == "":
-		return fmt.Errorf("%w: items ref kind is required", ErrInvalidWorkset)
+		return fmt.Errorf("%w: items ref kind is required", core.ErrInvalidWorkset)
 	case ref.URI == "" && ref.ArtifactID == "":
-		return fmt.Errorf("%w: items ref uri or artifact id is required", ErrInvalidWorkset)
+		return fmt.Errorf("%w: items ref uri or artifact id is required", core.ErrInvalidWorkset)
 	case ref.Count < 0:
-		return fmt.Errorf("%w: items ref count must be non-negative", ErrInvalidWorkset)
+		return fmt.Errorf("%w: items ref count must be non-negative", core.ErrInvalidWorkset)
 	default:
 		return nil
 	}
@@ -229,11 +231,11 @@ func validateWorksetItemsRef(ref *WorksetItemsRef) error {
 
 func validateWorksetChunks(chunks []WorksetChunkSpec, policy WorksetPolicy) error {
 	if len(chunks) > math.MaxInt32 {
-		return fmt.Errorf("%w: chunk count exceeds int32 limit", ErrInvalidWorkset)
+		return fmt.Errorf("%w: chunk count exceeds int32 limit", core.ErrInvalidWorkset)
 	}
 
 	if policy.MaxChunks > 0 && len(chunks) > int(policy.MaxChunks) {
-		return fmt.Errorf("%w: chunk count exceeds policy", ErrInvalidWorkset)
+		return fmt.Errorf("%w: chunk count exceeds policy", core.ErrInvalidWorkset)
 	}
 
 	for i := range chunks {
@@ -248,13 +250,13 @@ func validateWorksetChunks(chunks []WorksetChunkSpec, policy WorksetPolicy) erro
 func validateWorksetChunk(chunk *WorksetChunkSpec, policy WorksetPolicy) error {
 	switch {
 	case chunk.ChunkID == "":
-		return fmt.Errorf("%w: chunk id is required", ErrInvalidWorkset)
+		return fmt.Errorf("%w: chunk id is required", core.ErrInvalidWorkset)
 	case chunk.ItemCount < 0:
-		return fmt.Errorf("%w: chunk item count must be non-negative", ErrInvalidWorkset)
+		return fmt.Errorf("%w: chunk item count must be non-negative", core.ErrInvalidWorkset)
 	case policy.MaxChunkSize > 0 && chunk.ItemCount > policy.MaxChunkSize:
-		return fmt.Errorf("%w: chunk item count exceeds policy", ErrInvalidWorkset)
+		return fmt.Errorf("%w: chunk item count exceeds policy", core.ErrInvalidWorkset)
 	case policy.MaxConcurrency > 0 && chunk.Concurrency > policy.MaxConcurrency:
-		return fmt.Errorf("%w: chunk concurrency exceeds policy", ErrInvalidWorkset)
+		return fmt.Errorf("%w: chunk concurrency exceeds policy", core.ErrInvalidWorkset)
 	default:
 		return validateWorksetItemsRef(&chunk.ItemsRef)
 	}

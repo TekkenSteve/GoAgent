@@ -5,7 +5,8 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/TekkenSteve/GoAgent/agentos"
+	agentos "github.com/TekkenSteve/GoAgent/agentos/control"
+	agentoscore "github.com/TekkenSteve/GoAgent/agentos/core"
 )
 
 const FIRST = "first"
@@ -15,11 +16,11 @@ func TestMemoryArtifactStoreRequiresIdempotencyKey(t *testing.T) {
 
 	store := NewMemoryArtifactStore()
 
-	_, err := putArtifact(context.Background(), store, &agentos.ArtifactRef{
+	_, err := putArtifact(context.Background(), store, &agentoscore.ArtifactRef{
 		Name: "summary",
-		Kind: agentos.ArtifactKindObject,
+		Kind: agentoscore.ArtifactKindObject,
 	}, map[string]any{"ok": true}, "")
-	if !errors.Is(err, agentos.ErrInvalidArtifact) {
+	if !errors.Is(err, agentoscore.ErrInvalidArtifact) {
 		t.Fatalf("Put error = %v, want ErrInvalidArtifact", err)
 	}
 }
@@ -29,11 +30,11 @@ func TestMemoryArtifactStoreRequiresPlanID(t *testing.T) {
 
 	store := NewMemoryArtifactStore()
 
-	_, err := putArtifact(context.Background(), store, &agentos.ArtifactRef{
+	_, err := putArtifact(context.Background(), store, &agentoscore.ArtifactRef{
 		Name: "summary",
-		Kind: agentos.ArtifactKindObject,
+		Kind: agentoscore.ArtifactKindObject,
 	}, map[string]any{"ok": true}, "artifact-key")
-	if !errors.Is(err, agentos.ErrInvalidArtifact) {
+	if !errors.Is(err, agentoscore.ErrInvalidArtifact) {
 		t.Fatalf("Put error = %v, want ErrInvalidArtifact", err)
 	}
 }
@@ -64,13 +65,13 @@ func TestMemoryArtifactStorePutIsIdempotent(t *testing.T) {
 	requireMemoryArtifactPayloadValue(ctx, t, store, &scope, FIRST)
 }
 
-func putSummaryArtifactForTest(ctx context.Context, t *testing.T, store *MemoryArtifactStore, planID, idempotencyKey, value string) agentos.ArtifactRef {
+func putSummaryArtifactForTest(ctx context.Context, t *testing.T, store *MemoryArtifactStore, planID, idempotencyKey, value string) agentoscore.ArtifactRef {
 	t.Helper()
 
-	ref, err := putArtifact(ctx, store, &agentos.ArtifactRef{
+	ref, err := putArtifact(ctx, store, &agentoscore.ArtifactRef{
 		PlanID: planID,
 		Name:   "summary",
-		Kind:   agentos.ArtifactKindObject,
+		Kind:   agentoscore.ArtifactKindObject,
 	}, map[string]any{"value": value}, idempotencyKey)
 	if err != nil {
 		t.Fatalf("Put: %v", err)
@@ -102,19 +103,19 @@ func TestMemoryArtifactStoreScopesIdempotencyKeyByPlan(t *testing.T) {
 
 	store := NewMemoryArtifactStore()
 
-	first, err := putArtifact(context.Background(), store, &agentos.ArtifactRef{
+	first, err := putArtifact(context.Background(), store, &agentoscore.ArtifactRef{
 		PlanID: "plan-1",
 		Name:   "summary",
-		Kind:   agentos.ArtifactKindObject,
+		Kind:   agentoscore.ArtifactKindObject,
 	}, map[string]any{"value": "first"}, "shared-key")
 	if err != nil {
 		t.Fatalf("first Put: %v", err)
 	}
 
-	second, err := putArtifact(context.Background(), store, &agentos.ArtifactRef{
+	second, err := putArtifact(context.Background(), store, &agentoscore.ArtifactRef{
 		PlanID: "plan-2",
 		Name:   "summary",
-		Kind:   agentos.ArtifactKindObject,
+		Kind:   agentoscore.ArtifactKindObject,
 	}, map[string]any{"value": "second"}, "shared-key")
 	if err != nil {
 		t.Fatalf("second Put: %v", err)
@@ -130,31 +131,31 @@ func TestMemoryArtifactStoreRejectsDifferentIdempotencyReplay(t *testing.T) {
 
 	store := NewMemoryArtifactStore()
 
-	_, err := putArtifact(context.Background(), store, &agentos.ArtifactRef{
+	_, err := putArtifact(context.Background(), store, &agentoscore.ArtifactRef{
 		PlanID: "plan-1",
 		Name:   "summary",
-		Kind:   agentos.ArtifactKindObject,
+		Kind:   agentoscore.ArtifactKindObject,
 	}, map[string]any{"value": "first"}, "plan-1:key")
 	if err != nil {
 		t.Fatalf("first Put: %v", err)
 	}
 
-	_, err = putArtifact(context.Background(), store, &agentos.ArtifactRef{
+	_, err = putArtifact(context.Background(), store, &agentoscore.ArtifactRef{
 		PlanID: "plan-1",
 		Name:   "summary",
-		Kind:   agentos.ArtifactKindObject,
+		Kind:   agentoscore.ArtifactKindObject,
 	}, map[string]any{"value": "second"}, "plan-1:key")
-	if !errors.Is(err, agentos.ErrInvalidArtifact) {
+	if !errors.Is(err, agentoscore.ErrInvalidArtifact) {
 		t.Fatalf("changed payload error = %v, want ErrInvalidArtifact", err)
 	}
 
-	_, err = putArtifact(context.Background(), store, &agentos.ArtifactRef{
+	_, err = putArtifact(context.Background(), store, &agentoscore.ArtifactRef{
 		ArtifactID: "different-artifact",
 		PlanID:     "plan-1",
 		Name:       "summary",
-		Kind:       agentos.ArtifactKindObject,
+		Kind:       agentoscore.ArtifactKindObject,
 	}, map[string]any{"value": "first"}, "plan-1:key")
-	if !errors.Is(err, agentos.ErrInvalidArtifact) {
+	if !errors.Is(err, agentoscore.ErrInvalidArtifact) {
 		t.Fatalf("changed artifact error = %v, want ErrInvalidArtifact", err)
 	}
 }
@@ -165,13 +166,13 @@ func TestMemoryArtifactStoreIdempotentRefPublishKeepsPayload(t *testing.T) {
 	ctx := context.Background()
 	store := NewMemoryArtifactStore()
 
-	first, err := putArtifact(ctx, store, &agentos.ArtifactRef{
+	first, err := putArtifact(ctx, store, &agentoscore.ArtifactRef{
 		ArtifactID: "artifact-1",
 		PlanID:     "plan-1",
 		NodeID:     "research",
 		RunID:      "run-research",
 		Name:       "summary",
-		Kind:       agentos.ArtifactKindObject,
+		Kind:       agentoscore.ArtifactKindObject,
 	}, map[string]any{"value": "first"}, "plan-1:key")
 	if err != nil {
 		t.Fatalf("first Put: %v", err)
@@ -215,18 +216,18 @@ func TestMemoryArtifactStoreRejectsArtifactIDReuseWithDifferentKey(t *testing.T)
 	ctx := context.Background()
 	store := NewMemoryArtifactStore()
 
-	first, err := putArtifact(ctx, store, &agentos.ArtifactRef{
+	first, err := putArtifact(ctx, store, &agentoscore.ArtifactRef{
 		ArtifactID: "artifact-1",
 		PlanID:     "plan-1",
 		Name:       "summary",
-		Kind:       agentos.ArtifactKindObject,
+		Kind:       agentoscore.ArtifactKindObject,
 	}, map[string]any{"value": "first"}, "plan-1:key")
 	if err != nil {
 		t.Fatalf("first Put: %v", err)
 	}
 
 	_, err = store.Put(ctx, &first, nil, "plan-1:other-key")
-	if !errors.Is(err, agentos.ErrInvalidArtifact) {
+	if !errors.Is(err, agentoscore.ErrInvalidArtifact) {
 		t.Fatalf("artifact id reuse error = %v, want ErrInvalidArtifact", err)
 	}
 }
@@ -236,27 +237,27 @@ func TestMemoryArtifactStoreRejectsNewRefOnlyPayloadMetadata(t *testing.T) {
 
 	ctx := context.Background()
 	store := NewMemoryArtifactStore()
-	base := agentos.ArtifactRef{
+	base := agentoscore.ArtifactRef{
 		ArtifactID: "artifact-1",
 		PlanID:     "plan-1",
 		Name:       "summary",
-		Kind:       agentos.ArtifactKindObject,
+		Kind:       agentoscore.ArtifactKindObject,
 	}
 
-	tests := map[string]agentos.ArtifactRef{
-		"uri": func() agentos.ArtifactRef {
+	tests := map[string]agentoscore.ArtifactRef{
+		"uri": func() agentoscore.ArtifactRef {
 			ref := base
 			ref.URI = "local://artifact/plan-1/artifact-1"
 
 			return ref
 		}(),
-		"size": func() agentos.ArtifactRef {
+		"size": func() agentoscore.ArtifactRef {
 			ref := base
 			ref.SizeBytes = 12
 
 			return ref
 		}(),
-		"digest": func() agentos.ArtifactRef {
+		"digest": func() agentoscore.ArtifactRef {
 			ref := base
 			ref.Digest = "sha256:abc"
 
@@ -269,7 +270,7 @@ func TestMemoryArtifactStoreRejectsNewRefOnlyPayloadMetadata(t *testing.T) {
 			t.Parallel()
 
 			_, err := store.Put(ctx, &ref, nil, "plan-1:"+name)
-			if !errors.Is(err, agentos.ErrInvalidArtifact) {
+			if !errors.Is(err, agentoscore.ErrInvalidArtifact) {
 				t.Fatalf("Put error = %v, want ErrInvalidArtifact", err)
 			}
 		})
@@ -282,11 +283,11 @@ func TestMemoryArtifactStoreRequiresScopedReads(t *testing.T) {
 	ctx := context.Background()
 	store := NewMemoryArtifactStore()
 
-	ref, err := putArtifact(ctx, store, &agentos.ArtifactRef{
+	ref, err := putArtifact(ctx, store, &agentoscore.ArtifactRef{
 		ArtifactID: "artifact-1",
 		PlanID:     "plan-1",
 		Name:       "summary",
-		Kind:       agentos.ArtifactKindObject,
+		Kind:       agentoscore.ArtifactKindObject,
 	}, map[string]any{"value": "first"}, "plan-1:key")
 	if err != nil {
 		t.Fatalf("Put: %v", err)
@@ -297,7 +298,7 @@ func TestMemoryArtifactStoreRequiresScopedReads(t *testing.T) {
 		{PlanID: "plan-1", AccountID: "acct-1", ArtifactID: ref.ArtifactID},
 		{PlanID: "plan-1", ProjectID: "proj-1", ArtifactID: ref.ArtifactID},
 	} {
-		if _, _, err := store.Get(ctx, &scope); !errors.Is(err, agentos.ErrInvalidPlanScope) {
+		if _, _, err := store.Get(ctx, &scope); !errors.Is(err, agentoscore.ErrInvalidPlanScope) {
 			t.Fatalf("Get scope %#v error = %v, want ErrInvalidPlanScope", scope, err)
 		}
 
@@ -306,7 +307,7 @@ func TestMemoryArtifactStoreRequiresScopedReads(t *testing.T) {
 			AccountID: scope.AccountID,
 			ProjectID: scope.ProjectID,
 		}
-		if _, err := store.List(ctx, &listScope); !errors.Is(err, agentos.ErrInvalidPlanScope) {
+		if _, err := store.List(ctx, &listScope); !errors.Is(err, agentoscore.ErrInvalidPlanScope) {
 			t.Fatalf("List scope %#v error = %v, want ErrInvalidPlanScope", scope, err)
 		}
 	}

@@ -9,7 +9,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/TekkenSteve/GoAgent/agentos"
+	agentos "github.com/TekkenSteve/GoAgent/agentos/control"
+	agentoscore "github.com/TekkenSteve/GoAgent/agentos/core"
 	"github.com/TekkenSteve/GoAgent/pkg/logger"
 	"github.com/TekkenSteve/GoAgent/pkg/sse"
 	"github.com/gofiber/fiber/v2"
@@ -84,7 +85,7 @@ func testPlanSignalRoute(t *testing.T, app *fiber.App, planRuntime *fakePlanRunt
 	if planRuntime.signalRef.PlanID != plan1 ||
 		planRuntime.signalRef.AccountID != account1 ||
 		planRuntime.signalRef.ProjectID != project1 ||
-		planRuntime.signal.Type != agentos.SignalPlanNodeRetry ||
+		planRuntime.signal.Type != agentoscore.SignalPlanNodeRetry ||
 		planRuntime.signal.ActorID != operator1 ||
 		planRuntime.signal.Payload["node_id"] != research {
 		t.Fatalf("unexpected signal: ref=%#v signal=%#v", planRuntime.signalRef, planRuntime.signal)
@@ -106,7 +107,7 @@ func testPlanControlRoute(t *testing.T, app *fiber.App, planRuntime *fakePlanRun
 	if planRuntime.controlRef.PlanID != plan1 ||
 		planRuntime.controlRef.AccountID != account1 ||
 		planRuntime.controlRef.ProjectID != project1 ||
-		planRuntime.control.Operation != agentos.ControlPause ||
+		planRuntime.control.Operation != agentoscore.ControlPause ||
 		planRuntime.control.ActorID != operator1 {
 		t.Fatalf("unexpected control: ref=%#v control=%#v", planRuntime.controlRef, planRuntime.control)
 	}
@@ -202,7 +203,7 @@ func testPlanArtifactsRoute(t *testing.T, app *fiber.App, planRuntime *fakePlanR
 		t.Fatalf("unexpected artifact scope: %#v", planRuntime.artifactScope)
 	}
 
-	var refs []agentos.ArtifactRef
+	var refs []agentoscore.ArtifactRef
 	if err := json.NewDecoder(resp.Body).Decode(&refs); err != nil {
 		t.Fatalf("decode artifacts: %v", err)
 	}
@@ -229,7 +230,7 @@ func testPlanArtifactGetRoute(t *testing.T, app *fiber.App, planRuntime *fakePla
 		t.Fatalf("unexpected artifact get scope: %#v", planRuntime.artifactGetScope)
 	}
 
-	var artifact agentos.Artifact
+	var artifact agentoscore.Artifact
 	if err := json.NewDecoder(resp.Body).Decode(&artifact); err != nil {
 		t.Fatalf("decode artifact: %v", err)
 	}
@@ -317,7 +318,7 @@ func assertPlanDebugTraces(t *testing.T, traces []agentos.PlanDebugTrace) {
 	t.Helper()
 
 	if len(traces) != 1 ||
-		traces[0].EventType != agentos.EventNodeInputResolved ||
+		traces[0].EventType != agentoscore.EventNodeInputResolved ||
 		traces[0].InputResolution == nil ||
 		traces[0].InputResolution.MappingCount != 1 {
 		t.Fatalf("unexpected debug traces: %#v", traces)
@@ -327,12 +328,12 @@ func assertPlanDebugTraces(t *testing.T, traces []agentos.PlanDebugTrace) {
 func TestAgentOSPlanControlAndSignalRoutesCoverConsoleActions(t *testing.T) {
 	t.Parallel()
 	runControlOrSignalConsoleCase(t, []controlOrSignalCase{
-		{name: "pause", route: "/v1/agentos/plans/plan-1/control", body: `{"operation":"pause","account_id":"acct-1","project_id":"proj-1","idempotency_key":"pause-1","actor_id":"operator-1"}`, wantOp: agentos.ControlPause, wantKey: "pause-1", wantActor: "operator-1"},
-		{name: "resume", route: "/v1/agentos/plans/plan-1/control", body: `{"operation":"resume","account_id":"acct-1","project_id":"proj-1","idempotency_key":"resume-1","actor_id":"operator-1"}`, wantOp: agentos.ControlResume, wantKey: "resume-1", wantActor: operator1},
-		{name: "cancel", route: "/v1/agentos/plans/plan-1/control", body: `{"operation":"cancel","account_id":"acct-1","project_id":"proj-1","idempotency_key":"cancel-1","actor_id":"operator-1"}`, wantOp: agentos.ControlCancel, wantKey: "cancel-1", wantActor: "operator-1"},
-		{name: "retry", route: "/v1/agentos/plans/plan-1/signals", body: `{"type":"plan.node.retry","account_id":"acct-1","project_id":"proj-1","idempotency_key":"retry-1","actor_id":"operator-1","payload":{"node_id":"research"}}`, wantType: agentos.SignalPlanNodeRetry, wantKey: "retry-1", wantActor: operator1},
-		{name: "approve", route: "/v1/agentos/plans/plan-1/signals", body: `{"type":"plan.approve","account_id":"acct-1","project_id":"proj-1","idempotency_key":"approve-1","actor_id":"operator-1"}`, wantType: agentos.SignalPlanApprove, wantKey: "approve-1", wantActor: "operator-1"},
-		{name: "reject", route: "/v1/agentos/plans/plan-1/signals", body: `{"type":"plan.reject","account_id":"acct-1","project_id":"proj-1","idempotency_key":"reject-1","actor_id":"operator-1","payload":{"reason":"operator rejected"}}`, wantType: agentos.SignalPlanReject, wantKey: "reject-1", wantActor: operator1},
+		{name: "pause", route: "/v1/agentos/plans/plan-1/control", body: `{"operation":"pause","account_id":"acct-1","project_id":"proj-1","idempotency_key":"pause-1","actor_id":"operator-1"}`, wantOp: agentoscore.ControlPause, wantKey: "pause-1", wantActor: "operator-1"},
+		{name: "resume", route: "/v1/agentos/plans/plan-1/control", body: `{"operation":"resume","account_id":"acct-1","project_id":"proj-1","idempotency_key":"resume-1","actor_id":"operator-1"}`, wantOp: agentoscore.ControlResume, wantKey: "resume-1", wantActor: operator1},
+		{name: "cancel", route: "/v1/agentos/plans/plan-1/control", body: `{"operation":"cancel","account_id":"acct-1","project_id":"proj-1","idempotency_key":"cancel-1","actor_id":"operator-1"}`, wantOp: agentoscore.ControlCancel, wantKey: "cancel-1", wantActor: "operator-1"},
+		{name: "retry", route: "/v1/agentos/plans/plan-1/signals", body: `{"type":"plan.node.retry","account_id":"acct-1","project_id":"proj-1","idempotency_key":"retry-1","actor_id":"operator-1","payload":{"node_id":"research"}}`, wantType: agentoscore.SignalPlanNodeRetry, wantKey: "retry-1", wantActor: operator1},
+		{name: "approve", route: "/v1/agentos/plans/plan-1/signals", body: `{"type":"plan.approve","account_id":"acct-1","project_id":"proj-1","idempotency_key":"approve-1","actor_id":"operator-1"}`, wantType: agentoscore.SignalPlanApprove, wantKey: "approve-1", wantActor: "operator-1"},
+		{name: "reject", route: "/v1/agentos/plans/plan-1/signals", body: `{"type":"plan.reject","account_id":"acct-1","project_id":"proj-1","idempotency_key":"reject-1","actor_id":"operator-1","payload":{"reason":"operator rejected"}}`, wantType: agentoscore.SignalPlanReject, wantKey: "reject-1", wantActor: operator1},
 	})
 }
 
@@ -340,8 +341,8 @@ type controlOrSignalCase struct {
 	name      string
 	route     string
 	body      string
-	wantOp    agentos.ControlOperation
-	wantType  agentos.SignalType
+	wantOp    agentoscore.ControlOperation
+	wantType  agentoscore.SignalType
 	wantKey   string
 	wantActor string
 }
@@ -640,7 +641,7 @@ func TestAgentOSPlanEventRouteStreamsSSE(t *testing.T) {
 
 	assertPlanSSEEvent(t, events)
 
-	var event agentos.Event
+	var event agentoscore.Event
 	if err := json.Unmarshal([]byte(events[0].Data), &event); err != nil {
 		t.Fatalf("decode event data: %v", err)
 	}
@@ -667,12 +668,12 @@ func assertPlanSSEEvent(t *testing.T, events []sse.Event) {
 		t.Fatalf("event count = %d", len(events))
 	}
 
-	if events[0].Type != string(agentos.EventPlanStarted) || events[0].LastEventID != planEvent1 {
+	if events[0].Type != string(agentoscore.EventPlanStarted) || events[0].LastEventID != planEvent1 {
 		t.Fatalf("unexpected sse event: %#v", events[0])
 	}
 }
 
-func assertPlanSSEEventData(t *testing.T, event *agentos.Event) {
+func assertPlanSSEEventData(t *testing.T, event *agentoscore.Event) {
 	t.Helper()
 
 	if event.EventID != "plan-event-1" || event.Payload["plan_id"] != plan1 {
@@ -767,9 +768,9 @@ type fakePlanRuntime struct {
 	statusRef        agentos.PlanRef
 	descriptionRef   agentos.PlanRef
 	signalRef        agentos.PlanRef
-	signal           agentos.Signal
+	signal           agentoscore.Signal
 	controlRef       agentos.PlanRef
-	control          agentos.ControlRequest
+	control          agentoscore.ControlRequest
 	scope            agentos.PlanStreamScope
 	eventScope       agentos.PlanEventScope
 	debugScope       agentos.PlanDebugTraceScope
@@ -852,35 +853,35 @@ func fakePlanStatus(planID string) agentos.RunPlanStatus {
 			},
 		},
 		ActiveRunIDs: []string{"run-research"},
-		Artifacts: []agentos.ArtifactRef{
-			{ArtifactID: artifact1, PlanID: planID, NodeID: research, RunID: "run-research", Name: "summary", Kind: agentos.ArtifactKindObject},
+		Artifacts: []agentoscore.ArtifactRef{
+			{ArtifactID: artifact1, PlanID: planID, NodeID: research, RunID: "run-research", Name: "summary", Kind: agentoscore.ArtifactKindObject},
 		},
 		BudgetUsage: agentos.PlanBudgetUsage{SpentCents: 7},
 		UpdatedAt:   time.Now(),
 	}
 }
 
-func (r *fakePlanRuntime) SignalPlan(_ context.Context, ref agentos.PlanRef, signal *agentos.Signal) error {
+func (r *fakePlanRuntime) SignalPlan(_ context.Context, ref agentos.PlanRef, signal *agentoscore.Signal) error {
 	r.signalRef = ref
 	r.signal = *signal
 
 	return nil
 }
 
-func (r *fakePlanRuntime) ControlPlan(_ context.Context, ref agentos.PlanRef, control *agentos.ControlRequest) error {
+func (r *fakePlanRuntime) ControlPlan(_ context.Context, ref agentos.PlanRef, control *agentoscore.ControlRequest) error {
 	r.controlRef = ref
 	r.control = *control
 
 	return nil
 }
 
-func (r *fakePlanRuntime) SubscribePlan(_ context.Context, scope *agentos.PlanStreamScope) (agentos.Subscription, error) {
+func (r *fakePlanRuntime) SubscribePlan(_ context.Context, scope *agentos.PlanStreamScope) (agentoscore.Subscription, error) {
 	r.scope = *scope
 
-	events := make(chan agentos.Event, 1)
-	events <- agentos.Event{
+	events := make(chan agentoscore.Event, 1)
+	events <- agentoscore.Event{
 		EventID:   "plan-event-1",
-		EventType: agentos.EventPlanStarted,
+		EventType: agentoscore.EventPlanStarted,
 		Sequence:  8,
 		Timestamp: time.Now(),
 		Payload: map[string]any{
@@ -898,9 +899,9 @@ func (r *fakePlanRuntime) ListPlanEvents(_ context.Context, scope *agentos.PlanE
 
 	return []agentos.PlanEvent{
 		{
-			Event: agentos.Event{
+			Event: agentoscore.Event{
 				EventID:   "plan-event-1",
-				EventType: agentos.EventPlanNodeStarted,
+				EventType: agentoscore.EventPlanNodeStarted,
 				RunID:     "run-research",
 				Sequence:  8,
 				Timestamp: time.Now(),
@@ -919,7 +920,7 @@ func (r *fakePlanRuntime) ListPlanDebugTraces(_ context.Context, scope *agentos.
 	return []agentos.PlanDebugTrace{
 		{
 			EventID:   "debug-1",
-			EventType: agentos.EventNodeInputResolved,
+			EventType: agentoscore.EventNodeInputResolved,
 			PlanID:    scope.PlanID,
 			NodeID:    research,
 			RunID:     "run-research",
@@ -946,23 +947,23 @@ func (r *fakePlanRuntime) ListPlanAudits(_ context.Context, scope *agentos.PlanA
 			Action:         agentos.PlanAuditActionControl,
 			ActorID:        operator1,
 			IdempotencyKey: "control-1",
-			Payload:        map[string]any{"operation": string(agentos.ControlPause)},
+			Payload:        map[string]any{"operation": string(agentoscore.ControlPause)},
 			CreatedAt:      time.Now(),
 		},
 	}, nil
 }
 
-func (r *fakePlanRuntime) ListPlanArtifacts(_ context.Context, scope *agentos.PlanArtifactScope) ([]agentos.ArtifactRef, error) {
+func (r *fakePlanRuntime) ListPlanArtifacts(_ context.Context, scope *agentos.PlanArtifactScope) ([]agentoscore.ArtifactRef, error) {
 	r.artifactScope = *scope
 
-	return []agentos.ArtifactRef{
+	return []agentoscore.ArtifactRef{
 		{
 			ArtifactID: artifact1,
 			PlanID:     scope.PlanID,
 			NodeID:     research,
 			RunID:      "run-research",
 			Name:       "summary",
-			Kind:       agentos.ArtifactKindObject,
+			Kind:       agentoscore.ArtifactKindObject,
 			MediaType:  "application/json",
 			SizeBytes:  128,
 			Digest:     "sha256:artifact",
@@ -970,25 +971,25 @@ func (r *fakePlanRuntime) ListPlanArtifacts(_ context.Context, scope *agentos.Pl
 	}, nil
 }
 
-func (r *fakePlanRuntime) GetPlanArtifact(_ context.Context, scope *agentos.PlanArtifactScope) (agentos.Artifact, error) {
+func (r *fakePlanRuntime) GetPlanArtifact(_ context.Context, scope *agentos.PlanArtifactScope) (agentoscore.Artifact, error) {
 	r.artifactGetScope = *scope
 
-	return agentos.Artifact{
-		Ref: agentos.ArtifactRef{
+	return agentoscore.Artifact{
+		Ref: agentoscore.ArtifactRef{
 			ArtifactID: scope.ArtifactID,
 			PlanID:     scope.PlanID,
 			Name:       "summary",
-			Kind:       agentos.ArtifactKindObject,
+			Kind:       agentoscore.ArtifactKindObject,
 		},
 		Payload: map[string]any{"summary": "ok"},
 	}, nil
 }
 
 type fakeSubscription struct {
-	events <-chan agentos.Event
+	events <-chan agentoscore.Event
 }
 
-func (s fakeSubscription) Events() <-chan agentos.Event {
+func (s fakeSubscription) Events() <-chan agentoscore.Event {
 	return s.events
 }
 

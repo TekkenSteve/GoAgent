@@ -5,7 +5,8 @@ import (
 	"fmt"
 	"sync"
 
-	"github.com/TekkenSteve/GoAgent/agentos"
+	agentos "github.com/TekkenSteve/GoAgent/agentos/control"
+	agentoscore "github.com/TekkenSteve/GoAgent/agentos/core"
 )
 
 // StaticCapabilityCatalog is an in-memory capability catalog for tests, CLI
@@ -36,7 +37,7 @@ func NewStaticCapabilityCatalog(capabilities []agentos.Capability) (*StaticCapab
 // RegisterCapability adds or replaces one capability.
 func (c *StaticCapabilityCatalog) RegisterCapability(_ context.Context, capability *agentos.Capability, _ string) (agentos.Capability, bool, error) {
 	if c == nil {
-		return agentos.Capability{}, false, fmt.Errorf("%w: capability catalog is nil", agentos.ErrCapabilityNotFound)
+		return agentos.Capability{}, false, fmt.Errorf("%w: capability catalog is nil", agentoscore.ErrCapabilityNotFound)
 	}
 
 	if err := ValidateCapability(capability); err != nil {

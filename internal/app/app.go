@@ -10,7 +10,8 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/TekkenSteve/GoAgent/agentos"
+	agentos "github.com/TekkenSteve/GoAgent/agentos/control"
+	agentoscore "github.com/TekkenSteve/GoAgent/agentos/core"
 	agentostemporal "github.com/TekkenSteve/GoAgent/agentos/temporal"
 	"github.com/TekkenSteve/GoAgent/config"
 	agentfwconfig "github.com/TekkenSteve/GoAgent/internal/agentfw/config"
@@ -713,9 +714,9 @@ func temporalExternalBackends(l logger.Interface, cfg *config.Config) []agentost
 
 	result := make([]agentostemporal.ExternalBackendConfig, 0, len(backends))
 	for _, backend := range backends {
-		defaults := make(map[agentos.SignalType]string, len(backend.Signals.Defaults))
+		defaults := make(map[agentoscore.SignalType]string, len(backend.Signals.Defaults))
 		for signalType, signalName := range backend.Signals.Defaults {
-			defaults[agentos.SignalType(signalType)] = signalName
+			defaults[agentoscore.SignalType(signalType)] = signalName
 		}
 
 		result = append(result, agentostemporal.ExternalBackendConfig{

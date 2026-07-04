@@ -5,7 +5,8 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/TekkenSteve/GoAgent/agentos"
+	agentoscore "github.com/TekkenSteve/GoAgent/agentos/core"
+	agentos "github.com/TekkenSteve/GoAgent/agentos/process"
 )
 
 // Runtime coordinates durable process starts and read projections.
@@ -17,11 +18,11 @@ type Runtime struct {
 // NewRuntime creates a generic durable process use case.
 func NewRuntime(index ProcessIndex, events ProcessEventStore) (*Runtime, error) {
 	if index == nil {
-		return nil, fmt.Errorf("%w: process index is required", agentos.ErrProcessRouteNotFound)
+		return nil, fmt.Errorf("%w: process index is required", agentoscore.ErrProcessRouteNotFound)
 	}
 
 	if events == nil {
-		return nil, fmt.Errorf("%w: process event store is required", agentos.ErrProcessRouteNotFound)
+		return nil, fmt.Errorf("%w: process event store is required", agentoscore.ErrProcessRouteNotFound)
 	}
 
 	return &Runtime{index: index, events: events}, nil
@@ -29,16 +30,16 @@ func NewRuntime(index ProcessIndex, events ProcessEventStore) (*Runtime, error) 
 
 // StartProcess claims a coarse-grained durable process for an application-owned
 // resource.
-func (r *Runtime) StartProcess(ctx context.Context, spec *agentos.ProcessSpec) (agentos.ProcessStatus, error) {
+func (r *Runtime) StartProcess(ctx context.Context, spec *agentos.Spec) (agentos.Status, error) {
 	if err := agentos.ValidateProcessSpec(spec); err != nil {
-		return agentos.ProcessStatus{}, err
+		return agentos.Status{}, err
 	}
 
 	status := initialProcessStatus(spec)
 
 	status, created, err := r.index.CreateProcess(ctx, spec, &status)
 	if err != nil {
-		return agentos.ProcessStatus{}, err
+		return agentos.Status{}, err
 	}
 
 	if !created {
@@ -47,21 +48,21 @@ func (r *Runtime) StartProcess(ctx context.Context, spec *agentos.ProcessSpec) (
 
 	_, err = r.events.AppendProcessEvent(ctx, processStartedEvent(spec, &status), spec.IdempotencyKey)
 	if err != nil {
-		return agentos.ProcessStatus{}, err
+		return agentos.Status{}, err
 	}
 
 	return status, nil
 }
 
 // StatusProcess returns the latest durable process projection.
-func (r *Runtime) StatusProcess(ctx context.Context, ref agentos.ProcessRef) (agentos.ProcessStatus, error) {
+func (r *Runtime) StatusProcess(ctx context.Context, ref agentos.Ref) (agentos.Status, error) {
 	_, status, exists, err := r.index.GetProcessByRef(ctx, ref)
 	if err != nil {
-		return agentos.ProcessStatus{}, err
+		return agentos.Status{}, err
 	}
 
 	if !exists {
-		return agentos.ProcessStatus{}, fmt.Errorf("%w: process %q not found", agentos.ErrProcessRouteNotFound, ref.ProcessID)
+		return agentos.Status{}, fmt.Errorf("%w: process %q not found", agentoscore.ErrProcessRouteNotFound, ref.ProcessID)
 	}
 
 	return status, nil
@@ -69,17 +70,17 @@ func (r *Runtime) StatusProcess(ctx context.Context, ref agentos.ProcessRef) (ag
 
 // DescribeProcess returns the durable process projection with its immutable
 // start spec.
-func (r *Runtime) DescribeProcess(ctx context.Context, ref agentos.ProcessRef) (agentos.ProcessDescription, error) {
+func (r *Runtime) DescribeProcess(ctx context.Context, ref agentos.Ref) (agentos.Description, error) {
 	spec, status, exists, err := r.index.GetProcessByRef(ctx, ref)
 	if err != nil {
-		return agentos.ProcessDescription{}, err
+		return agentos.Description{}, err
 	}
 
 	if !exists {
-		return agentos.ProcessDescription{}, fmt.Errorf("%w: process %q not found", agentos.ErrProcessRouteNotFound, ref.ProcessID)
+		return agentos.Description{}, fmt.Errorf("%w: process %q not found", agentoscore.ErrProcessRouteNotFound, ref.ProcessID)
 	}
 
-	return agentos.ProcessDescription{
+	return agentos.Description{
 		ProcessID: spec.ProcessID,
 		Kind:      spec.Kind,
 		AccountID: spec.AccountID,
@@ -87,14 +88,14 @@ func (r *Runtime) DescribeProcess(ctx context.Context, ref agentos.ProcessRef) (
 		Resource:  spec.Resource,
 		Status:    status,
 		Policy:    spec.Policy,
-		Timers:    append([]agentos.ProcessTimerSpec(nil), spec.Timers...),
+		Timers:    append([]agentos.TimerSpec(nil), spec.Timers...),
 		Metadata:  cloneStringMap(spec.Metadata),
 		UpdatedAt: status.UpdatedAt,
 	}, nil
 }
 
 // SignalProcess records external input for a durable process.
-func (r *Runtime) SignalProcess(ctx context.Context, ref agentos.ProcessRef, signal *agentos.Signal) error {
+func (r *Runtime) SignalProcess(ctx context.Context, ref agentos.Ref, signal *agentoscore.Signal) error {
 	spec, status, err := r.requireProcess(ctx, ref)
 	if err != nil {
 		return err
@@ -125,18 +126,18 @@ func (r *Runtime) SignalProcess(ctx context.Context, ref agentos.ProcessRef, sig
 }
 
 // ControlProcess records and applies a lifecycle control operation.
-func (r *Runtime) ControlProcess(ctx context.Context, ref agentos.ProcessRef, control *agentos.ControlRequest) error {
+func (r *Runtime) ControlProcess(ctx context.Context, ref agentos.Ref, control *agentoscore.ControlRequest) error {
 	spec, status, err := r.requireProcess(ctx, ref)
 	if err != nil {
 		return err
 	}
 
-	if err := agentos.ValidateControlRequest(control); err != nil {
+	if err := agentoscore.ValidateControlRequest(control); err != nil {
 		return err
 	}
 
 	if control.IdempotencyKey == "" {
-		return fmt.Errorf("%w: process control idempotency key is required", agentos.ErrInvalidProcess)
+		return fmt.Errorf("%w: process control idempotency key is required", agentoscore.ErrInvalidProcess)
 	}
 
 	event := processControlEvent(&spec, control)
@@ -161,12 +162,12 @@ func (r *Runtime) ControlProcess(ctx context.Context, ref agentos.ProcessRef, co
 
 // SubscribeProcess replays durable process events through the public
 // subscription boundary.
-func (r *Runtime) SubscribeProcess(ctx context.Context, scope *agentos.ProcessStreamScope) (agentos.Subscription, error) {
+func (r *Runtime) SubscribeProcess(ctx context.Context, scope *agentos.StreamScope) (agentoscore.Subscription, error) {
 	if err := agentos.ValidateProcessStreamScope(scope); err != nil {
 		return nil, err
 	}
 
-	events, err := r.events.ListProcessEvents(ctx, &agentos.ProcessEventScope{
+	events, err := r.events.ListProcessEvents(ctx, &agentos.EventScope{
 		ProcessID:     scope.ProcessID,
 		AccountID:     scope.AccountID,
 		ProjectID:     scope.ProjectID,
@@ -180,30 +181,30 @@ func (r *Runtime) SubscribeProcess(ctx context.Context, scope *agentos.ProcessSt
 }
 
 // ListProcessEvents returns durable process events from the event store.
-func (r *Runtime) ListProcessEvents(ctx context.Context, scope *agentos.ProcessEventScope) ([]agentos.ProcessEvent, error) {
+func (r *Runtime) ListProcessEvents(ctx context.Context, scope *agentos.EventScope) ([]agentos.Event, error) {
 	return r.events.ListProcessEvents(ctx, scope)
 }
 
-func (r *Runtime) requireProcess(ctx context.Context, ref agentos.ProcessRef) (agentos.ProcessSpec, agentos.ProcessStatus, error) {
+func (r *Runtime) requireProcess(ctx context.Context, ref agentos.Ref) (agentos.Spec, agentos.Status, error) {
 	spec, status, exists, err := r.index.GetProcessByRef(ctx, ref)
 	if err != nil {
-		return agentos.ProcessSpec{}, agentos.ProcessStatus{}, err
+		return agentos.Spec{}, agentos.Status{}, err
 	}
 
 	if !exists {
-		return agentos.ProcessSpec{}, agentos.ProcessStatus{}, fmt.Errorf("%w: process %q not found", agentos.ErrProcessRouteNotFound, ref.ProcessID)
+		return agentos.Spec{}, agentos.Status{}, fmt.Errorf("%w: process %q not found", agentoscore.ErrProcessRouteNotFound, ref.ProcessID)
 	}
 
 	return spec, status, nil
 }
 
-func initialProcessStatus(spec *agentos.ProcessSpec) agentos.ProcessStatus {
+func initialProcessStatus(spec *agentos.Spec) agentos.Status {
 	now := spec.RequestedAt
 	if now.IsZero() {
 		now = time.Now().UTC()
 	}
 
-	return agentos.ProcessStatus{
+	return agentos.Status{
 		ProcessID:      spec.ProcessID,
 		Kind:           spec.Kind,
 		AccountID:      spec.AccountID,
@@ -216,15 +217,15 @@ func initialProcessStatus(spec *agentos.ProcessSpec) agentos.ProcessStatus {
 	}
 }
 
-func processStartedEvent(spec *agentos.ProcessSpec, status *agentos.ProcessStatus) *agentos.ProcessEvent {
+func processStartedEvent(spec *agentos.Spec, status *agentos.Status) *agentos.Event {
 	timestamp := status.StartedAt
 	if timestamp.IsZero() {
 		timestamp = time.Now().UTC()
 	}
 
-	return &agentos.ProcessEvent{
-		Event: agentos.Event{
-			EventType: agentos.EventProcessStarted,
+	return &agentos.Event{
+		Event: agentoscore.Event{
+			EventType: agentoscore.EventProcessStarted,
 			ProcessID: spec.ProcessID,
 			Timestamp: timestamp,
 			Payload: map[string]any{
@@ -240,38 +241,38 @@ func processStartedEvent(spec *agentos.ProcessSpec, status *agentos.ProcessStatu
 	}
 }
 
-func validateProcessSignal(signal *agentos.Signal) error {
+func validateProcessSignal(signal *agentoscore.Signal) error {
 	if signal == nil {
-		return fmt.Errorf("%w: process signal is required", agentos.ErrInvalidSignal)
+		return fmt.Errorf("%w: process signal is required", agentoscore.ErrInvalidSignal)
 	}
 
 	if signal.Type == "" {
-		return fmt.Errorf("%w: process signal type is required", agentos.ErrInvalidSignal)
+		return fmt.Errorf("%w: process signal type is required", agentoscore.ErrInvalidSignal)
 	}
 
 	if signal.IdempotencyKey == "" {
-		return fmt.Errorf("%w: process signal idempotency key is required", agentos.ErrInvalidSignal)
+		return fmt.Errorf("%w: process signal idempotency key is required", agentoscore.ErrInvalidSignal)
 	}
 
 	return nil
 }
 
-func processSignalEvent(spec *agentos.ProcessSpec, signal *agentos.Signal) *agentos.ProcessEvent {
+func processSignalEvent(spec *agentos.Spec, signal *agentoscore.Signal) *agentos.Event {
 	timestamp := signal.SentAt
 	if timestamp.IsZero() {
 		timestamp = time.Now().UTC()
 	}
 
-	return processEvent(spec, agentos.EventProcessSignalReceived, timestamp, map[string]any{
+	return processEvent(spec, agentoscore.EventProcessSignalReceived, timestamp, map[string]any{
 		"signal_type": string(signal.Type),
 		"actor_id":    signal.ActorID,
 		"payload":     cloneAnyMap(signal.Payload),
 	})
 }
 
-func processEvent(spec *agentos.ProcessSpec, eventType agentos.EventType, timestamp time.Time, payload map[string]any) *agentos.ProcessEvent {
-	return &agentos.ProcessEvent{
-		Event: agentos.Event{
+func processEvent(spec *agentos.Spec, eventType agentoscore.EventType, timestamp time.Time, payload map[string]any) *agentos.Event {
+	return &agentos.Event{
+		Event: agentoscore.Event{
 			EventType: eventType,
 			ProcessID: spec.ProcessID,
 			Timestamp: timestamp,
@@ -284,13 +285,13 @@ func processEvent(spec *agentos.ProcessSpec, eventType agentos.EventType, timest
 	}
 }
 
-func processControlEvent(spec *agentos.ProcessSpec, control *agentos.ControlRequest) *agentos.ProcessEvent {
+func processControlEvent(spec *agentos.Spec, control *agentoscore.ControlRequest) *agentos.Event {
 	timestamp := control.RequestedAt
 	if timestamp.IsZero() {
 		timestamp = time.Now().UTC()
 	}
 
-	return processEvent(spec, agentos.EventProcessControlReceived, timestamp, map[string]any{
+	return processEvent(spec, agentoscore.EventProcessControlReceived, timestamp, map[string]any{
 		"operation": string(control.Operation),
 		"actor_id":  control.ActorID,
 		"metadata":  cloneStringMap(control.Metadata),
@@ -305,13 +306,13 @@ func processLifecycleAfterSignal(current string) string {
 	return current
 }
 
-func processLifecycleAfterControl(current string, operation agentos.ControlOperation) string {
+func processLifecycleAfterControl(current string, operation agentoscore.ControlOperation) string {
 	switch operation {
-	case agentos.ControlPause:
+	case agentoscore.ControlPause:
 		return agentos.ProcessWaiting
-	case agentos.ControlResume:
+	case agentoscore.ControlResume:
 		return agentos.ProcessRunning
-	case agentos.ControlCancel:
+	case agentoscore.ControlCancel:
 		return agentos.ProcessCanceled
 	default:
 		return current

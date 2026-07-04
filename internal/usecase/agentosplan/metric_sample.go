@@ -5,7 +5,7 @@ import (
 	"maps"
 	"math"
 
-	"github.com/TekkenSteve/GoAgent/agentos"
+	agentoscore "github.com/TekkenSteve/GoAgent/agentos/core"
 )
 
 // NormalizePlanMetricSample returns the canonical representation used for
@@ -29,16 +29,16 @@ func ValidatePlanMetricSample(sample *PlanMetricSample) error {
 	}
 
 	if math.IsNaN(sample.Value) || math.IsInf(sample.Value, 0) {
-		return fmt.Errorf("%w: metric value must be finite", agentos.ErrInvalidRunPlan)
+		return fmt.Errorf("%w: metric value must be finite", agentoscore.ErrInvalidRunPlan)
 	}
 
 	if sample.Timestamp.IsZero() {
-		return fmt.Errorf("%w: metric timestamp is required", agentos.ErrInvalidRunPlan)
+		return fmt.Errorf("%w: metric timestamp is required", agentoscore.ErrInvalidRunPlan)
 	}
 
 	for key := range sample.Labels {
 		if key == "" {
-			return fmt.Errorf("%w: metric label key is required", agentos.ErrInvalidRunPlan)
+			return fmt.Errorf("%w: metric label key is required", agentoscore.ErrInvalidRunPlan)
 		}
 	}
 
@@ -60,12 +60,12 @@ func validatePlanMetricSampleIdentity(sample *PlanMetricSample) error {
 
 	for _, field := range required {
 		if field.value == "" {
-			return fmt.Errorf("%w: %s is required", agentos.ErrInvalidRunPlan, field.label)
+			return fmt.Errorf("%w: %s is required", agentoscore.ErrInvalidRunPlan, field.label)
 		}
 	}
 
 	if sample.Sequence <= 0 {
-		return fmt.Errorf("%w: metric event sequence must be positive", agentos.ErrInvalidRunPlan)
+		return fmt.Errorf("%w: metric event sequence must be positive", agentoscore.ErrInvalidRunPlan)
 	}
 
 	return nil
@@ -79,7 +79,7 @@ func ValidatePlanMetricSampleIdempotency(existing, requested *PlanMetricSample) 
 	requestedSample := NormalizePlanMetricSample(requested)
 
 	if !samePlanMetricSampleFact(&existingSample, &requestedSample) {
-		return fmt.Errorf("%w: metric sample identity conflict for plan %q event %q", agentos.ErrInvalidRunPlan, requestedSample.PlanID, requestedSample.EventID)
+		return fmt.Errorf("%w: metric sample identity conflict for plan %q event %q", agentoscore.ErrInvalidRunPlan, requestedSample.PlanID, requestedSample.EventID)
 	}
 
 	return nil

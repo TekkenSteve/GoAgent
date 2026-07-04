@@ -3,7 +3,7 @@ package agentosaction
 import (
 	"context"
 
-	"github.com/TekkenSteve/GoAgent/agentos"
+	agentos "github.com/TekkenSteve/GoAgent/agentos/process"
 )
 
 // Store persists governed action specs and latest lifecycle projections.

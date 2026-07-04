@@ -4,7 +4,7 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/TekkenSteve/GoAgent/agentos"
+	agentos "github.com/TekkenSteve/GoAgent/agentos/control"
 )
 
 // RunPlanCompiler parses serialized plans into validated executable plans.

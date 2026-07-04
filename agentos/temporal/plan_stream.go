@@ -3,12 +3,13 @@ package temporal
 import (
 	"sync"
 
-	"github.com/TekkenSteve/GoAgent/agentos"
+	agentos "github.com/TekkenSteve/GoAgent/agentos/control"
+	agentoscore "github.com/TekkenSteve/GoAgent/agentos/core"
 	"github.com/TekkenSteve/GoAgent/internal/usecase/agentosplan"
 )
 
-func newPlanReplaySubscription(planEvents []agentos.PlanEvent) agentos.Subscription {
-	out := make(chan agentos.Event, len(planEvents))
+func newPlanReplaySubscription(planEvents []agentos.PlanEvent) agentoscore.Subscription {
+	out := make(chan agentoscore.Event, len(planEvents))
 	for i := range planEvents {
 		out <- planEvents[i].ToEvent()
 	}
@@ -18,16 +19,16 @@ func newPlanReplaySubscription(planEvents []agentos.PlanEvent) agentos.Subscript
 	return &subscription{events: out}
 }
 
-func newPlanReplayThenLiveSubscription(scope *agentos.PlanStreamScope, planEvents []agentos.PlanEvent, live agentosplan.PlanEventSubscription) agentos.Subscription {
+func newPlanReplayThenLiveSubscription(scope *agentos.PlanStreamScope, planEvents []agentos.PlanEvent, live agentosplan.PlanEventSubscription) agentoscore.Subscription {
 	return newPlanReplayThenLiveSubscriptionAfter(scope, planEvents, live, 0)
 }
 
-func newPlanReplayThenLiveSubscriptionAfter(scope *agentos.PlanStreamScope, planEvents []agentos.PlanEvent, live agentosplan.PlanEventSubscription, liveAfterSequence int64) agentos.Subscription {
+func newPlanReplayThenLiveSubscriptionAfter(scope *agentos.PlanStreamScope, planEvents []agentos.PlanEvent, live agentosplan.PlanEventSubscription, liveAfterSequence int64) agentoscore.Subscription {
 	if live == nil {
 		return newPlanReplaySubscription(planEvents)
 	}
 
-	out := make(chan agentos.Event, len(planEvents))
+	out := make(chan agentoscore.Event, len(planEvents))
 	done := make(chan struct{})
 
 	var once sync.Once
@@ -58,7 +59,7 @@ func newPlanReplayThenLiveSubscriptionAfter(scope *agentos.PlanStreamScope, plan
 	}
 }
 
-func replayPlanEvents(out chan<- agentos.Event, done <-chan struct{}, planEvents []agentos.PlanEvent) bool {
+func replayPlanEvents(out chan<- agentoscore.Event, done <-chan struct{}, planEvents []agentos.PlanEvent) bool {
 	for i := range planEvents {
 		planEvent := &planEvents[i]
 
@@ -73,7 +74,7 @@ func replayPlanEvents(out chan<- agentos.Event, done <-chan struct{}, planEvents
 }
 
 func forwardLivePlanEvents(
-	out chan<- agentos.Event,
+	out chan<- agentoscore.Event,
 	done <-chan struct{},
 	scope *agentos.PlanStreamScope,
 	live agentosplan.PlanEventSubscription,

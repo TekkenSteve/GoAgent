@@ -6,7 +6,8 @@ import (
 	"fmt"
 	"sort"
 
-	"github.com/TekkenSteve/GoAgent/agentos"
+	agentos "github.com/TekkenSteve/GoAgent/agentos/control"
+	agentoscore "github.com/TekkenSteve/GoAgent/agentos/core"
 	"github.com/google/jsonschema-go/jsonschema"
 )
 
@@ -61,7 +62,7 @@ func (v Validator) Validate(ctx context.Context, spec *agentos.RunPlanSpec) (Exe
 
 	depth := maxDepth(order, edgesByFrom)
 	if depth > int(policy.MaxDepth) {
-		return ExecutablePlan{}, fmt.Errorf("%w: plan depth exceeds max %d", agentos.ErrInvalidRunPlan, policy.MaxDepth)
+		return ExecutablePlan{}, fmt.Errorf("%w: plan depth exceeds max %d", agentoscore.ErrInvalidRunPlan, policy.MaxDepth)
 	}
 
 	return ExecutablePlan{
@@ -80,15 +81,15 @@ func validatePlanEnvelope(spec *agentos.RunPlanSpec) (agentos.PlanPolicy, error)
 
 	policy := normalizePolicy(spec.Policy)
 	if policy.MaxHistoryEvents > 0 && policy.ContinueAsNewEvents > policy.MaxHistoryEvents {
-		return agentos.PlanPolicy{}, fmt.Errorf("%w: continue-as-new events %d exceeds max history events %d", agentos.ErrInvalidRunPlan, policy.ContinueAsNewEvents, policy.MaxHistoryEvents)
+		return agentos.PlanPolicy{}, fmt.Errorf("%w: continue-as-new events %d exceeds max history events %d", agentoscore.ErrInvalidRunPlan, policy.ContinueAsNewEvents, policy.MaxHistoryEvents)
 	}
 
 	if len(spec.Nodes) == 0 {
-		return agentos.PlanPolicy{}, fmt.Errorf("%w: nodes are required", agentos.ErrInvalidRunPlan)
+		return agentos.PlanPolicy{}, fmt.Errorf("%w: nodes are required", agentoscore.ErrInvalidRunPlan)
 	}
 
 	if len(spec.Nodes) > int(policy.MaxNodes) {
-		return agentos.PlanPolicy{}, fmt.Errorf("%w: node count %d exceeds max %d", agentos.ErrInvalidRunPlan, len(spec.Nodes), policy.MaxNodes)
+		return agentos.PlanPolicy{}, fmt.Errorf("%w: node count %d exceeds max %d", agentoscore.ErrInvalidRunPlan, len(spec.Nodes), policy.MaxNodes)
 	}
 
 	return policy, nil
@@ -103,7 +104,7 @@ func (v Validator) validateNodes(ctx context.Context, spec *agentos.RunPlanSpec)
 		}
 
 		if _, exists := nodeByID[node.NodeID]; exists {
-			return nil, fmt.Errorf("%w: duplicate node %q", agentos.ErrInvalidRunPlan, node.NodeID)
+			return nil, fmt.Errorf("%w: duplicate node %q", agentoscore.ErrInvalidRunPlan, node.NodeID)
 		}
 
 		nodeByID[node.NodeID] = *node
@@ -155,21 +156,21 @@ func (v Validator) validateNode(ctx context.Context, node *agentos.PlanNodeSpec)
 
 func validateNodeIdentity(node *agentos.PlanNodeSpec) error {
 	if node.NodeID == "" {
-		return fmt.Errorf("%w: node id is required", agentos.ErrInvalidRunPlan)
+		return fmt.Errorf("%w: node id is required", agentoscore.ErrInvalidRunPlan)
 	}
 
 	if node.Run.RunID == "" {
-		return fmt.Errorf("%w: node %q run id is required", agentos.ErrInvalidRunSpec, node.NodeID)
+		return fmt.Errorf("%w: node %q run id is required", agentoscore.ErrInvalidRunSpec, node.NodeID)
 	}
 
 	if node.Run.Backend.Kind == "" || node.Run.Backend.Name == "" {
-		return fmt.Errorf("%w: node %q backend is required", agentos.ErrInvalidBackendRef, node.NodeID)
+		return fmt.Errorf("%w: node %q backend is required", agentoscore.ErrInvalidBackendRef, node.NodeID)
 	}
 
 	switch node.Policy.Join {
 	case "", agentos.PlanJoinAll, agentos.PlanJoinAny, agentos.PlanJoinFirst:
 	default:
-		return fmt.Errorf("%w: node %q has invalid join strategy %q", agentos.ErrInvalidRunPlan, node.NodeID, node.Policy.Join)
+		return fmt.Errorf("%w: node %q has invalid join strategy %q", agentoscore.ErrInvalidRunPlan, node.NodeID, node.Policy.Join)
 	}
 
 	return nil
@@ -206,7 +207,7 @@ func (v Validator) validateNodeCapability(ctx context.Context, node *agentos.Pla
 	}
 
 	if v.Capabilities == nil {
-		return fmt.Errorf("%w: node %q capability catalog is required", agentos.ErrCapabilityNotFound, node.NodeID)
+		return fmt.Errorf("%w: node %q capability catalog is required", agentoscore.ErrCapabilityNotFound, node.NodeID)
 	}
 
 	capability, ok, err := v.Capabilities.GetCapability(ctx, node.Run.Backend, node.Capability)
@@ -215,12 +216,12 @@ func (v Validator) validateNodeCapability(ctx context.Context, node *agentos.Pla
 	}
 
 	if !ok {
-		return fmt.Errorf("%w: node %q capability %s/%s/%s", agentos.ErrCapabilityNotFound, node.NodeID, node.Run.Backend.Kind, node.Run.Backend.Name, node.Capability)
+		return fmt.Errorf("%w: node %q capability %s/%s/%s", agentoscore.ErrCapabilityNotFound, node.NodeID, node.Run.Backend.Kind, node.Run.Backend.Name, node.Capability)
 	}
 
 	if len(capability.InputSchema) > 0 {
 		if err := validateRawSchema(capability.InputSchema, node.Run.Input); err != nil {
-			return fmt.Errorf("%w: node %q input schema: %w", agentos.ErrInvalidRunPlan, node.NodeID, err)
+			return fmt.Errorf("%w: node %q input schema: %w", agentoscore.ErrInvalidRunPlan, node.NodeID, err)
 		}
 	}
 
@@ -251,7 +252,7 @@ func (v Validator) validateEdge(edge *agentos.PlanEdgeSpec, nodeByID map[string]
 		}
 
 		if mode == inputMappingSourceArtifact && mapping.SourceNodeID != edge.From {
-			return fmt.Errorf("%w: edge %q mapping source must match edge source", agentos.ErrInvalidRunPlan, edge.EdgeID)
+			return fmt.Errorf("%w: edge %q mapping source must match edge source", agentoscore.ErrInvalidRunPlan, edge.EdgeID)
 		}
 	}
 
@@ -260,25 +261,25 @@ func (v Validator) validateEdge(edge *agentos.PlanEdgeSpec, nodeByID map[string]
 
 func validateEdgeIdentity(edge *agentos.PlanEdgeSpec, nodeByID map[string]agentos.PlanNodeSpec) error {
 	if edge.From == "" || edge.To == "" {
-		return fmt.Errorf("%w: edge endpoints are required", agentos.ErrInvalidRunPlan)
+		return fmt.Errorf("%w: edge endpoints are required", agentoscore.ErrInvalidRunPlan)
 	}
 
 	if _, ok := nodeByID[edge.From]; !ok {
-		return fmt.Errorf("%w: edge from unknown node %q", agentos.ErrInvalidRunPlan, edge.From)
+		return fmt.Errorf("%w: edge from unknown node %q", agentoscore.ErrInvalidRunPlan, edge.From)
 	}
 
 	if _, ok := nodeByID[edge.To]; !ok {
-		return fmt.Errorf("%w: edge to unknown node %q", agentos.ErrInvalidRunPlan, edge.To)
+		return fmt.Errorf("%w: edge to unknown node %q", agentoscore.ErrInvalidRunPlan, edge.To)
 	}
 
 	if edge.From == edge.To {
-		return fmt.Errorf("%w: self edge on node %q", agentos.ErrInvalidRunPlan, edge.From)
+		return fmt.Errorf("%w: self edge on node %q", agentoscore.ErrInvalidRunPlan, edge.From)
 	}
 
 	switch edge.On {
 	case "", agentos.EdgeOnSuccess, agentos.EdgeOnError, agentos.EdgeOnComplete, agentos.EdgeOnAlways:
 	default:
-		return fmt.Errorf("%w: edge %q has invalid trigger %q", agentos.ErrInvalidRunPlan, edge.EdgeID, edge.On)
+		return fmt.Errorf("%w: edge %q has invalid trigger %q", agentoscore.ErrInvalidRunPlan, edge.EdgeID, edge.On)
 	}
 
 	return nil
@@ -290,7 +291,7 @@ func validateUniqueEdgeID(edge *agentos.PlanEdgeSpec, edgeIDs map[string]struct{
 	}
 
 	if _, exists := edgeIDs[edge.EdgeID]; exists {
-		return fmt.Errorf("%w: duplicate edge %q", agentos.ErrInvalidRunPlan, edge.EdgeID)
+		return fmt.Errorf("%w: duplicate edge %q", agentoscore.ErrInvalidRunPlan, edge.EdgeID)
 	}
 
 	edgeIDs[edge.EdgeID] = struct{}{}
@@ -322,7 +323,7 @@ func validateNodeInputMappingContracts(node *agentos.PlanNodeSpec, nodeByID map[
 
 		source, ok := nodeByID[mapping.SourceNodeID]
 		if !ok {
-			return fmt.Errorf("%w: node %q input %q source node %q is unknown", agentos.ErrInvalidRunPlan, node.NodeID, mapping.Target, mapping.SourceNodeID)
+			return fmt.Errorf("%w: node %q input %q source node %q is unknown", agentoscore.ErrInvalidRunPlan, node.NodeID, mapping.Target, mapping.SourceNodeID)
 		}
 
 		if err := validateArtifactMappingSource(node, &source, &mapping, edgesByFrom); err != nil {
@@ -335,7 +336,7 @@ func validateNodeInputMappingContracts(node *agentos.PlanNodeSpec, nodeByID map[
 
 func validateArtifactMappingSource(node, source *agentos.PlanNodeSpec, mapping *agentos.InputMapping, edgesByFrom map[string][]agentos.PlanEdgeSpec) error {
 	if source.NodeID == node.NodeID {
-		return fmt.Errorf("%w: node %q input %q cannot map an artifact from the same node", agentos.ErrInvalidRunPlan, node.NodeID, mapping.Target)
+		return fmt.Errorf("%w: node %q input %q cannot map an artifact from the same node", agentoscore.ErrInvalidRunPlan, node.NodeID, mapping.Target)
 	}
 
 	if !nodeDeclaresArtifact(source, mapping.SourceArtifact) {
@@ -343,7 +344,7 @@ func validateArtifactMappingSource(node, source *agentos.PlanNodeSpec, mapping *
 	}
 
 	if !hasDependencyPath(edgesByFrom, source.NodeID, node.NodeID) {
-		return fmt.Errorf("%w: node %q input %q requires a dependency path from source node %q", agentos.ErrInvalidRunPlan, node.NodeID, mapping.Target, source.NodeID)
+		return fmt.Errorf("%w: node %q input %q requires a dependency path from source node %q", agentoscore.ErrInvalidRunPlan, node.NodeID, mapping.Target, source.NodeID)
 	}
 
 	return nil
@@ -497,7 +498,7 @@ func topoSort(nodeByID map[string]agentos.PlanNodeSpec, edges []agentos.PlanEdge
 	}
 
 	if len(order) != len(nodeByID) {
-		return nil, fmt.Errorf("%w: plan contains a cycle", agentos.ErrInvalidRunPlan)
+		return nil, fmt.Errorf("%w: plan contains a cycle", agentoscore.ErrInvalidRunPlan)
 	}
 
 	return order, nil

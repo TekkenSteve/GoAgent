@@ -1,12 +1,386 @@
 basePath: /v1
 definitions:
-  agentos.Artifact:
+  control.ArtifactSpec:
     properties:
-      payload: {}
-      ref:
-        $ref: '#/definitions/agentos.ArtifactRef'
+      kind:
+        $ref: '#/definitions/core.ArtifactKind'
+      media_type:
+        type: string
+      name:
+        type: string
+      required:
+        type: boolean
+      schema_ref:
+        type: string
     type: object
-  agentos.ArtifactKind:
+  control.BackendKind:
+    enum:
+    - native
+    - temporal_external
+    - http
+    - grpc
+    type: string
+    x-enum-varnames:
+    - BackendKindNative
+    - BackendKindTemporalExternal
+    - BackendKindHTTP
+    - BackendKindGRPC
+  control.BackendRef:
+    properties:
+      kind:
+        $ref: '#/definitions/control.BackendKind'
+      name:
+        type: string
+    type: object
+  control.EdgeTrigger:
+    enum:
+    - success
+    - error
+    - complete
+    - always
+    type: string
+    x-enum-varnames:
+    - EdgeOnSuccess
+    - EdgeOnError
+    - EdgeOnComplete
+    - EdgeOnAlways
+  control.InputMapping:
+    properties:
+      expression:
+        type: string
+      required:
+        type: boolean
+      source_artifact:
+        type: string
+      source_node_id:
+        type: string
+      source_path:
+        type: string
+      target:
+        type: string
+    type: object
+  control.NodePolicy:
+    properties:
+      join:
+        $ref: '#/definitions/control.PlanJoinStrategy'
+      max_attempts:
+        type: integer
+      timeout_seconds:
+        type: integer
+    type: object
+  control.PlanAuditAction:
+    enum:
+    - plan.start
+    - plan.signal
+    - plan.control
+    type: string
+    x-enum-varnames:
+    - PlanAuditActionStart
+    - PlanAuditActionSignal
+    - PlanAuditActionControl
+  control.PlanBudgetUsage:
+    properties:
+      spent_cents:
+        type: integer
+    type: object
+  control.PlanCapabilityTrace:
+    properties:
+      backend:
+        $ref: '#/definitions/control.BackendRef'
+      capability:
+        type: string
+      controls:
+        items:
+          $ref: '#/definitions/core.ControlOperation'
+        type: array
+      has_input_schema:
+        type: boolean
+      has_output_schema:
+        type: boolean
+      signals:
+        items:
+          $ref: '#/definitions/core.SignalType'
+        type: array
+    type: object
+  control.PlanConditionTrace:
+    properties:
+      edge_id:
+        type: string
+      expression:
+        type: string
+      from:
+        type: string
+      node_id:
+        type: string
+      "on":
+        $ref: '#/definitions/control.EdgeTrigger'
+      parent_state:
+        type: string
+      result:
+        type: boolean
+      scope:
+        type: string
+      to:
+        type: string
+    type: object
+  control.PlanEdgeSpec:
+    properties:
+      condition:
+        type: string
+      edge_id:
+        type: string
+      from:
+        type: string
+      input_mapping:
+        items:
+          $ref: '#/definitions/control.InputMapping'
+        type: array
+      "on":
+        $ref: '#/definitions/control.EdgeTrigger'
+      to:
+        type: string
+    type: object
+  control.PlanInputMappingTrace:
+    properties:
+      expression:
+        type: string
+      required:
+        type: boolean
+      source_artifact:
+        type: string
+      source_node_id:
+        type: string
+      source_path:
+        type: string
+      target:
+        type: string
+    type: object
+  control.PlanInputResolutionTrace:
+    properties:
+      input_digest:
+        type: string
+      input_keys:
+        items:
+          type: string
+        type: array
+      mapping_count:
+        type: integer
+      mappings:
+        items:
+          $ref: '#/definitions/control.PlanInputMappingTrace'
+        type: array
+    type: object
+  control.PlanJoinStrategy:
+    enum:
+    - all
+    - any
+    - first
+    type: string
+    x-enum-varnames:
+    - PlanJoinAll
+    - PlanJoinAny
+    - PlanJoinFirst
+  control.PlanNodeSpec:
+    properties:
+      capability:
+        type: string
+      conditions:
+        items:
+          type: string
+        type: array
+      inputs:
+        items:
+          $ref: '#/definitions/control.InputMapping'
+        type: array
+      node_id:
+        type: string
+      outputs:
+        items:
+          $ref: '#/definitions/control.ArtifactSpec'
+        type: array
+      policy:
+        $ref: '#/definitions/control.NodePolicy'
+      run:
+        $ref: '#/definitions/control.RunSpec'
+    type: object
+  control.PlanNodeStatus:
+    properties:
+      artifacts:
+        items:
+          $ref: '#/definitions/core.ArtifactRef'
+        type: array
+      attempts:
+        type: integer
+      backend:
+        $ref: '#/definitions/control.BackendRef'
+      budget_usage:
+        $ref: '#/definitions/control.PlanBudgetUsage'
+      completed_at:
+        type: string
+      lifecycle_state:
+        type: string
+      node_id:
+        type: string
+      reason:
+        type: string
+      run_id:
+        type: string
+      started_at:
+        type: string
+      updated_at:
+        type: string
+    type: object
+  control.PlanPolicy:
+    properties:
+      budget_cents:
+        type: integer
+      continue_as_new_events:
+        type: integer
+      max_depth:
+        type: integer
+      max_expansions:
+        type: integer
+      max_history_events:
+        type: integer
+      max_iterations:
+        type: integer
+      max_nodes:
+        type: integer
+      max_parallel_nodes:
+        type: integer
+      timeout_seconds:
+        type: integer
+    type: object
+  control.PlanStateTransition:
+    properties:
+      next_lifecycle_state:
+        type: string
+      previous_lifecycle_state:
+        type: string
+    type: object
+  control.PlanTopology:
+    properties:
+      edges:
+        items:
+          $ref: '#/definitions/control.PlanTopologyEdge'
+        type: array
+      nodes:
+        items:
+          $ref: '#/definitions/control.PlanTopologyNode'
+        type: array
+      order:
+        items:
+          type: string
+        type: array
+    type: object
+  control.PlanTopologyEdge:
+    properties:
+      condition:
+        type: string
+      edge_id:
+        type: string
+      from:
+        type: string
+      input_mapping:
+        items:
+          $ref: '#/definitions/control.InputMapping'
+        type: array
+      "on":
+        $ref: '#/definitions/control.EdgeTrigger'
+      to:
+        type: string
+    type: object
+  control.PlanTopologyNode:
+    properties:
+      backend:
+        $ref: '#/definitions/control.BackendRef'
+      capability:
+        type: string
+      conditions:
+        items:
+          type: string
+        type: array
+      inputs:
+        items:
+          $ref: '#/definitions/control.InputMapping'
+        type: array
+      node_id:
+        type: string
+      outputs:
+        items:
+          $ref: '#/definitions/control.ArtifactSpec'
+        type: array
+      policy:
+        $ref: '#/definitions/control.NodePolicy'
+      run_id:
+        type: string
+      status:
+        $ref: '#/definitions/control.PlanNodeStatus'
+    type: object
+  control.RunPlanStatus:
+    properties:
+      active_run_ids:
+        items:
+          type: string
+        type: array
+      artifacts:
+        items:
+          $ref: '#/definitions/core.ArtifactRef'
+        type: array
+      budget_usage:
+        $ref: '#/definitions/control.PlanBudgetUsage'
+      lifecycle_state:
+        type: string
+      metadata:
+        additionalProperties:
+          type: string
+        type: object
+      nodes:
+        items:
+          $ref: '#/definitions/control.PlanNodeStatus'
+        type: array
+      plan_id:
+        type: string
+      reason:
+        type: string
+      started_at:
+        type: string
+      updated_at:
+        type: string
+    type: object
+  control.RunSpec:
+    properties:
+      account_id:
+        type: string
+      agent_id:
+        type: string
+      backend:
+        $ref: '#/definitions/control.BackendRef'
+      idempotency_key:
+        type: string
+      input:
+        additionalProperties: {}
+        type: object
+      metadata:
+        additionalProperties:
+          type: string
+        type: object
+      model_ref:
+        type: string
+      project_id:
+        type: string
+      requested_at:
+        type: string
+      run_id:
+        type: string
+      system_prompt:
+        type: string
+      thread_id:
+        type: string
+      user_message:
+        type: string
+    type: object
+  core.ArtifactKind:
     enum:
     - object
     - text
@@ -24,7 +398,7 @@ definitions:
     - ArtifactKindReport
     - ArtifactKindReference
     - ArtifactKindPlanDelta
-  agentos.ArtifactRef:
+  core.ArtifactRef:
     properties:
       artifact_id:
         type: string
@@ -33,7 +407,7 @@ definitions:
       digest:
         type: string
       kind:
-        $ref: '#/definitions/agentos.ArtifactKind'
+        $ref: '#/definitions/core.ArtifactKind'
       media_type:
         type: string
       metadata:
@@ -53,39 +427,7 @@ definitions:
       uri:
         type: string
     type: object
-  agentos.ArtifactSpec:
-    properties:
-      kind:
-        $ref: '#/definitions/agentos.ArtifactKind'
-      media_type:
-        type: string
-      name:
-        type: string
-      required:
-        type: boolean
-      schema_ref:
-        type: string
-    type: object
-  agentos.BackendKind:
-    enum:
-    - native
-    - temporal_external
-    - http
-    - grpc
-    type: string
-    x-enum-varnames:
-    - BackendKindNative
-    - BackendKindTemporalExternal
-    - BackendKindHTTP
-    - BackendKindGRPC
-  agentos.BackendRef:
-    properties:
-      kind:
-        $ref: '#/definitions/agentos.BackendKind'
-      name:
-        type: string
-    type: object
-  agentos.ControlOperation:
+  core.ControlOperation:
     enum:
     - pause
     - resume
@@ -95,19 +437,7 @@ definitions:
     - ControlPause
     - ControlResume
     - ControlCancel
-  agentos.EdgeTrigger:
-    enum:
-    - success
-    - error
-    - complete
-    - always
-    type: string
-    x-enum-varnames:
-    - EdgeOnSuccess
-    - EdgeOnError
-    - EdgeOnComplete
-    - EdgeOnAlways
-  agentos.EventType:
+  core.EventType:
     enum:
     - run.started
     - run.completed
@@ -209,46 +539,58 @@ definitions:
     - EventProcessTimerFired
     - EventProcessSignalReceived
     - EventProcessControlReceived
-  agentos.InputMapping:
+  core.RunProgress:
     properties:
-      expression:
-        type: string
-      required:
-        type: boolean
-      source_artifact:
-        type: string
-      source_node_id:
-        type: string
-      source_path:
-        type: string
-      target:
-        type: string
-    type: object
-  agentos.NodePolicy:
-    properties:
-      join:
-        $ref: '#/definitions/agentos.PlanJoinStrategy'
-      max_attempts:
+      current:
         type: integer
-      timeout_seconds:
+      label:
+        type: string
+      total:
         type: integer
     type: object
-  agentos.PlanAuditAction:
+  core.SignalType:
     enum:
-    - plan.start
-    - plan.signal
-    - plan.control
+    - control.pause
+    - control.resume
+    - control.cancel
+    - plan.node.retry
+    - plan.approve
+    - plan.reject
+    - user.message
+    - user.approval
+    - user.reject
+    - tool.result
+    - human.feedback
+    - config.patch
+    - memory.patch
     type: string
     x-enum-varnames:
-    - PlanAuditActionStart
-    - PlanAuditActionSignal
-    - PlanAuditActionControl
-  agentos.PlanAuditRecord:
+    - SignalControlPause
+    - SignalControlResume
+    - SignalControlCancel
+    - SignalPlanNodeRetry
+    - SignalPlanApprove
+    - SignalPlanReject
+    - SignalUserMessage
+    - SignalUserApproval
+    - SignalUserReject
+    - SignalToolResult
+    - SignalHumanFeedback
+    - SignalConfigPatch
+    - SignalMemoryPatch
+  github_com_TekkenSteve_GoAgent_agentos_control.BackendRef:
+    properties:
+      kind:
+        $ref: '#/definitions/control.BackendKind'
+      name:
+        type: string
+    type: object
+  github_com_TekkenSteve_GoAgent_agentos_control.PlanAuditRecord:
     properties:
       account_id:
         type: string
       action:
-        $ref: '#/definitions/agentos.PlanAuditAction'
+        $ref: '#/definitions/control.PlanAuditAction'
       actor_id:
         type: string
       audit_id:
@@ -269,65 +611,20 @@ definitions:
       run_id:
         type: string
     type: object
-  agentos.PlanBudgetUsage:
-    properties:
-      spent_cents:
-        type: integer
-    type: object
-  agentos.PlanCapabilityTrace:
-    properties:
-      backend:
-        $ref: '#/definitions/agentos.BackendRef'
-      capability:
-        type: string
-      controls:
-        items:
-          $ref: '#/definitions/agentos.ControlOperation'
-        type: array
-      has_input_schema:
-        type: boolean
-      has_output_schema:
-        type: boolean
-      signals:
-        items:
-          $ref: '#/definitions/agentos.SignalType'
-        type: array
-    type: object
-  agentos.PlanConditionTrace:
-    properties:
-      edge_id:
-        type: string
-      expression:
-        type: string
-      from:
-        type: string
-      node_id:
-        type: string
-      "on":
-        $ref: '#/definitions/agentos.EdgeTrigger'
-      parent_state:
-        type: string
-      result:
-        type: boolean
-      scope:
-        type: string
-      to:
-        type: string
-    type: object
-  agentos.PlanDebugTrace:
+  github_com_TekkenSteve_GoAgent_agentos_control.PlanDebugTrace:
     properties:
       capability:
-        $ref: '#/definitions/agentos.PlanCapabilityTrace'
+        $ref: '#/definitions/control.PlanCapabilityTrace'
       conditions:
         items:
-          $ref: '#/definitions/agentos.PlanConditionTrace'
+          $ref: '#/definitions/control.PlanConditionTrace'
         type: array
       event_id:
         type: string
       event_type:
-        $ref: '#/definitions/agentos.EventType'
+        $ref: '#/definitions/core.EventType'
       input_resolution:
-        $ref: '#/definitions/agentos.PlanInputResolutionTrace'
+        $ref: '#/definitions/control.PlanInputResolutionTrace'
       node_id:
         type: string
       plan_id:
@@ -341,33 +638,16 @@ definitions:
       timestamp:
         type: string
       transition:
-        $ref: '#/definitions/agentos.PlanStateTransition'
+        $ref: '#/definitions/control.PlanStateTransition'
     type: object
-  agentos.PlanEdgeSpec:
-    properties:
-      condition:
-        type: string
-      edge_id:
-        type: string
-      from:
-        type: string
-      input_mapping:
-        items:
-          $ref: '#/definitions/agentos.InputMapping'
-        type: array
-      "on":
-        $ref: '#/definitions/agentos.EdgeTrigger'
-      to:
-        type: string
-    type: object
-  agentos.PlanEvent:
+  github_com_TekkenSteve_GoAgent_agentos_control.PlanEvent:
     properties:
       account_id:
         type: string
       event_id:
         type: string
       event_type:
-        $ref: '#/definitions/agentos.EventType'
+        $ref: '#/definitions/core.EventType'
       node_id:
         type: string
       payload:
@@ -390,184 +670,7 @@ definitions:
       timestamp:
         type: string
     type: object
-  agentos.PlanInputMappingTrace:
-    properties:
-      expression:
-        type: string
-      required:
-        type: boolean
-      source_artifact:
-        type: string
-      source_node_id:
-        type: string
-      source_path:
-        type: string
-      target:
-        type: string
-    type: object
-  agentos.PlanInputResolutionTrace:
-    properties:
-      input_digest:
-        type: string
-      input_keys:
-        items:
-          type: string
-        type: array
-      mapping_count:
-        type: integer
-      mappings:
-        items:
-          $ref: '#/definitions/agentos.PlanInputMappingTrace'
-        type: array
-    type: object
-  agentos.PlanJoinStrategy:
-    enum:
-    - all
-    - any
-    - first
-    type: string
-    x-enum-varnames:
-    - PlanJoinAll
-    - PlanJoinAny
-    - PlanJoinFirst
-  agentos.PlanNodeSpec:
-    properties:
-      capability:
-        type: string
-      conditions:
-        items:
-          type: string
-        type: array
-      inputs:
-        items:
-          $ref: '#/definitions/agentos.InputMapping'
-        type: array
-      node_id:
-        type: string
-      outputs:
-        items:
-          $ref: '#/definitions/agentos.ArtifactSpec'
-        type: array
-      policy:
-        $ref: '#/definitions/agentos.NodePolicy'
-      run:
-        $ref: '#/definitions/agentos.RunSpec'
-    type: object
-  agentos.PlanNodeStatus:
-    properties:
-      artifacts:
-        items:
-          $ref: '#/definitions/agentos.ArtifactRef'
-        type: array
-      attempts:
-        type: integer
-      backend:
-        $ref: '#/definitions/agentos.BackendRef'
-      budget_usage:
-        $ref: '#/definitions/agentos.PlanBudgetUsage'
-      completed_at:
-        type: string
-      lifecycle_state:
-        type: string
-      node_id:
-        type: string
-      reason:
-        type: string
-      run_id:
-        type: string
-      started_at:
-        type: string
-      updated_at:
-        type: string
-    type: object
-  agentos.PlanPolicy:
-    properties:
-      budget_cents:
-        type: integer
-      continue_as_new_events:
-        type: integer
-      max_depth:
-        type: integer
-      max_expansions:
-        type: integer
-      max_history_events:
-        type: integer
-      max_iterations:
-        type: integer
-      max_nodes:
-        type: integer
-      max_parallel_nodes:
-        type: integer
-      timeout_seconds:
-        type: integer
-    type: object
-  agentos.PlanStateTransition:
-    properties:
-      next_lifecycle_state:
-        type: string
-      previous_lifecycle_state:
-        type: string
-    type: object
-  agentos.PlanTopology:
-    properties:
-      edges:
-        items:
-          $ref: '#/definitions/agentos.PlanTopologyEdge'
-        type: array
-      nodes:
-        items:
-          $ref: '#/definitions/agentos.PlanTopologyNode'
-        type: array
-      order:
-        items:
-          type: string
-        type: array
-    type: object
-  agentos.PlanTopologyEdge:
-    properties:
-      condition:
-        type: string
-      edge_id:
-        type: string
-      from:
-        type: string
-      input_mapping:
-        items:
-          $ref: '#/definitions/agentos.InputMapping'
-        type: array
-      "on":
-        $ref: '#/definitions/agentos.EdgeTrigger'
-      to:
-        type: string
-    type: object
-  agentos.PlanTopologyNode:
-    properties:
-      backend:
-        $ref: '#/definitions/agentos.BackendRef'
-      capability:
-        type: string
-      conditions:
-        items:
-          type: string
-        type: array
-      inputs:
-        items:
-          $ref: '#/definitions/agentos.InputMapping'
-        type: array
-      node_id:
-        type: string
-      outputs:
-        items:
-          $ref: '#/definitions/agentos.ArtifactSpec'
-        type: array
-      policy:
-        $ref: '#/definitions/agentos.NodePolicy'
-      run_id:
-        type: string
-      status:
-        $ref: '#/definitions/agentos.PlanNodeStatus'
-    type: object
-  agentos.RunPlanDescription:
+  github_com_TekkenSteve_GoAgent_agentos_control.RunPlanDescription:
     properties:
       account_id:
         type: string
@@ -578,25 +681,25 @@ definitions:
       plan_id:
         type: string
       policy:
-        $ref: '#/definitions/agentos.PlanPolicy'
+        $ref: '#/definitions/control.PlanPolicy'
       project_id:
         type: string
       status:
-        $ref: '#/definitions/agentos.RunPlanStatus'
+        $ref: '#/definitions/control.RunPlanStatus'
       thread_id:
         type: string
       topology:
-        $ref: '#/definitions/agentos.PlanTopology'
+        $ref: '#/definitions/control.PlanTopology'
       updated_at:
         type: string
     type: object
-  agentos.RunPlanSpec:
+  github_com_TekkenSteve_GoAgent_agentos_control.RunPlanSpec:
     properties:
       account_id:
         type: string
       edges:
         items:
-          $ref: '#/definitions/agentos.PlanEdgeSpec'
+          $ref: '#/definitions/control.PlanEdgeSpec'
         type: array
       idempotency_key:
         type: string
@@ -609,12 +712,12 @@ definitions:
         type: object
       nodes:
         items:
-          $ref: '#/definitions/agentos.PlanNodeSpec'
+          $ref: '#/definitions/control.PlanNodeSpec'
         type: array
       plan_id:
         type: string
       policy:
-        $ref: '#/definitions/agentos.PlanPolicy'
+        $ref: '#/definitions/control.PlanPolicy'
       project_id:
         type: string
       requested_at:
@@ -622,7 +725,7 @@ definitions:
       thread_id:
         type: string
     type: object
-  agentos.RunPlanStatus:
+  github_com_TekkenSteve_GoAgent_agentos_control.RunPlanStatus:
     properties:
       active_run_ids:
         items:
@@ -630,10 +733,10 @@ definitions:
         type: array
       artifacts:
         items:
-          $ref: '#/definitions/agentos.ArtifactRef'
+          $ref: '#/definitions/core.ArtifactRef'
         type: array
       budget_usage:
-        $ref: '#/definitions/agentos.PlanBudgetUsage'
+        $ref: '#/definitions/control.PlanBudgetUsage'
       lifecycle_state:
         type: string
       metadata:
@@ -642,7 +745,7 @@ definitions:
         type: object
       nodes:
         items:
-          $ref: '#/definitions/agentos.PlanNodeStatus'
+          $ref: '#/definitions/control.PlanNodeStatus'
         type: array
       plan_id:
         type: string
@@ -653,59 +756,18 @@ definitions:
       updated_at:
         type: string
     type: object
-  agentos.RunProgress:
-    properties:
-      current:
-        type: integer
-      label:
-        type: string
-      total:
-        type: integer
-    type: object
-  agentos.RunSpec:
-    properties:
-      account_id:
-        type: string
-      agent_id:
-        type: string
-      backend:
-        $ref: '#/definitions/agentos.BackendRef'
-      idempotency_key:
-        type: string
-      input:
-        additionalProperties: {}
-        type: object
-      metadata:
-        additionalProperties:
-          type: string
-        type: object
-      model_ref:
-        type: string
-      project_id:
-        type: string
-      requested_at:
-        type: string
-      run_id:
-        type: string
-      system_prompt:
-        type: string
-      thread_id:
-        type: string
-      user_message:
-        type: string
-    type: object
-  agentos.RunStatus:
+  github_com_TekkenSteve_GoAgent_agentos_control.RunStatus:
     properties:
       artifacts:
         items:
-          $ref: '#/definitions/agentos.ArtifactRef'
+          $ref: '#/definitions/core.ArtifactRef'
         type: array
       budget_usage:
-        $ref: '#/definitions/agentos.PlanBudgetUsage'
+        $ref: '#/definitions/control.PlanBudgetUsage'
       lifecycle_state:
         type: string
       progress:
-        $ref: '#/definitions/agentos.RunProgress'
+        $ref: '#/definitions/core.RunProgress'
       reason:
         type: string
       run_id:
@@ -713,7 +775,154 @@ definitions:
       updated_at:
         type: string
     type: object
-  agentos.SignalType:
+  github_com_TekkenSteve_GoAgent_agentos_core.Artifact:
+    properties:
+      payload: {}
+      ref:
+        $ref: '#/definitions/core.ArtifactRef'
+    type: object
+  github_com_TekkenSteve_GoAgent_agentos_core.ArtifactRef:
+    properties:
+      artifact_id:
+        type: string
+      created_at:
+        type: string
+      digest:
+        type: string
+      kind:
+        $ref: '#/definitions/core.ArtifactKind'
+      media_type:
+        type: string
+      metadata:
+        additionalProperties:
+          type: string
+        type: object
+      name:
+        type: string
+      node_id:
+        type: string
+      plan_id:
+        type: string
+      run_id:
+        type: string
+      size_bytes:
+        type: integer
+      uri:
+        type: string
+    type: object
+  github_com_TekkenSteve_GoAgent_agentos_core.ControlOperation:
+    enum:
+    - pause
+    - resume
+    - cancel
+    type: string
+    x-enum-varnames:
+    - ControlPause
+    - ControlResume
+    - ControlCancel
+  github_com_TekkenSteve_GoAgent_agentos_core.EventType:
+    enum:
+    - run.started
+    - run.completed
+    - run.failed
+    - run.cancelled
+    - run.paused
+    - run.resumed
+    - agent.step.started
+    - agent.step.completed
+    - agent.step.failed
+    - agent.message.delta
+    - agent.message.completed
+    - tool.call.started
+    - tool.call.delta
+    - tool.call.completed
+    - tool.call.failed
+    - approval.requested
+    - approval.resolved
+    - usage.reported
+    - checkpoint.created
+    - artifact.created
+    - node.input.resolved
+    - node.output.published
+    - capability.selected
+    - condition.evaluated
+    - plan.started
+    - plan.blocked
+    - plan.expanded
+    - plan.approved
+    - plan.rejected
+    - plan.succeeded
+    - plan.failed
+    - plan.canceled
+    - plan.node.ready
+    - plan.node.started
+    - plan.node.succeeded
+    - plan.node.failed
+    - plan.node.retry_scheduled
+    - plan.node.skipped
+    - plan.node.canceled
+    - process.started
+    - process.waiting
+    - process.blocked
+    - process.succeeded
+    - process.failed
+    - process.canceled
+    - process.timer.scheduled
+    - process.timer.fired
+    - process.signal.received
+    - process.control.received
+    type: string
+    x-enum-varnames:
+    - EventRunStarted
+    - EventRunCompleted
+    - EventRunFailed
+    - EventRunCancelled
+    - EventRunPaused
+    - EventRunResumed
+    - EventAgentStepStarted
+    - EventAgentStepCompleted
+    - EventAgentStepFailed
+    - EventAgentMessageDelta
+    - EventAgentMessageCompleted
+    - EventToolCallStarted
+    - EventToolCallDelta
+    - EventToolCallCompleted
+    - EventToolCallFailed
+    - EventApprovalRequested
+    - EventApprovalResolved
+    - EventUsageReported
+    - EventCheckpointCreated
+    - EventArtifactCreated
+    - EventNodeInputResolved
+    - EventNodeOutputPublished
+    - EventCapabilitySelected
+    - EventConditionEvaluated
+    - EventPlanStarted
+    - EventPlanBlocked
+    - EventPlanExpanded
+    - EventPlanApproved
+    - EventPlanRejected
+    - EventPlanSucceeded
+    - EventPlanFailed
+    - EventPlanCanceled
+    - EventPlanNodeReady
+    - EventPlanNodeStarted
+    - EventPlanNodeSucceeded
+    - EventPlanNodeFailed
+    - EventPlanNodeRetryScheduled
+    - EventPlanNodeSkipped
+    - EventPlanNodeCanceled
+    - EventProcessStarted
+    - EventProcessWaiting
+    - EventProcessBlocked
+    - EventProcessSucceeded
+    - EventProcessFailed
+    - EventProcessCanceled
+    - EventProcessTimerScheduled
+    - EventProcessTimerFired
+    - EventProcessSignalReceived
+    - EventProcessControlReceived
+  github_com_TekkenSteve_GoAgent_agentos_core.SignalType:
     enum:
     - control.pause
     - control.resume
@@ -754,7 +963,7 @@ definitions:
           type: string
         type: object
       operation:
-        $ref: '#/definitions/agentos.ControlOperation'
+        $ref: '#/definitions/github_com_TekkenSteve_GoAgent_agentos_core.ControlOperation'
       requested_at:
         type: string
     required:
@@ -765,7 +974,7 @@ definitions:
       event_id:
         type: string
       event_type:
-        $ref: '#/definitions/agentos.EventType'
+        $ref: '#/definitions/github_com_TekkenSteve_GoAgent_agentos_core.EventType'
       payload:
         additionalProperties: {}
         type: object
@@ -803,7 +1012,7 @@ definitions:
           type: string
         type: object
       operation:
-        $ref: '#/definitions/agentos.ControlOperation'
+        $ref: '#/definitions/github_com_TekkenSteve_GoAgent_agentos_core.ControlOperation'
       project_id:
         type: string
       requested_at:
@@ -829,7 +1038,7 @@ definitions:
       sent_at:
         type: string
       type:
-        $ref: '#/definitions/agentos.SignalType'
+        $ref: '#/definitions/github_com_TekkenSteve_GoAgent_agentos_core.SignalType'
     required:
     - account_id
     - project_id
@@ -847,7 +1056,7 @@ definitions:
       sent_at:
         type: string
       type:
-        $ref: '#/definitions/agentos.SignalType'
+        $ref: '#/definitions/github_com_TekkenSteve_GoAgent_agentos_core.SignalType'
     required:
     - type
     type: object
@@ -858,7 +1067,7 @@ definitions:
       agent_id:
         type: string
       backend:
-        $ref: '#/definitions/agentos.BackendRef'
+        $ref: '#/definitions/github_com_TekkenSteve_GoAgent_agentos_control.BackendRef'
       idempotency_key:
         type: string
       input:
@@ -962,14 +1171,14 @@ paths:
         name: request
         required: true
         schema:
-          $ref: '#/definitions/agentos.RunPlanSpec'
+          $ref: '#/definitions/github_com_TekkenSteve_GoAgent_agentos_control.RunPlanSpec'
       produces:
       - application/json
       responses:
         "202":
           description: Accepted
           schema:
-            $ref: '#/definitions/agentos.RunPlanStatus'
+            $ref: '#/definitions/github_com_TekkenSteve_GoAgent_agentos_control.RunPlanStatus'
         "400":
           description: Bad Request
           schema:
@@ -1026,7 +1235,7 @@ paths:
           description: OK
           schema:
             items:
-              $ref: '#/definitions/agentos.ArtifactRef'
+              $ref: '#/definitions/github_com_TekkenSteve_GoAgent_agentos_core.ArtifactRef'
             type: array
         "400":
           description: Bad Request
@@ -1076,7 +1285,7 @@ paths:
         "200":
           description: OK
           schema:
-            $ref: '#/definitions/agentos.Artifact'
+            $ref: '#/definitions/github_com_TekkenSteve_GoAgent_agentos_core.Artifact'
         "400":
           description: Bad Request
           schema:
@@ -1137,7 +1346,7 @@ paths:
           description: OK
           schema:
             items:
-              $ref: '#/definitions/agentos.PlanAuditRecord'
+              $ref: '#/definitions/github_com_TekkenSteve_GoAgent_agentos_control.PlanAuditRecord'
             type: array
         "400":
           description: Bad Request
@@ -1294,7 +1503,7 @@ paths:
           description: OK
           schema:
             items:
-              $ref: '#/definitions/agentos.PlanDebugTrace'
+              $ref: '#/definitions/github_com_TekkenSteve_GoAgent_agentos_control.PlanDebugTrace'
             type: array
         "400":
           description: Bad Request
@@ -1340,7 +1549,7 @@ paths:
         "200":
           description: OK
           schema:
-            $ref: '#/definitions/agentos.RunPlanDescription'
+            $ref: '#/definitions/github_com_TekkenSteve_GoAgent_agentos_control.RunPlanDescription'
         "400":
           description: Bad Request
           schema:
@@ -1447,7 +1656,7 @@ paths:
           description: OK
           schema:
             items:
-              $ref: '#/definitions/agentos.PlanEvent'
+              $ref: '#/definitions/github_com_TekkenSteve_GoAgent_agentos_control.PlanEvent'
             type: array
         "400":
           description: Bad Request
@@ -1520,7 +1729,7 @@ paths:
         "200":
           description: OK
           schema:
-            $ref: '#/definitions/agentos.RunPlanStatus'
+            $ref: '#/definitions/github_com_TekkenSteve_GoAgent_agentos_control.RunPlanStatus'
         "404":
           description: Not Found
           schema:
@@ -1598,7 +1807,7 @@ paths:
         "202":
           description: Accepted
           schema:
-            $ref: '#/definitions/agentos.RunStatus'
+            $ref: '#/definitions/github_com_TekkenSteve_GoAgent_agentos_control.RunStatus'
         "400":
           description: Bad Request
           schema:
@@ -1749,7 +1958,7 @@ paths:
         "200":
           description: OK
           schema:
-            $ref: '#/definitions/agentos.RunStatus'
+            $ref: '#/definitions/github_com_TekkenSteve_GoAgent_agentos_control.RunStatus'
         "404":
           description: Not Found
           schema:

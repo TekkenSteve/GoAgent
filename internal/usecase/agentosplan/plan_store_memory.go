@@ -8,7 +8,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/TekkenSteve/GoAgent/agentos"
+	agentos "github.com/TekkenSteve/GoAgent/agentos/control"
+	agentoscore "github.com/TekkenSteve/GoAgent/agentos/core"
 )
 
 // MemoryPlanStore is an explicit in-process PlanIndex, PlanTransitionStore,
@@ -134,7 +135,7 @@ func (s *MemoryPlanStore) CreatePlan(_ context.Context, spec *agentos.RunPlanSpe
 
 func prepareMemoryCreatePlanSnapshot(spec *agentos.RunPlanSpec, status *agentos.RunPlanStatus) (PlanStateSnapshot, error) {
 	if status == nil {
-		return PlanStateSnapshot{}, fmt.Errorf("%w: plan status is required", agentos.ErrInvalidRunPlan)
+		return PlanStateSnapshot{}, fmt.Errorf("%w: plan status is required", agentoscore.ErrInvalidRunPlan)
 	}
 
 	snapshot := PlanStateSnapshot{Spec: cloneRunPlanSpec(spec), Status: cloneRunPlanStatus(status)}
@@ -170,15 +171,15 @@ func (s *MemoryPlanStore) lookupExistingPlanByID(spec *agentos.RunPlanSpec) (age
 
 func validateMemoryCreatePlanInput(spec *agentos.RunPlanSpec) error {
 	if spec == nil {
-		return fmt.Errorf("%w: run plan spec is required", agentos.ErrInvalidRunPlan)
+		return fmt.Errorf("%w: run plan spec is required", agentoscore.ErrInvalidRunPlan)
 	}
 
 	if spec.PlanID == "" {
-		return fmt.Errorf("%w: plan id is required", agentos.ErrInvalidRunPlan)
+		return fmt.Errorf("%w: plan id is required", agentoscore.ErrInvalidRunPlan)
 	}
 
 	if spec.IdempotencyKey == "" {
-		return fmt.Errorf("%w: plan idempotency key is required", agentos.ErrInvalidRunPlan)
+		return fmt.Errorf("%w: plan idempotency key is required", agentoscore.ErrInvalidRunPlan)
 	}
 
 	return nil
@@ -226,7 +227,7 @@ func (s *MemoryPlanStore) ListPlanRefs(_ context.Context, scope *PlanRefScope) (
 	}
 
 	if scope.Limit < 0 {
-		return nil, fmt.Errorf("%w: plan ref limit must be non-negative", agentos.ErrInvalidPlanScope)
+		return nil, fmt.Errorf("%w: plan ref limit must be non-negative", agentoscore.ErrInvalidPlanScope)
 	}
 
 	lifecycleStates, err := planLifecycleStateSet(scope.LifecycleStates)
@@ -266,7 +267,7 @@ func planLifecycleStateSet(states []string) (map[string]struct{}, error) {
 	lifecycleStates := make(map[string]struct{}, len(states))
 	for _, state := range states {
 		if state == "" {
-			return nil, fmt.Errorf("%w: lifecycle state is required", agentos.ErrInvalidPlanScope)
+			return nil, fmt.Errorf("%w: lifecycle state is required", agentoscore.ErrInvalidPlanScope)
 		}
 
 		lifecycleStates[state] = struct{}{}
@@ -320,7 +321,7 @@ func (s *MemoryPlanStore) SavePlanState(_ context.Context, snapshot *PlanStateSn
 
 func normalizeMemoryPlanStateSnapshot(snapshot *PlanStateSnapshot) (PlanStateSnapshot, error) {
 	if snapshot == nil {
-		return PlanStateSnapshot{}, fmt.Errorf("%w: plan state snapshot is required", agentos.ErrInvalidRunPlan)
+		return PlanStateSnapshot{}, fmt.Errorf("%w: plan state snapshot is required", agentoscore.ErrInvalidRunPlan)
 	}
 
 	if err := ValidateRunPlanScope(&snapshot.Spec); err != nil {
@@ -329,7 +330,7 @@ func normalizeMemoryPlanStateSnapshot(snapshot *PlanStateSnapshot) (PlanStateSna
 
 	normalized := clonePlanStateSnapshot(snapshot)
 	if snapshot.Spec.IdempotencyKey == "" {
-		return PlanStateSnapshot{}, fmt.Errorf("%w: plan idempotency key is required", agentos.ErrInvalidRunPlan)
+		return PlanStateSnapshot{}, fmt.Errorf("%w: plan idempotency key is required", agentoscore.ErrInvalidRunPlan)
 	}
 
 	normalized.Spec.RequestedAt = NormalizeDurableTimestamp(normalized.Spec.RequestedAt)
@@ -350,7 +351,7 @@ func (s *MemoryPlanStore) savePlanStateLocked(snapshot *PlanStateSnapshot, allow
 			return err
 		}
 	} else if !allowCreate {
-		return fmt.Errorf("%w: %s", agentos.ErrPlanRouteNotFound, snapshot.Spec.PlanID)
+		return fmt.Errorf("%w: %s", agentoscore.ErrPlanRouteNotFound, snapshot.Spec.PlanID)
 	}
 
 	key := planStartKey{
@@ -359,7 +360,7 @@ func (s *MemoryPlanStore) savePlanStateLocked(snapshot *PlanStateSnapshot, allow
 		IdempotencyKey: snapshot.Spec.IdempotencyKey,
 	}
 	if existingPlanID, ok := s.planKeys[key]; ok && existingPlanID != snapshot.Spec.PlanID {
-		return fmt.Errorf("%w: plan idempotency key belongs to plan %q", agentos.ErrInvalidRunPlan, existingPlanID)
+		return fmt.Errorf("%w: plan idempotency key belongs to plan %q", agentoscore.ErrInvalidRunPlan, existingPlanID)
 	}
 
 	s.specs[snapshot.Spec.PlanID] = cloneRunPlanSpec(&snapshot.Spec)
@@ -419,19 +420,19 @@ func (s *MemoryPlanStore) PersistPlanTransition(_ context.Context, snapshot *Pla
 
 func validateMemoryPlanTransitionInput(snapshot *PlanStateSnapshot, event *agentos.PlanEvent, idempotencyKey string) error {
 	if event == nil {
-		return fmt.Errorf("%w: plan event is required", agentos.ErrInvalidPlanEvent)
+		return fmt.Errorf("%w: plan event is required", agentoscore.ErrInvalidPlanEvent)
 	}
 
 	if event.PlanID == "" {
-		return fmt.Errorf("%w: plan id is required", agentos.ErrInvalidPlanEvent)
+		return fmt.Errorf("%w: plan id is required", agentoscore.ErrInvalidPlanEvent)
 	}
 
 	if event.PlanID != snapshot.Spec.PlanID {
-		return fmt.Errorf("%w: event plan %q does not match snapshot plan %q", agentos.ErrInvalidPlanEvent, event.PlanID, snapshot.Spec.PlanID)
+		return fmt.Errorf("%w: event plan %q does not match snapshot plan %q", agentoscore.ErrInvalidPlanEvent, event.PlanID, snapshot.Spec.PlanID)
 	}
 
 	if idempotencyKey == "" {
-		return fmt.Errorf("%w: plan event idempotency key is required", agentos.ErrInvalidPlanEvent)
+		return fmt.Errorf("%w: plan event idempotency key is required", agentoscore.ErrInvalidPlanEvent)
 	}
 
 	return nil
@@ -462,15 +463,15 @@ func (s *MemoryPlanStore) LoadPlanState(_ context.Context, planID string) (PlanS
 
 func (s *MemoryPlanStore) AppendPlanEvent(_ context.Context, event *agentos.PlanEvent, idempotencyKey string) (agentos.PlanEvent, error) {
 	if event == nil {
-		return agentos.PlanEvent{}, fmt.Errorf("%w: plan event is required", agentos.ErrInvalidPlanEvent)
+		return agentos.PlanEvent{}, fmt.Errorf("%w: plan event is required", agentoscore.ErrInvalidPlanEvent)
 	}
 
 	if event.PlanID == "" {
-		return agentos.PlanEvent{}, fmt.Errorf("%w: plan id is required", agentos.ErrInvalidPlanEvent)
+		return agentos.PlanEvent{}, fmt.Errorf("%w: plan id is required", agentoscore.ErrInvalidPlanEvent)
 	}
 
 	if idempotencyKey == "" {
-		return agentos.PlanEvent{}, fmt.Errorf("%w: plan event idempotency key is required", agentos.ErrInvalidPlanEvent)
+		return agentos.PlanEvent{}, fmt.Errorf("%w: plan event idempotency key is required", agentoscore.ErrInvalidPlanEvent)
 	}
 
 	requestedEvent := NormalizePlanEventAppendRequest(event)
@@ -484,7 +485,7 @@ func (s *MemoryPlanStore) AppendPlanEvent(_ context.Context, event *agentos.Plan
 func (s *MemoryPlanStore) appendPlanEventLocked(event *agentos.PlanEvent, idempotencyKey string) (agentos.PlanEvent, error) {
 	spec, ok := s.specs[event.PlanID]
 	if !ok {
-		return agentos.PlanEvent{}, fmt.Errorf("%w: %s", agentos.ErrPlanRouteNotFound, event.PlanID)
+		return agentos.PlanEvent{}, fmt.Errorf("%w: %s", agentoscore.ErrPlanRouteNotFound, event.PlanID)
 	}
 
 	scoped, err := ScopePlanEventToSpec(event, &spec)
@@ -526,7 +527,7 @@ func (s *MemoryPlanStore) ListPlanEvents(_ context.Context, scope *agentos.PlanS
 
 	spec, ok := s.specs[scope.PlanID]
 	if !ok {
-		return nil, fmt.Errorf("%w: %s", agentos.ErrPlanRouteNotFound, scope.PlanID)
+		return nil, fmt.Errorf("%w: %s", agentoscore.ErrPlanRouteNotFound, scope.PlanID)
 	}
 
 	if err := ValidatePlanTenantAccess(agentos.PlanRef{PlanID: scope.PlanID, AccountID: scope.AccountID, ProjectID: scope.ProjectID}, &spec); err != nil {
@@ -573,7 +574,7 @@ func memoryPlanEventMatchesScope(event *agentos.PlanEvent, scope *agentos.PlanSt
 
 func (s *MemoryPlanStore) GetPlanMetricCheckpoint(_ context.Context, exporterID string, ref agentos.PlanRef) (PlanMetricCheckpoint, bool, error) {
 	if exporterID == "" {
-		return PlanMetricCheckpoint{}, false, fmt.Errorf("%w: metrics exporter id is required", agentos.ErrInvalidRunPlan)
+		return PlanMetricCheckpoint{}, false, fmt.Errorf("%w: metrics exporter id is required", agentoscore.ErrInvalidRunPlan)
 	}
 
 	if err := ValidatePlanRef(ref); err != nil {
@@ -590,7 +591,7 @@ func (s *MemoryPlanStore) GetPlanMetricCheckpoint(_ context.Context, exporterID 
 
 func (s *MemoryPlanStore) SavePlanMetricCheckpoint(_ context.Context, checkpoint *PlanMetricCheckpoint) error {
 	if checkpoint == nil {
-		return fmt.Errorf("%w: metrics checkpoint is required", agentos.ErrInvalidRunPlan)
+		return fmt.Errorf("%w: metrics checkpoint is required", agentoscore.ErrInvalidRunPlan)
 	}
 
 	ref := agentos.PlanRef{
@@ -607,17 +608,17 @@ func (s *MemoryPlanStore) SavePlanMetricCheckpoint(_ context.Context, checkpoint
 
 	spec, ok := s.specs[checkpoint.PlanID]
 	if !ok {
-		return fmt.Errorf("%w: %s", agentos.ErrPlanRouteNotFound, checkpoint.PlanID)
+		return fmt.Errorf("%w: %s", agentoscore.ErrPlanRouteNotFound, checkpoint.PlanID)
 	}
 
 	if spec.AccountID != checkpoint.AccountID || spec.ProjectID != checkpoint.ProjectID {
-		return fmt.Errorf("%w: %s", agentos.ErrPlanRouteNotFound, checkpoint.PlanID)
+		return fmt.Errorf("%w: %s", agentoscore.ErrPlanRouteNotFound, checkpoint.PlanID)
 	}
 
 	key := planMetricCheckpointKeyFromRef(checkpoint.ExporterID, ref)
 	if existing, ok := s.metrics[key]; ok {
 		if checkpoint.Sequence < existing.Sequence {
-			return fmt.Errorf("%w: metrics checkpoint sequence moved backward from %d to %d", agentos.ErrInvalidRunPlan, existing.Sequence, checkpoint.Sequence)
+			return fmt.Errorf("%w: metrics checkpoint sequence moved backward from %d to %d", agentoscore.ErrInvalidRunPlan, existing.Sequence, checkpoint.Sequence)
 		}
 	}
 
@@ -643,7 +644,7 @@ func (s *MemoryPlanStore) RecordAudit(_ context.Context, record *AuditRecord) (A
 
 	spec, ok := s.specs[stored.PlanID]
 	if !ok {
-		return AuditRecord{}, false, fmt.Errorf("%w: %s", agentos.ErrPlanRouteNotFound, stored.PlanID)
+		return AuditRecord{}, false, fmt.Errorf("%w: %s", agentoscore.ErrPlanRouteNotFound, stored.PlanID)
 	}
 
 	stored.AccountID = spec.AccountID
@@ -673,7 +674,7 @@ func (s *MemoryPlanStore) RecordAudit(_ context.Context, record *AuditRecord) (A
 
 func validateMemoryAuditRecord(record *AuditRecord) error {
 	if record == nil {
-		return fmt.Errorf("%w: audit record is required", agentos.ErrInvalidRunPlan)
+		return fmt.Errorf("%w: audit record is required", agentoscore.ErrInvalidRunPlan)
 	}
 
 	required := []struct {
@@ -687,7 +688,7 @@ func validateMemoryAuditRecord(record *AuditRecord) error {
 
 	for _, field := range required {
 		if field.value == "" {
-			return fmt.Errorf("%w: %s is required", agentos.ErrInvalidRunPlan, field.label)
+			return fmt.Errorf("%w: %s is required", agentoscore.ErrInvalidRunPlan, field.label)
 		}
 	}
 
@@ -720,7 +721,7 @@ func (s *MemoryPlanStore) RecordPlanCommand(_ context.Context, command *PlanComm
 
 	spec, ok := s.specs[stored.PlanID]
 	if !ok {
-		return PlanCommandRecord{}, false, fmt.Errorf("%w: %s", agentos.ErrPlanRouteNotFound, stored.PlanID)
+		return PlanCommandRecord{}, false, fmt.Errorf("%w: %s", agentoscore.ErrPlanRouteNotFound, stored.PlanID)
 	}
 
 	stored.AccountID = spec.AccountID
@@ -747,7 +748,7 @@ func (s *MemoryPlanStore) RecordPlanCommand(_ context.Context, command *PlanComm
 
 func validateMemoryPlanCommandRecord(command *PlanCommandRecord) error {
 	if command == nil {
-		return fmt.Errorf("%w: command record is required", agentos.ErrInvalidRunPlan)
+		return fmt.Errorf("%w: command record is required", agentoscore.ErrInvalidRunPlan)
 	}
 
 	required := []struct {
@@ -761,7 +762,7 @@ func validateMemoryPlanCommandRecord(command *PlanCommandRecord) error {
 
 	for _, field := range required {
 		if field.value == "" {
-			return fmt.Errorf("%w: %s is required", agentos.ErrInvalidRunPlan, field.label)
+			return fmt.Errorf("%w: %s is required", agentoscore.ErrInvalidRunPlan, field.label)
 		}
 	}
 
@@ -892,7 +893,7 @@ func (s *MemoryPlanStore) updatePlanCommandStatus(ref PlanCommandRef, status Pla
 
 	command, ok := s.commands[ref]
 	if !ok {
-		return PlanCommandRecord{}, fmt.Errorf("%w: command %q", agentos.ErrInvalidRunPlan, ref.IdempotencyKey)
+		return PlanCommandRecord{}, fmt.Errorf("%w: command %q", agentoscore.ErrInvalidRunPlan, ref.IdempotencyKey)
 	}
 
 	if err := ValidatePlanCommandStatusTransition(command.Status, status); err != nil {
@@ -904,7 +905,7 @@ func (s *MemoryPlanStore) updatePlanCommandStatus(ref PlanCommandRef, status Pla
 		audit, ok := s.auditKeys[AuditRefFromRecord(&commandAudit)]
 
 		if !ok {
-			return PlanCommandRecord{}, fmt.Errorf("%w: delivered command requires durable audit %q", agentos.ErrInvalidRunPlan, ref.IdempotencyKey)
+			return PlanCommandRecord{}, fmt.Errorf("%w: delivered command requires durable audit %q", agentoscore.ErrInvalidRunPlan, ref.IdempotencyKey)
 		}
 
 		if err := ValidatePlanCommandDeliveredAudit(&command, &audit); err != nil {
@@ -944,7 +945,7 @@ func (s *MemoryPlanStore) ListAuditRecords(_ context.Context, scope *agentos.Pla
 
 	spec, ok := s.specs[scope.PlanID]
 	if !ok {
-		return nil, fmt.Errorf("%w: %s", agentos.ErrPlanRouteNotFound, scope.PlanID)
+		return nil, fmt.Errorf("%w: %s", agentoscore.ErrPlanRouteNotFound, scope.PlanID)
 	}
 
 	if err := ValidatePlanTenantAccess(agentos.PlanRef{PlanID: scope.PlanID, AccountID: scope.AccountID, ProjectID: scope.ProjectID}, &spec); err != nil {
@@ -1148,12 +1149,12 @@ func clonePlanCommandRecord(command *PlanCommandRecord) PlanCommandRecord {
 	return clone
 }
 
-func cloneArtifactRefs(artifacts []agentos.ArtifactRef) []agentos.ArtifactRef {
+func cloneArtifactRefs(artifacts []agentoscore.ArtifactRef) []agentoscore.ArtifactRef {
 	if artifacts == nil {
 		return nil
 	}
 
-	clone := make([]agentos.ArtifactRef, len(artifacts))
+	clone := make([]agentoscore.ArtifactRef, len(artifacts))
 	for i := range artifacts {
 		artifact := artifacts[i]
 		artifact.Metadata = cloneMemoryStringMap(artifact.Metadata)

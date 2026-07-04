@@ -6,7 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 
-	"github.com/TekkenSteve/GoAgent/agentos"
+	agentoscore "github.com/TekkenSteve/GoAgent/agentos/core"
 )
 
 // MIME types for artifact payload encoding.
@@ -38,7 +38,7 @@ func EncodeArtifactPayload(payload any, mediaType string) (data []byte, normaliz
 	default:
 		data, err = json.Marshal(value)
 		if err != nil {
-			return nil, "", fmt.Errorf("%w: encode artifact payload: %w", agentos.ErrInvalidArtifact, err)
+			return nil, "", fmt.Errorf("%w: encode artifact payload: %w", agentoscore.ErrInvalidArtifact, err)
 		}
 
 		return data, mediaType, nil
@@ -52,7 +52,7 @@ func DecodeArtifactPayload(data []byte, mediaType string) (any, error) {
 	case MIMEApplicationJSON, "":
 		var value any
 		if err := json.Unmarshal(data, &value); err != nil {
-			return nil, fmt.Errorf("%w: decode artifact payload: %w", agentos.ErrInvalidArtifact, err)
+			return nil, fmt.Errorf("%w: decode artifact payload: %w", agentoscore.ErrInvalidArtifact, err)
 		}
 
 		return value, nil

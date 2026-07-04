@@ -9,7 +9,8 @@ import (
 	"io"
 	"net/http"
 
-	"github.com/TekkenSteve/GoAgent/agentos"
+	agentos "github.com/TekkenSteve/GoAgent/agentos/control"
+	agentoscore "github.com/TekkenSteve/GoAgent/agentos/core"
 	agentosruntime "github.com/TekkenSteve/GoAgent/internal/usecase/agentosruntime"
 )
 
@@ -45,17 +46,17 @@ func NewBackend(client *http.Client, subscriber agentosruntime.EventSubscriber, 
 // Start starts a remote HTTP agent run.
 func (b *Backend) Start(ctx context.Context, spec *agentos.RunSpec) (agentos.RunStatus, error) {
 	if spec == nil {
-		return agentos.RunStatus{}, fmt.Errorf("%w: run spec is required", agentos.ErrInvalidRunSpec)
+		return agentos.RunStatus{}, fmt.Errorf("%w: run spec is required", agentoscore.ErrInvalidRunSpec)
 	}
 
 	if spec.RunID == "" {
-		return agentos.RunStatus{}, fmt.Errorf("%w: run id is required", agentos.ErrInvalidRunSpec)
+		return agentos.RunStatus{}, fmt.Errorf("%w: run id is required", agentoscore.ErrInvalidRunSpec)
 	}
 
 	if spec.Backend != b.config.Ref() {
 		return agentos.RunStatus{}, fmt.Errorf(
 			"%w: run backend %s/%s does not match http backend %s/%s",
-			agentos.ErrInvalidBackendRef,
+			agentoscore.ErrInvalidBackendRef,
 			spec.Backend.Kind,
 			spec.Backend.Name,
 			b.config.Ref().Kind,
@@ -76,17 +77,17 @@ func (b *Backend) Start(ctx context.Context, spec *agentos.RunSpec) (agentos.Run
 }
 
 // Signal sends a business signal to a remote HTTP agent run.
-func (b *Backend) Signal(ctx context.Context, runID string, signal *agentos.Signal) error {
+func (b *Backend) Signal(ctx context.Context, runID string, signal *agentoscore.Signal) error {
 	if runID == "" {
-		return fmt.Errorf("%w: run id is required", agentos.ErrInvalidRunSpec)
+		return fmt.Errorf("%w: run id is required", agentoscore.ErrInvalidRunSpec)
 	}
 
 	if signal == nil {
-		return fmt.Errorf("%w: signal is required", agentos.ErrInvalidSignal)
+		return fmt.Errorf("%w: signal is required", agentoscore.ErrInvalidSignal)
 	}
 
 	if signal.Type == "" {
-		return fmt.Errorf("%w: type is required", agentos.ErrInvalidSignal)
+		return fmt.Errorf("%w: type is required", agentoscore.ErrInvalidSignal)
 	}
 
 	if err := b.doJSON(ctx, http.MethodPost, "/runs/"+runID+"/signals", signalRequestFromSignal(signal), nil); err != nil {
@@ -97,12 +98,12 @@ func (b *Backend) Signal(ctx context.Context, runID string, signal *agentos.Sign
 }
 
 // Control sends a lifecycle control operation to a remote HTTP agent run.
-func (b *Backend) Control(ctx context.Context, runID string, control *agentos.ControlRequest) error {
+func (b *Backend) Control(ctx context.Context, runID string, control *agentoscore.ControlRequest) error {
 	if runID == "" {
-		return fmt.Errorf("%w: run id is required", agentos.ErrInvalidRunSpec)
+		return fmt.Errorf("%w: run id is required", agentoscore.ErrInvalidRunSpec)
 	}
 
-	if err := agentos.ValidateControlRequest(control); err != nil {
+	if err := agentoscore.ValidateControlRequest(control); err != nil {
 		return err
 	}
 
@@ -116,7 +117,7 @@ func (b *Backend) Control(ctx context.Context, runID string, control *agentos.Co
 // Status returns remote HTTP agent run status.
 func (b *Backend) Status(ctx context.Context, runID string) (agentos.RunStatus, error) {
 	if runID == "" {
-		return agentos.RunStatus{}, fmt.Errorf("%w: run id is required", agentos.ErrInvalidRunSpec)
+		return agentos.RunStatus{}, fmt.Errorf("%w: run id is required", agentoscore.ErrInvalidRunSpec)
 	}
 
 	var status agentos.RunStatus
@@ -132,7 +133,7 @@ func (b *Backend) Status(ctx context.Context, runID string) (agentos.RunStatus, 
 }
 
 // Subscribe returns the shared AgentOS event stream for the run.
-func (b *Backend) Subscribe(ctx context.Context, scope agentos.StreamScope) (agentos.Subscription, error) {
+func (b *Backend) Subscribe(ctx context.Context, scope agentoscore.StreamScope) (agentoscore.Subscription, error) {
 	if b.subscriber == nil {
 		return nil, errHTTPBackendSubscriberNotConfigured
 	}

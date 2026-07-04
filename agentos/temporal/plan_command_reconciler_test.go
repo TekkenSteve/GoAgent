@@ -5,15 +5,16 @@ import (
 	"testing"
 	"time"
 
-	"github.com/TekkenSteve/GoAgent/agentos"
+	agentos "github.com/TekkenSteve/GoAgent/agentos/control"
+	agentoscore "github.com/TekkenSteve/GoAgent/agentos/core"
 	"github.com/TekkenSteve/GoAgent/internal/usecase/agentosplan"
 )
 
 func TestPlanCommandReconcilerDeliversRecoverableCommands(t *testing.T) {
 	t.Parallel()
 	store, ref := newPlanRuntimeTestStore(t)
-	signal := agentos.Signal{
-		Type:           agentos.SignalPlanApprove,
+	signal := agentoscore.Signal{
+		Type:           agentoscore.SignalPlanApprove,
 		IdempotencyKey: "approve-1",
 		ActorID:        "operator-1",
 	}
@@ -27,8 +28,8 @@ func TestPlanCommandReconcilerDeliversRecoverableCommands(t *testing.T) {
 		t.Fatalf("MarkPlanCommandFailed: %v", err)
 	}
 
-	control := agentos.ControlRequest{
-		Operation:      agentos.ControlCancel,
+	control := agentoscore.ControlRequest{
+		Operation:      agentoscore.ControlCancel,
 		IdempotencyKey: "cancel-1",
 		ActorID:        "operator-1",
 		Metadata:       map[string]string{"reason": "operator"},
@@ -78,7 +79,7 @@ func TestPlanCommandReconcilerMarksInvalidPayloadFailed(t *testing.T) {
 	reconciler := newPlanCommandReconciler(temporalClient, testPlanTaskQueues(), store, store, store)
 
 	result, err := reconciler.Recover(t.Context(), 0)
-	if !errors.Is(err, agentos.ErrInvalidRunPlan) {
+	if !errors.Is(err, agentoscore.ErrInvalidRunPlan) {
 		t.Fatalf("Recover error = %v, want ErrInvalidRunPlan", err)
 	}
 
@@ -103,11 +104,11 @@ func TestCommandDeliveryPayloadPreservesCommandTimestamps(t *testing.T) {
 
 	ref := agentos.PlanRef{PlanID: "plan-1", AccountID: "acct-1", ProjectID: "proj-1"}
 	sentAt := time.Date(2026, 6, 20, 12, 0, 0, 0, time.UTC)
-	signal := agentos.Signal{
-		Type:           agentos.SignalPlanReject,
+	signal := agentoscore.Signal{
+		Type:           agentoscore.SignalPlanReject,
 		IdempotencyKey: "reject-1",
 		ActorID:        "operator-1",
-		Payload:        map[string]any{agentos.SignalPayloadReason: "not ready"},
+		Payload:        map[string]any{agentoscore.SignalPayloadReason: "not ready"},
 		SentAt:         sentAt,
 	}
 	signalCommand := commandFromAudit(planSignalAuditRecord(ref, &signal))
@@ -121,8 +122,8 @@ func TestCommandDeliveryPayloadPreservesCommandTimestamps(t *testing.T) {
 	})
 
 	requestedAt := time.Date(2026, 6, 20, 12, 5, 0, 0, time.UTC)
-	control := agentos.ControlRequest{
-		Operation:      agentos.ControlPause,
+	control := agentoscore.ControlRequest{
+		Operation:      agentoscore.ControlPause,
 		IdempotencyKey: "pause-1",
 		RequestedAt:    requestedAt,
 		ActorID:        "operator-1",
@@ -171,13 +172,13 @@ func assertCommandDeliveryTimestamp(t *testing.T, command *agentosplan.PlanComma
 }
 
 func signalPayloadSentAt(payload any) (time.Time, bool) {
-	signal, ok := payload.(agentos.Signal)
+	signal, ok := payload.(agentoscore.Signal)
 
 	return signal.SentAt, ok
 }
 
 func controlPayloadRequestedAt(payload any) (time.Time, bool) {
-	control, ok := payload.(agentos.ControlRequest)
+	control, ok := payload.(agentoscore.ControlRequest)
 
 	return control.RequestedAt, ok
 }
@@ -186,8 +187,8 @@ func TestWorkerKitRecoverPlanCommandsUsesReconciler(t *testing.T) {
 	t.Parallel()
 	store, ref := newPlanRuntimeTestStore(t)
 
-	signal := agentos.Signal{
-		Type:           agentos.SignalPlanApprove,
+	signal := agentoscore.Signal{
+		Type:           agentoscore.SignalPlanApprove,
 		IdempotencyKey: "approve-1",
 		ActorID:        "operator-1",
 	}
@@ -209,8 +210,8 @@ func TestPlanRuntimeRecoverPlanCommandsUsesReconciler(t *testing.T) {
 	t.Parallel()
 	store, ref := newPlanRuntimeTestStore(t)
 
-	signal := agentos.Signal{
-		Type:           agentos.SignalPlanApprove,
+	signal := agentoscore.Signal{
+		Type:           agentoscore.SignalPlanApprove,
 		IdempotencyKey: "approve-runtime-1",
 		ActorID:        "operator-1",
 	}

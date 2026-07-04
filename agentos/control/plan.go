@@ -1,9 +1,11 @@
-package agentos
+package control
 
 import (
 	"encoding/json"
 	"fmt"
 	"time"
+
+	"github.com/TekkenSteve/GoAgent/agentos/core"
 )
 
 // RunPlanSpec describes a cross-backend execution plan. Each node is a
@@ -81,11 +83,11 @@ type InputMapping struct {
 
 // ArtifactSpec describes an output artifact contract for a plan node.
 type ArtifactSpec struct {
-	Name      string       `json:"name"`
-	Kind      ArtifactKind `json:"kind"`
-	MediaType string       `json:"media_type,omitempty"`
-	SchemaRef string       `json:"schema_ref,omitempty"`
-	Required  bool         `json:"required,omitempty"`
+	Name      string            `json:"name"`
+	Kind      core.ArtifactKind `json:"kind"`
+	MediaType string            `json:"media_type,omitempty"`
+	SchemaRef string            `json:"schema_ref,omitempty"`
+	Required  bool              `json:"required,omitempty"`
 }
 
 // ArtifactSchema declares a JSON Schema document addressable by ArtifactSpec.SchemaRef.
@@ -101,42 +103,6 @@ type ArtifactSchemaCatalogSpec struct {
 	ArtifactSchemas []ArtifactSchema `json:"artifact_schemas"`
 }
 
-// ArtifactKind identifies public artifact payload categories.
-type ArtifactKind string
-
-const (
-	ArtifactKindObject    ArtifactKind = "object"
-	ArtifactKindText      ArtifactKind = "text"
-	ArtifactKindFile      ArtifactKind = "file"
-	ArtifactKindPatch     ArtifactKind = "patch"
-	ArtifactKindReport    ArtifactKind = "report"
-	ArtifactKindReference ArtifactKind = "reference"
-	ArtifactKindPlanDelta ArtifactKind = "plan_delta"
-)
-
-// ArtifactRef points to an artifact outside Temporal workflow history.
-type ArtifactRef struct {
-	ArtifactID string            `json:"artifact_id"`
-	PlanID     string            `json:"plan_id,omitempty"`
-	NodeID     string            `json:"node_id,omitempty"`
-	RunID      string            `json:"run_id,omitempty"`
-	Name       string            `json:"name"`
-	Kind       ArtifactKind      `json:"kind"`
-	MediaType  string            `json:"media_type,omitempty"`
-	URI        string            `json:"uri,omitempty"`
-	SizeBytes  int64             `json:"size_bytes,omitempty"`
-	Digest     string            `json:"digest,omitempty"`
-	Metadata   map[string]string `json:"metadata,omitempty"`
-	CreatedAt  time.Time         `json:"created_at,omitzero" schema:"optional"`
-}
-
-// Artifact is the public artifact document returned by ArtifactStore-backed
-// control-plane APIs. Payloads are never embedded in Temporal workflow history.
-type Artifact struct {
-	Ref     ArtifactRef `json:"ref"`
-	Payload any         `json:"payload,omitempty"`
-}
-
 // PlanArtifactScope selects artifacts inside a tenant-scoped RunPlan.
 type PlanArtifactScope struct {
 	PlanID     string `json:"plan_id"`
@@ -150,13 +116,13 @@ type PlanArtifactScope struct {
 
 // Capability describes a backend-owned execution capability.
 type Capability struct {
-	Backend      BackendRef         `json:"backend"`
-	Name         string             `json:"name"`
-	Description  string             `json:"description,omitempty"`
-	InputSchema  json.RawMessage    `json:"input_schema,omitempty"`
-	OutputSchema json.RawMessage    `json:"output_schema,omitempty"`
-	Signals      []SignalType       `json:"signals,omitempty"`
-	Controls     []ControlOperation `json:"controls,omitempty"`
+	Backend      BackendRef              `json:"backend"`
+	Name         string                  `json:"name"`
+	Description  string                  `json:"description,omitempty"`
+	InputSchema  json.RawMessage         `json:"input_schema,omitempty"`
+	OutputSchema json.RawMessage         `json:"output_schema,omitempty"`
+	Signals      []core.SignalType       `json:"signals,omitempty"`
+	Controls     []core.ControlOperation `json:"controls,omitempty"`
 }
 
 // CapabilityCatalogSpec is the public wire format for backend capability
@@ -196,16 +162,16 @@ const (
 
 // RunPlanStatus is the public aggregate lifecycle view for a RunPlan.
 type RunPlanStatus struct {
-	PlanID         string            `json:"plan_id"`
-	LifecycleState string            `json:"lifecycle_state"`
-	Nodes          []PlanNodeStatus  `json:"nodes,omitempty"`
-	ActiveRunIDs   []string          `json:"active_run_ids,omitempty"`
-	Artifacts      []ArtifactRef     `json:"artifacts,omitempty"`
-	Reason         string            `json:"reason,omitempty"`
-	BudgetUsage    PlanBudgetUsage   `json:"budget_usage,omitzero" schema:"optional"`
-	Metadata       map[string]string `json:"metadata,omitempty"`
-	StartedAt      time.Time         `json:"started_at,omitzero" schema:"optional"`
-	UpdatedAt      time.Time         `json:"updated_at,omitzero" schema:"optional"`
+	PlanID         string             `json:"plan_id"`
+	LifecycleState string             `json:"lifecycle_state"`
+	Nodes          []PlanNodeStatus   `json:"nodes,omitempty"`
+	ActiveRunIDs   []string           `json:"active_run_ids,omitempty"`
+	Artifacts      []core.ArtifactRef `json:"artifacts,omitempty"`
+	Reason         string             `json:"reason,omitempty"`
+	BudgetUsage    PlanBudgetUsage    `json:"budget_usage,omitzero" schema:"optional"`
+	Metadata       map[string]string  `json:"metadata,omitempty"`
+	StartedAt      time.Time          `json:"started_at,omitzero" schema:"optional"`
+	UpdatedAt      time.Time          `json:"updated_at,omitzero" schema:"optional"`
 }
 
 // RunPlanDescription is the public, read-oriented view of a RunPlan. Topology
@@ -257,17 +223,17 @@ type PlanTopologyEdge struct {
 
 // PlanNodeStatus is the public lifecycle view for one plan node.
 type PlanNodeStatus struct {
-	NodeID         string          `json:"node_id"`
-	RunID          string          `json:"run_id,omitempty"`
-	Backend        BackendRef      `json:"backend"`
-	LifecycleState string          `json:"lifecycle_state"`
-	Attempts       int32           `json:"attempts,omitempty"`
-	BudgetUsage    PlanBudgetUsage `json:"budget_usage,omitzero" schema:"optional"`
-	Reason         string          `json:"reason,omitempty"`
-	Artifacts      []ArtifactRef   `json:"artifacts,omitempty"`
-	StartedAt      time.Time       `json:"started_at,omitzero" schema:"optional"`
-	CompletedAt    time.Time       `json:"completed_at,omitzero" schema:"optional"`
-	UpdatedAt      time.Time       `json:"updated_at,omitzero" schema:"optional"`
+	NodeID         string             `json:"node_id"`
+	RunID          string             `json:"run_id,omitempty"`
+	Backend        BackendRef         `json:"backend"`
+	LifecycleState string             `json:"lifecycle_state"`
+	Attempts       int32              `json:"attempts,omitempty"`
+	BudgetUsage    PlanBudgetUsage    `json:"budget_usage,omitzero" schema:"optional"`
+	Reason         string             `json:"reason,omitempty"`
+	Artifacts      []core.ArtifactRef `json:"artifacts,omitempty"`
+	StartedAt      time.Time          `json:"started_at,omitzero" schema:"optional"`
+	CompletedAt    time.Time          `json:"completed_at,omitzero" schema:"optional"`
+	UpdatedAt      time.Time          `json:"updated_at,omitzero" schema:"optional"`
 }
 
 // PlanBudgetUsage reports plan-level resource consumption.
@@ -331,7 +297,7 @@ type PlanDebugTraceScope struct {
 
 // PlanEvent is the public event envelope for plan-level events.
 type PlanEvent struct {
-	Event
+	core.Event
 	PlanID    string `json:"plan_id"`
 	AccountID string `json:"account_id"`
 	ProjectID string `json:"project_id"`
@@ -342,7 +308,7 @@ type PlanEvent struct {
 // UI/debug clients away from raw event payload parsing.
 type PlanDebugTrace struct {
 	EventID         string                    `json:"event_id"`
-	EventType       EventType                 `json:"event_type"`
+	EventType       core.EventType            `json:"event_type"`
 	PlanID          string                    `json:"plan_id"`
 	NodeID          string                    `json:"node_id,omitempty"`
 	RunID           string                    `json:"run_id,omitempty"`
@@ -363,12 +329,12 @@ type PlanStateTransition struct {
 
 // PlanCapabilityTrace records backend capability selected for one node.
 type PlanCapabilityTrace struct {
-	Backend         BackendRef         `json:"backend"`
-	Capability      string             `json:"capability"`
-	Signals         []SignalType       `json:"signals,omitempty"`
-	Controls        []ControlOperation `json:"controls,omitempty"`
-	HasInputSchema  bool               `json:"has_input_schema,omitempty"`
-	HasOutputSchema bool               `json:"has_output_schema,omitempty"`
+	Backend         BackendRef              `json:"backend"`
+	Capability      string                  `json:"capability"`
+	Signals         []core.SignalType       `json:"signals,omitempty"`
+	Controls        []core.ControlOperation `json:"controls,omitempty"`
+	HasInputSchema  bool                    `json:"has_input_schema,omitempty"`
+	HasOutputSchema bool                    `json:"has_output_schema,omitempty"`
 }
 
 // PlanInputResolutionTrace records redacted input mapping details.
@@ -439,24 +405,24 @@ type PlanAuditRecord struct {
 
 // RunPlanSpecJSONSchema returns a JSON Schema inferred from RunPlanSpec.
 func RunPlanSpecJSONSchema() ([]byte, error) {
-	return jsonSchemaFor[RunPlanSpec]()
+	return core.JSONSchemaFor[RunPlanSpec]()
 }
 
 // PlanDeltaSpecJSONSchema returns a JSON Schema inferred from PlanDeltaSpec.
 func PlanDeltaSpecJSONSchema() ([]byte, error) {
-	return jsonSchemaFor[PlanDeltaSpec]()
+	return core.JSONSchemaFor[PlanDeltaSpec]()
 }
 
 // CapabilityCatalogSpecJSONSchema returns a JSON Schema inferred from
 // CapabilityCatalogSpec.
 func CapabilityCatalogSpecJSONSchema() ([]byte, error) {
-	return jsonSchemaFor[CapabilityCatalogSpec]()
+	return core.JSONSchemaFor[CapabilityCatalogSpec]()
 }
 
 // ArtifactSchemaCatalogSpecJSONSchema returns a JSON Schema inferred from
 // ArtifactSchemaCatalogSpec.
 func ArtifactSchemaCatalogSpecJSONSchema() ([]byte, error) {
-	return jsonSchemaFor[ArtifactSchemaCatalogSpec]()
+	return core.JSONSchemaFor[ArtifactSchemaCatalogSpec]()
 }
 
 // PlanSchemaKind identifies a public RunPlan authoring schema.
@@ -493,6 +459,6 @@ func PlanJSONSchema(kind PlanSchemaKind) ([]byte, error) {
 	case PlanSchemaKindArtifactSchemaCatalog:
 		return ArtifactSchemaCatalogSpecJSONSchema()
 	default:
-		return nil, fmt.Errorf("%w: unsupported plan schema kind %q", ErrInvalidRunPlan, kind)
+		return nil, fmt.Errorf("%w: unsupported plan schema kind %q", core.ErrInvalidRunPlan, kind)
 	}
 }

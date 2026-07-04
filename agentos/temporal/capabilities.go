@@ -1,6 +1,9 @@
 package temporal
 
-import "github.com/TekkenSteve/GoAgent/agentos"
+import (
+	agentos "github.com/TekkenSteve/GoAgent/agentos/control"
+	agentoscore "github.com/TekkenSteve/GoAgent/agentos/core"
+)
 
 // DefaultCapabilities returns capability declarations owned by this default
 // Temporal-backed AgentOS implementation.
@@ -30,13 +33,13 @@ func NativeRunCapability() agentos.Capability {
 		},
 		Name:        agentos.CapabilityRun,
 		Description: "Start, signal, and control a GoAgent native agent run.",
-		Signals: []agentos.SignalType{
-			agentos.SignalUserMessage,
+		Signals: []agentoscore.SignalType{
+			agentoscore.SignalUserMessage,
 		},
-		Controls: []agentos.ControlOperation{
-			agentos.ControlPause,
-			agentos.ControlResume,
-			agentos.ControlCancel,
+		Controls: []agentoscore.ControlOperation{
+			agentoscore.ControlPause,
+			agentoscore.ControlResume,
+			agentoscore.ControlCancel,
 		},
 	}
 }

@@ -3,21 +3,22 @@ package agentosruntime
 import (
 	"context"
 
-	"github.com/TekkenSteve/GoAgent/agentos"
+	agentos "github.com/TekkenSteve/GoAgent/agentos/control"
+	agentoscore "github.com/TekkenSteve/GoAgent/agentos/core"
 )
 
 // AgentBackend is the execution contract shared by native and external agent runtimes.
 type AgentBackend interface {
 	Start(ctx context.Context, spec *agentos.RunSpec) (agentos.RunStatus, error)
-	Signal(ctx context.Context, runID string, signal *agentos.Signal) error
-	Control(ctx context.Context, runID string, control *agentos.ControlRequest) error
+	Signal(ctx context.Context, runID string, signal *agentoscore.Signal) error
+	Control(ctx context.Context, runID string, control *agentoscore.ControlRequest) error
 	Status(ctx context.Context, runID string) (agentos.RunStatus, error)
-	Subscribe(ctx context.Context, scope agentos.StreamScope) (agentos.Subscription, error)
+	Subscribe(ctx context.Context, scope agentoscore.StreamScope) (agentoscore.Subscription, error)
 }
 
 // EventSubscriber exposes the normalized AgentOS event stream shared by backends.
 type EventSubscriber interface {
-	SubscribeAgentOS(ctx context.Context, scope agentos.StreamScope) (agentos.Subscription, error)
+	SubscribeAgentOS(ctx context.Context, scope agentoscore.StreamScope) (agentoscore.Subscription, error)
 }
 
 // BackendCapabilities exposes optional backend features without forcing every

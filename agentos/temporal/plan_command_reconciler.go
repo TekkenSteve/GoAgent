@@ -6,7 +6,8 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/TekkenSteve/GoAgent/agentos"
+	agentos "github.com/TekkenSteve/GoAgent/agentos/control"
+	agentoscore "github.com/TekkenSteve/GoAgent/agentos/core"
 	"github.com/TekkenSteve/GoAgent/internal/usecase/agentosplan"
 )
 
@@ -120,11 +121,11 @@ func (r *planCommandReconciler) deliverPlanStart(ctx context.Context, command *a
 	}
 
 	if !exists {
-		return r.markCommandFailed(ctx, command, fmt.Errorf("%w: %s", agentos.ErrPlanRouteNotFound, command.PlanID))
+		return r.markCommandFailed(ctx, command, fmt.Errorf("%w: %s", agentoscore.ErrPlanRouteNotFound, command.PlanID))
 	}
 
 	if command.IdempotencyKey != spec.IdempotencyKey {
-		err := fmt.Errorf("%w: plan.start command idempotency key does not match plan start request", agentos.ErrInvalidRunPlan)
+		err := fmt.Errorf("%w: plan.start command idempotency key does not match plan start request", agentoscore.ErrInvalidRunPlan)
 
 		return r.markCommandFailed(ctx, command, err)
 	}
@@ -177,29 +178,29 @@ func commandDeliveryPayload(command *agentosplan.PlanCommandRecord) (
 
 		return PlanControlSignalName, control, *audit, nil
 	case agentosplan.AuditActionPlanStart:
-		return "", nil, agentosplan.AuditRecord{}, fmt.Errorf("%w: plan start is handled by deliverPlanStart", agentos.ErrInvalidRunPlan)
+		return "", nil, agentosplan.AuditRecord{}, fmt.Errorf("%w: plan start is handled by deliverPlanStart", agentoscore.ErrInvalidRunPlan)
 	default:
-		return "", nil, agentosplan.AuditRecord{}, fmt.Errorf("%w: unsupported plan command action %q", agentos.ErrInvalidRunPlan, command.Action)
+		return "", nil, agentosplan.AuditRecord{}, fmt.Errorf("%w: unsupported plan command action %q", agentoscore.ErrInvalidRunPlan, command.Action)
 	}
 }
 
-func signalFromPlanCommand(command *agentosplan.PlanCommandRecord) (agentos.Signal, error) {
+func signalFromPlanCommand(command *agentosplan.PlanCommandRecord) (agentoscore.Signal, error) {
 	signalType, err := signalTypePayload(command.Payload, planCommandPayloadSignalType)
 	if err != nil {
-		return agentos.Signal{}, err
+		return agentoscore.Signal{}, err
 	}
 
 	payload, err := mapPayload(command.Payload, planCommandPayloadPayload)
 	if err != nil {
-		return agentos.Signal{}, err
+		return agentoscore.Signal{}, err
 	}
 
 	sentAt, err := optionalTimePayload(command.Payload, planCommandPayloadSentAt)
 	if err != nil {
-		return agentos.Signal{}, err
+		return agentoscore.Signal{}, err
 	}
 
-	signal := agentos.Signal{
+	signal := agentoscore.Signal{
 		Type:           signalType,
 		IdempotencyKey: command.IdempotencyKey,
 		ActorID:        command.ActorID,
@@ -207,75 +208,75 @@ func signalFromPlanCommand(command *agentosplan.PlanCommandRecord) (agentos.Sign
 		SentAt:         sentAt,
 	}
 	if err := agentosplan.ValidatePlanSignal(&signal); err != nil {
-		return agentos.Signal{}, err
+		return agentoscore.Signal{}, err
 	}
 
 	return signal, nil
 }
 
-func controlFromPlanCommand(command *agentosplan.PlanCommandRecord) (agentos.ControlRequest, error) {
+func controlFromPlanCommand(command *agentosplan.PlanCommandRecord) (agentoscore.ControlRequest, error) {
 	operation, err := controlOperationPayload(command.Payload, planCommandPayloadOperation)
 	if err != nil {
-		return agentos.ControlRequest{}, err
+		return agentoscore.ControlRequest{}, err
 	}
 
 	metadata, err := stringMapPayload(command.Payload, planCommandPayloadMetadata)
 	if err != nil {
-		return agentos.ControlRequest{}, err
+		return agentoscore.ControlRequest{}, err
 	}
 
 	requestedAt, err := optionalTimePayload(command.Payload, planCommandPayloadRequestedAt)
 	if err != nil {
-		return agentos.ControlRequest{}, err
+		return agentoscore.ControlRequest{}, err
 	}
 
-	control := agentos.ControlRequest{
+	control := agentoscore.ControlRequest{
 		Operation:      operation,
 		IdempotencyKey: command.IdempotencyKey,
 		RequestedAt:    requestedAt,
 		ActorID:        command.ActorID,
 		Metadata:       metadata,
 	}
-	if err := agentos.ValidateControlRequest(&control); err != nil {
-		return agentos.ControlRequest{}, err
+	if err := agentoscore.ValidateControlRequest(&control); err != nil {
+		return agentoscore.ControlRequest{}, err
 	}
 
 	if control.ActorID == "" {
-		return agentos.ControlRequest{}, fmt.Errorf("%w: control actor id is required", agentos.ErrInvalidControlOperation)
+		return agentoscore.ControlRequest{}, fmt.Errorf("%w: control actor id is required", agentoscore.ErrInvalidControlOperation)
 	}
 
 	return control, nil
 }
 
-func signalTypePayload(payload map[string]any, key string) (agentos.SignalType, error) {
+func signalTypePayload(payload map[string]any, key string) (agentoscore.SignalType, error) {
 	value, exists := payload[key]
 	if !exists {
-		return "", fmt.Errorf("%w: command payload.%s is required", agentos.ErrInvalidRunPlan, key)
+		return "", fmt.Errorf("%w: command payload.%s is required", agentoscore.ErrInvalidRunPlan, key)
 	}
 
 	switch typed := value.(type) {
-	case agentos.SignalType:
+	case agentoscore.SignalType:
 		return typed, nil
 	case string:
-		return agentos.SignalType(typed), nil
+		return agentoscore.SignalType(typed), nil
 	default:
-		return "", fmt.Errorf("%w: command payload.%s must be a string", agentos.ErrInvalidRunPlan, key)
+		return "", fmt.Errorf("%w: command payload.%s must be a string", agentoscore.ErrInvalidRunPlan, key)
 	}
 }
 
-func controlOperationPayload(payload map[string]any, key string) (agentos.ControlOperation, error) {
+func controlOperationPayload(payload map[string]any, key string) (agentoscore.ControlOperation, error) {
 	value, exists := payload[key]
 	if !exists {
-		return "", fmt.Errorf("%w: command payload.%s is required", agentos.ErrInvalidRunPlan, key)
+		return "", fmt.Errorf("%w: command payload.%s is required", agentoscore.ErrInvalidRunPlan, key)
 	}
 
 	switch typed := value.(type) {
-	case agentos.ControlOperation:
+	case agentoscore.ControlOperation:
 		return typed, nil
 	case string:
-		return agentos.ControlOperation(typed), nil
+		return agentoscore.ControlOperation(typed), nil
 	default:
-		return "", fmt.Errorf("%w: command payload.%s must be a string", agentos.ErrInvalidRunPlan, key)
+		return "", fmt.Errorf("%w: command payload.%s must be a string", agentoscore.ErrInvalidRunPlan, key)
 	}
 }
 
@@ -296,7 +297,7 @@ func mapPayload(payload map[string]any, key string) (map[string]any, error) {
 
 		return converted, nil
 	default:
-		return nil, fmt.Errorf("%w: command payload.%s must be an object", agentos.ErrInvalidRunPlan, key)
+		return nil, fmt.Errorf("%w: command payload.%s must be an object", agentoscore.ErrInvalidRunPlan, key)
 	}
 }
 
@@ -314,7 +315,7 @@ func stringMapPayload(payload map[string]any, key string) (map[string]string, er
 		for key, value := range typed {
 			stringValue, ok := value.(string)
 			if !ok {
-				return nil, fmt.Errorf("%w: command payload.%s.%s must be a string", agentos.ErrInvalidRunPlan, planCommandPayloadMetadata, key)
+				return nil, fmt.Errorf("%w: command payload.%s.%s must be a string", agentoscore.ErrInvalidRunPlan, planCommandPayloadMetadata, key)
 			}
 
 			converted[key] = stringValue
@@ -322,7 +323,7 @@ func stringMapPayload(payload map[string]any, key string) (map[string]string, er
 
 		return converted, nil
 	default:
-		return nil, fmt.Errorf("%w: command payload.%s must be an object", agentos.ErrInvalidRunPlan, key)
+		return nil, fmt.Errorf("%w: command payload.%s must be an object", agentoscore.ErrInvalidRunPlan, key)
 	}
 }
 
@@ -338,12 +339,12 @@ func optionalTimePayload(payload map[string]any, key string) (time.Time, error) 
 	case string:
 		parsed, err := time.Parse(time.RFC3339Nano, typed)
 		if err != nil {
-			return time.Time{}, fmt.Errorf("%w: command payload.%s must be RFC3339 time", agentos.ErrInvalidRunPlan, key)
+			return time.Time{}, fmt.Errorf("%w: command payload.%s must be RFC3339 time", agentoscore.ErrInvalidRunPlan, key)
 		}
 
 		return parsed, nil
 	default:
-		return time.Time{}, fmt.Errorf("%w: command payload.%s must be RFC3339 time", agentos.ErrInvalidRunPlan, key)
+		return time.Time{}, fmt.Errorf("%w: command payload.%s must be RFC3339 time", agentoscore.ErrInvalidRunPlan, key)
 	}
 }
 
@@ -355,7 +356,7 @@ func planRefFromCommand(command *agentosplan.PlanCommandRecord) agentos.PlanRef 
 	}
 }
 
-func planControlAuditRecord(ref agentos.PlanRef, control *agentos.ControlRequest) *agentosplan.AuditRecord {
+func planControlAuditRecord(ref agentos.PlanRef, control *agentoscore.ControlRequest) *agentosplan.AuditRecord {
 	payload := map[string]any{
 		planCommandPayloadOperation: control.Operation,
 		planCommandPayloadMetadata:  control.Metadata,

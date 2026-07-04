@@ -4,7 +4,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/TekkenSteve/GoAgent/agentos"
+	agentos "github.com/TekkenSteve/GoAgent/agentos/control"
 )
 
 func TestEvaluateContinuationPolicy(t *testing.T) {

@@ -1,6 +1,7 @@
 // examples/types/main.go
 //
-// Type-only usage: import agentos for the public AgentOS contract.
+// Type-only usage: import agentos/control and agentos/core for the public
+// AgentOS contracts.
 //
 //	go run examples/types/main.go
 package main
@@ -12,7 +13,8 @@ import (
 	"os"
 	"time"
 
-	"github.com/TekkenSteve/GoAgent/agentos"
+	agentos "github.com/TekkenSteve/GoAgent/agentos/control"
+	agentoscore "github.com/TekkenSteve/GoAgent/agentos/core"
 )
 
 func main() {
@@ -34,9 +36,9 @@ func main() {
 
 	writeJSON("RunSpec", spec)
 
-	tool := agentos.ToolDef{
+	tool := agentoscore.ToolDef{
 		Type: "function",
-		Function: agentos.ToolFuncDef{
+		Function: agentoscore.ToolFuncDef{
 			Name:        "lookup_document",
 			Description: "Look up a document by id",
 			Parameters:  json.RawMessage(`{"type":"object","properties":{"id":{"type":"string"}},"required":["id"]}`),

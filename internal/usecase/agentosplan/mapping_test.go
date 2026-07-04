@@ -5,7 +5,8 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/TekkenSteve/GoAgent/agentos"
+	agentos "github.com/TekkenSteve/GoAgent/agentos/control"
+	agentoscore "github.com/TekkenSteve/GoAgent/agentos/core"
 )
 
 func TestResolveRunInputMapsPlanInputsArtifactsAndExpressions(t *testing.T) {
@@ -13,7 +14,7 @@ func TestResolveRunInputMapsPlanInputsArtifactsAndExpressions(t *testing.T) {
 
 	ctx := context.Background()
 	store := NewMemoryArtifactStore()
-	status := mappingTestPlanStatus([]agentos.ArtifactRef{putMappingTestArtifact(ctx, t, store)})
+	status := mappingTestPlanStatus([]agentoscore.ArtifactRef{putMappingTestArtifact(ctx, t, store)})
 
 	compiler, err := NewCELCompiler()
 	if err != nil {
@@ -44,7 +45,7 @@ func TestResolveRunInputFailsWhenRequiredArtifactIsMissing(t *testing.T) {
 	node := mappingTestNode(&mapping)
 
 	_, err := ResolveRunInput(context.Background(), NewMemoryArtifactStore(), nil, &spec, &status, &node, nil)
-	if !errors.Is(err, agentos.ErrArtifactNotFound) {
+	if !errors.Is(err, agentoscore.ErrArtifactNotFound) {
 		t.Fatalf("error = %v, want ErrArtifactNotFound", err)
 	}
 }
@@ -62,7 +63,7 @@ func TestResolveRunInputRejectsArtifactMappingWithoutSourceNode(t *testing.T) {
 	}
 
 	_, err := ResolveRunInput(context.Background(), NewMemoryArtifactStore(), nil, &spec, &status, &node, nil)
-	if !errors.Is(err, agentos.ErrInvalidArtifact) {
+	if !errors.Is(err, agentoscore.ErrInvalidArtifact) {
 		t.Fatalf("error = %v, want ErrInvalidArtifact", err)
 	}
 }
@@ -95,25 +96,25 @@ func TestResolveRunInputFailsWhenArtifactPayloadIsMissing(t *testing.T) {
 	ctx := context.Background()
 	store := NewMemoryArtifactStore()
 
-	ref, err := putArtifact(ctx, store, &agentos.ArtifactRef{
+	ref, err := putArtifact(ctx, store, &agentoscore.ArtifactRef{
 		ArtifactID: "artifact-summary",
 		PlanID:     "plan-1",
 		NodeID:     "research",
 		RunID:      "run-research",
 		Name:       "summary",
-		Kind:       agentos.ArtifactKindObject,
+		Kind:       agentoscore.ArtifactKindObject,
 	}, nil, "plan-1:artifact-summary")
 	if err != nil {
 		t.Fatalf("Put nil artifact: %v", err)
 	}
 
 	spec := mappingTestPlanSpec()
-	status := mappingTestPlanStatus([]agentos.ArtifactRef{ref})
+	status := mappingTestPlanStatus([]agentoscore.ArtifactRef{ref})
 	mapping := agentos.InputMapping{Target: "summary", SourceNodeID: "research", SourceArtifact: "summary", Required: true}
 	node := mappingTestNode(&mapping)
 
 	_, err = ResolveRunInput(ctx, store, nil, &spec, &status, &node, nil)
-	if !errors.Is(err, agentos.ErrArtifactNotFound) {
+	if !errors.Is(err, agentoscore.ErrArtifactNotFound) {
 		t.Fatalf("error = %v, want ErrArtifactNotFound", err)
 	}
 }
@@ -122,14 +123,14 @@ func TestResolveRunInputRejectsArtifactRefFromDifferentPlan(t *testing.T) {
 	t.Parallel()
 
 	spec := mappingTestPlanSpec()
-	status := mappingTestPlanStatus([]agentos.ArtifactRef{
-		{ArtifactID: "artifact-summary", PlanID: "other-plan", NodeID: "research", Name: "summary", Kind: agentos.ArtifactKindObject},
+	status := mappingTestPlanStatus([]agentoscore.ArtifactRef{
+		{ArtifactID: "artifact-summary", PlanID: "other-plan", NodeID: "research", Name: "summary", Kind: agentoscore.ArtifactKindObject},
 	})
 	mapping := agentos.InputMapping{Target: "summary", SourceNodeID: "research", SourceArtifact: "summary", Required: true}
 	node := mappingTestNode(&mapping)
 
 	_, err := ResolveRunInput(context.Background(), NewMemoryArtifactStore(), nil, &spec, &status, &node, nil)
-	if !errors.Is(err, agentos.ErrInvalidArtifact) {
+	if !errors.Is(err, agentoscore.ErrInvalidArtifact) {
 		t.Fatalf("error = %v, want ErrInvalidArtifact", err)
 	}
 }
@@ -138,14 +139,14 @@ func TestResolveRunInputRejectsArtifactRefWithoutID(t *testing.T) {
 	t.Parallel()
 
 	spec := mappingTestPlanSpec()
-	status := mappingTestPlanStatus([]agentos.ArtifactRef{
-		{PlanID: "plan-1", NodeID: "research", Name: "summary", Kind: agentos.ArtifactKindObject},
+	status := mappingTestPlanStatus([]agentoscore.ArtifactRef{
+		{PlanID: "plan-1", NodeID: "research", Name: "summary", Kind: agentoscore.ArtifactKindObject},
 	})
 	mapping := agentos.InputMapping{Target: "summary", SourceNodeID: "research", SourceArtifact: "summary", Required: true}
 	node := mappingTestNode(&mapping)
 
 	_, err := ResolveRunInput(context.Background(), NewMemoryArtifactStore(), nil, &spec, &status, &node, nil)
-	if !errors.Is(err, agentos.ErrInvalidArtifact) {
+	if !errors.Is(err, agentoscore.ErrInvalidArtifact) {
 		t.Fatalf("error = %v, want ErrInvalidArtifact", err)
 	}
 }
@@ -154,20 +155,20 @@ func mappingTestPlanSpec() agentos.RunPlanSpec {
 	return agentos.RunPlanSpec{PlanID: "plan-1", AccountID: "acct-1", ProjectID: "proj-1"}
 }
 
-func mappingTestPlanStatus(artifacts []agentos.ArtifactRef) agentos.RunPlanStatus {
+func mappingTestPlanStatus(artifacts []agentoscore.ArtifactRef) agentos.RunPlanStatus {
 	return agentos.RunPlanStatus{PlanID: "plan-1", Artifacts: artifacts}
 }
 
-func putMappingTestArtifact(ctx context.Context, t *testing.T, store *MemoryArtifactStore) agentos.ArtifactRef {
+func putMappingTestArtifact(ctx context.Context, t *testing.T, store *MemoryArtifactStore) agentoscore.ArtifactRef {
 	t.Helper()
 
-	ref, err := putArtifact(ctx, store, &agentos.ArtifactRef{
+	ref, err := putArtifact(ctx, store, &agentoscore.ArtifactRef{
 		ArtifactID: "artifact-summary",
 		PlanID:     "plan-1",
 		NodeID:     "research",
 		RunID:      "run-research",
 		Name:       "summary",
-		Kind:       agentos.ArtifactKindObject,
+		Kind:       agentoscore.ArtifactKindObject,
 	}, map[string]any{
 		"body": map[string]any{
 			"title": "Durable agents",

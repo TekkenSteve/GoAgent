@@ -6,7 +6,8 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/TekkenSteve/GoAgent/agentos"
+	agentos "github.com/TekkenSteve/GoAgent/agentos/control"
+	agentoscore "github.com/TekkenSteve/GoAgent/agentos/core"
 	agentosruntime "github.com/TekkenSteve/GoAgent/internal/usecase/agentosruntime"
 	"go.temporal.io/sdk/client"
 	"go.temporal.io/sdk/converter"
@@ -71,17 +72,17 @@ func NewBackend(temporalClient TemporalClient, subscriber agentosruntime.EventSu
 // Start starts an external Temporal workflow.
 func (b *Backend) Start(ctx context.Context, spec *agentos.RunSpec) (agentos.RunStatus, error) {
 	if spec == nil {
-		return agentos.RunStatus{}, fmt.Errorf("%w: run spec is required", agentos.ErrInvalidRunSpec)
+		return agentos.RunStatus{}, fmt.Errorf("%w: run spec is required", agentoscore.ErrInvalidRunSpec)
 	}
 
 	if spec.RunID == "" {
-		return agentos.RunStatus{}, fmt.Errorf("%w: run id is required", agentos.ErrInvalidRunSpec)
+		return agentos.RunStatus{}, fmt.Errorf("%w: run id is required", agentoscore.ErrInvalidRunSpec)
 	}
 
 	if spec.Backend != b.config.Ref() {
 		return agentos.RunStatus{}, fmt.Errorf(
 			"%w: run backend %s/%s does not match temporal external backend %s/%s",
-			agentos.ErrInvalidBackendRef,
+			agentoscore.ErrInvalidBackendRef,
 			spec.Backend.Kind,
 			spec.Backend.Name,
 			b.config.Ref().Kind,
@@ -108,17 +109,17 @@ func (b *Backend) Start(ctx context.Context, spec *agentos.RunSpec) (agentos.Run
 }
 
 // Signal translates an AgentOS signal into a Temporal workflow signal.
-func (b *Backend) Signal(ctx context.Context, runID string, signal *agentos.Signal) error {
+func (b *Backend) Signal(ctx context.Context, runID string, signal *agentoscore.Signal) error {
 	if runID == "" {
-		return fmt.Errorf("%w: run id is required", agentos.ErrInvalidRunSpec)
+		return fmt.Errorf("%w: run id is required", agentoscore.ErrInvalidRunSpec)
 	}
 
 	if signal == nil {
-		return fmt.Errorf("%w: signal is required", agentos.ErrInvalidSignal)
+		return fmt.Errorf("%w: signal is required", agentoscore.ErrInvalidSignal)
 	}
 
 	if signal.Type == "" {
-		return fmt.Errorf("%w: type is required", agentos.ErrInvalidSignal)
+		return fmt.Errorf("%w: type is required", agentoscore.ErrInvalidSignal)
 	}
 
 	signalName, err := b.signalName(signal.Type)
@@ -134,20 +135,20 @@ func (b *Backend) Signal(ctx context.Context, runID string, signal *agentos.Sign
 }
 
 // Control translates lifecycle operations to external workflow signal/cancel operations.
-func (b *Backend) Control(ctx context.Context, runID string, control *agentos.ControlRequest) error {
-	if err := agentos.ValidateControlRequest(control); err != nil {
+func (b *Backend) Control(ctx context.Context, runID string, control *agentoscore.ControlRequest) error {
+	if err := agentoscore.ValidateControlRequest(control); err != nil {
 		return err
 	}
 
 	switch control.Operation {
-	case agentos.ControlPause:
-		return b.controlBySignal(ctx, runID, agentos.SignalControlPause, control)
-	case agentos.ControlResume:
-		return b.controlBySignal(ctx, runID, agentos.SignalControlResume, control)
-	case agentos.ControlCancel:
-		return b.controlBySignal(ctx, runID, agentos.SignalControlCancel, control)
+	case agentoscore.ControlPause:
+		return b.controlBySignal(ctx, runID, agentoscore.SignalControlPause, control)
+	case agentoscore.ControlResume:
+		return b.controlBySignal(ctx, runID, agentoscore.SignalControlResume, control)
+	case agentoscore.ControlCancel:
+		return b.controlBySignal(ctx, runID, agentoscore.SignalControlCancel, control)
 	default:
-		return fmt.Errorf("%w: %s", agentos.ErrInvalidControlOperation, control.Operation)
+		return fmt.Errorf("%w: %s", agentoscore.ErrInvalidControlOperation, control.Operation)
 	}
 }
 
@@ -157,7 +158,7 @@ func (b *Backend) Status(ctx context.Context, runID string) (agentos.RunStatus, 
 }
 
 // Subscribe returns the shared AgentOS event stream for the run.
-func (b *Backend) Subscribe(ctx context.Context, scope agentos.StreamScope) (agentos.Subscription, error) {
+func (b *Backend) Subscribe(ctx context.Context, scope agentoscore.StreamScope) (agentoscore.Subscription, error) {
 	if b.subscriber == nil {
 		return nil, errTemporalExternalNoSubscriber
 	}
@@ -169,7 +170,7 @@ func (b *Backend) Subscribe(ctx context.Context, scope agentos.StreamScope) (age
 func (b *Backend) Capabilities() agentosruntime.BackendCapabilities {
 	return agentosruntime.BackendCapabilities{
 		SupportsSignal:            true,
-		SupportsSignalUserMessage: b.config.Signals.Defaults[agentos.SignalUserMessage] != "",
+		SupportsSignalUserMessage: b.config.Signals.Defaults[agentoscore.SignalUserMessage] != "",
 		SupportsPause:             b.config.Signals.Pause != "",
 		SupportsResume:            b.config.Signals.Resume != "",
 		SupportsCancel:            b.config.Signals.Cancel != "",
@@ -177,12 +178,12 @@ func (b *Backend) Capabilities() agentosruntime.BackendCapabilities {
 	}
 }
 
-func (b *Backend) controlBySignal(ctx context.Context, runID string, signalType agentos.SignalType, control *agentos.ControlRequest) error {
+func (b *Backend) controlBySignal(ctx context.Context, runID string, signalType agentoscore.SignalType, control *agentoscore.ControlRequest) error {
 	if _, err := b.signalName(signalType); err != nil {
-		return fmt.Errorf("%w: control %s is not mapped for backend %s", agentos.ErrInvalidControlOperation, signalType, b.config.Name)
+		return fmt.Errorf("%w: control %s is not mapped for backend %s", agentoscore.ErrInvalidControlOperation, signalType, b.config.Name)
 	}
 
-	signal := agentos.Signal{
+	signal := agentoscore.Signal{
 		Type:           signalType,
 		IdempotencyKey: control.IdempotencyKey,
 		SentAt:         control.RequestedAt,
@@ -191,24 +192,24 @@ func (b *Backend) controlBySignal(ctx context.Context, runID string, signalType 
 	return b.Signal(ctx, runID, &signal)
 }
 
-func (b *Backend) signalName(signalType agentos.SignalType) (string, error) {
+func (b *Backend) signalName(signalType agentoscore.SignalType) (string, error) {
 	switch signalType {
-	case agentos.SignalControlPause:
+	case agentoscore.SignalControlPause:
 		if b.config.Signals.Pause != "" {
 			return b.config.Signals.Pause, nil
 		}
-	case agentos.SignalControlResume:
+	case agentoscore.SignalControlResume:
 		if b.config.Signals.Resume != "" {
 			return b.config.Signals.Resume, nil
 		}
-	case agentos.SignalControlCancel:
+	case agentoscore.SignalControlCancel:
 		if b.config.Signals.Cancel != "" {
 			return b.config.Signals.Cancel, nil
 		}
-	case agentos.SignalPlanNodeRetry, agentos.SignalPlanApprove, agentos.SignalPlanReject,
-		agentos.SignalUserMessage, agentos.SignalUserApproval, agentos.SignalUserReject,
-		agentos.SignalToolResult, agentos.SignalHumanFeedback, agentos.SignalConfigPatch,
-		agentos.SignalMemoryPatch:
+	case agentoscore.SignalPlanNodeRetry, agentoscore.SignalPlanApprove, agentoscore.SignalPlanReject,
+		agentoscore.SignalUserMessage, agentoscore.SignalUserApproval, agentoscore.SignalUserReject,
+		agentoscore.SignalToolResult, agentoscore.SignalHumanFeedback, agentoscore.SignalConfigPatch,
+		agentoscore.SignalMemoryPatch:
 	}
 
 	if b.config.Signals.Defaults != nil {
@@ -217,7 +218,7 @@ func (b *Backend) signalName(signalType agentos.SignalType) (string, error) {
 		}
 	}
 
-	return "", fmt.Errorf("%w: signal %s is not mapped for backend %s", agentos.ErrInvalidSignal, signalType, b.config.Name)
+	return "", fmt.Errorf("%w: signal %s is not mapped for backend %s", agentoscore.ErrInvalidSignal, signalType, b.config.Name)
 }
 
 func (b *Backend) queryStatus(ctx context.Context, runID string) (agentos.RunStatus, error) {

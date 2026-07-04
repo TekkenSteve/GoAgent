@@ -3,7 +3,8 @@ package temporalexternal
 import (
 	"time"
 
-	"github.com/TekkenSteve/GoAgent/agentos"
+	agentos "github.com/TekkenSteve/GoAgent/agentos/control"
+	agentoscore "github.com/TekkenSteve/GoAgent/agentos/core"
 )
 
 // StartInput is the stable cross-language workflow input sent to external Temporal backends.
@@ -25,10 +26,10 @@ type StartInput struct {
 
 // SignalInput is the stable signal payload sent to external Temporal backends.
 type SignalInput struct {
-	Type           agentos.SignalType `json:"type"`
-	IdempotencyKey string             `json:"idempotency_key,omitempty"`
-	Payload        map[string]any     `json:"payload,omitempty"`
-	SentAt         time.Time          `json:"sent_at"`
+	Type           agentoscore.SignalType `json:"type"`
+	IdempotencyKey string                 `json:"idempotency_key,omitempty"`
+	Payload        map[string]any         `json:"payload,omitempty"`
+	SentAt         time.Time              `json:"sent_at"`
 }
 
 func startInputFromSpec(spec *agentos.RunSpec) StartInput {
@@ -54,7 +55,7 @@ func startInputFromSpec(spec *agentos.RunSpec) StartInput {
 	}
 }
 
-func signalInputFromSignal(signal *agentos.Signal) SignalInput {
+func signalInputFromSignal(signal *agentoscore.Signal) SignalInput {
 	sentAt := signal.SentAt
 	if sentAt.IsZero() {
 		sentAt = time.Now().UTC()

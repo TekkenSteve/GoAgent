@@ -6,7 +6,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/TekkenSteve/GoAgent/agentos"
+	agentos "github.com/TekkenSteve/GoAgent/agentos/control"
+	agentoscore "github.com/TekkenSteve/GoAgent/agentos/core"
 )
 
 // MemoryArtifactStore stores artifacts in-process. Production runtimes should
@@ -25,7 +26,7 @@ type artifactIdempotencyKey struct {
 }
 
 type storedArtifact struct {
-	ref     agentos.ArtifactRef
+	ref     agentoscore.ArtifactRef
 	payload any
 }
 
@@ -40,10 +41,10 @@ func NewMemoryArtifactStore() *MemoryArtifactStore {
 }
 
 // Put stores one artifact payload.
-func (s *MemoryArtifactStore) Put(_ context.Context, artifact *agentos.ArtifactRef, payload any, idempotencyKey string) (agentos.ArtifactRef, error) {
+func (s *MemoryArtifactStore) Put(_ context.Context, artifact *agentoscore.ArtifactRef, payload any, idempotencyKey string) (agentoscore.ArtifactRef, error) {
 	ref, err := s.prepareArtifactRef(artifact, payload, idempotencyKey)
 	if err != nil {
-		return agentos.ArtifactRef{}, err
+		return agentoscore.ArtifactRef{}, err
 	}
 
 	s.mu.Lock()
@@ -56,14 +57,14 @@ func (s *MemoryArtifactStore) Put(_ context.Context, artifact *agentos.ArtifactR
 	return s.storeNewArtifact(&ref, payload, idempotencyKey)
 }
 
-func (s *MemoryArtifactStore) prepareArtifactRef(artifact *agentos.ArtifactRef, payload any, idempotencyKey string) (agentos.ArtifactRef, error) {
+func (s *MemoryArtifactStore) prepareArtifactRef(artifact *agentoscore.ArtifactRef, payload any, idempotencyKey string) (agentoscore.ArtifactRef, error) {
 	if err := validateArtifactPutInput(artifact, idempotencyKey); err != nil {
-		return agentos.ArtifactRef{}, err
+		return agentoscore.ArtifactRef{}, err
 	}
 
 	ref, err := artifactRefWithPayloadMetadata(artifact, payload)
 	if err != nil {
-		return agentos.ArtifactRef{}, err
+		return agentoscore.ArtifactRef{}, err
 	}
 
 	if ref.ArtifactID == "" {
@@ -77,27 +78,27 @@ func (s *MemoryArtifactStore) prepareArtifactRef(artifact *agentos.ArtifactRef, 
 	return ref, nil
 }
 
-func validateArtifactPutInput(artifact *agentos.ArtifactRef, idempotencyKey string) error {
+func validateArtifactPutInput(artifact *agentoscore.ArtifactRef, idempotencyKey string) error {
 	if idempotencyKey == "" {
-		return fmt.Errorf("%w: artifact idempotency key is required", agentos.ErrInvalidArtifact)
+		return fmt.Errorf("%w: artifact idempotency key is required", agentoscore.ErrInvalidArtifact)
 	}
 
 	if artifact.PlanID == "" {
-		return fmt.Errorf("%w: plan id is required", agentos.ErrInvalidArtifact)
+		return fmt.Errorf("%w: plan id is required", agentoscore.ErrInvalidArtifact)
 	}
 
 	if artifact.Name == "" {
-		return fmt.Errorf("%w: artifact name is required", agentos.ErrInvalidArtifact)
+		return fmt.Errorf("%w: artifact name is required", agentoscore.ErrInvalidArtifact)
 	}
 
 	if artifact.Kind == "" {
-		return fmt.Errorf("%w: artifact kind is required", agentos.ErrInvalidArtifact)
+		return fmt.Errorf("%w: artifact kind is required", agentoscore.ErrInvalidArtifact)
 	}
 
 	return nil
 }
 
-func artifactRefWithPayloadMetadata(artifact *agentos.ArtifactRef, payload any) (agentos.ArtifactRef, error) {
+func artifactRefWithPayloadMetadata(artifact *agentoscore.ArtifactRef, payload any) (agentoscore.ArtifactRef, error) {
 	ref := *artifact
 	if payload == nil {
 		return ref, nil
@@ -105,7 +106,7 @@ func artifactRefWithPayloadMetadata(artifact *agentos.ArtifactRef, payload any) 
 
 	encodedPayload, mediaType, err := EncodeArtifactPayload(payload, ref.MediaType)
 	if err != nil {
-		return agentos.ArtifactRef{}, err
+		return agentoscore.ArtifactRef{}, err
 	}
 
 	ref.MediaType = mediaType
@@ -115,31 +116,31 @@ func artifactRefWithPayloadMetadata(artifact *agentos.ArtifactRef, payload any) 
 	return ref, nil
 }
 
-func (s *MemoryArtifactStore) replayedArtifact(artifact *agentos.ArtifactRef, idempotencyKey string) (agentos.ArtifactRef, bool, error) {
+func (s *MemoryArtifactStore) replayedArtifact(artifact *agentoscore.ArtifactRef, idempotencyKey string) (agentoscore.ArtifactRef, bool, error) {
 	key := artifactIdempotencyKey{PlanID: artifact.PlanID, IdempotencyKey: idempotencyKey}
 
 	artifactID, exists := s.byKey[key]
 	if !exists {
-		return agentos.ArtifactRef{}, false, nil
+		return agentoscore.ArtifactRef{}, false, nil
 	}
 
 	existing := s.artifacts[artifactID]
 	if err := ValidateArtifactPublishIdempotency(&existing.ref, artifact); err != nil {
-		return agentos.ArtifactRef{}, true, err
+		return agentoscore.ArtifactRef{}, true, err
 	}
 
 	return existing.ref, true, nil
 }
 
-func (s *MemoryArtifactStore) storeNewArtifact(artifact *agentos.ArtifactRef, payload any, idempotencyKey string) (agentos.ArtifactRef, error) {
+func (s *MemoryArtifactStore) storeNewArtifact(artifact *agentoscore.ArtifactRef, payload any, idempotencyKey string) (agentoscore.ArtifactRef, error) {
 	if payload == nil {
 		if err := ValidateNewRefOnlyArtifactPublish(artifact); err != nil {
-			return agentos.ArtifactRef{}, err
+			return agentoscore.ArtifactRef{}, err
 		}
 	}
 
 	if _, exists := s.artifacts[artifact.ArtifactID]; exists {
-		return agentos.ArtifactRef{}, fmt.Errorf("%w: artifact id %q already exists with a different idempotency key", agentos.ErrInvalidArtifact, artifact.ArtifactID)
+		return agentoscore.ArtifactRef{}, fmt.Errorf("%w: artifact id %q already exists with a different idempotency key", agentoscore.ErrInvalidArtifact, artifact.ArtifactID)
 	}
 
 	s.artifacts[artifact.ArtifactID] = storedArtifact{ref: *artifact, payload: payload}
@@ -150,13 +151,13 @@ func (s *MemoryArtifactStore) storeNewArtifact(artifact *agentos.ArtifactRef, pa
 }
 
 // Get retrieves one artifact inside a plan scope.
-func (s *MemoryArtifactStore) Get(_ context.Context, scope *agentos.PlanArtifactScope) (agentos.ArtifactRef, any, error) {
+func (s *MemoryArtifactStore) Get(_ context.Context, scope *agentos.PlanArtifactScope) (agentoscore.ArtifactRef, any, error) {
 	if err := ValidatePlanArtifactScope(scope); err != nil {
-		return agentos.ArtifactRef{}, nil, err
+		return agentoscore.ArtifactRef{}, nil, err
 	}
 
 	if scope.ArtifactID == "" {
-		return agentos.ArtifactRef{}, nil, fmt.Errorf("%w: artifact id is required", agentos.ErrInvalidArtifact)
+		return agentoscore.ArtifactRef{}, nil, fmt.Errorf("%w: artifact id is required", agentoscore.ErrInvalidArtifact)
 	}
 
 	s.mu.RLock()
@@ -164,14 +165,14 @@ func (s *MemoryArtifactStore) Get(_ context.Context, scope *agentos.PlanArtifact
 
 	artifact, ok := s.artifacts[scope.ArtifactID]
 	if !ok || !artifactRefMatchesScope(&artifact.ref, scope) {
-		return agentos.ArtifactRef{}, nil, fmt.Errorf("%w: %s", agentos.ErrArtifactNotFound, scope.ArtifactID)
+		return agentoscore.ArtifactRef{}, nil, fmt.Errorf("%w: %s", agentoscore.ErrArtifactNotFound, scope.ArtifactID)
 	}
 
 	return artifact.ref, artifact.payload, nil
 }
 
 // List returns artifacts associated with a plan scope.
-func (s *MemoryArtifactStore) List(_ context.Context, scope *agentos.PlanArtifactScope) ([]agentos.ArtifactRef, error) {
+func (s *MemoryArtifactStore) List(_ context.Context, scope *agentos.PlanArtifactScope) ([]agentoscore.ArtifactRef, error) {
 	if err := ValidatePlanArtifactScope(scope); err != nil {
 		return nil, err
 	}
@@ -181,7 +182,7 @@ func (s *MemoryArtifactStore) List(_ context.Context, scope *agentos.PlanArtifac
 
 	ids := s.byPlan[scope.PlanID]
 
-	refs := make([]agentos.ArtifactRef, 0, len(ids))
+	refs := make([]agentoscore.ArtifactRef, 0, len(ids))
 	for _, id := range ids {
 		if artifact, ok := s.artifacts[id]; ok && artifactRefMatchesScope(&artifact.ref, scope) {
 			refs = append(refs, artifact.ref)
@@ -194,7 +195,7 @@ func (s *MemoryArtifactStore) List(_ context.Context, scope *agentos.PlanArtifac
 	return refs, nil
 }
 
-func artifactRefMatchesScope(ref *agentos.ArtifactRef, scope *agentos.PlanArtifactScope) bool {
+func artifactRefMatchesScope(ref *agentoscore.ArtifactRef, scope *agentos.PlanArtifactScope) bool {
 	if ref.PlanID != scope.PlanID {
 		return false
 	}
@@ -218,9 +219,9 @@ func artifactRefMatchesScope(ref *agentos.ArtifactRef, scope *agentos.PlanArtifa
 // publishes that attempt to claim blob metadata without writing payload through
 // the ArtifactStore. Idempotent replays of an existing artifact are validated
 // against the stored ref before this check is needed.
-func ValidateNewRefOnlyArtifactPublish(ref *agentos.ArtifactRef) error {
+func ValidateNewRefOnlyArtifactPublish(ref *agentoscore.ArtifactRef) error {
 	if ref.URI != "" || ref.SizeBytes != 0 || ref.Digest != "" {
-		return fmt.Errorf("%w: artifact payload metadata requires a stored payload", agentos.ErrInvalidArtifact)
+		return fmt.Errorf("%w: artifact payload metadata requires a stored payload", agentoscore.ErrInvalidArtifact)
 	}
 
 	return nil

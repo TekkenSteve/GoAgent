@@ -7,7 +7,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/TekkenSteve/GoAgent/agentos"
+	agentos "github.com/TekkenSteve/GoAgent/agentos/control"
+	agentoscore "github.com/TekkenSteve/GoAgent/agentos/core"
 	agentosruntimetest "github.com/TekkenSteve/GoAgent/internal/usecase/agentosruntime/agentosruntimetest"
 	"google.golang.org/grpc"
 )
@@ -45,8 +46,8 @@ func TestBackendConformance(t *testing.T) {
 
 	if server.service.start.RunID != Run1 ||
 		server.service.signal.RunID != Run1 ||
-		server.service.signal.Type != agentos.SignalUserMessage ||
-		server.service.control.Operation != agentos.ControlCancel ||
+		server.service.signal.Type != agentoscore.SignalUserMessage ||
+		server.service.control.Operation != agentoscore.ControlCancel ||
 		server.service.status.RunID != Run1 {
 		t.Fatalf("unexpected grpc calls: %#v", server.service)
 	}
@@ -67,7 +68,7 @@ func TestBackendRejectsNilConfig(t *testing.T) {
 	t.Parallel()
 
 	_, err := NewBackend(nil, nil)
-	if !errors.Is(err, agentos.ErrInvalidBackendRef) {
+	if !errors.Is(err, agentoscore.ErrInvalidBackendRef) {
 		t.Fatalf("NewBackend nil config error = %v, want ErrInvalidBackendRef", err)
 	}
 }
@@ -77,11 +78,11 @@ func TestBackendRejectsNilRunInputs(t *testing.T) {
 
 	backend := &Backend{config: Config{Name: "grpc-test"}}
 
-	if _, err := backend.Start(context.Background(), nil); !errors.Is(err, agentos.ErrInvalidRunSpec) {
+	if _, err := backend.Start(context.Background(), nil); !errors.Is(err, agentoscore.ErrInvalidRunSpec) {
 		t.Fatalf("Start nil error = %v, want ErrInvalidRunSpec", err)
 	}
 
-	if err := backend.Signal(context.Background(), Run1, nil); !errors.Is(err, agentos.ErrInvalidSignal) {
+	if err := backend.Signal(context.Background(), Run1, nil); !errors.Is(err, agentoscore.ErrInvalidSignal) {
 		t.Fatalf("Signal nil error = %v, want ErrInvalidSignal", err)
 	}
 }

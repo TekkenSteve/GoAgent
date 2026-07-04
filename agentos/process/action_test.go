@@ -1,9 +1,11 @@
-package agentos
+package process
 
 import (
 	"errors"
 	"testing"
 	"time"
+
+	"github.com/TekkenSteve/GoAgent/agentos/core"
 )
 
 func TestValidateGovernedActionSpecAcceptsGenericAction(t *testing.T) {
@@ -36,8 +38,8 @@ func TestValidateGovernedActionSpecRequiresActionIdentity(t *testing.T) {
 			tt.edit(&spec)
 
 			err := ValidateGovernedActionSpec(&spec)
-			if !errors.Is(err, ErrInvalidGovernedAction) {
-				t.Fatalf("ValidateGovernedActionSpec error = %v, want ErrInvalidGovernedAction", err)
+			if !errors.Is(err, core.ErrInvalidGovernedAction) {
+				t.Fatalf("ValidateGovernedActionSpec error = %v, want core.ErrInvalidGovernedAction", err)
 			}
 		})
 	}
@@ -50,16 +52,16 @@ func TestValidateGovernedActionSpecRequiresTenantAndProcessOrResourceScope(t *te
 	account.AccountID = ""
 
 	accountErr := ValidateGovernedActionSpec(&account)
-	if !errors.Is(accountErr, ErrInvalidGovernedAction) {
-		t.Fatalf("account scope error = %v, want ErrInvalidGovernedAction", accountErr)
+	if !errors.Is(accountErr, core.ErrInvalidGovernedAction) {
+		t.Fatalf("account scope error = %v, want core.ErrInvalidGovernedAction", accountErr)
 	}
 
 	project := validGovernedActionSpec()
 	project.ProjectID = ""
 
 	projectErr := ValidateGovernedActionSpec(&project)
-	if !errors.Is(projectErr, ErrInvalidGovernedAction) {
-		t.Fatalf("project scope error = %v, want ErrInvalidGovernedAction", projectErr)
+	if !errors.Is(projectErr, core.ErrInvalidGovernedAction) {
+		t.Fatalf("project scope error = %v, want core.ErrInvalidGovernedAction", projectErr)
 	}
 
 	scope := validGovernedActionSpec()
@@ -67,8 +69,8 @@ func TestValidateGovernedActionSpecRequiresTenantAndProcessOrResourceScope(t *te
 	scope.Resource = ResourceRef{}
 
 	scopeErr := ValidateGovernedActionSpec(&scope)
-	if !errors.Is(scopeErr, ErrInvalidGovernedAction) {
-		t.Fatalf("process/resource scope error = %v, want ErrInvalidGovernedAction", scopeErr)
+	if !errors.Is(scopeErr, core.ErrInvalidGovernedAction) {
+		t.Fatalf("process/resource scope error = %v, want core.ErrInvalidGovernedAction", scopeErr)
 	}
 }
 
@@ -79,8 +81,8 @@ func TestValidateGovernedActionSpecRejectsCrossTenantResource(t *testing.T) {
 	spec.Resource.AccountID = "acct-other"
 
 	err := ValidateGovernedActionSpec(&spec)
-	if !errors.Is(err, ErrInvalidGovernedAction) {
-		t.Fatalf("ValidateGovernedActionSpec error = %v, want ErrInvalidGovernedAction", err)
+	if !errors.Is(err, core.ErrInvalidGovernedAction) {
+		t.Fatalf("ValidateGovernedActionSpec error = %v, want core.ErrInvalidGovernedAction", err)
 	}
 }
 
@@ -110,8 +112,8 @@ func TestValidateGovernedActionSpecRejectsInvalidRefs(t *testing.T) {
 			tt.edit(&spec)
 
 			err := ValidateGovernedActionSpec(&spec)
-			if !errors.Is(err, ErrInvalidGovernedAction) {
-				t.Fatalf("ValidateGovernedActionSpec error = %v, want ErrInvalidGovernedAction", err)
+			if !errors.Is(err, core.ErrInvalidGovernedAction) {
+				t.Fatalf("ValidateGovernedActionSpec error = %v, want core.ErrInvalidGovernedAction", err)
 			}
 		})
 	}
@@ -121,8 +123,8 @@ func TestValidateActionScopeRequiresTenantScope(t *testing.T) {
 	t.Parallel()
 
 	err := ValidateActionScope(&ActionScope{AccountID: "acct-1", Limit: -1})
-	if !errors.Is(err, ErrInvalidGovernedActionScope) {
-		t.Fatalf("ValidateActionScope error = %v, want ErrInvalidGovernedActionScope", err)
+	if !errors.Is(err, core.ErrInvalidGovernedActionScope) {
+		t.Fatalf("ValidateActionScope error = %v, want core.ErrInvalidGovernedActionScope", err)
 	}
 
 	scope := ActionScope{
@@ -137,8 +139,8 @@ func TestValidateActionScopeRequiresTenantScope(t *testing.T) {
 	}
 
 	err = ValidateActionScope(&scope)
-	if !errors.Is(err, ErrInvalidGovernedActionScope) {
-		t.Fatalf("ValidateActionScope resource error = %v, want ErrInvalidGovernedActionScope", err)
+	if !errors.Is(err, core.ErrInvalidGovernedActionScope) {
+		t.Fatalf("ValidateActionScope resource error = %v, want core.ErrInvalidGovernedActionScope", err)
 	}
 }
 
