@@ -62,6 +62,19 @@ func TestAgentOSProcessPostgresDurablePersistence(t *testing.T) {
 		t.Fatalf("replayed status = %#v, want first idempotent status", replayedStatus)
 	}
 
+	processes, err := repo.ListProcesses(ctx, &agentos.Scope{
+		AccountID:      spec.AccountID,
+		ProjectID:      spec.ProjectID,
+		Resource:       spec.Resource,
+		LifecycleState: agentos.ProcessWaiting,
+	})
+	if err != nil {
+		t.Fatalf("ListProcesses: %v", err)
+	}
+	if len(processes) != 1 || processes[0].ProcessID != spec.ProcessID {
+		t.Fatalf("processes = %#v, want updated process", processes)
+	}
+
 	event := postgresIntegrationProcessEvent(&spec, agentoscore.EventProcessWaiting)
 	firstEvent, err := repo.AppendProcessEvent(ctx, &event, "event-"+suffix)
 	if err != nil {

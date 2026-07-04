@@ -144,6 +144,14 @@ func (r *processRuntime) DescribeProcess(ctx context.Context, ref agentosproc.Re
 	return r.processRuntime.DescribeProcess(ctx, ref)
 }
 
+func (r *processRuntime) ListProcesses(ctx context.Context, scope *agentosproc.Scope) ([]agentosproc.Status, error) {
+	if r == nil || r.processRuntime == nil {
+		return nil, errProcessRuntimeNotConfigured
+	}
+
+	return r.processRuntime.ListProcesses(ctx, scope)
+}
+
 func (r *processRuntime) SignalProcess(ctx context.Context, ref agentosproc.Ref, signal *agentoscore.Signal) error {
 	if r == nil || r.processRuntime == nil {
 		return errProcessRuntimeNotConfigured

@@ -94,6 +94,11 @@ func (r *Runtime) DescribeProcess(ctx context.Context, ref agentos.Ref) (agentos
 	}, nil
 }
 
+// ListProcesses returns durable process projections from the process index.
+func (r *Runtime) ListProcesses(ctx context.Context, scope *agentos.Scope) ([]agentos.Status, error) {
+	return r.index.ListProcesses(ctx, scope)
+}
+
 // SignalProcess records external input for a durable process.
 func (r *Runtime) SignalProcess(ctx context.Context, ref agentos.Ref, signal *agentoscore.Signal) error {
 	spec, status, err := r.requireProcess(ctx, ref)

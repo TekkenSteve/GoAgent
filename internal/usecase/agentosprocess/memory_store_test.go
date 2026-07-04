@@ -9,6 +9,8 @@ import (
 	agentos "github.com/TekkenSteve/GoAgent/agentos/process"
 )
 
+const changedProcessID = "process-2"
+
 func TestMemoryStoreCreateProcessIsIdempotent(t *testing.T) {
 	t.Parallel()
 
@@ -46,7 +48,7 @@ func TestMemoryStoreRejectsProcessStartKeyReuseWithDifferentRequest(t *testing.T
 	spec := createSampleProcess(t, store)
 
 	changed := spec
-	changed.ProcessID = "process-2"
+	changed.ProcessID = changedProcessID
 	status := sampleProcessStatus(&changed)
 
 	_, _, err := store.CreateProcess(t.Context(), &changed, &status)
@@ -147,6 +149,39 @@ func TestMemoryStoreListProcessEventsFiltersAndLimits(t *testing.T) {
 
 	if len(got) != 1 || got[0].Sequence != 2 {
 		t.Fatalf("events = %#v, want one event at sequence 2", got)
+	}
+}
+
+func TestMemoryStoreListProcessesFiltersByResource(t *testing.T) {
+	t.Parallel()
+
+	store := NewMemoryStore()
+	first := sampleProcessSpec()
+	second := sampleProcessSpec()
+	second.ProcessID = changedProcessID
+	second.IdempotencyKey = "process-key-2"
+	second.Resource.ResourceID = "resource-2"
+	second.RequestedAt = first.RequestedAt.Add(time.Minute)
+
+	if _, _, err := store.CreateProcess(t.Context(), &first, &agentos.Status{LifecycleState: agentos.ProcessRunning}); err != nil {
+		t.Fatalf("CreateProcess first: %v", err)
+	}
+
+	if _, _, err := store.CreateProcess(t.Context(), &second, &agentos.Status{LifecycleState: agentos.ProcessRunning}); err != nil {
+		t.Fatalf("CreateProcess second: %v", err)
+	}
+
+	statuses, err := store.ListProcesses(t.Context(), &agentos.Scope{
+		AccountID: first.AccountID,
+		ProjectID: first.ProjectID,
+		Resource:  first.Resource,
+	})
+	if err != nil {
+		t.Fatalf("ListProcesses: %v", err)
+	}
+
+	if len(statuses) != 1 || statuses[0].ProcessID != first.ProcessID {
+		t.Fatalf("statuses = %#v, want first process only", statuses)
 	}
 }
 

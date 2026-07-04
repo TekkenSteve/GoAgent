@@ -12,6 +12,7 @@ type Runtime interface {
 	StartProcess(ctx context.Context, spec *Spec) (Status, error)
 	StatusProcess(ctx context.Context, ref Ref) (Status, error)
 	DescribeProcess(ctx context.Context, ref Ref) (Description, error)
+	ListProcesses(ctx context.Context, scope *Scope) ([]Status, error)
 	SignalProcess(ctx context.Context, ref Ref, signal *core.Signal) error
 	ControlProcess(ctx context.Context, ref Ref, control *core.ControlRequest) error
 	SubscribeProcess(ctx context.Context, scope *StreamScope) (core.Subscription, error)
@@ -45,4 +46,12 @@ type BatchRuntime interface {
 	ListWorksets(ctx context.Context, scope *WorksetScope) ([]WorksetStatus, error)
 	RecordWorksetChunk(ctx context.Context, ref WorksetRef, result *WorksetChunkResult) (WorksetStatus, error)
 	CancelWorkset(ctx context.Context, ref WorksetRef, control *core.ControlRequest) (WorksetStatus, error)
+}
+
+// ProjectionRuntime is the read-model boundary for REST, MCP, UI, and
+// operators. Implementations read durable projections instead of querying
+// Temporal workflow state on hot paths.
+type ProjectionRuntime interface {
+	GetResourceProjection(ctx context.Context, scope *ResourceProjectionScope) (ResourceProjection, error)
+	ListResourceProjections(ctx context.Context, scope *ResourceProjectionListScope) ([]ResourceProjectionSummary, error)
 }

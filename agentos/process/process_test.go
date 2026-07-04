@@ -153,6 +153,24 @@ func TestValidateProcessScopesRequireTenantScope(t *testing.T) {
 	if !errors.Is(eventErr, core.ErrInvalidProcessScope) {
 		t.Fatalf("ValidateProcessEventScope error = %v, want core.ErrInvalidProcessScope", eventErr)
 	}
+
+	processErr := ValidateScope(&Scope{AccountID: "acct-1", ProjectID: "proj-1", Limit: -1})
+	if !errors.Is(processErr, core.ErrInvalidProcessScope) {
+		t.Fatalf("ValidateProcessScope error = %v, want core.ErrInvalidProcessScope", processErr)
+	}
+}
+
+func TestValidateResourceProjectionScopes(t *testing.T) {
+	t.Parallel()
+
+	resource := ResourceRef{Kind: "resource-kind", ResourceID: "resource-1", AccountID: "acct-1", ProjectID: "proj-1"}
+	if err := ValidateResourceProjectionScope(&ResourceProjectionScope{Resource: resource}); err != nil {
+		t.Fatalf("ValidateResourceProjectionScope: %v", err)
+	}
+
+	if err := ValidateResourceProjectionListScope(&ResourceProjectionListScope{AccountID: "acct-1", ProjectID: "proj-1"}); err != nil {
+		t.Fatalf("ValidateResourceProjectionListScope: %v", err)
+	}
 }
 
 func TestProcessSpecJSONSchema(t *testing.T) {

@@ -112,6 +112,18 @@ type EventScope struct {
 	Limit         int    `json:"limit,omitempty"`
 }
 
+// Scope selects durable process projections for a tenant, resource, process
+// kind, or lifecycle state.
+type Scope struct {
+	AccountID      string       `json:"account_id"`
+	ProjectID      string       `json:"project_id"`
+	Resource       ResourceRef  `json:"resource,omitzero" schema:"optional"`
+	ResourceKind   ResourceKind `json:"resource_kind,omitempty"`
+	Kind           Kind         `json:"kind,omitempty"`
+	LifecycleState string       `json:"lifecycle_state,omitempty"`
+	Limit          int          `json:"limit,omitempty"`
+}
+
 // Event is the public event envelope for process-level events.
 type Event struct {
 	core.Event
@@ -238,6 +250,43 @@ func ValidateProcessEventScope(scope *EventScope) error {
 		AccountID: scope.AccountID,
 		ProjectID: scope.ProjectID,
 	})
+}
+
+// ValidateScope validates a durable process projection query scope.
+func ValidateScope(scope *Scope) error {
+	if scope == nil {
+		return fmt.Errorf("%w: process scope is required", core.ErrInvalidProcessScope)
+	}
+
+	if scope.AccountID == "" {
+		return fmt.Errorf("%w: account id is required", core.ErrInvalidProcessScope)
+	}
+
+	if scope.ProjectID == "" {
+		return fmt.Errorf("%w: project id is required", core.ErrInvalidProcessScope)
+	}
+
+	if scope.Limit < 0 {
+		return fmt.Errorf("%w: limit must be non-negative", core.ErrInvalidProcessScope)
+	}
+
+	return validateOptionalScopeResource(scope.AccountID, scope.ProjectID, scope.Resource)
+}
+
+func validateOptionalScopeResource(accountID, projectID string, resource ResourceRef) error {
+	if resource.Kind == "" && resource.ResourceID == "" && resource.AccountID == "" && resource.ProjectID == "" {
+		return nil
+	}
+
+	if err := ValidateResourceRef(resource); err != nil {
+		return fmt.Errorf("%w: %w", core.ErrInvalidProcessScope, err)
+	}
+
+	if resource.AccountID != accountID || resource.ProjectID != projectID {
+		return fmt.Errorf("%w: resource must be in process tenant scope", core.ErrInvalidProcessScope)
+	}
+
+	return nil
 }
 
 // SpecJSONSchema returns a JSON Schema inferred from Spec.

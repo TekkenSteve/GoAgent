@@ -102,6 +102,42 @@ func (s *MemoryStore) GetProcessByRef(_ context.Context, ref agentos.Ref) (agent
 	return cloneProcessSpec(&spec), cloneProcessStatus(&status), true, nil
 }
 
+// ListProcesses returns tenant-scoped process projections.
+func (s *MemoryStore) ListProcesses(_ context.Context, scope *agentos.Scope) ([]agentos.Status, error) {
+	if err := agentos.ValidateScope(scope); err != nil {
+		return nil, err
+	}
+
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	statuses := make([]agentos.Status, 0, len(s.statuses))
+	for processID := range s.statuses {
+		status := s.statuses[processID]
+
+		spec := s.specs[processID]
+		if !processStatusMatchesScope(&spec, &status, scope) {
+			continue
+		}
+
+		statuses = append(statuses, cloneProcessStatus(&status))
+	}
+
+	sort.SliceStable(statuses, func(i, j int) bool {
+		if statuses[i].UpdatedAt.Equal(statuses[j].UpdatedAt) {
+			return statuses[i].ProcessID < statuses[j].ProcessID
+		}
+
+		return statuses[i].UpdatedAt.After(statuses[j].UpdatedAt)
+	})
+
+	if scope.Limit > 0 && len(statuses) > scope.Limit {
+		statuses = statuses[:scope.Limit]
+	}
+
+	return statuses, nil
+}
+
 // UpdateProcessStatus updates the latest durable process projection.
 func (s *MemoryStore) UpdateProcessStatus(
 	_ context.Context,
@@ -219,6 +255,32 @@ func (s *MemoryStore) ListProcessEvents(_ context.Context, scope *agentos.EventS
 	}
 
 	return filtered, nil
+}
+
+func processStatusMatchesScope(spec *agentos.Spec, status *agentos.Status, scope *agentos.Scope) bool {
+	if status.AccountID != scope.AccountID || status.ProjectID != scope.ProjectID {
+		return false
+	}
+
+	return processStatusMatchesResource(status, scope) &&
+		processStatusMatchesKind(spec, scope) &&
+		processStatusMatchesLifecycle(status, scope)
+}
+
+func processStatusMatchesResource(status *agentos.Status, scope *agentos.Scope) bool {
+	if scope.Resource.Kind != "" && status.Resource != scope.Resource {
+		return false
+	}
+
+	return scope.ResourceKind == "" || status.Resource.Kind == scope.ResourceKind
+}
+
+func processStatusMatchesKind(spec *agentos.Spec, scope *agentos.Scope) bool {
+	return scope.Kind == "" || spec.Kind == scope.Kind
+}
+
+func processStatusMatchesLifecycle(status *agentos.Status, scope *agentos.Scope) bool {
+	return scope.LifecycleState == "" || status.LifecycleState == scope.LifecycleState
 }
 
 func validateCreateProcessInput(spec *agentos.Spec, status *agentos.Status) error {

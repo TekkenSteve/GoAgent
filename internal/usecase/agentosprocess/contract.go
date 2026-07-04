@@ -10,6 +10,7 @@ import (
 type ProcessIndex interface {
 	CreateProcess(ctx context.Context, spec *agentos.Spec, status *agentos.Status) (agentos.Status, bool, error)
 	GetProcessByRef(ctx context.Context, ref agentos.Ref) (agentos.Spec, agentos.Status, bool, error)
+	ListProcesses(ctx context.Context, scope *agentos.Scope) ([]agentos.Status, error)
 	UpdateProcessStatus(ctx context.Context, status *agentos.Status, idempotencyKey string) (agentos.Status, error)
 }
 

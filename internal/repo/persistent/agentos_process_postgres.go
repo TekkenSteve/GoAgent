@@ -69,6 +69,92 @@ func (r *AgentOSProcessRepo) GetProcessByRef(ctx context.Context, ref agentos.Re
 	}, "GetProcessByRef")
 }
 
+func (r *AgentOSProcessRepo) ListProcesses(ctx context.Context, scope *agentos.Scope) ([]agentos.Status, error) {
+	if err := agentos.ValidateScope(scope); err != nil {
+		return nil, err
+	}
+
+	builder := r.processListBuilder(scope)
+
+	query, args, err := builder.ToSql()
+	if err != nil {
+		return nil, fmt.Errorf("AgentOSProcessRepo - ListProcesses - builder: %w", err)
+	}
+
+	rows, err := r.Pool.Query(ctx, query, args...)
+	if err != nil {
+		return nil, fmt.Errorf("AgentOSProcessRepo - ListProcesses - query: %w", err)
+	}
+	defer rows.Close()
+
+	statuses, err := scanProcessStatuses(rows)
+	if err != nil {
+		return nil, err
+	}
+
+	return statuses, nil
+}
+
+func (r *AgentOSProcessRepo) processListBuilder(scope *agentos.Scope) sq.SelectBuilder {
+	builder := r.Builder.
+		Select("status_json").
+		From("processes").
+		Where(sq.Eq{
+			"account_id": scope.AccountID,
+			"project_id": scope.ProjectID,
+		}).
+		OrderBy("updated_at DESC", "process_id ASC")
+
+	if scope.Resource.Kind != "" {
+		builder = builder.Where(sq.Eq{
+			"resource_kind": string(scope.Resource.Kind),
+			"resource_id":   scope.Resource.ResourceID,
+		})
+	}
+
+	if scope.ResourceKind != "" {
+		builder = builder.Where(sq.Eq{"resource_kind": string(scope.ResourceKind)})
+	}
+
+	if scope.Kind != "" {
+		builder = builder.Where(sq.Eq{"kind": string(scope.Kind)})
+	}
+
+	if scope.LifecycleState != "" {
+		builder = builder.Where(sq.Eq{"lifecycle_state": scope.LifecycleState})
+	}
+
+	if scope.Limit > 0 {
+		builder = builder.Limit(uint64(scope.Limit))
+	}
+
+	return builder
+}
+
+func scanProcessStatuses(rows pgx.Rows) ([]agentos.Status, error) {
+	var statuses []agentos.Status
+
+	for rows.Next() {
+		var statusJSON []byte
+		if err := rows.Scan(&statusJSON); err != nil {
+			return nil, fmt.Errorf("AgentOSProcessRepo - ListProcesses - scan: %w", err)
+		}
+
+		var status agentos.Status
+		if err := json.Unmarshal(statusJSON, &status); err != nil {
+			return nil, fmt.Errorf("AgentOSProcessRepo - ListProcesses - decode status: %w", err)
+		}
+
+		statuses = append(statuses, status)
+	}
+
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("AgentOSProcessRepo - ListProcesses - rows: %w", err)
+	}
+
+	return statuses, nil
+}
+
 func (r *AgentOSProcessRepo) UpdateProcessStatus(
 	ctx context.Context,
 	status *agentos.Status,

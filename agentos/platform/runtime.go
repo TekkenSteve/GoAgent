@@ -14,4 +14,5 @@ type Runtime interface {
 	process.LedgerRuntime
 	process.GovernedActionRuntime
 	process.BatchRuntime
+	process.ProjectionRuntime
 }
