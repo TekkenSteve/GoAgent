@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"reflect"
 	"sort"
 
 	agentos "github.com/TekkenSteve/GoAgent/agentos/control"
@@ -15,6 +16,7 @@ const (
 	defaultMaxNodes      int32 = 256
 	defaultMaxDepth      int32 = 32
 	defaultMaxExpansions int32 = 64
+	defaultBatchInputKey       = "items"
 )
 
 // Validator validates RunPlan specs against topology, policy, expressions,
@@ -225,7 +227,53 @@ func (v Validator) validateNodeCapability(ctx context.Context, node *agentos.Pla
 		}
 	}
 
+	if err := validateNodeBatchLimits(node, &capability); err != nil {
+		return err
+	}
+
 	return nil
+}
+
+func validateNodeBatchLimits(node *agentos.PlanNodeSpec, capability *agentos.Capability) error {
+	if capability.Limits.MaxBatchItems == 0 {
+		return nil
+	}
+
+	key := capability.Limits.BatchInputKey
+	if key == "" {
+		key = defaultBatchInputKey
+	}
+
+	value, ok := node.Run.Input[key]
+	if !ok {
+		return fmt.Errorf("%w: node %q batch input %q is required", agentoscore.ErrInvalidRunPlan, node.NodeID, key)
+	}
+
+	size, ok := batchSize(value)
+	if !ok {
+		return fmt.Errorf("%w: node %q batch input %q must be an array", agentoscore.ErrInvalidRunPlan, node.NodeID, key)
+	}
+
+	if size > int(capability.Limits.MaxBatchItems) {
+		return fmt.Errorf("%w: node %q batch input %q has %d items, exceeds max %d", agentoscore.ErrInvalidRunPlan, node.NodeID, key, size, capability.Limits.MaxBatchItems)
+	}
+
+	return nil
+}
+
+func batchSize(value any) (int, bool) {
+	if value == nil {
+		return 0, false
+	}
+
+	v := reflect.ValueOf(value)
+
+	kind := v.Kind()
+	if kind == reflect.Array || kind == reflect.Slice {
+		return v.Len(), true
+	}
+
+	return 0, false
 }
 
 func (v Validator) validateEdge(edge *agentos.PlanEdgeSpec, nodeByID map[string]agentos.PlanNodeSpec, edgeIDs map[string]struct{}) error {

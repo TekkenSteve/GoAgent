@@ -41,6 +41,9 @@ const (
 const (
 	// CapabilityRun is the standard capability for starting one backend-owned run.
 	CapabilityRun = "run"
+	// CapabilityRunBatch is the standard capability for starting one backend-owned
+	// run that internally owns a bounded batch.
+	CapabilityRunBatch = "run.batch"
 )
 
 // BackendRef selects the backend that owns a run.

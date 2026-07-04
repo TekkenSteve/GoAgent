@@ -123,6 +123,18 @@ type Capability struct {
 	OutputSchema json.RawMessage         `json:"output_schema,omitempty"`
 	Signals      []core.SignalType       `json:"signals,omitempty"`
 	Controls     []core.ControlOperation `json:"controls,omitempty"`
+	Streaming    bool                    `json:"streaming,omitempty"`
+	Artifacts    []core.ArtifactKind     `json:"artifacts,omitempty"`
+	Limits       CapabilityLimits        `json:"limits,omitzero" schema:"optional"`
+}
+
+// CapabilityLimits describes control-plane limits for one backend-owned
+// capability. Batch limits constrain one coarse-grained backend run; AgentOS
+// does not expand batch items into PlanNodeSpec values.
+type CapabilityLimits struct {
+	MaxBatchItems   int32  `json:"max_batch_items,omitempty"`
+	MaxParallelRuns int32  `json:"max_parallel_runs,omitempty"`
+	BatchInputKey   string `json:"batch_input_key,omitempty"`
 }
 
 // CapabilityCatalogSpec is the public wire format for backend capability

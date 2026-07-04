@@ -112,6 +112,81 @@ func TestValidatorRejectsSchemaMismatch(t *testing.T) {
 	}
 }
 
+func TestValidatorAcceptsRunBatchWithinCapabilityLimit(t *testing.T) {
+	t.Parallel()
+
+	ref := agentos.BackendRef{Kind: agentos.BackendKindHTTP, Name: "batch-runtime"}
+	spec := agentos.RunPlanSpec{
+		PlanID:    "plan-batch",
+		AccountID: "acct-plan-batch",
+		ProjectID: "proj-plan-batch",
+		Nodes: []agentos.PlanNodeSpec{
+			{
+				NodeID:     "batch",
+				Capability: agentos.CapabilityRunBatch,
+				Run: agentos.RunSpec{
+					RunID:   "run-batch",
+					Backend: ref,
+					Input: map[string]any{
+						"records": []string{"alert-1", "alert-2"},
+					},
+				},
+			},
+		},
+	}
+	catalog := mustCapabilityCatalog(t, []agentos.Capability{
+		{
+			Backend: ref,
+			Name:    agentos.CapabilityRunBatch,
+			Limits: agentos.CapabilityLimits{
+				MaxBatchItems: 3,
+				BatchInputKey: "records",
+			},
+		},
+	})
+
+	_, err := Validator{Capabilities: catalog}.Validate(context.Background(), &spec)
+	if err != nil {
+		t.Fatalf("Validate: %v", err)
+	}
+}
+
+func TestValidatorRejectsRunBatchOverCapabilityLimit(t *testing.T) {
+	t.Parallel()
+
+	ref := agentos.BackendRef{Kind: agentos.BackendKindHTTP, Name: "batch-runtime"}
+	spec := agentos.RunPlanSpec{
+		PlanID:    "plan-batch",
+		AccountID: "acct-plan-batch",
+		ProjectID: "proj-plan-batch",
+		Nodes: []agentos.PlanNodeSpec{
+			{
+				NodeID:     "batch",
+				Capability: agentos.CapabilityRunBatch,
+				Run: agentos.RunSpec{
+					RunID:   "run-batch",
+					Backend: ref,
+					Input: map[string]any{
+						"items": []any{"alert-1", "alert-2", "alert-3"},
+					},
+				},
+			},
+		},
+	}
+	catalog := mustCapabilityCatalog(t, []agentos.Capability{
+		{
+			Backend: ref,
+			Name:    agentos.CapabilityRunBatch,
+			Limits:  agentos.CapabilityLimits{MaxBatchItems: 2},
+		},
+	})
+
+	_, err := Validator{Capabilities: catalog}.Validate(context.Background(), &spec)
+	if !errors.Is(err, agentoscore.ErrInvalidRunPlan) {
+		t.Fatalf("error = %v, want ErrInvalidRunPlan", err)
+	}
+}
+
 func TestValidatorRejectsArtifactSchemaRefWithoutCatalog(t *testing.T) {
 	t.Parallel()
 
@@ -591,7 +666,7 @@ func samplePlanPtr(ref agentos.BackendRef) *agentos.RunPlanSpec {
 func sampleCapabilityCatalog(t *testing.T, ref agentos.BackendRef) *StaticCapabilityCatalog {
 	t.Helper()
 
-	catalog, err := NewStaticCapabilityCatalog([]agentos.Capability{
+	return mustCapabilityCatalog(t, []agentos.Capability{
 		{
 			Backend: ref,
 			Name:    RESEARCH,
@@ -602,6 +677,12 @@ func sampleCapabilityCatalog(t *testing.T, ref agentos.BackendRef) *StaticCapabi
 			}`),
 		},
 	})
+}
+
+func mustCapabilityCatalog(t *testing.T, capabilities []agentos.Capability) *StaticCapabilityCatalog {
+	t.Helper()
+
+	catalog, err := NewStaticCapabilityCatalog(capabilities)
 	if err != nil {
 		t.Fatalf("catalog: %v", err)
 	}

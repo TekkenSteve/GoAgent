@@ -66,6 +66,14 @@ func TestValidateCapabilityRejectsInvalidDeclaration(t *testing.T) {
 	}); !errors.Is(err, agentoscore.ErrInvalidRunPlan) {
 		t.Fatalf("invalid schema error = %v, want ErrInvalidRunPlan", err)
 	}
+
+	if err := ValidateCapability(&agentos.Capability{
+		Backend: agentos.BackendRef{Kind: agentos.BackendKindHTTP, Name: "research"},
+		Name:    agentos.CapabilityRunBatch,
+		Limits:  agentos.CapabilityLimits{MaxBatchItems: -1},
+	}); !errors.Is(err, agentoscore.ErrInvalidRunPlan) {
+		t.Fatalf("invalid batch limit error = %v, want ErrInvalidRunPlan", err)
+	}
 }
 
 func TestStaticCapabilityCatalogRegistersAndReads(t *testing.T) {

@@ -23,6 +23,10 @@ func ValidateCapability(capability *agentos.Capability) error {
 		return fmt.Errorf("%w: capability name is required", agentoscore.ErrCapabilityNotFound)
 	}
 
+	if err := validateCapabilityLimits(capability); err != nil {
+		return err
+	}
+
 	if err := validateRawJSON("input schema", capability.InputSchema); err != nil {
 		return err
 	}
@@ -32,6 +36,17 @@ func ValidateCapability(capability *agentos.Capability) error {
 	}
 
 	return nil
+}
+
+func validateCapabilityLimits(capability *agentos.Capability) error {
+	switch {
+	case capability.Limits.MaxBatchItems < 0:
+		return fmt.Errorf("%w: capability %q max batch items must be non-negative", agentoscore.ErrInvalidRunPlan, capability.Name)
+	case capability.Limits.MaxParallelRuns < 0:
+		return fmt.Errorf("%w: capability %q max parallel runs must be non-negative", agentoscore.ErrInvalidRunPlan, capability.Name)
+	default:
+		return nil
+	}
 }
 
 // RegisterCapabilities registers a batch of backend capabilities into a

@@ -54,6 +54,37 @@
             "items": {
               "type": "string"
             }
+          },
+          "streaming": {
+            "type": "boolean"
+          },
+          "artifacts": {
+            "type": [
+              "null",
+              "array"
+            ],
+            "items": {
+              "type": "string"
+            }
+          },
+          "limits": {
+            "type": "object",
+            "properties": {
+              "max_batch_items": {
+                "type": "integer",
+                "minimum": -2147483648,
+                "maximum": 2147483647
+              },
+              "max_parallel_runs": {
+                "type": "integer",
+                "minimum": -2147483648,
+                "maximum": 2147483647
+              },
+              "batch_input_key": {
+                "type": "string"
+              }
+            },
+            "additionalProperties": false
           }
         },
         "required": [
