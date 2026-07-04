@@ -48,6 +48,18 @@ type LedgerRuntime interface {
 	ListLedgerEntries(ctx context.Context, scope *LedgerScope) ([]LedgerEntry, error)
 }
 
+// GovernedActionRuntime coordinates coarse-grained actions that require
+// dry-run, risk review, approval, execution, cancellation, or compensation.
+type GovernedActionRuntime interface {
+	RequestAction(ctx context.Context, spec *GovernedActionSpec) (GovernedActionStatus, error)
+	StatusAction(ctx context.Context, ref ActionRef) (GovernedActionStatus, error)
+	ListActions(ctx context.Context, scope *ActionScope) ([]GovernedActionStatus, error)
+	RecordActionDryRun(ctx context.Context, ref ActionRef, result *ActionDryRunResult) (GovernedActionStatus, error)
+	ResolveActionApproval(ctx context.Context, ref ActionRef, decision *ActionApprovalDecision) (GovernedActionStatus, error)
+	CompleteAction(ctx context.Context, ref ActionRef, result *ActionExecutionResult) (GovernedActionStatus, error)
+	CancelAction(ctx context.Context, ref ActionRef, req *ActionCancelRequest) (GovernedActionStatus, error)
+}
+
 // Subscription is a stream of run events.
 type Subscription interface {
 	Events() <-chan Event
