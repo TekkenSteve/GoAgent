@@ -157,6 +157,37 @@ func TestWorkerKitRegistersProcessWorkflowAndActivities(t *testing.T) {
 	}
 }
 
+func TestAgentOSOwnedWorkflowRegistrationsHaveVersionPins(t *testing.T) {
+	t.Parallel()
+
+	kit := &WorkerKit{
+		planActivities:    newTestPlanActivities(t, &fakePlanRuntime{}),
+		processActivities: newTestProcessActivities(t),
+	}
+	workers := fakeWorkerSet()
+
+	if err := kit.Register(workers.workerSet()); err != nil {
+		t.Fatalf("Register: %v", err)
+	}
+
+	registered := append([]string{}, workers.planControl.workflows...)
+	registered = append(registered, workers.processControl.workflows...)
+
+	for _, pin := range agentOSWorkflowVersionPins() {
+		if !slices.Contains(registered, pin.Name) {
+			t.Fatalf("workflow %q has version pin but was not registered; got %#v", pin.Name, registered)
+		}
+
+		registered = slices.DeleteFunc(registered, func(name string) bool {
+			return name == pin.Name
+		})
+	}
+
+	if len(registered) != 0 {
+		t.Fatalf("registered AgentOS-owned workflows are missing version pins: %#v", registered)
+	}
+}
+
 func TestWorkerKitRegistersNativeWorkloadsOnDedicatedWorkers(t *testing.T) {
 	t.Parallel()
 

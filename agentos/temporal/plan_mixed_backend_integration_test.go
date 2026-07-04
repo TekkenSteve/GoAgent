@@ -24,7 +24,6 @@ import (
 	"go.temporal.io/sdk/activity"
 	"go.temporal.io/sdk/client"
 	"go.temporal.io/sdk/converter"
-	"go.temporal.io/sdk/testsuite"
 	"go.temporal.io/sdk/workflow"
 	"google.golang.org/grpc"
 )
@@ -38,7 +37,7 @@ func TestPlanWorkflowRunsThroughMixedBackendAdapters(t *testing.T) {
 	planID, httpNodeID, summaryArtifact := "plan-real-mixed-adapters", "http", "summary"
 	adapter := newMixedBackendAdapter(t, planID, httpNodeID, summaryArtifact)
 
-	env := (&testsuite.WorkflowTestSuite{}).NewTestWorkflowEnvironment()
+	env := newAgentOSTemporalWorkflowTestEnv()
 	env.RegisterWorkflowWithOptions(PlanWorkflow, workflow.RegisterOptions{Name: PlanWorkflowName})
 	env.RegisterActivityWithOptions(adapter.activities.ValidatePlanActivity, activity.RegisterOptions{Name: ValidatePlanActivityName})
 	env.RegisterActivityWithOptions(adapter.activities.PersistPlanStateActivity, activity.RegisterOptions{Name: PersistPlanStateActivityName})

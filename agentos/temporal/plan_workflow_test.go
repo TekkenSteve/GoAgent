@@ -12,10 +12,14 @@ import (
 	"github.com/stretchr/testify/require"
 	"go.temporal.io/sdk/activity"
 	"go.temporal.io/sdk/testsuite"
+	"go.temporal.io/sdk/worker"
 	"go.temporal.io/sdk/workflow"
 )
 
-const RUNNING = "running"
+const (
+	RUNNING                           = "running"
+	workflowTestDeadlockDetectionTime = 10 * time.Second
+)
 
 func TestPlanWorkflowExecutesSuccessEdgeAndPublishesArtifacts(t *testing.T) {
 	t.Parallel()
@@ -503,7 +507,7 @@ func TestPlanWorkflowOrchestratesMixedBackendsThroughRuntime(t *testing.T) {
 	activities, err := NewPlanActivitiesWithStores(runtime, mixedBackendCapabilities(refs), store, nil, agentosplan.NewMemoryArtifactStore())
 	require.NoError(t, err)
 
-	env := (&testsuite.WorkflowTestSuite{}).NewTestWorkflowEnvironment()
+	env := newAgentOSTemporalWorkflowTestEnv()
 	env.RegisterWorkflowWithOptions(PlanWorkflow, workflow.RegisterOptions{Name: PlanWorkflowName})
 
 	for _, a := range []struct {
@@ -537,6 +541,13 @@ func TestPlanWorkflowOrchestratesMixedBackendsThroughRuntime(t *testing.T) {
 	require.NotEmpty(t, events)
 	require.Equal(t, agentoscore.EventPlanStarted, events[0].EventType)
 	require.Equal(t, agentoscore.EventPlanSucceeded, events[len(events)-1].EventType)
+}
+
+func newAgentOSTemporalWorkflowTestEnv() *testsuite.TestWorkflowEnvironment {
+	env := (&testsuite.WorkflowTestSuite{}).NewTestWorkflowEnvironment()
+	env.SetWorkerOptions(worker.Options{DeadlockDetectionTimeout: workflowTestDeadlockDetectionTime})
+
+	return env
 }
 
 func TestPlanWorkflowRetriesFailedNodeFromSignal(t *testing.T) {

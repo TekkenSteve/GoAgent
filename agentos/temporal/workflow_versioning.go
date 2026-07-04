@@ -12,6 +12,18 @@ const (
 
 var errTemporalWorkflowVersionInvalid = errors.New("agentos temporal workflow version: invalid")
 
+type workflowVersionPin struct {
+	Name    string
+	Version int
+}
+
+func agentOSWorkflowVersionPins() []workflowVersionPin {
+	return []workflowVersionPin{
+		{Name: PlanWorkflowName, Version: currentPlanWorkflowVersion},
+		{Name: ProcessWorkflowName, Version: currentProcessWorkflowVersion},
+	}
+}
+
 func validatePlanWorkflowVersion(got int) error {
 	return validateWorkflowVersion(PlanWorkflowName, got, currentPlanWorkflowVersion)
 }

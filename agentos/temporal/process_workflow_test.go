@@ -77,9 +77,7 @@ func TestProcessWorkflowRequiresCurrentWorkflowVersion(t *testing.T) {
 func newProcessWorkflowTestEnv(t *testing.T) *testsuite.TestWorkflowEnvironment {
 	t.Helper()
 
-	var suite testsuite.WorkflowTestSuite
-
-	env := suite.NewTestWorkflowEnvironment()
+	env := newAgentOSTemporalWorkflowTestEnv()
 	env.RegisterWorkflowWithOptions(ProcessWorkflow, workflow.RegisterOptions{Name: ProcessWorkflowName})
 
 	activities := newTestProcessActivities(t)
