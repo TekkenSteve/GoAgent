@@ -1,11 +1,21 @@
 # GoAgent
 
-A Go microservices framework built on Clean Architecture principles, integrating an Agent runtime and Temporal-based orchestration engine.
+GoAgent is the reference implementation of **AgentOS**: an **Agent Control Plane** plus a **Durable Process Platform** built on Temporal.
+
+It has two public surfaces:
+
+- **Agent Control Plane** — starts, controls, observes, and composes backend-owned agent runs across native GoAgent, LangGraph, OpenCode-style runtimes, HTTP backends, gRPC backends, and external Temporal workflows.
+- **Durable Process Platform** — models long-lived intelligent work as generic resources, processes, ledgers, governed actions, batches, and projections. Domain systems such as AiSOC should build on these primitives without adding their business nouns to AgentOS core.
+
+The native GoAgent agent framework is one backend implementation. Temporal is the durable process kernel. `agentos/temporal` is the default adapter that wires AgentOS ports to Temporal, Postgres, Redis, and artifact storage.
 
 ## Features
 
-- **Agent Framework** — ReAct loop agent runtime with LLM integration, tool execution, and MCP server support
-- **Orchestration Engine** — Temporal-based workflow orchestration with multi-step, parallel, conditional, and dynamic execution patterns
+- **Agent Control Plane** — backend-owned run lifecycle, signals, controls, durable RunPlan orchestration, backend capabilities, and event ingest
+- **Durable Process Platform** — generic resource/process runtime, ledger, governed action, batch/workset, and projection interfaces
+- **Temporal Kernel Adapter** — explicit Temporal task queue isolation, durable workflows, timers, signals, retries, cancellation, and recovery
+- **Native Agent Backend** — ReAct loop agent runtime with LLM integration, tool execution, team composition, and MCP server support
+- **External Backend Adapters** — HTTP, gRPC, and `temporal_external` backends for runtimes owned outside GoAgent
 - **Multi-Agent Teams** — Hierarchical team composition with recursive sub-team expansion
 - **Human-in-the-Loop** — Workflow pause/resume/cancel and signal-based waiting steps
 - **Streaming** — Server-Sent Events (SSE) and WebSocket support for real-time agent output
@@ -95,17 +105,45 @@ make compose-up-all
 
 ## Project Structure
 
-GoAgent is structured around a small public **AgentOS SDK boundary** plus an application shell. Implementation packages live under `internal/` and are not public contracts.
+GoAgent is structured around a small public **AgentOS boundary** plus adapters and an application shell. Implementation packages live under `internal/` and are not public contracts.
+
+```text
+Applications / reference distributions
+  -> agentos/platform        # optional facade when an app wants both planes
+      -> agentos/control     # Agent Control Plane
+      -> agentos/process     # Durable Process Platform
+          -> agentos/core    # shared OS primitives
+
+Default implementation
+  -> agentos/temporal        # Temporal/Postgres/Redis/artifact adapter
+      -> agentos/control
+      -> agentos/process
+      -> agentos/core
+
+Internal application
+  -> internal/controller     # REST transport
+  -> internal/usecase        # application use cases
+  -> internal/repo           # persistence/backend adapters
+  -> internal/agentfw        # native GoAgent backend implementation
+```
+
+The separation is intentional:
+
+- `agentos/control` never imports `agentos/process`; agent runs and plans do not know business process semantics.
+- `agentos/process` never imports `agentos/control`; durable processes can exist without agent execution.
+- `agentos/platform` is the composition facade for applications that need both.
+- `agentos/temporal` implements public ports. It must not define AiSOC, DevOps, CodeAgent, or other business domain models.
+- `internal/agentfw` is a native backend, not the public architecture of every backend.
 
 ### Public Library Packages
 
 | Package | Layer | Description |
 |---------|-------|-------------|
-| `agentos/core/` | Public SDK core | Shared signals, controls, events, artifacts, messages, tools, subscriptions, and public errors |
-| `agentos/control/` | Agent control plane | RunRuntime, PlanRuntime, run specs, RunPlan specs, capabilities, backend refs, plan schemas |
-| `agentos/process/` | Durable process platform | ResourceRef, Runtime, LedgerRuntime, GovernedActionRuntime, BatchRuntime, ProjectionRuntime, worksets |
-| `agentos/platform/` | Public facade | Combined platform runtime interface for applications that need both control and process layers |
-| `agentos/temporal/` | Public adapter | Default Temporal/Postgres/Redis implementation and worker registration kit |
+| `agentos/core/` | Shared primitives | Signals, controls, events, artifacts, messages, tools, subscriptions, and public errors |
+| `agentos/control/` | Agent Control Plane | Runtime, PlanRuntime, RunSpec, RunPlanSpec, PlanNodeSpec, capabilities, backend refs, plan schemas |
+| `agentos/process/` | Durable Process Platform | ResourceRef, process runtime, ledger runtime, governed action runtime, batch runtime, projection runtime |
+| `agentos/platform/` | Composition facade | One runtime interface that embeds the control and process interfaces |
+| `agentos/temporal/` | Default adapter | Temporal/Postgres/Redis/artifact-store implementation and worker registration kit |
 | `config/` | Outer | Application configuration (env-based) |
 | `pkg/` | Generic utilities | Infrastructure wrappers that are not GoAgent implementation contracts |
 
@@ -131,18 +169,43 @@ Follows the [12-Factor App](https://12factor.net/) principles. All configuration
 Configuration file: [config/config.go](config/config.go)  
 Example configuration: [.env.example](.env.example)
 
-## Agent Framework
+## Agent Control Plane
 
-### Architecture
+The Agent Control Plane coordinates backend-owned agent runs. A backend may be the native GoAgent backend, a LangGraph service, an OpenCode-style runtime, an HTTP service, a gRPC service, or an external Temporal workflow.
 
-The native GoAgent backend consists of:
+The public model is intentionally coarse-grained:
 
-1. **Agent Runtime** — ReAct loop: `think → act → observe → repeat`, with LLM provider abstraction
+- `control.RunSpec` starts one backend-owned run.
+- `control.RunStatus` is the public lifecycle view of that run.
+- `control.RunPlanSpec` composes backend-owned runs.
+- `control.PlanNodeSpec` is a run-level orchestration node. It is not a native GoAgent step, not a Temporal activity, not a LangGraph graph node, not an OpenCode step, and not a tool call.
+- `control.CapabilityRunBatch` represents one backend-owned batch run. AgentOS validates coarse limits and observes progress; it does not expand batch items into thousands of plan nodes.
+
+Backend-specific graph, loop, step, tool, and record-level execution details stay inside the owning backend or data plane. They can be reported to AgentOS as events, artifacts, ledger records, or projections.
+
+## Durable Process Platform
+
+The Durable Process Platform provides generic building blocks for long-lived intelligent work:
+
+- `process.ResourceRef` identifies domain resources such as cases, tickets, orders, incidents, alerts, pull requests, or changes without making those nouns part of AgentOS core.
+- `process.Runtime` owns durable process lifecycle.
+- `process.LedgerRuntime` records decisions, evidence refs, action refs, prompt/response refs, artifact refs, actors, timestamps, and rationale.
+- `process.GovernedActionRuntime` models dry-run, risk evaluation, approval, execution, cancellation, and compensation.
+- `process.BatchRuntime` models worksets and bounded batch progress.
+- `process.ProjectionRuntime` serves REST, MCP, UI, and operator read models from durable projections instead of high-frequency Temporal Workflow Query calls.
+
+Temporal stores deterministic process control, timers, signals, retries, and compact references. Large prompts, responses, evidence blobs, search indexes, lake data, graph data, and artifact payloads stay in external stores.
+
+## Native Agent Backend
+
+The native GoAgent backend is one implementation behind the control plane:
+
+1. **Agent Runtime** — ReAct loop with LLM provider abstraction
 2. **Tool System** — Tool definitions with JSON Schema, executor abstraction, MCP server integration
 3. **Team System** — Hierarchical team composition inside the native backend
 4. **Temporal Worker Kit** — Workflow/activity registration for durable native execution
 
-Native step queues, team expansion, and backend-internal graph logic are implementation details. External control-plane callers should model cross-framework orchestration with AgentOS `RunSpec` and `RunPlanSpec`, not native step payloads.
+Native step queues, team expansion, LLM calls, tool calls, and backend-internal graph logic are implementation details. They are not the model that external backends must copy.
 
 ### REST Examples
 
@@ -212,7 +275,7 @@ import (
 
 Do not import implementation packages such as `internal/entity`, `internal/repo`, `internal/usecase`, or old root-level implementation packages. Public examples and docs are guarded by tests to keep that boundary intact.
 
-## Three Usage Modes
+## Usage Modes
 
 GoAgent can be consumed in three ways, from simple to deeply integrated:
 
@@ -246,9 +309,9 @@ resp, _ := http.DefaultClient.Do(req)
 defer resp.Body.Close()
 ```
 
-### Mode 2 — Library Embedding
+### Mode 2 — Go Library Embedding
 
-Import the stable AgentOS control-plane boundary into your Go application. Use `agentos/temporal` for the default Temporal/Postgres/Redis implementation.
+Import the stable AgentOS boundary into a Go application. Use `agentos/temporal` for the default Temporal/Postgres/Redis implementation.
 
 ```go
 import (
@@ -259,7 +322,7 @@ import (
 rt, _ := agentostemporal.NewRuntime(ctx, agentostemporal.RuntimeConfig{
     TemporalAddress: "127.0.0.1:7233",
     TemporalNamespace: "default",
-    TemporalTaskQueue: "agent-framework",
+    TemporalTaskQueues: agentostemporal.DefaultTaskQueues(),
     PostgresURL: "postgres://goagent:goagent@127.0.0.1:5432/goagent?sslmode=disable",
     RedisURL: "redis://127.0.0.1:6379/0",
 })
@@ -273,7 +336,7 @@ status, _ := rt.Start(ctx, agentos.RunSpec{
 })
 ```
 
-### Mode 3 — Type-Only
+### Mode 3 — Public Types Only
 
 Import only the public AgentOS packages needed by the service. Use `agentos/core` for shared messages/tools/events and `agentos/control` for run/plan contracts.
 
@@ -296,36 +359,42 @@ type MyService struct {
 
 This project follows the [go-clean-template](https://github.com/evrone/go-clean-template) architecture pattern:
 
-1. **Public SDK boundary** (`agentos/core`, `agentos/control`, `agentos/process`, `agentos/platform`) — stable external contract for embedded callers
-2. **Internal ports** (`internal/usecase/contracts.go`, `internal/repo/contracts.go`) — implementation contracts hidden from downstream projects
-3. **Dependency direction**: outer layers import inner layers, never the reverse
-4. **Testability**: interface isolation enables easy unit testing with mocks
+1. **Public ports** (`agentos/core`, `agentos/control`, `agentos/process`, `agentos/platform`) define stable application-facing contracts.
+2. **Adapters** (`agentos/temporal`, `internal/repo/*`, `internal/controller/*`) implement ports for Temporal, storage, backend runtimes, and transports.
+3. **Use cases** coordinate application behavior through interfaces instead of concrete infrastructure.
+4. **Dependency direction** stays explicit: domain contracts do not import adapters, and public packages do not import `internal`.
+5. **Testability** comes from small interfaces, deterministic workflow inputs, and boundary tests.
 
 ### Dependency Flow
 
-```
-┌──────────────────────────────────────────────┐
-│  agentos/core/       agentos/control/         │  Public SDK
-│  agentos/process/    agentos/platform/        │
-│  agentos/temporal/                            │  Default adapter
-├──────────────────────────────────────────────┤
-│  internal/entity/   │  internal/state/       │  Inner Layer
-│  ──────────┼──────────                        │  (zero external deps,
-│  internal/usecase/contracts.go               │   stdlib only)
-│  internal/repo/contracts.go                  │
-├──────────────────────────────────────────────┤
-│  internal/usecase/agent/  ...                │  Inner Layer
-│  (imports internal/repo for output ports)     │  (business logic)
-├──────────────────────────────────────────────┤
-│  internal/repo/persistent/  ...              │  Outer Layer
-│  internal/controller/  internal/app/         │  (infrastructure,
-│  internal/agentfw/orchestration/              │   imports inner)
-└──────────────────────────────────────────────┘
+```text
+┌────────────────────────────────────────────────────────────┐
+│ Applications / reference distributions                     │
+│  - AiSOC, CodeAgent, DevOps, CustomerOps                   │
+│  - import agentos/platform or specific public packages      │
+├────────────────────────────────────────────────────────────┤
+│ Public AgentOS ports                                        │
+│  agentos/core                                               │
+│  agentos/control        Agent Control Plane                 │
+│  agentos/process        Durable Process Platform            │
+│  agentos/platform       Composition facade                  │
+├────────────────────────────────────────────────────────────┤
+│ Public default adapter                                      │
+│  agentos/temporal       Temporal/Postgres/Redis/artifacts   │
+├────────────────────────────────────────────────────────────┤
+│ Application shell                                           │
+│  internal/controller    REST transport                      │
+│  internal/usecase       application services                │
+│  internal/repo          persistence and backend adapters     │
+│  internal/agentfw       native GoAgent backend              │
+│  internal/app           dependency injection                │
+└────────────────────────────────────────────────────────────┘
 ```
 
-- **Public layer** (`agentos/core`, `agentos/control`, `agentos/process`, `agentos/platform`, `agentos/temporal`) is the only supported embedded import contract
-- **Inner layer** (`internal/entity/`, `internal/state/`, `internal/usecase/`, `internal/repo/contracts.go`) is implementation-only
-- **Outer layer** (`internal/repo/*/`, `internal/controller/`, `internal/app/`, `pkg/`) implements interfaces defined by the inner layer
+- **Public ports** are the supported application-facing contracts.
+- **Temporal adapter** is the default implementation of those contracts, not the owner of business vocabulary.
+- **Application shell** wires the service, HTTP API, persistence, worker registration, and native backend.
+- **Reference distributions** should live in `examples/` or downstream repositories. They use AgentOS primitives but do not change AgentOS core types.
 
 ### Dependency Injection
 
