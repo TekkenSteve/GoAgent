@@ -125,6 +125,7 @@ func Run(cfg *config.Config) {
 		temporalRuntime *agentfwruntime.TemporalRuntime
 		agentOSRuntime  agentos.Runtime
 		planRuntime     agentos.PlanRuntime
+		platformRuntime agentosplatform.Runtime
 		agentUC         *agent.UseCase
 		cancelWorkflow  restapiv1.CancelWorkflowFn
 		signalWorkflow  restapiv1.SignalWorkflowFn
@@ -142,6 +143,7 @@ func Run(cfg *config.Config) {
 		temporalRuntime = tc.runtime
 		agentOSRuntime = tc.agentOSRuntime
 		planRuntime = tc.planRuntime
+		platformRuntime = tc.platformRuntime
 		agentUC = tc.agentUC
 		triggerUC = tc.triggerUC
 		cancelWorkflow = tc.cancelWorkflow
@@ -167,7 +169,7 @@ func Run(cfg *config.Config) {
 		l.Warn("app - Run - stream executor unavailable (agent usecase not initialized)")
 	}
 
-	runHTTPServer(cfg, l, agentExecutor, orchExecutor, cancelWorkflow, signalWorkflow, infra.templateUC, triggerUC, infra.eventIngest, agentOSRuntime, planRuntime, temporalRuntime)
+	runHTTPServer(cfg, l, agentExecutor, orchExecutor, cancelWorkflow, signalWorkflow, infra.templateUC, triggerUC, infra.eventIngest, agentOSRuntime, planRuntime, platformRuntime, temporalRuntime)
 }
 
 func initAgentExecutor(temporalRuntime *agentfwruntime.TemporalRuntime, agentOSRuntime agentos.Runtime, fwCfg *agentfwconfig.Config) (usecase.AgentExecutor, usecase.OrchestrationExecutor, error) {
@@ -192,10 +194,10 @@ func initAgentExecutor(temporalRuntime *agentfwruntime.TemporalRuntime, agentOSR
 	return agentExecutor, orchExecutor, nil
 }
 
-func runHTTPServer(cfg *config.Config, l *logger.Logger, agentExecutor usecase.AgentExecutor, orchExecutor usecase.OrchestrationExecutor, cancelWorkflow restapiv1.CancelWorkflowFn, signalWorkflow restapiv1.SignalWorkflowFn, templateUC *templatepkg.UseCase, triggerUC *triggerpkg.UseCase, eventIngest *eventing.Service, agentOSRuntime agentos.Runtime, planRuntime agentos.PlanRuntime, temporalRuntime *agentfwruntime.TemporalRuntime) {
+func runHTTPServer(cfg *config.Config, l *logger.Logger, agentExecutor usecase.AgentExecutor, orchExecutor usecase.OrchestrationExecutor, cancelWorkflow restapiv1.CancelWorkflowFn, signalWorkflow restapiv1.SignalWorkflowFn, templateUC *templatepkg.UseCase, triggerUC *triggerpkg.UseCase, eventIngest *eventing.Service, agentOSRuntime agentos.Runtime, planRuntime agentos.PlanRuntime, platformRuntime agentosplatform.Runtime, temporalRuntime *agentfwruntime.TemporalRuntime) {
 	httpServer := httpserver.New(l, httpserver.Port(cfg.HTTP.Port), httpserver.Prefork(cfg.HTTP.UsePreforkMode))
 	restapi.NewRouter(httpServer.App, cfg, agentExecutor, orchExecutor, l,
-		cancelWorkflow, signalWorkflow, templateUC, triggerUC, eventIngest, agentOSRuntime, planRuntime)
+		cancelWorkflow, signalWorkflow, templateUC, triggerUC, eventIngest, agentOSRuntime, planRuntime, platformRuntime)
 	httpServer.Start()
 
 	interrupt := make(chan os.Signal, 1)

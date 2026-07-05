@@ -9,6 +9,367 @@
     "host": "localhost:8080",
     "basePath": "/v1",
     "paths": {
+        "/agentos/actions": {
+            "get": {
+                "description": "Query governed action projections for a tenant, process, resource, kind, or lifecycle state.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "agentos"
+                ],
+                "summary": "List AgentOS governed actions",
+                "operationId": "agentos-list-actions",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Account ID",
+                        "name": "account_id",
+                        "in": "query",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Project ID",
+                        "name": "project_id",
+                        "in": "query",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Process ID",
+                        "name": "process_id",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Resource kind",
+                        "name": "resource_kind",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Resource ID",
+                        "name": "resource_id",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Action kind",
+                        "name": "kind",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Lifecycle state",
+                        "name": "lifecycle_state",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "description": "Maximum actions",
+                        "name": "limit",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "array",
+                            "items": {
+                                "$ref": "#/definitions/github_com_TekkenSteve_GoAgent_agentos_process.GovernedActionStatus"
+                            }
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/response.Error"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/response.Error"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/response.Error"
+                        }
+                    }
+                }
+            },
+            "post": {
+                "description": "Request one governed action with durable dry-run, approval, and execution state.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "agentos"
+                ],
+                "summary": "Request AgentOS governed action",
+                "operationId": "agentos-request-action",
+                "parameters": [
+                    {
+                        "description": "Governed action request",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/github_com_TekkenSteve_GoAgent_agentos_process.GovernedActionSpec"
+                        }
+                    }
+                ],
+                "responses": {
+                    "202": {
+                        "description": "Accepted",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_TekkenSteve_GoAgent_agentos_process.GovernedActionStatus"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/response.Error"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/response.Error"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/response.Error"
+                        }
+                    }
+                }
+            }
+        },
+        "/agentos/actions/{action_id}": {
+            "get": {
+                "description": "Query one governed action projection.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "agentos"
+                ],
+                "summary": "Get AgentOS governed action status",
+                "operationId": "agentos-action-status",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Action ID",
+                        "name": "action_id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Account ID",
+                        "name": "account_id",
+                        "in": "query",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Project ID",
+                        "name": "project_id",
+                        "in": "query",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_TekkenSteve_GoAgent_agentos_process.GovernedActionStatus"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/response.Error"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/response.Error"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/response.Error"
+                        }
+                    }
+                }
+            }
+        },
+        "/agentos/ledger": {
+            "get": {
+                "description": "Query durable ledger entries for a tenant, process, resource, or kind.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "agentos"
+                ],
+                "summary": "List AgentOS ledger entries",
+                "operationId": "agentos-list-ledger-entries",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Account ID",
+                        "name": "account_id",
+                        "in": "query",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Project ID",
+                        "name": "project_id",
+                        "in": "query",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Process ID",
+                        "name": "process_id",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Resource kind",
+                        "name": "resource_kind",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Resource ID",
+                        "name": "resource_id",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Ledger entry kind",
+                        "name": "kind",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "description": "Only return entries after this sequence",
+                        "name": "after_sequence",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "description": "Maximum entries",
+                        "name": "limit",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "array",
+                            "items": {
+                                "$ref": "#/definitions/github_com_TekkenSteve_GoAgent_agentos_process.LedgerEntry"
+                            }
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/response.Error"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/response.Error"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/response.Error"
+                        }
+                    }
+                }
+            },
+            "post": {
+                "description": "Append one durable process or resource ledger entry.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "agentos"
+                ],
+                "summary": "Append AgentOS ledger entry",
+                "operationId": "agentos-append-ledger-entry",
+                "parameters": [
+                    {
+                        "description": "Ledger entry request",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/github_com_TekkenSteve_GoAgent_agentos_process.LedgerEntrySpec"
+                        }
+                    }
+                ],
+                "responses": {
+                    "201": {
+                        "description": "Created",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_TekkenSteve_GoAgent_agentos_process.LedgerEntry"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/response.Error"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/response.Error"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/response.Error"
+                        }
+                    }
+                }
+            }
+        },
         "/agentos/plans": {
             "post": {
                 "description": "Start a durable cross-backend AgentOS RunPlan.",
@@ -939,6 +1300,360 @@
                 }
             }
         },
+        "/agentos/processes": {
+            "get": {
+                "description": "Query durable process projections for a tenant, resource, kind, or lifecycle state.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "agentos"
+                ],
+                "summary": "List AgentOS processes",
+                "operationId": "agentos-list-processes",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Account ID",
+                        "name": "account_id",
+                        "in": "query",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Project ID",
+                        "name": "project_id",
+                        "in": "query",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Resource kind",
+                        "name": "resource_kind",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Resource ID",
+                        "name": "resource_id",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Process kind",
+                        "name": "kind",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Lifecycle state",
+                        "name": "lifecycle_state",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "description": "Maximum processes",
+                        "name": "limit",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "array",
+                            "items": {
+                                "$ref": "#/definitions/github_com_TekkenSteve_GoAgent_agentos_process.Status"
+                            }
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/response.Error"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/response.Error"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/response.Error"
+                        }
+                    }
+                }
+            },
+            "post": {
+                "description": "Start a durable business process for a tenant-scoped resource.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "agentos"
+                ],
+                "summary": "Start AgentOS process",
+                "operationId": "agentos-start-process",
+                "parameters": [
+                    {
+                        "description": "AgentOS process request",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/github_com_TekkenSteve_GoAgent_agentos_process.Spec"
+                        }
+                    }
+                ],
+                "responses": {
+                    "202": {
+                        "description": "Accepted",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_TekkenSteve_GoAgent_agentos_process.Status"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/response.Error"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/response.Error"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/response.Error"
+                        }
+                    }
+                }
+            }
+        },
+        "/agentos/processes/{process_id}": {
+            "get": {
+                "description": "Query the public description of one durable business process.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "agentos"
+                ],
+                "summary": "Describe AgentOS process",
+                "operationId": "agentos-describe-process",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Process ID",
+                        "name": "process_id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Account ID",
+                        "name": "account_id",
+                        "in": "query",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Project ID",
+                        "name": "project_id",
+                        "in": "query",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_TekkenSteve_GoAgent_agentos_process.Description"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/response.Error"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/response.Error"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/response.Error"
+                        }
+                    }
+                }
+            }
+        },
+        "/agentos/processes/{process_id}/status": {
+            "get": {
+                "description": "Query the current status of one durable business process.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "agentos"
+                ],
+                "summary": "Get AgentOS process status",
+                "operationId": "agentos-process-status",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Process ID",
+                        "name": "process_id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Account ID",
+                        "name": "account_id",
+                        "in": "query",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Project ID",
+                        "name": "project_id",
+                        "in": "query",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_TekkenSteve_GoAgent_agentos_process.Status"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/response.Error"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/response.Error"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/response.Error"
+                        }
+                    }
+                }
+            }
+        },
+        "/agentos/resources": {
+            "get": {
+                "description": "Query durable process-platform projections for application-owned resources.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "agentos"
+                ],
+                "summary": "Get or list AgentOS resource projections",
+                "operationId": "agentos-resources",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Account ID",
+                        "name": "account_id",
+                        "in": "query",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Project ID",
+                        "name": "project_id",
+                        "in": "query",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Resource kind",
+                        "name": "resource_kind",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Resource ID",
+                        "name": "resource_id",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Lifecycle state",
+                        "name": "lifecycle_state",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "description": "Maximum projection rows or nested records",
+                        "name": "limit",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_TekkenSteve_GoAgent_agentos_process.ResourceProjection"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/response.Error"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/response.Error"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/response.Error"
+                        }
+                    }
+                }
+            }
+        },
         "/agentos/runs": {
             "post": {
                 "description": "Start a generic AgentOS run on the selected backend.",
@@ -1194,6 +1909,219 @@
                         "description": "OK",
                         "schema": {
                             "$ref": "#/definitions/github_com_TekkenSteve_GoAgent_agentos_control.RunStatus"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/response.Error"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/response.Error"
+                        }
+                    }
+                }
+            }
+        },
+        "/agentos/worksets": {
+            "get": {
+                "description": "Query batch workset projections for a tenant, process, resource, kind, or lifecycle state.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "agentos"
+                ],
+                "summary": "List AgentOS worksets",
+                "operationId": "agentos-list-worksets",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Account ID",
+                        "name": "account_id",
+                        "in": "query",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Project ID",
+                        "name": "project_id",
+                        "in": "query",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Process ID",
+                        "name": "process_id",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Resource kind",
+                        "name": "resource_kind",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Resource ID",
+                        "name": "resource_id",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Workset kind",
+                        "name": "kind",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Lifecycle state",
+                        "name": "lifecycle_state",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "description": "Maximum worksets",
+                        "name": "limit",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "array",
+                            "items": {
+                                "$ref": "#/definitions/github_com_TekkenSteve_GoAgent_agentos_process.WorksetStatus"
+                            }
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/response.Error"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/response.Error"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/response.Error"
+                        }
+                    }
+                }
+            },
+            "post": {
+                "description": "Start one durable coarse-grained batch workset.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "agentos"
+                ],
+                "summary": "Start AgentOS workset",
+                "operationId": "agentos-start-workset",
+                "parameters": [
+                    {
+                        "description": "Workset request",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/github_com_TekkenSteve_GoAgent_agentos_process.WorksetSpec"
+                        }
+                    }
+                ],
+                "responses": {
+                    "202": {
+                        "description": "Accepted",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_TekkenSteve_GoAgent_agentos_process.WorksetStatus"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/response.Error"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/response.Error"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/response.Error"
+                        }
+                    }
+                }
+            }
+        },
+        "/agentos/worksets/{workset_id}": {
+            "get": {
+                "description": "Query one workset projection.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "agentos"
+                ],
+                "summary": "Get AgentOS workset status",
+                "operationId": "agentos-workset-status",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Workset ID",
+                        "name": "workset_id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Account ID",
+                        "name": "account_id",
+                        "in": "query",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Project ID",
+                        "name": "project_id",
+                        "in": "query",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_TekkenSteve_GoAgent_agentos_process.WorksetStatus"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/response.Error"
                         }
                     },
                     "404": {
@@ -2596,6 +3524,913 @@
                 "SignalConfigPatch",
                 "SignalMemoryPatch"
             ]
+        },
+        "github_com_TekkenSteve_GoAgent_agentos_process.Description": {
+            "type": "object",
+            "properties": {
+                "account_id": {
+                    "type": "string"
+                },
+                "kind": {
+                    "type": "string"
+                },
+                "metadata": {
+                    "type": "object",
+                    "additionalProperties": {
+                        "type": "string"
+                    }
+                },
+                "policy": {
+                    "$ref": "#/definitions/process.Policy"
+                },
+                "process_id": {
+                    "type": "string"
+                },
+                "project_id": {
+                    "type": "string"
+                },
+                "resource": {
+                    "$ref": "#/definitions/process.ResourceRef"
+                },
+                "status": {
+                    "$ref": "#/definitions/process.Status"
+                },
+                "timers": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/process.TimerSpec"
+                    }
+                },
+                "updated_at": {
+                    "type": "string"
+                }
+            }
+        },
+        "github_com_TekkenSteve_GoAgent_agentos_process.GovernedActionSpec": {
+            "type": "object",
+            "properties": {
+                "account_id": {
+                    "type": "string"
+                },
+                "action_id": {
+                    "type": "string"
+                },
+                "approval_required": {
+                    "type": "boolean"
+                },
+                "compensation_ref": {
+                    "$ref": "#/definitions/process.LedgerDataRef"
+                },
+                "dry_run_required": {
+                    "type": "boolean"
+                },
+                "idempotency_key": {
+                    "type": "string"
+                },
+                "input_refs": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/process.LedgerDataRef"
+                    }
+                },
+                "intent": {
+                    "type": "string"
+                },
+                "kind": {
+                    "type": "string"
+                },
+                "metadata": {
+                    "type": "object",
+                    "additionalProperties": {
+                        "type": "string"
+                    }
+                },
+                "process_id": {
+                    "type": "string"
+                },
+                "project_id": {
+                    "type": "string"
+                },
+                "requested_at": {
+                    "type": "string"
+                },
+                "requested_by": {
+                    "$ref": "#/definitions/process.ActorRef"
+                },
+                "resource": {
+                    "$ref": "#/definitions/process.ResourceRef"
+                },
+                "risk": {
+                    "$ref": "#/definitions/process.ActionRiskAssessment"
+                }
+            }
+        },
+        "github_com_TekkenSteve_GoAgent_agentos_process.GovernedActionStatus": {
+            "type": "object",
+            "properties": {
+                "account_id": {
+                    "type": "string"
+                },
+                "action_id": {
+                    "type": "string"
+                },
+                "approval_state": {
+                    "type": "string"
+                },
+                "dry_run_state": {
+                    "type": "string"
+                },
+                "execution_state": {
+                    "type": "string"
+                },
+                "kind": {
+                    "type": "string"
+                },
+                "lifecycle_state": {
+                    "type": "string"
+                },
+                "process_id": {
+                    "type": "string"
+                },
+                "project_id": {
+                    "type": "string"
+                },
+                "reason": {
+                    "type": "string"
+                },
+                "resource": {
+                    "$ref": "#/definitions/process.ResourceRef"
+                },
+                "risk": {
+                    "$ref": "#/definitions/process.ActionRiskAssessment"
+                },
+                "updated_at": {
+                    "type": "string"
+                }
+            }
+        },
+        "github_com_TekkenSteve_GoAgent_agentos_process.LedgerEntry": {
+            "type": "object",
+            "properties": {
+                "account_id": {
+                    "type": "string"
+                },
+                "actor": {
+                    "$ref": "#/definitions/process.ActorRef"
+                },
+                "artifact_refs": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/core.ArtifactRef"
+                    }
+                },
+                "created_at": {
+                    "type": "string"
+                },
+                "data_refs": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/process.LedgerDataRef"
+                    }
+                },
+                "entry_id": {
+                    "type": "string"
+                },
+                "idempotency_key": {
+                    "type": "string"
+                },
+                "kind": {
+                    "$ref": "#/definitions/process.LedgerEntryKind"
+                },
+                "metadata": {
+                    "type": "object",
+                    "additionalProperties": {
+                        "type": "string"
+                    }
+                },
+                "occurred_at": {
+                    "type": "string"
+                },
+                "process_id": {
+                    "type": "string"
+                },
+                "project_id": {
+                    "type": "string"
+                },
+                "rationale": {
+                    "type": "string"
+                },
+                "resource": {
+                    "$ref": "#/definitions/process.ResourceRef"
+                },
+                "sequence": {
+                    "type": "integer"
+                },
+                "summary": {
+                    "type": "string"
+                }
+            }
+        },
+        "github_com_TekkenSteve_GoAgent_agentos_process.LedgerEntrySpec": {
+            "type": "object",
+            "properties": {
+                "account_id": {
+                    "type": "string"
+                },
+                "actor": {
+                    "$ref": "#/definitions/process.ActorRef"
+                },
+                "artifact_refs": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/core.ArtifactRef"
+                    }
+                },
+                "data_refs": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/process.LedgerDataRef"
+                    }
+                },
+                "entry_id": {
+                    "type": "string"
+                },
+                "idempotency_key": {
+                    "type": "string"
+                },
+                "kind": {
+                    "$ref": "#/definitions/process.LedgerEntryKind"
+                },
+                "metadata": {
+                    "type": "object",
+                    "additionalProperties": {
+                        "type": "string"
+                    }
+                },
+                "occurred_at": {
+                    "type": "string"
+                },
+                "process_id": {
+                    "type": "string"
+                },
+                "project_id": {
+                    "type": "string"
+                },
+                "rationale": {
+                    "type": "string"
+                },
+                "resource": {
+                    "$ref": "#/definitions/process.ResourceRef"
+                },
+                "summary": {
+                    "type": "string"
+                }
+            }
+        },
+        "github_com_TekkenSteve_GoAgent_agentos_process.ResourceProjection": {
+            "type": "object",
+            "properties": {
+                "actions": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/process.GovernedActionStatus"
+                    }
+                },
+                "artifacts": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/core.ArtifactRef"
+                    }
+                },
+                "ledger": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/process.LedgerEntry"
+                    }
+                },
+                "metadata": {
+                    "type": "object",
+                    "additionalProperties": {
+                        "type": "string"
+                    }
+                },
+                "processes": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/process.Status"
+                    }
+                },
+                "resource": {
+                    "$ref": "#/definitions/process.ResourceRef"
+                },
+                "updated_at": {
+                    "type": "string"
+                },
+                "worksets": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/process.WorksetStatus"
+                    }
+                }
+            }
+        },
+        "github_com_TekkenSteve_GoAgent_agentos_process.Spec": {
+            "type": "object",
+            "properties": {
+                "account_id": {
+                    "type": "string"
+                },
+                "idempotency_key": {
+                    "type": "string"
+                },
+                "inputs": {
+                    "type": "object",
+                    "additionalProperties": {}
+                },
+                "kind": {
+                    "type": "string"
+                },
+                "metadata": {
+                    "type": "object",
+                    "additionalProperties": {
+                        "type": "string"
+                    }
+                },
+                "policy": {
+                    "$ref": "#/definitions/process.Policy"
+                },
+                "process_id": {
+                    "type": "string"
+                },
+                "project_id": {
+                    "type": "string"
+                },
+                "requested_at": {
+                    "type": "string"
+                },
+                "resource": {
+                    "$ref": "#/definitions/process.ResourceRef"
+                },
+                "timers": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/process.TimerSpec"
+                    }
+                }
+            }
+        },
+        "github_com_TekkenSteve_GoAgent_agentos_process.Status": {
+            "type": "object",
+            "properties": {
+                "account_id": {
+                    "type": "string"
+                },
+                "kind": {
+                    "type": "string"
+                },
+                "lifecycle_state": {
+                    "type": "string"
+                },
+                "metadata": {
+                    "type": "object",
+                    "additionalProperties": {
+                        "type": "string"
+                    }
+                },
+                "process_id": {
+                    "type": "string"
+                },
+                "progress": {
+                    "$ref": "#/definitions/core.RunProgress"
+                },
+                "project_id": {
+                    "type": "string"
+                },
+                "reason": {
+                    "type": "string"
+                },
+                "resource": {
+                    "$ref": "#/definitions/process.ResourceRef"
+                },
+                "started_at": {
+                    "type": "string"
+                },
+                "updated_at": {
+                    "type": "string"
+                }
+            }
+        },
+        "github_com_TekkenSteve_GoAgent_agentos_process.WorksetSpec": {
+            "type": "object",
+            "properties": {
+                "account_id": {
+                    "type": "string"
+                },
+                "chunks": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/process.WorksetChunkSpec"
+                    }
+                },
+                "idempotency_key": {
+                    "type": "string"
+                },
+                "items_ref": {
+                    "$ref": "#/definitions/process.WorksetItemsRef"
+                },
+                "kind": {
+                    "type": "string"
+                },
+                "metadata": {
+                    "type": "object",
+                    "additionalProperties": {
+                        "type": "string"
+                    }
+                },
+                "policy": {
+                    "$ref": "#/definitions/process.WorksetPolicy"
+                },
+                "process_id": {
+                    "type": "string"
+                },
+                "project_id": {
+                    "type": "string"
+                },
+                "requested_at": {
+                    "type": "string"
+                },
+                "requested_by": {
+                    "$ref": "#/definitions/process.ActorRef"
+                },
+                "resource": {
+                    "$ref": "#/definitions/process.ResourceRef"
+                },
+                "workset_id": {
+                    "type": "string"
+                }
+            }
+        },
+        "github_com_TekkenSteve_GoAgent_agentos_process.WorksetStatus": {
+            "type": "object",
+            "properties": {
+                "account_id": {
+                    "type": "string"
+                },
+                "kind": {
+                    "type": "string"
+                },
+                "lifecycle_state": {
+                    "type": "string"
+                },
+                "metadata": {
+                    "type": "object",
+                    "additionalProperties": {
+                        "type": "string"
+                    }
+                },
+                "process_id": {
+                    "type": "string"
+                },
+                "progress": {
+                    "$ref": "#/definitions/process.WorksetProgress"
+                },
+                "project_id": {
+                    "type": "string"
+                },
+                "reason": {
+                    "type": "string"
+                },
+                "resource": {
+                    "$ref": "#/definitions/process.ResourceRef"
+                },
+                "updated_at": {
+                    "type": "string"
+                },
+                "workset_id": {
+                    "type": "string"
+                }
+            }
+        },
+        "process.ActionRiskAssessment": {
+            "type": "object",
+            "properties": {
+                "assessed_at": {
+                    "type": "string"
+                },
+                "evidence_refs": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/process.LedgerDataRef"
+                    }
+                },
+                "level": {
+                    "$ref": "#/definitions/process.ActionRiskLevel"
+                },
+                "reason": {
+                    "type": "string"
+                }
+            }
+        },
+        "process.ActionRiskLevel": {
+            "type": "string",
+            "enum": [
+                "low",
+                "medium",
+                "high",
+                "critical"
+            ],
+            "x-enum-varnames": [
+                "ActionRiskLow",
+                "ActionRiskMedium",
+                "ActionRiskHigh",
+                "ActionRiskCritical"
+            ]
+        },
+        "process.ActorRef": {
+            "type": "object",
+            "properties": {
+                "actor_id": {
+                    "type": "string"
+                },
+                "kind": {
+                    "type": "string"
+                }
+            }
+        },
+        "process.GovernedActionStatus": {
+            "type": "object",
+            "properties": {
+                "account_id": {
+                    "type": "string"
+                },
+                "action_id": {
+                    "type": "string"
+                },
+                "approval_state": {
+                    "type": "string"
+                },
+                "dry_run_state": {
+                    "type": "string"
+                },
+                "execution_state": {
+                    "type": "string"
+                },
+                "kind": {
+                    "type": "string"
+                },
+                "lifecycle_state": {
+                    "type": "string"
+                },
+                "process_id": {
+                    "type": "string"
+                },
+                "project_id": {
+                    "type": "string"
+                },
+                "reason": {
+                    "type": "string"
+                },
+                "resource": {
+                    "$ref": "#/definitions/process.ResourceRef"
+                },
+                "risk": {
+                    "$ref": "#/definitions/process.ActionRiskAssessment"
+                },
+                "updated_at": {
+                    "type": "string"
+                }
+            }
+        },
+        "process.LedgerDataRef": {
+            "type": "object",
+            "properties": {
+                "artifact_id": {
+                    "type": "string"
+                },
+                "digest": {
+                    "type": "string"
+                },
+                "kind": {
+                    "type": "string"
+                },
+                "media_type": {
+                    "type": "string"
+                },
+                "metadata": {
+                    "type": "object",
+                    "additionalProperties": {
+                        "type": "string"
+                    }
+                },
+                "uri": {
+                    "type": "string"
+                }
+            }
+        },
+        "process.LedgerEntry": {
+            "type": "object",
+            "properties": {
+                "account_id": {
+                    "type": "string"
+                },
+                "actor": {
+                    "$ref": "#/definitions/process.ActorRef"
+                },
+                "artifact_refs": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/core.ArtifactRef"
+                    }
+                },
+                "created_at": {
+                    "type": "string"
+                },
+                "data_refs": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/process.LedgerDataRef"
+                    }
+                },
+                "entry_id": {
+                    "type": "string"
+                },
+                "idempotency_key": {
+                    "type": "string"
+                },
+                "kind": {
+                    "$ref": "#/definitions/process.LedgerEntryKind"
+                },
+                "metadata": {
+                    "type": "object",
+                    "additionalProperties": {
+                        "type": "string"
+                    }
+                },
+                "occurred_at": {
+                    "type": "string"
+                },
+                "process_id": {
+                    "type": "string"
+                },
+                "project_id": {
+                    "type": "string"
+                },
+                "rationale": {
+                    "type": "string"
+                },
+                "resource": {
+                    "$ref": "#/definitions/process.ResourceRef"
+                },
+                "sequence": {
+                    "type": "integer"
+                },
+                "summary": {
+                    "type": "string"
+                }
+            }
+        },
+        "process.LedgerEntryKind": {
+            "type": "string",
+            "enum": [
+                "decision",
+                "evidence",
+                "artifact",
+                "action",
+                "prompt",
+                "response",
+                "tool_io",
+                "rationale"
+            ],
+            "x-enum-varnames": [
+                "LedgerEntryDecision",
+                "LedgerEntryEvidence",
+                "LedgerEntryArtifact",
+                "LedgerEntryAction",
+                "LedgerEntryPrompt",
+                "LedgerEntryResponse",
+                "LedgerEntryToolIO",
+                "LedgerEntryRationale"
+            ]
+        },
+        "process.Policy": {
+            "type": "object",
+            "properties": {
+                "continue_as_new_events": {
+                    "type": "integer"
+                },
+                "max_history_events": {
+                    "type": "integer"
+                },
+                "timeout_seconds": {
+                    "type": "integer"
+                }
+            }
+        },
+        "process.ResourceRef": {
+            "type": "object",
+            "properties": {
+                "account_id": {
+                    "type": "string"
+                },
+                "kind": {
+                    "type": "string"
+                },
+                "project_id": {
+                    "type": "string"
+                },
+                "resource_id": {
+                    "type": "string"
+                }
+            }
+        },
+        "process.Status": {
+            "type": "object",
+            "properties": {
+                "account_id": {
+                    "type": "string"
+                },
+                "kind": {
+                    "type": "string"
+                },
+                "lifecycle_state": {
+                    "type": "string"
+                },
+                "metadata": {
+                    "type": "object",
+                    "additionalProperties": {
+                        "type": "string"
+                    }
+                },
+                "process_id": {
+                    "type": "string"
+                },
+                "progress": {
+                    "$ref": "#/definitions/core.RunProgress"
+                },
+                "project_id": {
+                    "type": "string"
+                },
+                "reason": {
+                    "type": "string"
+                },
+                "resource": {
+                    "$ref": "#/definitions/process.ResourceRef"
+                },
+                "started_at": {
+                    "type": "string"
+                },
+                "updated_at": {
+                    "type": "string"
+                }
+            }
+        },
+        "process.TimerSpec": {
+            "type": "object",
+            "properties": {
+                "after_seconds": {
+                    "type": "integer"
+                },
+                "fire_at": {
+                    "type": "string"
+                },
+                "payload": {
+                    "type": "object",
+                    "additionalProperties": {}
+                },
+                "signal": {
+                    "$ref": "#/definitions/core.SignalType"
+                },
+                "timer_id": {
+                    "type": "string"
+                }
+            }
+        },
+        "process.WorksetChunkSpec": {
+            "type": "object",
+            "properties": {
+                "chunk_id": {
+                    "type": "string"
+                },
+                "concurrency": {
+                    "type": "integer"
+                },
+                "item_count": {
+                    "type": "integer"
+                },
+                "items_ref": {
+                    "$ref": "#/definitions/process.WorksetItemsRef"
+                }
+            }
+        },
+        "process.WorksetItemsRef": {
+            "type": "object",
+            "properties": {
+                "artifact_id": {
+                    "type": "string"
+                },
+                "count": {
+                    "type": "integer"
+                },
+                "digest": {
+                    "type": "string"
+                },
+                "kind": {
+                    "type": "string"
+                },
+                "media_type": {
+                    "type": "string"
+                },
+                "metadata": {
+                    "type": "object",
+                    "additionalProperties": {
+                        "type": "string"
+                    }
+                },
+                "uri": {
+                    "type": "string"
+                }
+            }
+        },
+        "process.WorksetPolicy": {
+            "type": "object",
+            "properties": {
+                "max_chunk_size": {
+                    "type": "integer"
+                },
+                "max_chunks": {
+                    "type": "integer"
+                },
+                "max_concurrency": {
+                    "type": "integer"
+                },
+                "max_items": {
+                    "type": "integer"
+                }
+            }
+        },
+        "process.WorksetProgress": {
+            "type": "object",
+            "properties": {
+                "completed_chunks": {
+                    "type": "integer"
+                },
+                "completed_items": {
+                    "type": "integer"
+                },
+                "failed_chunks": {
+                    "type": "integer"
+                },
+                "failed_items": {
+                    "type": "integer"
+                },
+                "total_chunks": {
+                    "type": "integer"
+                },
+                "total_items": {
+                    "type": "integer"
+                }
+            }
+        },
+        "process.WorksetStatus": {
+            "type": "object",
+            "properties": {
+                "account_id": {
+                    "type": "string"
+                },
+                "kind": {
+                    "type": "string"
+                },
+                "lifecycle_state": {
+                    "type": "string"
+                },
+                "metadata": {
+                    "type": "object",
+                    "additionalProperties": {
+                        "type": "string"
+                    }
+                },
+                "process_id": {
+                    "type": "string"
+                },
+                "progress": {
+                    "$ref": "#/definitions/process.WorksetProgress"
+                },
+                "project_id": {
+                    "type": "string"
+                },
+                "reason": {
+                    "type": "string"
+                },
+                "resource": {
+                    "$ref": "#/definitions/process.ResourceRef"
+                },
+                "updated_at": {
+                    "type": "string"
+                },
+                "workset_id": {
+                    "type": "string"
+                }
+            }
         },
         "request.AgentOSControl": {
             "type": "object",

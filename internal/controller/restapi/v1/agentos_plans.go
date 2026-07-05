@@ -109,6 +109,10 @@ func (r *V1) withPlanRef(ctx *fiber.Ctx, fn func(agentos.PlanRef) error) error {
 		return errorResponse(ctx, http.StatusBadRequest, err.Error())
 	}
 
+	if err := req.Validate(); err != nil {
+		return errorResponse(ctx, http.StatusBadRequest, err.Error())
+	}
+
 	return fn(agentos.PlanRef{
 		PlanID:    ctx.Params("plan_id"),
 		AccountID: req.AccountID,
@@ -222,7 +226,7 @@ func withQueryScope[T any](r *V1, ctx *fiber.Ctx, scopeName string, fn func(T) (
 		return errorResponse(ctx, http.StatusBadRequest, "invalid "+scopeName)
 	}
 
-	if err := r.v.Struct(&req); err != nil {
+	if err := validateRESTQuery(r, &req); err != nil {
 		return errorResponse(ctx, http.StatusBadRequest, err.Error())
 	}
 

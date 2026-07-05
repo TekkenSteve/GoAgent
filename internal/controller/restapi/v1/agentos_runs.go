@@ -187,7 +187,16 @@ func agentOSError(ctx *fiber.Ctx, err error) error {
 		errors.Is(err, agentoscore.ErrInvalidRunPlan),
 		errors.Is(err, agentoscore.ErrInvalidArtifact),
 		errors.Is(err, agentoscore.ErrInvalidExpression),
-		errors.Is(err, agentoscore.ErrInvalidPlanEvent):
+		errors.Is(err, agentoscore.ErrInvalidPlanEvent),
+		errors.Is(err, agentoscore.ErrInvalidResourceRef),
+		errors.Is(err, agentoscore.ErrInvalidProcess),
+		errors.Is(err, agentoscore.ErrInvalidProcessScope),
+		errors.Is(err, agentoscore.ErrInvalidLedgerEntry),
+		errors.Is(err, agentoscore.ErrInvalidLedgerScope),
+		errors.Is(err, agentoscore.ErrInvalidGovernedAction),
+		errors.Is(err, agentoscore.ErrInvalidGovernedActionScope),
+		errors.Is(err, agentoscore.ErrInvalidWorkset),
+		errors.Is(err, agentoscore.ErrInvalidWorksetScope):
 		return errorResponse(ctx, http.StatusBadRequest, err.Error())
 	case errors.Is(err, agentoscore.ErrBackendNotFound),
 		errors.Is(err, agentoscore.ErrRunRouteNotFound),

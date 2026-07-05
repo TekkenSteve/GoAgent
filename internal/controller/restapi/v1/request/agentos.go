@@ -1,11 +1,15 @@
 package request
 
 import (
+	"errors"
 	"time"
 
 	agentos "github.com/TekkenSteve/GoAgent/agentos/control"
 	agentoscore "github.com/TekkenSteve/GoAgent/agentos/core"
+	agentosprocess "github.com/TekkenSteve/GoAgent/agentos/process"
 )
+
+var errAgentOSTenantScopeRequired = errors.New("account_id and project_id are required")
 
 // AgentOSStart starts a generic AgentOS run.
 type AgentOSStart struct {
@@ -89,6 +93,10 @@ type AgentOSPlanStreamScope struct {
 	AfterSequence int64  `query:"after_sequence"`
 }
 
+func (r *AgentOSPlanStreamScope) Validate() error {
+	return validateAgentOSTenantScope(r.AccountID, r.ProjectID)
+}
+
 // AgentOSPlanEventScope selects durable plan events for REST history queries.
 type AgentOSPlanEventScope struct {
 	AccountID     string `query:"account_id" validate:"required"`
@@ -97,6 +105,10 @@ type AgentOSPlanEventScope struct {
 	RunID         string `query:"run_id"`
 	AfterSequence int64  `query:"after_sequence"`
 	Limit         int    `query:"limit"`
+}
+
+func (r *AgentOSPlanEventScope) Validate() error {
+	return validateAgentOSTenantScope(r.AccountID, r.ProjectID)
 }
 
 // AgentOSPlanDebugTraceScope selects durable plan debug traces for REST queries.
@@ -109,6 +121,10 @@ type AgentOSPlanDebugTraceScope struct {
 	Limit         int    `query:"limit"`
 }
 
+func (r *AgentOSPlanDebugTraceScope) Validate() error {
+	return validateAgentOSTenantScope(r.AccountID, r.ProjectID)
+}
+
 // AgentOSPlanAuditScope selects plan audit records for REST queries.
 type AgentOSPlanAuditScope struct {
 	AccountID string                  `query:"account_id" validate:"required"`
@@ -117,6 +133,10 @@ type AgentOSPlanAuditScope struct {
 	RunID     string                  `query:"run_id"`
 	Action    agentos.PlanAuditAction `query:"action"`
 	Limit     int                     `query:"limit"`
+}
+
+func (r *AgentOSPlanAuditScope) Validate() error {
+	return validateAgentOSTenantScope(r.AccountID, r.ProjectID)
 }
 
 // AgentOSPlanArtifactScope selects plan artifacts for REST queries.
@@ -128,10 +148,18 @@ type AgentOSPlanArtifactScope struct {
 	Limit     int    `query:"limit"`
 }
 
+func (r *AgentOSPlanArtifactScope) Validate() error {
+	return validateAgentOSTenantScope(r.AccountID, r.ProjectID)
+}
+
 // AgentOSPlanScope selects one plan inside a tenant boundary.
 type AgentOSPlanScope struct {
 	AccountID string `query:"account_id" validate:"required"`
 	ProjectID string `query:"project_id" validate:"required"`
+}
+
+func (r *AgentOSPlanScope) Validate() error {
+	return validateAgentOSTenantScope(r.AccountID, r.ProjectID)
 }
 
 // AgentOSPlanConsoleScope selects plan data for the operator console.
@@ -141,6 +169,10 @@ type AgentOSPlanConsoleScope struct {
 	EventLimit    int    `query:"event_limit"`
 	AuditLimit    int    `query:"audit_limit"`
 	ArtifactLimit int    `query:"artifact_limit"`
+}
+
+func (r *AgentOSPlanConsoleScope) Validate() error {
+	return validateAgentOSTenantScope(r.AccountID, r.ProjectID)
 }
 
 // AgentOSEvent is the public REST envelope for external backend event ingest.
@@ -155,4 +187,119 @@ type AgentOSEvent struct {
 	TraceID   string                `json:"trace_id,omitempty"`
 	Tags      map[string]string     `json:"tags,omitempty"`
 	Payload   map[string]any        `json:"payload,omitempty"`
+}
+
+// AgentOSProcessScope selects durable process projections.
+type AgentOSProcessScope struct {
+	AccountID      string                      `query:"account_id" validate:"required"`
+	ProjectID      string                      `query:"project_id" validate:"required"`
+	ResourceKind   agentosprocess.ResourceKind `query:"resource_kind"`
+	ResourceID     string                      `query:"resource_id"`
+	Kind           agentosprocess.Kind         `query:"kind"`
+	LifecycleState string                      `query:"lifecycle_state"`
+	Limit          int                         `query:"limit"`
+}
+
+func (r *AgentOSProcessScope) Validate() error {
+	return validateAgentOSTenantScope(r.AccountID, r.ProjectID)
+}
+
+// AgentOSProcessRef selects one durable process inside tenant scope.
+type AgentOSProcessRef struct {
+	AccountID string `query:"account_id" validate:"required"`
+	ProjectID string `query:"project_id" validate:"required"`
+}
+
+func (r *AgentOSProcessRef) Validate() error {
+	return validateAgentOSTenantScope(r.AccountID, r.ProjectID)
+}
+
+// AgentOSLedgerScope selects ledger entries for a tenant, process, resource, or kind.
+type AgentOSLedgerScope struct {
+	AccountID     string                         `query:"account_id" validate:"required"`
+	ProjectID     string                         `query:"project_id" validate:"required"`
+	ProcessID     string                         `query:"process_id"`
+	ResourceKind  agentosprocess.ResourceKind    `query:"resource_kind"`
+	ResourceID    string                         `query:"resource_id"`
+	Kind          agentosprocess.LedgerEntryKind `query:"kind"`
+	AfterSequence int64                          `query:"after_sequence"`
+	Limit         int                            `query:"limit"`
+}
+
+func (r *AgentOSLedgerScope) Validate() error {
+	return validateAgentOSTenantScope(r.AccountID, r.ProjectID)
+}
+
+// AgentOSActionScope selects governed actions for a tenant, process, resource, kind, or lifecycle state.
+type AgentOSActionScope struct {
+	AccountID      string                      `query:"account_id" validate:"required"`
+	ProjectID      string                      `query:"project_id" validate:"required"`
+	ProcessID      string                      `query:"process_id"`
+	ResourceKind   agentosprocess.ResourceKind `query:"resource_kind"`
+	ResourceID     string                      `query:"resource_id"`
+	Kind           agentosprocess.ActionKind   `query:"kind"`
+	LifecycleState string                      `query:"lifecycle_state"`
+	Limit          int                         `query:"limit"`
+}
+
+func (r *AgentOSActionScope) Validate() error {
+	return validateAgentOSTenantScope(r.AccountID, r.ProjectID)
+}
+
+// AgentOSActionRef selects one governed action inside tenant scope.
+type AgentOSActionRef struct {
+	AccountID string `query:"account_id" validate:"required"`
+	ProjectID string `query:"project_id" validate:"required"`
+}
+
+func (r *AgentOSActionRef) Validate() error {
+	return validateAgentOSTenantScope(r.AccountID, r.ProjectID)
+}
+
+// AgentOSWorksetScope selects worksets for a tenant, process, resource, kind, or lifecycle state.
+type AgentOSWorksetScope struct {
+	AccountID      string                      `query:"account_id" validate:"required"`
+	ProjectID      string                      `query:"project_id" validate:"required"`
+	ProcessID      string                      `query:"process_id"`
+	ResourceKind   agentosprocess.ResourceKind `query:"resource_kind"`
+	ResourceID     string                      `query:"resource_id"`
+	Kind           agentosprocess.WorksetKind  `query:"kind"`
+	LifecycleState string                      `query:"lifecycle_state"`
+	Limit          int                         `query:"limit"`
+}
+
+func (r *AgentOSWorksetScope) Validate() error {
+	return validateAgentOSTenantScope(r.AccountID, r.ProjectID)
+}
+
+// AgentOSWorksetRef selects one workset inside tenant scope.
+type AgentOSWorksetRef struct {
+	AccountID string `query:"account_id" validate:"required"`
+	ProjectID string `query:"project_id" validate:"required"`
+}
+
+func (r *AgentOSWorksetRef) Validate() error {
+	return validateAgentOSTenantScope(r.AccountID, r.ProjectID)
+}
+
+// AgentOSResourceScope selects one resource projection or a resource projection list.
+type AgentOSResourceScope struct {
+	AccountID      string                      `query:"account_id" validate:"required"`
+	ProjectID      string                      `query:"project_id" validate:"required"`
+	ResourceKind   agentosprocess.ResourceKind `query:"resource_kind"`
+	ResourceID     string                      `query:"resource_id"`
+	LifecycleState string                      `query:"lifecycle_state"`
+	Limit          int                         `query:"limit"`
+}
+
+func (r *AgentOSResourceScope) Validate() error {
+	return validateAgentOSTenantScope(r.AccountID, r.ProjectID)
+}
+
+func validateAgentOSTenantScope(accountID, projectID string) error {
+	if accountID == "" || projectID == "" {
+		return errAgentOSTenantScopeRequired
+	}
+
+	return nil
 }

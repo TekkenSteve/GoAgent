@@ -4,6 +4,7 @@ import (
 	"net/http"
 
 	agentos "github.com/TekkenSteve/GoAgent/agentos/control"
+	agentosplatform "github.com/TekkenSteve/GoAgent/agentos/platform"
 	"github.com/TekkenSteve/GoAgent/config"
 	_ "github.com/TekkenSteve/GoAgent/docs" // Swagger docs.
 	"github.com/TekkenSteve/GoAgent/internal/agentfw/eventing"
@@ -29,6 +30,7 @@ func NewRouter(app *fiber.App, cfg *config.Config, t usecase.AgentExecutor, o us
 	eventIngest *eventing.Service,
 	agentOSRuntime agentos.Runtime,
 	agentOSPlanRuntime agentos.PlanRuntime,
+	agentOSPlatformRuntime agentosplatform.Runtime,
 ) {
 	// Options
 	app.Use(middleware.Logger(l))
@@ -52,6 +54,6 @@ func NewRouter(app *fiber.App, cfg *config.Config, t usecase.AgentExecutor, o us
 	// Routers
 	apiV1Group := app.Group("/v1")
 	{
-		v1.NewRoutes(apiV1Group, t, o, l, cancelWorkflow, signalWorkflow, m, eh, eventIngest, agentOSRuntime, agentOSPlanRuntime)
+		v1.NewRoutes(apiV1Group, t, o, l, cancelWorkflow, signalWorkflow, m, eh, eventIngest, agentOSRuntime, agentOSPlanRuntime, agentOSPlatformRuntime)
 	}
 }

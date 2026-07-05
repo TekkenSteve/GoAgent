@@ -952,6 +952,610 @@ definitions:
     - SignalHumanFeedback
     - SignalConfigPatch
     - SignalMemoryPatch
+  github_com_TekkenSteve_GoAgent_agentos_process.Description:
+    properties:
+      account_id:
+        type: string
+      kind:
+        type: string
+      metadata:
+        additionalProperties:
+          type: string
+        type: object
+      policy:
+        $ref: '#/definitions/process.Policy'
+      process_id:
+        type: string
+      project_id:
+        type: string
+      resource:
+        $ref: '#/definitions/process.ResourceRef'
+      status:
+        $ref: '#/definitions/process.Status'
+      timers:
+        items:
+          $ref: '#/definitions/process.TimerSpec'
+        type: array
+      updated_at:
+        type: string
+    type: object
+  github_com_TekkenSteve_GoAgent_agentos_process.GovernedActionSpec:
+    properties:
+      account_id:
+        type: string
+      action_id:
+        type: string
+      approval_required:
+        type: boolean
+      compensation_ref:
+        $ref: '#/definitions/process.LedgerDataRef'
+      dry_run_required:
+        type: boolean
+      idempotency_key:
+        type: string
+      input_refs:
+        items:
+          $ref: '#/definitions/process.LedgerDataRef'
+        type: array
+      intent:
+        type: string
+      kind:
+        type: string
+      metadata:
+        additionalProperties:
+          type: string
+        type: object
+      process_id:
+        type: string
+      project_id:
+        type: string
+      requested_at:
+        type: string
+      requested_by:
+        $ref: '#/definitions/process.ActorRef'
+      resource:
+        $ref: '#/definitions/process.ResourceRef'
+      risk:
+        $ref: '#/definitions/process.ActionRiskAssessment'
+    type: object
+  github_com_TekkenSteve_GoAgent_agentos_process.GovernedActionStatus:
+    properties:
+      account_id:
+        type: string
+      action_id:
+        type: string
+      approval_state:
+        type: string
+      dry_run_state:
+        type: string
+      execution_state:
+        type: string
+      kind:
+        type: string
+      lifecycle_state:
+        type: string
+      process_id:
+        type: string
+      project_id:
+        type: string
+      reason:
+        type: string
+      resource:
+        $ref: '#/definitions/process.ResourceRef'
+      risk:
+        $ref: '#/definitions/process.ActionRiskAssessment'
+      updated_at:
+        type: string
+    type: object
+  github_com_TekkenSteve_GoAgent_agentos_process.LedgerEntry:
+    properties:
+      account_id:
+        type: string
+      actor:
+        $ref: '#/definitions/process.ActorRef'
+      artifact_refs:
+        items:
+          $ref: '#/definitions/core.ArtifactRef'
+        type: array
+      created_at:
+        type: string
+      data_refs:
+        items:
+          $ref: '#/definitions/process.LedgerDataRef'
+        type: array
+      entry_id:
+        type: string
+      idempotency_key:
+        type: string
+      kind:
+        $ref: '#/definitions/process.LedgerEntryKind'
+      metadata:
+        additionalProperties:
+          type: string
+        type: object
+      occurred_at:
+        type: string
+      process_id:
+        type: string
+      project_id:
+        type: string
+      rationale:
+        type: string
+      resource:
+        $ref: '#/definitions/process.ResourceRef'
+      sequence:
+        type: integer
+      summary:
+        type: string
+    type: object
+  github_com_TekkenSteve_GoAgent_agentos_process.LedgerEntrySpec:
+    properties:
+      account_id:
+        type: string
+      actor:
+        $ref: '#/definitions/process.ActorRef'
+      artifact_refs:
+        items:
+          $ref: '#/definitions/core.ArtifactRef'
+        type: array
+      data_refs:
+        items:
+          $ref: '#/definitions/process.LedgerDataRef'
+        type: array
+      entry_id:
+        type: string
+      idempotency_key:
+        type: string
+      kind:
+        $ref: '#/definitions/process.LedgerEntryKind'
+      metadata:
+        additionalProperties:
+          type: string
+        type: object
+      occurred_at:
+        type: string
+      process_id:
+        type: string
+      project_id:
+        type: string
+      rationale:
+        type: string
+      resource:
+        $ref: '#/definitions/process.ResourceRef'
+      summary:
+        type: string
+    type: object
+  github_com_TekkenSteve_GoAgent_agentos_process.ResourceProjection:
+    properties:
+      actions:
+        items:
+          $ref: '#/definitions/process.GovernedActionStatus'
+        type: array
+      artifacts:
+        items:
+          $ref: '#/definitions/core.ArtifactRef'
+        type: array
+      ledger:
+        items:
+          $ref: '#/definitions/process.LedgerEntry'
+        type: array
+      metadata:
+        additionalProperties:
+          type: string
+        type: object
+      processes:
+        items:
+          $ref: '#/definitions/process.Status'
+        type: array
+      resource:
+        $ref: '#/definitions/process.ResourceRef'
+      updated_at:
+        type: string
+      worksets:
+        items:
+          $ref: '#/definitions/process.WorksetStatus'
+        type: array
+    type: object
+  github_com_TekkenSteve_GoAgent_agentos_process.Spec:
+    properties:
+      account_id:
+        type: string
+      idempotency_key:
+        type: string
+      inputs:
+        additionalProperties: {}
+        type: object
+      kind:
+        type: string
+      metadata:
+        additionalProperties:
+          type: string
+        type: object
+      policy:
+        $ref: '#/definitions/process.Policy'
+      process_id:
+        type: string
+      project_id:
+        type: string
+      requested_at:
+        type: string
+      resource:
+        $ref: '#/definitions/process.ResourceRef'
+      timers:
+        items:
+          $ref: '#/definitions/process.TimerSpec'
+        type: array
+    type: object
+  github_com_TekkenSteve_GoAgent_agentos_process.Status:
+    properties:
+      account_id:
+        type: string
+      kind:
+        type: string
+      lifecycle_state:
+        type: string
+      metadata:
+        additionalProperties:
+          type: string
+        type: object
+      process_id:
+        type: string
+      progress:
+        $ref: '#/definitions/core.RunProgress'
+      project_id:
+        type: string
+      reason:
+        type: string
+      resource:
+        $ref: '#/definitions/process.ResourceRef'
+      started_at:
+        type: string
+      updated_at:
+        type: string
+    type: object
+  github_com_TekkenSteve_GoAgent_agentos_process.WorksetSpec:
+    properties:
+      account_id:
+        type: string
+      chunks:
+        items:
+          $ref: '#/definitions/process.WorksetChunkSpec'
+        type: array
+      idempotency_key:
+        type: string
+      items_ref:
+        $ref: '#/definitions/process.WorksetItemsRef'
+      kind:
+        type: string
+      metadata:
+        additionalProperties:
+          type: string
+        type: object
+      policy:
+        $ref: '#/definitions/process.WorksetPolicy'
+      process_id:
+        type: string
+      project_id:
+        type: string
+      requested_at:
+        type: string
+      requested_by:
+        $ref: '#/definitions/process.ActorRef'
+      resource:
+        $ref: '#/definitions/process.ResourceRef'
+      workset_id:
+        type: string
+    type: object
+  github_com_TekkenSteve_GoAgent_agentos_process.WorksetStatus:
+    properties:
+      account_id:
+        type: string
+      kind:
+        type: string
+      lifecycle_state:
+        type: string
+      metadata:
+        additionalProperties:
+          type: string
+        type: object
+      process_id:
+        type: string
+      progress:
+        $ref: '#/definitions/process.WorksetProgress'
+      project_id:
+        type: string
+      reason:
+        type: string
+      resource:
+        $ref: '#/definitions/process.ResourceRef'
+      updated_at:
+        type: string
+      workset_id:
+        type: string
+    type: object
+  process.ActionRiskAssessment:
+    properties:
+      assessed_at:
+        type: string
+      evidence_refs:
+        items:
+          $ref: '#/definitions/process.LedgerDataRef'
+        type: array
+      level:
+        $ref: '#/definitions/process.ActionRiskLevel'
+      reason:
+        type: string
+    type: object
+  process.ActionRiskLevel:
+    enum:
+    - low
+    - medium
+    - high
+    - critical
+    type: string
+    x-enum-varnames:
+    - ActionRiskLow
+    - ActionRiskMedium
+    - ActionRiskHigh
+    - ActionRiskCritical
+  process.ActorRef:
+    properties:
+      actor_id:
+        type: string
+      kind:
+        type: string
+    type: object
+  process.GovernedActionStatus:
+    properties:
+      account_id:
+        type: string
+      action_id:
+        type: string
+      approval_state:
+        type: string
+      dry_run_state:
+        type: string
+      execution_state:
+        type: string
+      kind:
+        type: string
+      lifecycle_state:
+        type: string
+      process_id:
+        type: string
+      project_id:
+        type: string
+      reason:
+        type: string
+      resource:
+        $ref: '#/definitions/process.ResourceRef'
+      risk:
+        $ref: '#/definitions/process.ActionRiskAssessment'
+      updated_at:
+        type: string
+    type: object
+  process.LedgerDataRef:
+    properties:
+      artifact_id:
+        type: string
+      digest:
+        type: string
+      kind:
+        type: string
+      media_type:
+        type: string
+      metadata:
+        additionalProperties:
+          type: string
+        type: object
+      uri:
+        type: string
+    type: object
+  process.LedgerEntry:
+    properties:
+      account_id:
+        type: string
+      actor:
+        $ref: '#/definitions/process.ActorRef'
+      artifact_refs:
+        items:
+          $ref: '#/definitions/core.ArtifactRef'
+        type: array
+      created_at:
+        type: string
+      data_refs:
+        items:
+          $ref: '#/definitions/process.LedgerDataRef'
+        type: array
+      entry_id:
+        type: string
+      idempotency_key:
+        type: string
+      kind:
+        $ref: '#/definitions/process.LedgerEntryKind'
+      metadata:
+        additionalProperties:
+          type: string
+        type: object
+      occurred_at:
+        type: string
+      process_id:
+        type: string
+      project_id:
+        type: string
+      rationale:
+        type: string
+      resource:
+        $ref: '#/definitions/process.ResourceRef'
+      sequence:
+        type: integer
+      summary:
+        type: string
+    type: object
+  process.LedgerEntryKind:
+    enum:
+    - decision
+    - evidence
+    - artifact
+    - action
+    - prompt
+    - response
+    - tool_io
+    - rationale
+    type: string
+    x-enum-varnames:
+    - LedgerEntryDecision
+    - LedgerEntryEvidence
+    - LedgerEntryArtifact
+    - LedgerEntryAction
+    - LedgerEntryPrompt
+    - LedgerEntryResponse
+    - LedgerEntryToolIO
+    - LedgerEntryRationale
+  process.Policy:
+    properties:
+      continue_as_new_events:
+        type: integer
+      max_history_events:
+        type: integer
+      timeout_seconds:
+        type: integer
+    type: object
+  process.ResourceRef:
+    properties:
+      account_id:
+        type: string
+      kind:
+        type: string
+      project_id:
+        type: string
+      resource_id:
+        type: string
+    type: object
+  process.Status:
+    properties:
+      account_id:
+        type: string
+      kind:
+        type: string
+      lifecycle_state:
+        type: string
+      metadata:
+        additionalProperties:
+          type: string
+        type: object
+      process_id:
+        type: string
+      progress:
+        $ref: '#/definitions/core.RunProgress'
+      project_id:
+        type: string
+      reason:
+        type: string
+      resource:
+        $ref: '#/definitions/process.ResourceRef'
+      started_at:
+        type: string
+      updated_at:
+        type: string
+    type: object
+  process.TimerSpec:
+    properties:
+      after_seconds:
+        type: integer
+      fire_at:
+        type: string
+      payload:
+        additionalProperties: {}
+        type: object
+      signal:
+        $ref: '#/definitions/core.SignalType'
+      timer_id:
+        type: string
+    type: object
+  process.WorksetChunkSpec:
+    properties:
+      chunk_id:
+        type: string
+      concurrency:
+        type: integer
+      item_count:
+        type: integer
+      items_ref:
+        $ref: '#/definitions/process.WorksetItemsRef'
+    type: object
+  process.WorksetItemsRef:
+    properties:
+      artifact_id:
+        type: string
+      count:
+        type: integer
+      digest:
+        type: string
+      kind:
+        type: string
+      media_type:
+        type: string
+      metadata:
+        additionalProperties:
+          type: string
+        type: object
+      uri:
+        type: string
+    type: object
+  process.WorksetPolicy:
+    properties:
+      max_chunk_size:
+        type: integer
+      max_chunks:
+        type: integer
+      max_concurrency:
+        type: integer
+      max_items:
+        type: integer
+    type: object
+  process.WorksetProgress:
+    properties:
+      completed_chunks:
+        type: integer
+      completed_items:
+        type: integer
+      failed_chunks:
+        type: integer
+      failed_items:
+        type: integer
+      total_chunks:
+        type: integer
+      total_items:
+        type: integer
+    type: object
+  process.WorksetStatus:
+    properties:
+      account_id:
+        type: string
+      kind:
+        type: string
+      lifecycle_state:
+        type: string
+      metadata:
+        additionalProperties:
+          type: string
+        type: object
+      process_id:
+        type: string
+      progress:
+        $ref: '#/definitions/process.WorksetProgress'
+      project_id:
+        type: string
+      reason:
+        type: string
+      resource:
+        $ref: '#/definitions/process.ResourceRef'
+      updated_at:
+        type: string
+      workset_id:
+        type: string
+    type: object
   request.AgentOSControl:
     properties:
       actor_id:
@@ -1159,6 +1763,251 @@ info:
   title: GoAgent API
   version: "1.0"
 paths:
+  /agentos/actions:
+    get:
+      consumes:
+      - application/json
+      description: Query governed action projections for a tenant, process, resource,
+        kind, or lifecycle state.
+      operationId: agentos-list-actions
+      parameters:
+      - description: Account ID
+        in: query
+        name: account_id
+        required: true
+        type: string
+      - description: Project ID
+        in: query
+        name: project_id
+        required: true
+        type: string
+      - description: Process ID
+        in: query
+        name: process_id
+        type: string
+      - description: Resource kind
+        in: query
+        name: resource_kind
+        type: string
+      - description: Resource ID
+        in: query
+        name: resource_id
+        type: string
+      - description: Action kind
+        in: query
+        name: kind
+        type: string
+      - description: Lifecycle state
+        in: query
+        name: lifecycle_state
+        type: string
+      - description: Maximum actions
+        in: query
+        name: limit
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            items:
+              $ref: '#/definitions/github_com_TekkenSteve_GoAgent_agentos_process.GovernedActionStatus'
+            type: array
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/response.Error'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/response.Error'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/response.Error'
+      summary: List AgentOS governed actions
+      tags:
+      - agentos
+    post:
+      consumes:
+      - application/json
+      description: Request one governed action with durable dry-run, approval, and
+        execution state.
+      operationId: agentos-request-action
+      parameters:
+      - description: Governed action request
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/github_com_TekkenSteve_GoAgent_agentos_process.GovernedActionSpec'
+      produces:
+      - application/json
+      responses:
+        "202":
+          description: Accepted
+          schema:
+            $ref: '#/definitions/github_com_TekkenSteve_GoAgent_agentos_process.GovernedActionStatus'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/response.Error'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/response.Error'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/response.Error'
+      summary: Request AgentOS governed action
+      tags:
+      - agentos
+  /agentos/actions/{action_id}:
+    get:
+      consumes:
+      - application/json
+      description: Query one governed action projection.
+      operationId: agentos-action-status
+      parameters:
+      - description: Action ID
+        in: path
+        name: action_id
+        required: true
+        type: string
+      - description: Account ID
+        in: query
+        name: account_id
+        required: true
+        type: string
+      - description: Project ID
+        in: query
+        name: project_id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/github_com_TekkenSteve_GoAgent_agentos_process.GovernedActionStatus'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/response.Error'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/response.Error'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/response.Error'
+      summary: Get AgentOS governed action status
+      tags:
+      - agentos
+  /agentos/ledger:
+    get:
+      consumes:
+      - application/json
+      description: Query durable ledger entries for a tenant, process, resource, or
+        kind.
+      operationId: agentos-list-ledger-entries
+      parameters:
+      - description: Account ID
+        in: query
+        name: account_id
+        required: true
+        type: string
+      - description: Project ID
+        in: query
+        name: project_id
+        required: true
+        type: string
+      - description: Process ID
+        in: query
+        name: process_id
+        type: string
+      - description: Resource kind
+        in: query
+        name: resource_kind
+        type: string
+      - description: Resource ID
+        in: query
+        name: resource_id
+        type: string
+      - description: Ledger entry kind
+        in: query
+        name: kind
+        type: string
+      - description: Only return entries after this sequence
+        in: query
+        name: after_sequence
+        type: integer
+      - description: Maximum entries
+        in: query
+        name: limit
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            items:
+              $ref: '#/definitions/github_com_TekkenSteve_GoAgent_agentos_process.LedgerEntry'
+            type: array
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/response.Error'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/response.Error'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/response.Error'
+      summary: List AgentOS ledger entries
+      tags:
+      - agentos
+    post:
+      consumes:
+      - application/json
+      description: Append one durable process or resource ledger entry.
+      operationId: agentos-append-ledger-entry
+      parameters:
+      - description: Ledger entry request
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/github_com_TekkenSteve_GoAgent_agentos_process.LedgerEntrySpec'
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: Created
+          schema:
+            $ref: '#/definitions/github_com_TekkenSteve_GoAgent_agentos_process.LedgerEntry'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/response.Error'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/response.Error'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/response.Error'
+      summary: Append AgentOS ledger entry
+      tags:
+      - agentos
   /agentos/plans:
     post:
       consumes:
@@ -1788,6 +2637,246 @@ paths:
       summary: Get AgentOS plan authoring schema
       tags:
       - agentos
+  /agentos/processes:
+    get:
+      consumes:
+      - application/json
+      description: Query durable process projections for a tenant, resource, kind,
+        or lifecycle state.
+      operationId: agentos-list-processes
+      parameters:
+      - description: Account ID
+        in: query
+        name: account_id
+        required: true
+        type: string
+      - description: Project ID
+        in: query
+        name: project_id
+        required: true
+        type: string
+      - description: Resource kind
+        in: query
+        name: resource_kind
+        type: string
+      - description: Resource ID
+        in: query
+        name: resource_id
+        type: string
+      - description: Process kind
+        in: query
+        name: kind
+        type: string
+      - description: Lifecycle state
+        in: query
+        name: lifecycle_state
+        type: string
+      - description: Maximum processes
+        in: query
+        name: limit
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            items:
+              $ref: '#/definitions/github_com_TekkenSteve_GoAgent_agentos_process.Status'
+            type: array
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/response.Error'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/response.Error'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/response.Error'
+      summary: List AgentOS processes
+      tags:
+      - agentos
+    post:
+      consumes:
+      - application/json
+      description: Start a durable business process for a tenant-scoped resource.
+      operationId: agentos-start-process
+      parameters:
+      - description: AgentOS process request
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/github_com_TekkenSteve_GoAgent_agentos_process.Spec'
+      produces:
+      - application/json
+      responses:
+        "202":
+          description: Accepted
+          schema:
+            $ref: '#/definitions/github_com_TekkenSteve_GoAgent_agentos_process.Status'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/response.Error'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/response.Error'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/response.Error'
+      summary: Start AgentOS process
+      tags:
+      - agentos
+  /agentos/processes/{process_id}:
+    get:
+      consumes:
+      - application/json
+      description: Query the public description of one durable business process.
+      operationId: agentos-describe-process
+      parameters:
+      - description: Process ID
+        in: path
+        name: process_id
+        required: true
+        type: string
+      - description: Account ID
+        in: query
+        name: account_id
+        required: true
+        type: string
+      - description: Project ID
+        in: query
+        name: project_id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/github_com_TekkenSteve_GoAgent_agentos_process.Description'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/response.Error'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/response.Error'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/response.Error'
+      summary: Describe AgentOS process
+      tags:
+      - agentos
+  /agentos/processes/{process_id}/status:
+    get:
+      consumes:
+      - application/json
+      description: Query the current status of one durable business process.
+      operationId: agentos-process-status
+      parameters:
+      - description: Process ID
+        in: path
+        name: process_id
+        required: true
+        type: string
+      - description: Account ID
+        in: query
+        name: account_id
+        required: true
+        type: string
+      - description: Project ID
+        in: query
+        name: project_id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/github_com_TekkenSteve_GoAgent_agentos_process.Status'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/response.Error'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/response.Error'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/response.Error'
+      summary: Get AgentOS process status
+      tags:
+      - agentos
+  /agentos/resources:
+    get:
+      consumes:
+      - application/json
+      description: Query durable process-platform projections for application-owned
+        resources.
+      operationId: agentos-resources
+      parameters:
+      - description: Account ID
+        in: query
+        name: account_id
+        required: true
+        type: string
+      - description: Project ID
+        in: query
+        name: project_id
+        required: true
+        type: string
+      - description: Resource kind
+        in: query
+        name: resource_kind
+        type: string
+      - description: Resource ID
+        in: query
+        name: resource_id
+        type: string
+      - description: Lifecycle state
+        in: query
+        name: lifecycle_state
+        type: string
+      - description: Maximum projection rows or nested records
+        in: query
+        name: limit
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/github_com_TekkenSteve_GoAgent_agentos_process.ResourceProjection'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/response.Error'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/response.Error'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/response.Error'
+      summary: Get or list AgentOS resource projections
+      tags:
+      - agentos
   /agentos/runs:
     post:
       consumes:
@@ -1968,6 +3057,150 @@ paths:
           schema:
             $ref: '#/definitions/response.Error'
       summary: Get AgentOS run status
+      tags:
+      - agentos
+  /agentos/worksets:
+    get:
+      consumes:
+      - application/json
+      description: Query batch workset projections for a tenant, process, resource,
+        kind, or lifecycle state.
+      operationId: agentos-list-worksets
+      parameters:
+      - description: Account ID
+        in: query
+        name: account_id
+        required: true
+        type: string
+      - description: Project ID
+        in: query
+        name: project_id
+        required: true
+        type: string
+      - description: Process ID
+        in: query
+        name: process_id
+        type: string
+      - description: Resource kind
+        in: query
+        name: resource_kind
+        type: string
+      - description: Resource ID
+        in: query
+        name: resource_id
+        type: string
+      - description: Workset kind
+        in: query
+        name: kind
+        type: string
+      - description: Lifecycle state
+        in: query
+        name: lifecycle_state
+        type: string
+      - description: Maximum worksets
+        in: query
+        name: limit
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            items:
+              $ref: '#/definitions/github_com_TekkenSteve_GoAgent_agentos_process.WorksetStatus'
+            type: array
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/response.Error'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/response.Error'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/response.Error'
+      summary: List AgentOS worksets
+      tags:
+      - agentos
+    post:
+      consumes:
+      - application/json
+      description: Start one durable coarse-grained batch workset.
+      operationId: agentos-start-workset
+      parameters:
+      - description: Workset request
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/github_com_TekkenSteve_GoAgent_agentos_process.WorksetSpec'
+      produces:
+      - application/json
+      responses:
+        "202":
+          description: Accepted
+          schema:
+            $ref: '#/definitions/github_com_TekkenSteve_GoAgent_agentos_process.WorksetStatus'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/response.Error'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/response.Error'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/response.Error'
+      summary: Start AgentOS workset
+      tags:
+      - agentos
+  /agentos/worksets/{workset_id}:
+    get:
+      consumes:
+      - application/json
+      description: Query one workset projection.
+      operationId: agentos-workset-status
+      parameters:
+      - description: Workset ID
+        in: path
+        name: workset_id
+        required: true
+        type: string
+      - description: Account ID
+        in: query
+        name: account_id
+        required: true
+        type: string
+      - description: Project ID
+        in: query
+        name: project_id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/github_com_TekkenSteve_GoAgent_agentos_process.WorksetStatus'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/response.Error'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/response.Error'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/response.Error'
+      summary: Get AgentOS workset status
       tags:
       - agentos
   /orchestration/execute:

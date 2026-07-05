@@ -4,6 +4,7 @@ import (
 	"context"
 
 	agentos "github.com/TekkenSteve/GoAgent/agentos/control"
+	agentosplatform "github.com/TekkenSteve/GoAgent/agentos/platform"
 	"github.com/TekkenSteve/GoAgent/internal/agentfw/eventing"
 	"github.com/TekkenSteve/GoAgent/internal/usecase"
 	"github.com/TekkenSteve/GoAgent/pkg/logger"
@@ -25,9 +26,10 @@ type V1 struct {
 	l logger.Interface
 	v *validator.Validate
 
-	eventIngest    *eventing.Service
-	cancelWorkflow CancelWorkflowFn // non-nil only when running with Temporal
-	signalWorkflow SignalWorkflowFn // non-nil only when running with Temporal
-	agentOSRuntime agentos.Runtime
-	planRuntime    agentos.PlanRuntime
+	eventIngest     *eventing.Service
+	cancelWorkflow  CancelWorkflowFn // non-nil only when running with Temporal
+	signalWorkflow  SignalWorkflowFn // non-nil only when running with Temporal
+	agentOSRuntime  agentos.Runtime
+	planRuntime     agentos.PlanRuntime
+	platformRuntime agentosplatform.Runtime
 }
