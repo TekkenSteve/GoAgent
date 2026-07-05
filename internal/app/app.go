@@ -12,6 +12,8 @@ import (
 
 	agentos "github.com/TekkenSteve/GoAgent/agentos/control"
 	agentoscore "github.com/TekkenSteve/GoAgent/agentos/core"
+	agentosplatform "github.com/TekkenSteve/GoAgent/agentos/platform"
+	agentosproc "github.com/TekkenSteve/GoAgent/agentos/process"
 	agentostemporal "github.com/TekkenSteve/GoAgent/agentos/temporal"
 	"github.com/TekkenSteve/GoAgent/config"
 	agentfwconfig "github.com/TekkenSteve/GoAgent/internal/agentfw/config"
@@ -38,7 +40,11 @@ import (
 	"github.com/TekkenSteve/GoAgent/internal/repo/webapi"
 	"github.com/TekkenSteve/GoAgent/internal/usecase"
 	"github.com/TekkenSteve/GoAgent/internal/usecase/agent"
+	"github.com/TekkenSteve/GoAgent/internal/usecase/agentosaction"
+	"github.com/TekkenSteve/GoAgent/internal/usecase/agentosbatch"
+	"github.com/TekkenSteve/GoAgent/internal/usecase/agentosledger"
 	"github.com/TekkenSteve/GoAgent/internal/usecase/agentosplan"
+	"github.com/TekkenSteve/GoAgent/internal/usecase/agentosprojection"
 	agentosruntime "github.com/TekkenSteve/GoAgent/internal/usecase/agentosruntime"
 	billingpkg "github.com/TekkenSteve/GoAgent/internal/usecase/billing"
 	agentfwusecase "github.com/TekkenSteve/GoAgent/internal/usecase/executor"
@@ -213,19 +219,21 @@ func runHTTPServer(cfg *config.Config, l *logger.Logger, agentExecutor usecase.A
 
 // temporalComponents holds the initialized components returned by initTemporalComponents.
 type temporalComponents struct {
-	runtime          *agentfwruntime.TemporalRuntime
-	agentOSRuntime   agentos.Runtime
-	planRuntime      agentos.PlanRuntime
-	closePlanRuntime func() error
-	planRecovery     *agentostemporal.PlanCommandRecoveryLoop
-	planMetrics      *agentosplan.PlanMetricsExporterLoop
-	batchWriter      *pipelinepkg.BatchWriter
-	agentUC          *agent.UseCase
-	triggerUC        *triggerpkg.UseCase
-	toolRegistry     *toolkit.ToolRegistry
-	cancelWorkflow   restapiv1.CancelWorkflowFn
-	signalWorkflow   restapiv1.SignalWorkflowFn
-	llmProvider      *webapi.BifrostProvider
+	runtime             *agentfwruntime.TemporalRuntime
+	agentOSRuntime      agentos.Runtime
+	planRuntime         agentos.PlanRuntime
+	platformRuntime     agentosplatform.Runtime
+	closePlanRuntime    func() error
+	closeProcessRuntime func() error
+	planRecovery        *agentostemporal.PlanCommandRecoveryLoop
+	planMetrics         *agentosplan.PlanMetricsExporterLoop
+	batchWriter         *pipelinepkg.BatchWriter
+	agentUC             *agent.UseCase
+	triggerUC           *triggerpkg.UseCase
+	toolRegistry        *toolkit.ToolRegistry
+	cancelWorkflow      restapiv1.CancelWorkflowFn
+	signalWorkflow      restapiv1.SignalWorkflowFn
+	llmProvider         *webapi.BifrostProvider
 }
 
 // Stop releases background loops and Temporal-owned runtime resources created
@@ -251,6 +259,12 @@ func (c *temporalComponents) Stop(l logger.Interface) {
 	if c.closePlanRuntime != nil {
 		if err := c.closePlanRuntime(); err != nil {
 			l.Error(fmt.Errorf("app - Run - close agentos plan runtime: %w", err))
+		}
+	}
+
+	if c.closeProcessRuntime != nil {
+		if err := c.closeProcessRuntime(); err != nil {
+			l.Error(fmt.Errorf("app - Run - close agentos process runtime: %w", err))
 		}
 	}
 
@@ -297,7 +311,23 @@ func registerAgentOSSchemas(l *logger.Logger, cfg *config.Config, capabilityCata
 	}
 }
 
-func setupPlanRuntime(agentOSRuntime agentos.Runtime, planStore *temporalrepo.AgentOSPlanRepo, planEventStream *planstream.RedisPlanEventStream, artifactStore *temporalrepo.AgentOSArtifactRepo, capabilityCatalog *temporalrepo.AgentOSCapabilityCatalogRepo, artifactSchemaCatalog *temporalrepo.AgentOSArtifactSchemaCatalogRepo, fwCfg *agentfwconfig.Config, cfg *config.Config, runtime *agentfwruntime.TemporalRuntime, comp *initAgentComponentsResult, l *logger.Logger) (*agentostemporal.PlanActivities, agentos.PlanRuntime, *agentostemporal.PlanCommandRecoveryLoop, *agentosplan.PlanMetricsExporterLoop) {
+type agentOSProcessPlatformRuntimes struct {
+	processRuntime      agentosproc.Runtime
+	ledgerRuntime       agentosproc.LedgerRuntime
+	actionRuntime       agentosproc.GovernedActionRuntime
+	worksetRuntime      agentosproc.BatchRuntime
+	projectionRuntime   agentosproc.ProjectionRuntime
+	closeProcessRuntime func() error
+}
+
+type agentOSProcessPlatformStores struct {
+	processStore *temporalrepo.AgentOSProcessRepo
+	ledgerStore  *temporalrepo.AgentOSLedgerRepo
+	actionStore  *temporalrepo.AgentOSActionRepo
+	worksetStore *temporalrepo.AgentOSWorksetRepo
+}
+
+func setupPlanRuntime(agentOSRuntime agentos.Runtime, planStore *temporalrepo.AgentOSPlanRepo, planEventStream *planstream.RedisPlanEventStream, artifactStore *temporalrepo.AgentOSArtifactRepo, capabilityCatalog *temporalrepo.AgentOSCapabilityCatalogRepo, artifactSchemaCatalog *temporalrepo.AgentOSArtifactSchemaCatalogRepo, fwCfg *agentfwconfig.Config, cfg *config.Config, runtime *agentfwruntime.TemporalRuntime, comp *initAgentComponentsResult, l *logger.Logger) (*agentostemporal.PlanActivities, agentos.PlanRuntime, *agentOSProcessPlatformRuntimes, *agentostemporal.PlanCommandRecoveryLoop, *agentosplan.PlanMetricsExporterLoop) {
 	planActivities, err := agentostemporal.NewPlanActivitiesWithCatalogAndSchemas(
 		agentOSRuntime,
 		capabilityCatalog,
@@ -310,9 +340,9 @@ func setupPlanRuntime(agentOSRuntime agentos.Runtime, planStore *temporalrepo.Ag
 		l.Fatal(fmt.Errorf("app - Run - agentos plan activities: %w", err))
 	}
 
-	processStore := temporalrepo.NewAgentOSProcessRepo(planStore.Postgres)
+	stores := newAgentOSProcessPlatformStores(planStore.Postgres)
 
-	processActivities, err := agentostemporal.NewProcessActivities(processStore, processStore)
+	processActivities, err := agentostemporal.NewProcessActivities(stores.processStore, stores.processStore)
 	if err != nil {
 		l.Fatal(fmt.Errorf("app - Run - agentos process activities: %w", err))
 	}
@@ -333,6 +363,8 @@ func setupPlanRuntime(agentOSRuntime agentos.Runtime, planStore *temporalrepo.Ag
 		l.Fatal(fmt.Errorf("app - Run - agentos temporal plan runtime: %w", err))
 	}
 
+	processPlatform := newAgentOSProcessPlatformRuntimes(l, &planRuntimeConfig, runtime, stores)
+
 	registrar := agentOSRegistrar{
 		base:              agentfwruntime.NewDefaultRegistrar(comp.activities),
 		planActivities:    planActivities,
@@ -346,7 +378,63 @@ func setupPlanRuntime(agentOSRuntime agentos.Runtime, planStore *temporalrepo.Ag
 	planRecovery := startAgentOSPlanCommandRecovery(l, &cfg.AgentOS, planRuntime)
 	planMetrics := startAgentOSPlanMetricsExporter(l, cfg, planStore)
 
-	return planActivities, planRuntime, planRecovery, planMetrics
+	return planActivities, planRuntime, processPlatform, planRecovery, planMetrics
+}
+
+func newAgentOSProcessPlatformStores(pg *postgres.Postgres) agentOSProcessPlatformStores {
+	return agentOSProcessPlatformStores{
+		processStore: temporalrepo.NewAgentOSProcessRepo(pg),
+		ledgerStore:  temporalrepo.NewAgentOSLedgerRepo(pg),
+		actionStore:  temporalrepo.NewAgentOSActionRepo(pg),
+		worksetStore: temporalrepo.NewAgentOSWorksetRepo(pg),
+	}
+}
+
+func newAgentOSProcessPlatformRuntimes(l *logger.Logger, cfg *agentostemporal.RuntimeConfig, runtime *agentfwruntime.TemporalRuntime, stores agentOSProcessPlatformStores) *agentOSProcessPlatformRuntimes {
+	processRuntime, err := agentostemporal.NewProcessRuntimeWithClient(context.Background(), cfg, runtime.Client)
+	if err != nil {
+		l.Fatal(fmt.Errorf("app - Run - agentos temporal process runtime: %w", err))
+	}
+
+	ledgerRuntime, err := agentosledger.NewRuntime(stores.ledgerStore)
+	if err != nil {
+		l.Fatal(fmt.Errorf("app - Run - agentos ledger runtime: %w", err))
+	}
+
+	actionRuntime, err := agentosaction.NewRuntime(stores.actionStore)
+	if err != nil {
+		l.Fatal(fmt.Errorf("app - Run - agentos action runtime: %w", err))
+	}
+
+	worksetRuntime, err := agentosbatch.NewRuntime(stores.worksetStore)
+	if err != nil {
+		l.Fatal(fmt.Errorf("app - Run - agentos workset runtime: %w", err))
+	}
+
+	projectionRuntime := newAgentOSProjectionRuntime(l, stores)
+
+	return &agentOSProcessPlatformRuntimes{
+		processRuntime:      processRuntime,
+		ledgerRuntime:       ledgerRuntime,
+		actionRuntime:       actionRuntime,
+		worksetRuntime:      worksetRuntime,
+		projectionRuntime:   projectionRuntime,
+		closeProcessRuntime: closeAgentOSProcessRuntime(processRuntime),
+	}
+}
+
+func newAgentOSProjectionRuntime(l *logger.Logger, stores agentOSProcessPlatformStores) agentosproc.ProjectionRuntime {
+	projectionRuntime, err := agentosprojection.NewRuntime(agentosprojection.Config{
+		Processes: stores.processStore,
+		Ledger:    stores.ledgerStore,
+		Actions:   stores.actionStore,
+		Worksets:  stores.worksetStore,
+	})
+	if err != nil {
+		l.Fatal(fmt.Errorf("app - Run - agentos projection runtime: %w", err))
+	}
+
+	return projectionRuntime
 }
 
 func initTemporalComponents(l *logger.Logger, cfg *config.Config, fwCfg *agentfwconfig.Config, pg *postgres.Postgres, rdb *goredis.Redis,
@@ -377,6 +465,32 @@ func initTemporalComponents(l *logger.Logger, cfg *config.Config, fwCfg *agentfw
 		return runtime.Client.CancelWorkflow(ctx, workflowID, "")
 	}
 
+	agentOSRuntime := newAgentOSControlRuntime(l, cfg, fwCfg, runtime, runBackendIndex)
+
+	planStore, planEventStream, artifactStore, capabilityCatalog, artifactSchemaCatalog := initPlanInfrastructure(l, cfg, pg, rdb)
+	registerAgentOSSchemas(l, cfg, capabilityCatalog, artifactSchemaCatalog)
+	_, planRuntime, processPlatform, planRecovery, planMetrics := setupPlanRuntime(agentOSRuntime, planStore, planEventStream, artifactStore, capabilityCatalog, artifactSchemaCatalog, fwCfg, cfg, runtime, comp, l)
+
+	return &temporalComponents{
+		runtime:             runtime,
+		agentOSRuntime:      agentOSRuntime,
+		planRuntime:         planRuntime,
+		platformRuntime:     processPlatform.platformRuntime(agentOSRuntime, planRuntime),
+		closePlanRuntime:    closeAgentOSPlanRuntime(planRuntime),
+		closeProcessRuntime: processPlatform.closeProcessRuntime,
+		planRecovery:        planRecovery,
+		planMetrics:         planMetrics,
+		batchWriter:         comp.batchWriter,
+		agentUC:             comp.agentUC,
+		triggerUC:           comp.triggerUC,
+		toolRegistry:        comp.toolRegistry,
+		cancelWorkflow:      cancelWorkflow,
+		signalWorkflow:      signalWorkflow,
+		llmProvider:         comp.llmProvider,
+	}
+}
+
+func newAgentOSControlRuntime(l logger.Interface, cfg *config.Config, fwCfg *agentfwconfig.Config, runtime *agentfwruntime.TemporalRuntime, runBackendIndex *temporalrepo.RunBackendIndexRepo) agentos.Runtime {
 	agentOSRuntime, err := agentostemporal.NewRuntimeWithClient(
 		context.Background(), &agentostemporal.RuntimeConfig{
 			TemporalAddress:          fwCfg.Temporal.Address,
@@ -394,25 +508,7 @@ func initTemporalComponents(l *logger.Logger, cfg *config.Config, fwCfg *agentfw
 		l.Fatal(fmt.Errorf("app - Run - agentos temporal runtime: %w", err))
 	}
 
-	planStore, planEventStream, artifactStore, capabilityCatalog, artifactSchemaCatalog := initPlanInfrastructure(l, cfg, pg, rdb)
-	registerAgentOSSchemas(l, cfg, capabilityCatalog, artifactSchemaCatalog)
-	_, planRuntime, planRecovery, planMetrics := setupPlanRuntime(agentOSRuntime, planStore, planEventStream, artifactStore, capabilityCatalog, artifactSchemaCatalog, fwCfg, cfg, runtime, comp, l)
-
-	return &temporalComponents{
-		runtime:          runtime,
-		agentOSRuntime:   agentOSRuntime,
-		planRuntime:      planRuntime,
-		closePlanRuntime: closeAgentOSPlanRuntime(planRuntime),
-		planRecovery:     planRecovery,
-		planMetrics:      planMetrics,
-		batchWriter:      comp.batchWriter,
-		agentUC:          comp.agentUC,
-		triggerUC:        comp.triggerUC,
-		toolRegistry:     comp.toolRegistry,
-		cancelWorkflow:   cancelWorkflow,
-		signalWorkflow:   signalWorkflow,
-		llmProvider:      comp.llmProvider,
-	}
+	return agentOSRuntime
 }
 
 func startAgentOSPlanMetricsExporter(l logger.Interface, cfg *config.Config, planStore *temporalrepo.AgentOSPlanRepo) *agentosplan.PlanMetricsExporterLoop {
@@ -573,6 +669,17 @@ func (r agentOSRegistrar) RegisterActivities(rt *agentfwruntime.TemporalRuntime)
 
 func closeAgentOSPlanRuntime(planRuntime agentos.PlanRuntime) func() error {
 	closeable, ok := planRuntime.(interface {
+		Close() error
+	})
+	if !ok {
+		return nil
+	}
+
+	return closeable.Close
+}
+
+func closeAgentOSProcessRuntime(processRuntime agentosproc.Runtime) func() error {
+	closeable, ok := processRuntime.(interface {
 		Close() error
 	})
 	if !ok {
