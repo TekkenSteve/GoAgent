@@ -8,9 +8,16 @@ from pydantic import BaseModel, TypeAdapter
 from .models import (
     AgentOSEvent,
     AgentOSEventIngestResult,
+    ActionRef,
+    ActionScope,
     Artifact,
     ArtifactRef,
     ControlRequest,
+    GovernedActionSpec,
+    GovernedActionStatus,
+    LedgerEntry,
+    LedgerEntrySpec,
+    LedgerScope,
     PlanArtifactScope,
     PlanAuditRecord,
     PlanAuditScope,
@@ -20,12 +27,24 @@ from .models import (
     PlanEventScope,
     PlanRef,
     PlanSignal,
+    ProcessDescription,
+    ProcessRef,
+    ProcessScope,
+    ProcessSpec,
+    ProcessStatus,
+    ResourceProjection,
+    ResourceProjectionScope,
+    ResourceProjectionSummary,
     RunPlanDescription,
     RunPlanSpec,
     RunPlanStatus,
     RunStart,
     RunStatus,
     Signal,
+    WorksetRef,
+    WorksetScope,
+    WorksetSpec,
+    WorksetStatus,
 )
 
 T = TypeVar("T")
@@ -180,6 +199,117 @@ class PlansClient:
         return await self._transport.get(f"/v1/agentos/plans/schemas/{kind}")
 
 
+class ProcessesClient:
+    def __init__(self, transport: _Transport) -> None:
+        self._transport = transport
+
+    async def start(self, spec: ProcessSpec) -> ProcessStatus:
+        return await self._transport.post("/v1/agentos/processes", spec, ProcessStatus)
+
+    async def list(self, scope: ProcessScope) -> list[ProcessStatus]:
+        return await self._transport.get(
+            "/v1/agentos/processes",
+            list[ProcessStatus],
+            **scope.model_dump(mode="json"),
+        )
+
+    async def status(self, ref: ProcessRef) -> ProcessStatus:
+        return await self._transport.get(
+            f"/v1/agentos/processes/{ref.process_id}/status",
+            ProcessStatus,
+            account_id=ref.account_id,
+            project_id=ref.project_id,
+        )
+
+    async def describe(self, ref: ProcessRef) -> ProcessDescription:
+        return await self._transport.get(
+            f"/v1/agentos/processes/{ref.process_id}",
+            ProcessDescription,
+            account_id=ref.account_id,
+            project_id=ref.project_id,
+        )
+
+
+class LedgerClient:
+    def __init__(self, transport: _Transport) -> None:
+        self._transport = transport
+
+    async def append(self, spec: LedgerEntrySpec) -> LedgerEntry:
+        return await self._transport.post("/v1/agentos/ledger", spec, LedgerEntry)
+
+    async def list(self, scope: LedgerScope) -> list[LedgerEntry]:
+        return await self._transport.get(
+            "/v1/agentos/ledger",
+            list[LedgerEntry],
+            **scope.model_dump(mode="json"),
+        )
+
+
+class ActionsClient:
+    def __init__(self, transport: _Transport) -> None:
+        self._transport = transport
+
+    async def request(self, spec: GovernedActionSpec) -> GovernedActionStatus:
+        return await self._transport.post("/v1/agentos/actions", spec, GovernedActionStatus)
+
+    async def list(self, scope: ActionScope) -> list[GovernedActionStatus]:
+        return await self._transport.get(
+            "/v1/agentos/actions",
+            list[GovernedActionStatus],
+            **scope.model_dump(mode="json"),
+        )
+
+    async def status(self, ref: ActionRef) -> GovernedActionStatus:
+        return await self._transport.get(
+            f"/v1/agentos/actions/{ref.action_id}",
+            GovernedActionStatus,
+            account_id=ref.account_id,
+            project_id=ref.project_id,
+        )
+
+
+class WorksetsClient:
+    def __init__(self, transport: _Transport) -> None:
+        self._transport = transport
+
+    async def start(self, spec: WorksetSpec) -> WorksetStatus:
+        return await self._transport.post("/v1/agentos/worksets", spec, WorksetStatus)
+
+    async def list(self, scope: WorksetScope) -> list[WorksetStatus]:
+        return await self._transport.get(
+            "/v1/agentos/worksets",
+            list[WorksetStatus],
+            **scope.model_dump(mode="json"),
+        )
+
+    async def status(self, ref: WorksetRef) -> WorksetStatus:
+        return await self._transport.get(
+            f"/v1/agentos/worksets/{ref.workset_id}",
+            WorksetStatus,
+            account_id=ref.account_id,
+            project_id=ref.project_id,
+        )
+
+
+class ResourcesClient:
+    def __init__(self, transport: _Transport) -> None:
+        self._transport = transport
+
+    async def get(self, scope: ResourceProjectionScope) -> ResourceProjection:
+        return await self._transport.get(
+            "/v1/agentos/resources",
+            ResourceProjection,
+            **scope.model_dump(mode="json"),
+        )
+
+    async def list(self, scope: ResourceProjectionScope) -> list[ResourceProjectionSummary]:
+        return await self._transport.get(
+            "/v1/agentos/resources",
+            list[ResourceProjectionSummary],
+            **scope.model_dump(mode="json", exclude={"resource_id"}),
+        )
+
+
 class AgentOSClient:
     def __init__(
         self,
@@ -200,6 +330,11 @@ class AgentOSClient:
         self._transport = _Transport(self._http)
         self.runs = RunsClient(self._transport)
         self.plans = PlansClient(self._transport)
+        self.processes = ProcessesClient(self._transport)
+        self.ledger = LedgerClient(self._transport)
+        self.actions = ActionsClient(self._transport)
+        self.worksets = WorksetsClient(self._transport)
+        self.resources = ResourcesClient(self._transport)
 
     async def __aenter__(self) -> AgentOSClient:
         return self

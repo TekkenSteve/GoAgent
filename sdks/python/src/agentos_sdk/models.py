@@ -322,3 +322,297 @@ class PlanAuditRecord(AgentOSModel):
     created_at: datetime | None = None
     metadata: dict[str, str] = Field(default_factory=dict)
 
+
+class ResourceRef(AgentOSModel):
+    kind: str
+    resource_id: str
+    account_id: str
+    project_id: str
+
+
+class ProcessRef(AgentOSModel):
+    process_id: str
+    account_id: str
+    project_id: str
+
+
+class ProcessPolicy(AgentOSModel):
+    timeout_seconds: int = 0
+    max_history_events: int = 0
+    continue_as_new_events: int = 0
+
+
+class ProcessTimerSpec(AgentOSModel):
+    timer_id: str
+    fire_at: datetime | None = None
+    after_seconds: int = 0
+    signal: str = ""
+    payload: dict[str, Any] = Field(default_factory=dict)
+
+
+class ProcessSpec(AgentOSModel):
+    process_id: str
+    kind: str
+    account_id: str
+    project_id: str
+    idempotency_key: str
+    resource: ResourceRef
+    requested_at: datetime | None = None
+    inputs: dict[str, Any] = Field(default_factory=dict)
+    metadata: dict[str, str] = Field(default_factory=dict)
+    policy: ProcessPolicy | None = None
+    timers: list[ProcessTimerSpec] = Field(default_factory=list)
+
+
+class ProcessStatus(AgentOSModel):
+    process_id: str
+    kind: str = ""
+    account_id: str = ""
+    project_id: str = ""
+    resource: ResourceRef | None = None
+    lifecycle_state: str
+    reason: str = ""
+    progress: RunProgress | None = None
+    metadata: dict[str, str] = Field(default_factory=dict)
+    started_at: datetime | None = None
+    updated_at: datetime | None = None
+
+
+class ProcessDescription(AgentOSModel):
+    process_id: str
+    kind: str
+    account_id: str
+    project_id: str
+    resource: ResourceRef
+    status: ProcessStatus
+    policy: ProcessPolicy | None = None
+    timers: list[ProcessTimerSpec] = Field(default_factory=list)
+    metadata: dict[str, str] = Field(default_factory=dict)
+    updated_at: datetime | None = None
+
+
+class ProcessScope(AgentOSModel):
+    account_id: str
+    project_id: str
+    resource_kind: str = ""
+    resource_id: str = ""
+    kind: str = ""
+    lifecycle_state: str = ""
+    limit: int = 0
+
+
+class ActorRef(AgentOSModel):
+    kind: str = ""
+    actor_id: str = ""
+
+
+class LedgerDataRef(AgentOSModel):
+    kind: str
+    uri: str = ""
+    artifact_id: str = ""
+    media_type: str = ""
+    digest: str = ""
+    metadata: dict[str, str] = Field(default_factory=dict)
+
+
+class LedgerEntrySpec(AgentOSModel):
+    entry_id: str
+    idempotency_key: str
+    account_id: str
+    project_id: str
+    process_id: str = ""
+    resource: ResourceRef | None = None
+    kind: str
+    actor: ActorRef | None = None
+    occurred_at: datetime | None = None
+    summary: str = ""
+    rationale: str = ""
+    data_refs: list[LedgerDataRef] = Field(default_factory=list)
+    artifact_refs: list[ArtifactRef] = Field(default_factory=list)
+    metadata: dict[str, str] = Field(default_factory=dict)
+
+
+class LedgerEntry(LedgerEntrySpec):
+    sequence: int
+    created_at: datetime | None = None
+
+
+class LedgerScope(AgentOSModel):
+    account_id: str
+    project_id: str
+    process_id: str = ""
+    resource_kind: str = ""
+    resource_id: str = ""
+    kind: str = ""
+    after_sequence: int = 0
+    limit: int = 0
+
+
+class ActionRef(AgentOSModel):
+    action_id: str
+    account_id: str
+    project_id: str
+
+
+class ActionRiskAssessment(AgentOSModel):
+    level: str = ""
+    reason: str = ""
+    evidence_refs: list[LedgerDataRef] = Field(default_factory=list)
+    assessed_at: datetime | None = None
+
+
+class GovernedActionSpec(AgentOSModel):
+    action_id: str
+    idempotency_key: str
+    account_id: str
+    project_id: str
+    process_id: str = ""
+    resource: ResourceRef | None = None
+    kind: str
+    intent: str = ""
+    requested_by: ActorRef | None = None
+    requested_at: datetime | None = None
+    dry_run_required: bool = False
+    approval_required: bool = False
+    risk: ActionRiskAssessment | None = None
+    input_refs: list[LedgerDataRef] = Field(default_factory=list)
+    compensation_ref: LedgerDataRef | None = None
+    metadata: dict[str, str] = Field(default_factory=dict)
+
+
+class GovernedActionStatus(AgentOSModel):
+    action_id: str
+    account_id: str
+    project_id: str
+    process_id: str = ""
+    resource: ResourceRef | None = None
+    kind: str = ""
+    lifecycle_state: str
+    dry_run_state: str = ""
+    approval_state: str = ""
+    execution_state: str = ""
+    risk: ActionRiskAssessment | None = None
+    reason: str = ""
+    updated_at: datetime | None = None
+
+
+class ActionScope(AgentOSModel):
+    account_id: str
+    project_id: str
+    process_id: str = ""
+    resource_kind: str = ""
+    resource_id: str = ""
+    kind: str = ""
+    lifecycle_state: str = ""
+    limit: int = 0
+
+
+class WorksetRef(AgentOSModel):
+    workset_id: str
+    account_id: str
+    project_id: str
+
+
+class WorksetItemsRef(AgentOSModel):
+    kind: str
+    uri: str = ""
+    artifact_id: str = ""
+    media_type: str = ""
+    digest: str = ""
+    count: int = 0
+    metadata: dict[str, str] = Field(default_factory=dict)
+
+
+class WorksetChunkSpec(AgentOSModel):
+    chunk_id: str
+    items_ref: WorksetItemsRef
+    item_count: int = 0
+    concurrency: int = 0
+
+
+class WorksetPolicy(AgentOSModel):
+    max_items: int = 0
+    max_chunk_size: int = 0
+    max_chunks: int = 0
+    max_concurrency: int = 0
+
+
+class WorksetSpec(AgentOSModel):
+    workset_id: str
+    idempotency_key: str
+    account_id: str
+    project_id: str
+    process_id: str = ""
+    resource: ResourceRef | None = None
+    kind: str
+    requested_by: ActorRef | None = None
+    requested_at: datetime | None = None
+    items_ref: WorksetItemsRef
+    chunks: list[WorksetChunkSpec] = Field(default_factory=list)
+    policy: WorksetPolicy | None = None
+    metadata: dict[str, str] = Field(default_factory=dict)
+
+
+class WorksetProgress(AgentOSModel):
+    total_items: int = 0
+    completed_items: int = 0
+    failed_items: int = 0
+    total_chunks: int = 0
+    completed_chunks: int = 0
+    failed_chunks: int = 0
+
+
+class WorksetStatus(AgentOSModel):
+    workset_id: str
+    account_id: str
+    project_id: str
+    process_id: str = ""
+    resource: ResourceRef | None = None
+    kind: str = ""
+    lifecycle_state: str
+    progress: WorksetProgress | None = None
+    reason: str = ""
+    metadata: dict[str, str] = Field(default_factory=dict)
+    updated_at: datetime | None = None
+
+
+class WorksetScope(AgentOSModel):
+    account_id: str
+    project_id: str
+    process_id: str = ""
+    resource_kind: str = ""
+    resource_id: str = ""
+    kind: str = ""
+    lifecycle_state: str = ""
+    limit: int = 0
+
+
+class ResourceProjectionScope(AgentOSModel):
+    account_id: str
+    project_id: str
+    resource_kind: str
+    resource_id: str = ""
+    lifecycle_state: str = ""
+    limit: int = 0
+
+
+class ResourceProjection(AgentOSModel):
+    resource: ResourceRef
+    processes: list[ProcessStatus] = Field(default_factory=list)
+    ledger: list[LedgerEntry] = Field(default_factory=list)
+    actions: list[GovernedActionStatus] = Field(default_factory=list)
+    worksets: list[WorksetStatus] = Field(default_factory=list)
+    artifacts: list[ArtifactRef] = Field(default_factory=list)
+    updated_at: datetime | None = None
+    metadata: dict[str, str] = Field(default_factory=dict)
+
+
+class ResourceProjectionSummary(AgentOSModel):
+    resource: ResourceRef
+    latest_process_id: str = ""
+    latest_lifecycle_state: str = ""
+    process_count: int = 0
+    action_count: int = 0
+    workset_count: int = 0
+    ledger_count: int = 0
+    updated_at: datetime | None = None
