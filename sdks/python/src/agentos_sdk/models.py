@@ -461,6 +461,39 @@ class ActionRiskAssessment(AgentOSModel):
     assessed_at: datetime | None = None
 
 
+class ActionDryRunResult(AgentOSModel):
+    idempotency_key: str
+    succeeded: bool
+    summary: str = ""
+    risk: ActionRiskAssessment | None = None
+    output_refs: list[LedgerDataRef] = Field(default_factory=list)
+    recorded_at: datetime | None = None
+
+
+class ActionApprovalDecision(AgentOSModel):
+    idempotency_key: str
+    approved: bool
+    actor: ActorRef | None = None
+    reason: str = ""
+    decided_at: datetime | None = None
+
+
+class ActionExecutionResult(AgentOSModel):
+    idempotency_key: str
+    succeeded: bool
+    summary: str = ""
+    output_refs: list[LedgerDataRef] = Field(default_factory=list)
+    artifact_refs: list[ArtifactRef] = Field(default_factory=list)
+    recorded_at: datetime | None = None
+
+
+class ActionCancelRequest(AgentOSModel):
+    idempotency_key: str
+    actor: ActorRef | None = None
+    reason: str = ""
+    requested_at: datetime | None = None
+
+
 class GovernedActionSpec(AgentOSModel):
     action_id: str
     idempotency_key: str

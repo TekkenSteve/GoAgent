@@ -8,6 +8,10 @@ from pydantic import BaseModel, TypeAdapter
 from .models import (
     AgentOSEvent,
     AgentOSEventIngestResult,
+    ActionApprovalDecision,
+    ActionCancelRequest,
+    ActionDryRunResult,
+    ActionExecutionResult,
     ActionRef,
     ActionScope,
     Artifact,
@@ -65,9 +69,15 @@ class _Transport:
         response = await self._http.get(path, params=self._query(params))
         return self._decode(response, model)
 
-    async def post(self, path: str, body: BaseModel | dict[str, Any] | None = None, model: type[T] | Any = None) -> T | Any:
+    async def post(
+        self,
+        path: str,
+        body: BaseModel | dict[str, Any] | None = None,
+        model: type[T] | Any = None,
+        **params: Any,
+    ) -> T | Any:
         payload = self._body(body)
-        response = await self._http.post(path, json=payload)
+        response = await self._http.post(path, json=payload, params=self._query(params))
         return self._decode(response, model)
 
     @staticmethod
@@ -262,6 +272,58 @@ class ActionsClient:
     async def status(self, ref: ActionRef) -> GovernedActionStatus:
         return await self._transport.get(
             f"/v1/agentos/actions/{ref.action_id}",
+            GovernedActionStatus,
+            account_id=ref.account_id,
+            project_id=ref.project_id,
+        )
+
+    async def record_dry_run(
+        self,
+        ref: ActionRef,
+        result: ActionDryRunResult,
+    ) -> GovernedActionStatus:
+        return await self._transport.post(
+            f"/v1/agentos/actions/{ref.action_id}/dry-run",
+            result,
+            GovernedActionStatus,
+            account_id=ref.account_id,
+            project_id=ref.project_id,
+        )
+
+    async def resolve_approval(
+        self,
+        ref: ActionRef,
+        decision: ActionApprovalDecision,
+    ) -> GovernedActionStatus:
+        return await self._transport.post(
+            f"/v1/agentos/actions/{ref.action_id}/approval",
+            decision,
+            GovernedActionStatus,
+            account_id=ref.account_id,
+            project_id=ref.project_id,
+        )
+
+    async def complete(
+        self,
+        ref: ActionRef,
+        result: ActionExecutionResult,
+    ) -> GovernedActionStatus:
+        return await self._transport.post(
+            f"/v1/agentos/actions/{ref.action_id}/execution",
+            result,
+            GovernedActionStatus,
+            account_id=ref.account_id,
+            project_id=ref.project_id,
+        )
+
+    async def cancel(
+        self,
+        ref: ActionRef,
+        request: ActionCancelRequest,
+    ) -> GovernedActionStatus:
+        return await self._transport.post(
+            f"/v1/agentos/actions/{ref.action_id}/cancel",
+            request,
             GovernedActionStatus,
             account_id=ref.account_id,
             project_id=ref.project_id,

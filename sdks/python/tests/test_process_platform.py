@@ -6,6 +6,10 @@ import httpx
 import pytest
 
 from agentos_sdk import (
+    ActionApprovalDecision,
+    ActionCancelRequest,
+    ActionDryRunResult,
+    ActionExecutionResult,
     ActionRef,
     ActionScope,
     AgentOSClient,
@@ -155,6 +159,22 @@ async def test_ledger_action_workset_clients_preserve_scopes_and_keys() -> None:
             case "/v1/agentos/actions/action-1":
                 assert dict(request.url.params) == {"account_id": "acct-1", "project_id": "proj-1"}
                 return json_response(200, {"action_id": "action-1", "account_id": "acct-1", "project_id": "proj-1", "lifecycle_state": "waiting_approval"})
+            case "/v1/agentos/actions/action-1/dry-run":
+                assert dict(request.url.params) == {"account_id": "acct-1", "project_id": "proj-1"}
+                assert json.loads(request.content)["idempotency_key"] == "action-dry-run-1"
+                return json_response(200, {"action_id": "action-1", "account_id": "acct-1", "project_id": "proj-1", "lifecycle_state": "waiting_approval"})
+            case "/v1/agentos/actions/action-1/approval":
+                assert dict(request.url.params) == {"account_id": "acct-1", "project_id": "proj-1"}
+                assert json.loads(request.content)["idempotency_key"] == "action-approval-1"
+                return json_response(200, {"action_id": "action-1", "account_id": "acct-1", "project_id": "proj-1", "lifecycle_state": "ready"})
+            case "/v1/agentos/actions/action-1/execution":
+                assert dict(request.url.params) == {"account_id": "acct-1", "project_id": "proj-1"}
+                assert json.loads(request.content)["idempotency_key"] == "action-execution-1"
+                return json_response(200, {"action_id": "action-1", "account_id": "acct-1", "project_id": "proj-1", "lifecycle_state": "executed"})
+            case "/v1/agentos/actions/action-1/cancel":
+                assert dict(request.url.params) == {"account_id": "acct-1", "project_id": "proj-1"}
+                assert json.loads(request.content)["idempotency_key"] == "action-cancel-1"
+                return json_response(200, {"action_id": "action-1", "account_id": "acct-1", "project_id": "proj-1", "lifecycle_state": "canceled"})
             case "/v1/agentos/worksets":
                 if request.method == "POST":
                     assert json.loads(request.content)["idempotency_key"] == "workset-start-1"
@@ -213,6 +233,23 @@ async def test_ledger_action_workset_clients_preserve_scopes_and_keys() -> None:
         action_status = await client.actions.status(
             ActionRef(action_id="action-1", account_id="acct-1", project_id="proj-1")
         )
+        action_ref = ActionRef(action_id="action-1", account_id="acct-1", project_id="proj-1")
+        dry_run_status = await client.actions.record_dry_run(
+            action_ref,
+            ActionDryRunResult(idempotency_key="action-dry-run-1", succeeded=True),
+        )
+        approval_status = await client.actions.resolve_approval(
+            action_ref,
+            ActionApprovalDecision(idempotency_key="action-approval-1", approved=True),
+        )
+        execution_status = await client.actions.complete(
+            action_ref,
+            ActionExecutionResult(idempotency_key="action-execution-1", succeeded=True),
+        )
+        cancel_status = await client.actions.cancel(
+            action_ref,
+            ActionCancelRequest(idempotency_key="action-cancel-1", reason="operator canceled"),
+        )
         workset = await client.worksets.start(
             WorksetSpec(
                 workset_id="workset-1",
@@ -234,6 +271,7 @@ async def test_ledger_action_workset_clients_preserve_scopes_and_keys() -> None:
     assert entry.sequence == 7
     assert entries[0].entry_id == "entry-1"
     assert action.action_id == actions[0].action_id == action_status.action_id
+    assert dry_run_status.action_id == approval_status.action_id == execution_status.action_id == cancel_status.action_id
     assert workset.workset_id == worksets[0].workset_id == workset_status.workset_id
     assert seen == [
         ("POST", "/v1/agentos/ledger"),
@@ -241,6 +279,10 @@ async def test_ledger_action_workset_clients_preserve_scopes_and_keys() -> None:
         ("POST", "/v1/agentos/actions"),
         ("GET", "/v1/agentos/actions"),
         ("GET", "/v1/agentos/actions/action-1"),
+        ("POST", "/v1/agentos/actions/action-1/dry-run"),
+        ("POST", "/v1/agentos/actions/action-1/approval"),
+        ("POST", "/v1/agentos/actions/action-1/execution"),
+        ("POST", "/v1/agentos/actions/action-1/cancel"),
         ("POST", "/v1/agentos/worksets"),
         ("GET", "/v1/agentos/worksets"),
         ("GET", "/v1/agentos/worksets/workset-1"),

@@ -44,6 +44,10 @@ func TestAgentOSProcessPlatformRoutesUseRuntime(t *testing.T) {
 	testActionRequestRoute(t, app, runtime)
 	testActionListRoute(t, app, runtime)
 	testActionStatusRoute(t, app, runtime)
+	testActionDryRunRoute(t, app, runtime)
+	testActionApprovalRoute(t, app, runtime)
+	testActionExecutionRoute(t, app, runtime)
+	testActionCancelRoute(t, app, runtime)
 	testWorksetStartRoute(t, app, runtime)
 	testWorksetListRoute(t, app, runtime)
 	testWorksetStatusRoute(t, app, runtime)
@@ -213,6 +217,62 @@ func testActionStatusRoute(t *testing.T, app *fiber.App, runtime *fakePlatformRu
 	}
 }
 
+func testActionDryRunRoute(t *testing.T, app *fiber.App, runtime *fakePlatformRuntime) {
+	t.Helper()
+
+	body := `{"idempotency_key":"action-1:dry-run","succeeded":true,"summary":"preview ok"}`
+
+	status := routeJSON[agentosprocess.GovernedActionStatus](t, app, http.MethodPost, "/v1/agentos/actions/action-1/dry-run?account_id=acct-1&project_id=proj-1", body, http.StatusOK, "action dry-run")
+	if runtime.actionDryRunRef.ActionID != action1 ||
+		runtime.actionDryRunResult.IdempotencyKey != "action-1:dry-run" ||
+		!runtime.actionDryRunResult.Succeeded ||
+		status.ActionID != action1 {
+		t.Fatalf("unexpected action dry-run: ref=%#v result=%#v status=%#v", runtime.actionDryRunRef, runtime.actionDryRunResult, status)
+	}
+}
+
+func testActionApprovalRoute(t *testing.T, app *fiber.App, runtime *fakePlatformRuntime) {
+	t.Helper()
+
+	body := `{"idempotency_key":"action-1:approval","approved":true,"reason":"operator approved"}`
+
+	status := routeJSON[agentosprocess.GovernedActionStatus](t, app, http.MethodPost, "/v1/agentos/actions/action-1/approval?account_id=acct-1&project_id=proj-1", body, http.StatusOK, "action approval")
+	if runtime.actionApprovalRef.ActionID != action1 ||
+		runtime.actionApprovalDecision.IdempotencyKey != "action-1:approval" ||
+		!runtime.actionApprovalDecision.Approved ||
+		status.ActionID != action1 {
+		t.Fatalf("unexpected action approval: ref=%#v decision=%#v status=%#v", runtime.actionApprovalRef, runtime.actionApprovalDecision, status)
+	}
+}
+
+func testActionExecutionRoute(t *testing.T, app *fiber.App, runtime *fakePlatformRuntime) {
+	t.Helper()
+
+	body := `{"idempotency_key":"action-1:execution","succeeded":true,"summary":"executed"}`
+
+	status := routeJSON[agentosprocess.GovernedActionStatus](t, app, http.MethodPost, "/v1/agentos/actions/action-1/execution?account_id=acct-1&project_id=proj-1", body, http.StatusOK, "action execution")
+	if runtime.actionExecutionRef.ActionID != action1 ||
+		runtime.actionExecutionResult.IdempotencyKey != "action-1:execution" ||
+		!runtime.actionExecutionResult.Succeeded ||
+		status.ActionID != action1 {
+		t.Fatalf("unexpected action execution: ref=%#v result=%#v status=%#v", runtime.actionExecutionRef, runtime.actionExecutionResult, status)
+	}
+}
+
+func testActionCancelRoute(t *testing.T, app *fiber.App, runtime *fakePlatformRuntime) {
+	t.Helper()
+
+	body := `{"idempotency_key":"action-1:cancel","reason":"operator canceled"}`
+
+	status := routeJSON[agentosprocess.GovernedActionStatus](t, app, http.MethodPost, "/v1/agentos/actions/action-1/cancel?account_id=acct-1&project_id=proj-1", body, http.StatusOK, "action cancel")
+	if runtime.actionCancelRef.ActionID != action1 ||
+		runtime.actionCancelRequest.IdempotencyKey != "action-1:cancel" ||
+		runtime.actionCancelRequest.Reason != "operator canceled" ||
+		status.ActionID != action1 {
+		t.Fatalf("unexpected action cancel: ref=%#v request=%#v status=%#v", runtime.actionCancelRef, runtime.actionCancelRequest, status)
+	}
+}
+
 func testWorksetStartRoute(t *testing.T, app *fiber.App, runtime *fakePlatformRuntime) {
 	t.Helper()
 
@@ -309,20 +369,28 @@ type fakePlatformRuntime struct {
 	*fakeAgentOSRuntime
 	*fakePlanRuntime
 
-	startedProcess        agentosprocess.Spec
-	processScope          agentosprocess.Scope
-	statusProcessRef      agentosprocess.Ref
-	descriptionProcessRef agentosprocess.Ref
-	ledgerSpec            agentosprocess.LedgerEntrySpec
-	ledgerScope           agentosprocess.LedgerScope
-	actionSpec            agentosprocess.GovernedActionSpec
-	actionScope           agentosprocess.ActionScope
-	actionRef             agentosprocess.ActionRef
-	worksetSpec           agentosprocess.WorksetSpec
-	worksetScope          agentosprocess.WorksetScope
-	worksetRef            agentosprocess.WorksetRef
-	resourceScope         agentosprocess.ResourceProjectionScope
-	resourceListScope     agentosprocess.ResourceProjectionListScope
+	startedProcess         agentosprocess.Spec
+	processScope           agentosprocess.Scope
+	statusProcessRef       agentosprocess.Ref
+	descriptionProcessRef  agentosprocess.Ref
+	ledgerSpec             agentosprocess.LedgerEntrySpec
+	ledgerScope            agentosprocess.LedgerScope
+	actionSpec             agentosprocess.GovernedActionSpec
+	actionScope            agentosprocess.ActionScope
+	actionRef              agentosprocess.ActionRef
+	actionDryRunRef        agentosprocess.ActionRef
+	actionDryRunResult     agentosprocess.ActionDryRunResult
+	actionApprovalRef      agentosprocess.ActionRef
+	actionApprovalDecision agentosprocess.ActionApprovalDecision
+	actionExecutionRef     agentosprocess.ActionRef
+	actionExecutionResult  agentosprocess.ActionExecutionResult
+	actionCancelRef        agentosprocess.ActionRef
+	actionCancelRequest    agentosprocess.ActionCancelRequest
+	worksetSpec            agentosprocess.WorksetSpec
+	worksetScope           agentosprocess.WorksetScope
+	worksetRef             agentosprocess.WorksetRef
+	resourceScope          agentosprocess.ResourceProjectionScope
+	resourceListScope      agentosprocess.ResourceProjectionListScope
 }
 
 func newFakePlatformRuntime() *fakePlatformRuntime {
@@ -417,20 +485,32 @@ func (r *fakePlatformRuntime) ListActions(_ context.Context, scope *agentosproce
 	return []agentosprocess.GovernedActionStatus{actionStatus(action1)}, nil
 }
 
-func (r *fakePlatformRuntime) RecordActionDryRun(context.Context, agentosprocess.ActionRef, *agentosprocess.ActionDryRunResult) (agentosprocess.GovernedActionStatus, error) {
-	return agentosprocess.GovernedActionStatus{}, nil
+func (r *fakePlatformRuntime) RecordActionDryRun(_ context.Context, ref agentosprocess.ActionRef, result *agentosprocess.ActionDryRunResult) (agentosprocess.GovernedActionStatus, error) {
+	r.actionDryRunRef = ref
+	r.actionDryRunResult = *result
+
+	return actionStatus(ref.ActionID), nil
 }
 
-func (r *fakePlatformRuntime) ResolveActionApproval(context.Context, agentosprocess.ActionRef, *agentosprocess.ActionApprovalDecision) (agentosprocess.GovernedActionStatus, error) {
-	return agentosprocess.GovernedActionStatus{}, nil
+func (r *fakePlatformRuntime) ResolveActionApproval(_ context.Context, ref agentosprocess.ActionRef, decision *agentosprocess.ActionApprovalDecision) (agentosprocess.GovernedActionStatus, error) {
+	r.actionApprovalRef = ref
+	r.actionApprovalDecision = *decision
+
+	return actionStatus(ref.ActionID), nil
 }
 
-func (r *fakePlatformRuntime) CompleteAction(context.Context, agentosprocess.ActionRef, *agentosprocess.ActionExecutionResult) (agentosprocess.GovernedActionStatus, error) {
-	return agentosprocess.GovernedActionStatus{}, nil
+func (r *fakePlatformRuntime) CompleteAction(_ context.Context, ref agentosprocess.ActionRef, result *agentosprocess.ActionExecutionResult) (agentosprocess.GovernedActionStatus, error) {
+	r.actionExecutionRef = ref
+	r.actionExecutionResult = *result
+
+	return actionStatus(ref.ActionID), nil
 }
 
-func (r *fakePlatformRuntime) CancelAction(context.Context, agentosprocess.ActionRef, *agentosprocess.ActionCancelRequest) (agentosprocess.GovernedActionStatus, error) {
-	return agentosprocess.GovernedActionStatus{}, nil
+func (r *fakePlatformRuntime) CancelAction(_ context.Context, ref agentosprocess.ActionRef, req *agentosprocess.ActionCancelRequest) (agentosprocess.GovernedActionStatus, error) {
+	r.actionCancelRef = ref
+	r.actionCancelRequest = *req
+
+	return actionStatus(ref.ActionID), nil
 }
 
 func (r *fakePlatformRuntime) StartWorkset(_ context.Context, spec *agentosprocess.WorksetSpec) (agentosprocess.WorksetStatus, error) {

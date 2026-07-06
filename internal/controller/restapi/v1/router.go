@@ -136,6 +136,10 @@ func registerAgentOSProcessPlatformRoutes(apiV1Group fiber.Router, r *V1, platfo
 		apiV1Group.Post("/agentos/actions", r.requestAgentOSAction)
 		apiV1Group.Get("/agentos/actions", r.listAgentOSActions)
 		apiV1Group.Get("/agentos/actions/:action_id", r.statusAgentOSAction)
+		apiV1Group.Post("/agentos/actions/:action_id/dry-run", r.recordAgentOSActionDryRun)
+		apiV1Group.Post("/agentos/actions/:action_id/approval", r.resolveAgentOSActionApproval)
+		apiV1Group.Post("/agentos/actions/:action_id/execution", r.completeAgentOSAction)
+		apiV1Group.Post("/agentos/actions/:action_id/cancel", r.cancelAgentOSAction)
 
 		apiV1Group.Post("/agentos/worksets", r.startAgentOSWorkset)
 		apiV1Group.Get("/agentos/worksets", r.listAgentOSWorksets)

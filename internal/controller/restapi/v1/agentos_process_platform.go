@@ -271,6 +271,90 @@ func (r *V1) statusAgentOSAction(ctx *fiber.Ctx) error {
 	})
 }
 
+// @Summary     Record AgentOS action dry-run
+// @Description Record one governed action dry-run result.
+// @ID          agentos-record-action-dry-run
+// @Tags        agentos
+// @Accept      json
+// @Produce     json
+// @Param       action_id path string true "Action ID"
+// @Param       account_id query string true "Account ID"
+// @Param       project_id query string true "Project ID"
+// @Param       request body agentosprocess.ActionDryRunResult true "Dry-run result"
+// @Success     200 {object} agentosprocess.GovernedActionStatus
+// @Failure     400 {object} response.Error
+// @Failure     404 {object} response.Error
+// @Failure     500 {object} response.Error
+// @Router      /agentos/actions/{action_id}/dry-run [post]
+func (r *V1) recordAgentOSActionDryRun(ctx *fiber.Ctx) error {
+	return withAgentOSActionTransition[agentosprocess.ActionDryRunResult](r, ctx, func(ref agentosprocess.ActionRef, result *agentosprocess.ActionDryRunResult) (agentosprocess.GovernedActionStatus, error) {
+		return r.platformRuntime.RecordActionDryRun(ctx.UserContext(), ref, result)
+	})
+}
+
+// @Summary     Resolve AgentOS action approval
+// @Description Record a governed action approval decision.
+// @ID          agentos-resolve-action-approval
+// @Tags        agentos
+// @Accept      json
+// @Produce     json
+// @Param       action_id path string true "Action ID"
+// @Param       account_id query string true "Account ID"
+// @Param       project_id query string true "Project ID"
+// @Param       request body agentosprocess.ActionApprovalDecision true "Approval decision"
+// @Success     200 {object} agentosprocess.GovernedActionStatus
+// @Failure     400 {object} response.Error
+// @Failure     404 {object} response.Error
+// @Failure     500 {object} response.Error
+// @Router      /agentos/actions/{action_id}/approval [post]
+func (r *V1) resolveAgentOSActionApproval(ctx *fiber.Ctx) error {
+	return withAgentOSActionTransition[agentosprocess.ActionApprovalDecision](r, ctx, func(ref agentosprocess.ActionRef, decision *agentosprocess.ActionApprovalDecision) (agentosprocess.GovernedActionStatus, error) {
+		return r.platformRuntime.ResolveActionApproval(ctx.UserContext(), ref, decision)
+	})
+}
+
+// @Summary     Complete AgentOS action execution
+// @Description Record the execution result for one governed action.
+// @ID          agentos-complete-action
+// @Tags        agentos
+// @Accept      json
+// @Produce     json
+// @Param       action_id path string true "Action ID"
+// @Param       account_id query string true "Account ID"
+// @Param       project_id query string true "Project ID"
+// @Param       request body agentosprocess.ActionExecutionResult true "Execution result"
+// @Success     200 {object} agentosprocess.GovernedActionStatus
+// @Failure     400 {object} response.Error
+// @Failure     404 {object} response.Error
+// @Failure     500 {object} response.Error
+// @Router      /agentos/actions/{action_id}/execution [post]
+func (r *V1) completeAgentOSAction(ctx *fiber.Ctx) error {
+	return withAgentOSActionTransition[agentosprocess.ActionExecutionResult](r, ctx, func(ref agentosprocess.ActionRef, result *agentosprocess.ActionExecutionResult) (agentosprocess.GovernedActionStatus, error) {
+		return r.platformRuntime.CompleteAction(ctx.UserContext(), ref, result)
+	})
+}
+
+// @Summary     Cancel AgentOS action
+// @Description Cancel one governed action.
+// @ID          agentos-cancel-action
+// @Tags        agentos
+// @Accept      json
+// @Produce     json
+// @Param       action_id path string true "Action ID"
+// @Param       account_id query string true "Account ID"
+// @Param       project_id query string true "Project ID"
+// @Param       request body agentosprocess.ActionCancelRequest true "Cancel request"
+// @Success     200 {object} agentosprocess.GovernedActionStatus
+// @Failure     400 {object} response.Error
+// @Failure     404 {object} response.Error
+// @Failure     500 {object} response.Error
+// @Router      /agentos/actions/{action_id}/cancel [post]
+func (r *V1) cancelAgentOSAction(ctx *fiber.Ctx) error {
+	return withAgentOSActionTransition[agentosprocess.ActionCancelRequest](r, ctx, func(ref agentosprocess.ActionRef, req *agentosprocess.ActionCancelRequest) (agentosprocess.GovernedActionStatus, error) {
+		return r.platformRuntime.CancelAction(ctx.UserContext(), ref, req)
+	})
+}
+
 // @Summary     Start AgentOS workset
 // @Description Start one durable coarse-grained batch workset.
 // @ID          agentos-start-workset
@@ -412,6 +496,26 @@ func (r *V1) withActionRef(ctx *fiber.Ctx, fn func(agentosprocess.ActionRef) err
 			AccountID: req.AccountID,
 			ProjectID: req.ProjectID,
 		})
+	})
+}
+
+func withAgentOSActionTransition[T any](
+	r *V1,
+	ctx *fiber.Ctx,
+	fn func(agentosprocess.ActionRef, *T) (agentosprocess.GovernedActionStatus, error),
+) error {
+	return r.withActionRef(ctx, func(ref agentosprocess.ActionRef) error {
+		var body T
+		if err := ctx.BodyParser(&body); err != nil {
+			return errorResponse(ctx, http.StatusBadRequest, "invalid request body")
+		}
+
+		status, err := fn(ref, &body)
+		if err != nil {
+			return agentOSError(ctx, err)
+		}
+
+		return ctx.Status(http.StatusOK).JSON(status)
 	})
 }
 

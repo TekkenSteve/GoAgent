@@ -228,6 +228,302 @@ const docTemplate = `{
                 }
             }
         },
+        "/agentos/actions/{action_id}/approval": {
+            "post": {
+                "description": "Record a governed action approval decision.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "agentos"
+                ],
+                "summary": "Resolve AgentOS action approval",
+                "operationId": "agentos-resolve-action-approval",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Action ID",
+                        "name": "action_id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Account ID",
+                        "name": "account_id",
+                        "in": "query",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Project ID",
+                        "name": "project_id",
+                        "in": "query",
+                        "required": true
+                    },
+                    {
+                        "description": "Approval decision",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/github_com_TekkenSteve_GoAgent_agentos_process.ActionApprovalDecision"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_TekkenSteve_GoAgent_agentos_process.GovernedActionStatus"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/response.Error"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/response.Error"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/response.Error"
+                        }
+                    }
+                }
+            }
+        },
+        "/agentos/actions/{action_id}/cancel": {
+            "post": {
+                "description": "Cancel one governed action.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "agentos"
+                ],
+                "summary": "Cancel AgentOS action",
+                "operationId": "agentos-cancel-action",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Action ID",
+                        "name": "action_id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Account ID",
+                        "name": "account_id",
+                        "in": "query",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Project ID",
+                        "name": "project_id",
+                        "in": "query",
+                        "required": true
+                    },
+                    {
+                        "description": "Cancel request",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/github_com_TekkenSteve_GoAgent_agentos_process.ActionCancelRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_TekkenSteve_GoAgent_agentos_process.GovernedActionStatus"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/response.Error"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/response.Error"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/response.Error"
+                        }
+                    }
+                }
+            }
+        },
+        "/agentos/actions/{action_id}/dry-run": {
+            "post": {
+                "description": "Record one governed action dry-run result.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "agentos"
+                ],
+                "summary": "Record AgentOS action dry-run",
+                "operationId": "agentos-record-action-dry-run",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Action ID",
+                        "name": "action_id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Account ID",
+                        "name": "account_id",
+                        "in": "query",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Project ID",
+                        "name": "project_id",
+                        "in": "query",
+                        "required": true
+                    },
+                    {
+                        "description": "Dry-run result",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/github_com_TekkenSteve_GoAgent_agentos_process.ActionDryRunResult"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_TekkenSteve_GoAgent_agentos_process.GovernedActionStatus"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/response.Error"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/response.Error"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/response.Error"
+                        }
+                    }
+                }
+            }
+        },
+        "/agentos/actions/{action_id}/execution": {
+            "post": {
+                "description": "Record the execution result for one governed action.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "agentos"
+                ],
+                "summary": "Complete AgentOS action execution",
+                "operationId": "agentos-complete-action",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Action ID",
+                        "name": "action_id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Account ID",
+                        "name": "account_id",
+                        "in": "query",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Project ID",
+                        "name": "project_id",
+                        "in": "query",
+                        "required": true
+                    },
+                    {
+                        "description": "Execution result",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/github_com_TekkenSteve_GoAgent_agentos_process.ActionExecutionResult"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_TekkenSteve_GoAgent_agentos_process.GovernedActionStatus"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/response.Error"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/response.Error"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/response.Error"
+                        }
+                    }
+                }
+            }
+        },
         "/agentos/ledger": {
             "get": {
                 "description": "Query durable ledger entries for a tenant, process, resource, or kind.",
@@ -3530,6 +3826,98 @@ const docTemplate = `{
                 "SignalConfigPatch",
                 "SignalMemoryPatch"
             ]
+        },
+        "github_com_TekkenSteve_GoAgent_agentos_process.ActionApprovalDecision": {
+            "type": "object",
+            "properties": {
+                "actor": {
+                    "$ref": "#/definitions/process.ActorRef"
+                },
+                "approved": {
+                    "type": "boolean"
+                },
+                "decided_at": {
+                    "type": "string"
+                },
+                "idempotency_key": {
+                    "type": "string"
+                },
+                "reason": {
+                    "type": "string"
+                }
+            }
+        },
+        "github_com_TekkenSteve_GoAgent_agentos_process.ActionCancelRequest": {
+            "type": "object",
+            "properties": {
+                "actor": {
+                    "$ref": "#/definitions/process.ActorRef"
+                },
+                "idempotency_key": {
+                    "type": "string"
+                },
+                "reason": {
+                    "type": "string"
+                },
+                "requested_at": {
+                    "type": "string"
+                }
+            }
+        },
+        "github_com_TekkenSteve_GoAgent_agentos_process.ActionDryRunResult": {
+            "type": "object",
+            "properties": {
+                "idempotency_key": {
+                    "type": "string"
+                },
+                "output_refs": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/process.LedgerDataRef"
+                    }
+                },
+                "recorded_at": {
+                    "type": "string"
+                },
+                "risk": {
+                    "$ref": "#/definitions/process.ActionRiskAssessment"
+                },
+                "succeeded": {
+                    "type": "boolean"
+                },
+                "summary": {
+                    "type": "string"
+                }
+            }
+        },
+        "github_com_TekkenSteve_GoAgent_agentos_process.ActionExecutionResult": {
+            "type": "object",
+            "properties": {
+                "artifact_refs": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/core.ArtifactRef"
+                    }
+                },
+                "idempotency_key": {
+                    "type": "string"
+                },
+                "output_refs": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/process.LedgerDataRef"
+                    }
+                },
+                "recorded_at": {
+                    "type": "string"
+                },
+                "succeeded": {
+                    "type": "boolean"
+                },
+                "summary": {
+                    "type": "string"
+                }
+            }
         },
         "github_com_TekkenSteve_GoAgent_agentos_process.Description": {
             "type": "object",
