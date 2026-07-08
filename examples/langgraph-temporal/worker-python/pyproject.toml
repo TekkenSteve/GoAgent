@@ -1,0 +1,17 @@
+[project]
+name = "goagent-langgraph-temporal-worker"
+version = "0.1.0"
+description = "LangGraph Temporal worker implementing the GoAgent AgentOS external backend contract."
+requires-python = ">=3.11"
+dependencies = [
+    "httpx>=0.27.0",
+    "langgraph>=0.2.0",
+    "temporalio>=1.7.0",
+]
+
+[project.scripts]
+goagent-langgraph-worker = "worker:main"
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"

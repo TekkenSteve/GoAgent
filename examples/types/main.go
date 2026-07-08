@@ -1,9 +1,7 @@
 // examples/types/main.go
 //
-// Mode 3 — Type-Only: Import entity/ for shared domain types
-//
-// Demonstrates importing only the entity package to share domain type
-// definitions across microservices without pulling in any infrastructure.
+// Type-only usage: import agentos/control and agentos/core for the public
+// AgentOS contracts.
 //
 //	go run examples/types/main.go
 package main
@@ -13,63 +11,50 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"time"
 
-	"github.com/TekkenSteve/GoAgent/entity"
-)
-
-const (
-	typeModel       = "gpt-4o"
-	typeTemperature = 0.3
+	agentos "github.com/TekkenSteve/GoAgent/agentos/control"
+	agentoscore "github.com/TekkenSteve/GoAgent/agentos/core"
 )
 
 func main() {
-	msg := entity.Message{
-		Role:    entity.RoleUser,
-		Content: "Hello from a microservice that only depends on entity/",
-	}
-
-	writef(os.Stdout, "=== Type-Only Usage ===\n\n")
-
-	b, err := json.Marshal(msg)
-	if err != nil {
-		log.Fatalf("json.Marshal: %v", err)
-	}
-
-	writef(os.Stdout, "Serialized message:\n  %s\n\n", string(b))
-
-	tool := entity.ToolDef{
-		Type: "function",
-		Function: entity.ToolFuncDef{
-			Name:        "my_tool",
-			Description: "A tool defined using GoAgent entity types",
-			Parameters:  json.RawMessage(`{"type":"object","properties":{"input":{"type":"string"}}}`),
+	spec := agentos.RunSpec{
+		RunID:        "run-example",
+		ThreadID:     "thread-example",
+		AccountID:    "acct-example",
+		ProjectID:    "project-example",
+		AgentID:      "agent-example",
+		ModelRef:     "gpt-4.1-mini",
+		SystemPrompt: "You are a concise assistant.",
+		UserMessage:  "Summarize AgentOS in one sentence.",
+		RequestedAt:  time.Now().UTC(),
+		Backend:      agentos.BackendRef{Kind: agentos.BackendKindNative, Name: agentos.BackendNameGoAgentNative},
+		Metadata: map[string]string{
+			"source": "type-example",
 		},
 	}
 
-	b, err = json.MarshalIndent(tool, "", "  ")
-	if err != nil {
-		log.Fatalf("json.MarshalIndent: %v", err)
+	writeJSON("RunSpec", spec)
+
+	tool := agentoscore.ToolDef{
+		Type: "function",
+		Function: agentoscore.ToolFuncDef{
+			Name:        "lookup_document",
+			Description: "Look up a document by id",
+			Parameters:  json.RawMessage(`{"type":"object","properties":{"id":{"type":"string"}},"required":["id"]}`),
+		},
 	}
 
-	writef(os.Stdout, "Tool definition:\n%s\n\n", string(b))
-
-	req := entity.LLMRequest{
-		Messages: []entity.Message{msg},
-		Tools:    []entity.ToolDef{tool},
-		Config:   entity.LLMConfig{Model: typeModel, Temperature: typeTemperature},
-	}
-
-	b, err = json.MarshalIndent(req, "", "  ")
-	if err != nil {
-		log.Fatalf("json.MarshalIndent: %v", err)
-	}
-
-	writef(os.Stdout, "LLM request (ready for your own LLM adapter):\n%s\n", string(b))
+	writeJSON("ToolDef", tool)
 }
 
-// writef is a thin wrapper around fmt.Fprintf for stdout writes.
-func writef(f *os.File, format string, args ...any) {
-	if _, err := fmt.Fprintf(f, format, args...); err != nil {
-		log.Fatalf("writef: %v", err)
+func writeJSON(label string, value any) {
+	data, err := json.MarshalIndent(value, "", "  ")
+	if err != nil {
+		log.Fatalf("marshal %s: %v", label, err)
+	}
+
+	if _, err := fmt.Fprintf(os.Stdout, "%s:\n%s\n\n", label, data); err != nil {
+		log.Fatalf("write %s: %v", label, err)
 	}
 }

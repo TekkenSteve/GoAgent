@@ -52,11 +52,11 @@ func TestAuth_MissingAuthHeader(t *testing.T) {
 	app := fiber.New()
 	jwtMgr := newJWTManager(t)
 	app.Use(middleware.Auth(jwtMgr))
-	app.Get("/v1/agent/execute", func(c *fiber.Ctx) error {
+	app.Get("/v1/agentos/runs", func(c *fiber.Ctx) error {
 		return c.SendStatus(fiber.StatusOK)
 	})
 
-	resp, err := app.Test(httptest.NewRequestWithContext(context.Background(), fiber.MethodGet, "/v1/agent/execute", http.NoBody))
+	resp, err := app.Test(httptest.NewRequestWithContext(context.Background(), fiber.MethodGet, "/v1/agentos/runs", http.NoBody))
 	require.NoError(t, err)
 
 	defer resp.Body.Close()
@@ -70,11 +70,11 @@ func TestAuth_InvalidToken(t *testing.T) {
 	app := fiber.New()
 	jwtMgr := newJWTManager(t)
 	app.Use(middleware.Auth(jwtMgr))
-	app.Get("/v1/agent/execute", func(c *fiber.Ctx) error {
+	app.Get("/v1/agentos/runs", func(c *fiber.Ctx) error {
 		return c.SendStatus(fiber.StatusOK)
 	})
 
-	req := httptest.NewRequestWithContext(context.Background(), fiber.MethodGet, "/v1/agent/execute", http.NoBody)
+	req := httptest.NewRequestWithContext(context.Background(), fiber.MethodGet, "/v1/agentos/runs", http.NoBody)
 	req.Header.Set("Authorization", "Bearer invalid-token")
 	resp, err := app.Test(req)
 	require.NoError(t, err)
@@ -90,7 +90,7 @@ func TestAuth_ValidToken(t *testing.T) {
 	app := fiber.New()
 	jwtMgr := newJWTManager(t)
 	app.Use(middleware.Auth(jwtMgr))
-	app.Get("/v1/agent/execute", func(c *fiber.Ctx) error {
+	app.Get("/v1/agentos/runs", func(c *fiber.Ctx) error {
 		userID := c.Locals("userID")
 
 		return c.JSON(fiber.Map{"user_id": userID})
@@ -99,7 +99,7 @@ func TestAuth_ValidToken(t *testing.T) {
 	token, err := jwtMgr.GenerateToken("user-123")
 	require.NoError(t, err)
 
-	req := httptest.NewRequestWithContext(context.Background(), fiber.MethodGet, "/v1/agent/execute", http.NoBody)
+	req := httptest.NewRequestWithContext(context.Background(), fiber.MethodGet, "/v1/agentos/runs", http.NoBody)
 	req.Header.Set("Authorization", "Bearer "+token)
 	resp, err := app.Test(req)
 	require.NoError(t, err)

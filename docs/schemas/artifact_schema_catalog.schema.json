@@ -1,0 +1,34 @@
+{
+  "type": "object",
+  "properties": {
+    "artifact_schemas": {
+      "type": [
+        "null",
+        "array"
+      ],
+      "items": {
+        "type": "object",
+        "properties": {
+          "ref": {
+            "type": "string"
+          },
+          "description": {
+            "type": "string"
+          },
+          "schema": {
+            "type": "object"
+          }
+        },
+        "required": [
+          "ref",
+          "schema"
+        ],
+        "additionalProperties": false
+      }
+    }
+  },
+  "required": [
+    "artifact_schemas"
+  ],
+  "additionalProperties": false
+}

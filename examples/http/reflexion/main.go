@@ -52,7 +52,7 @@ func main() {
 	fmt.Fprintln(os.Stdout, "The eval step checks quality; OnResult appends a refine step on failure.")
 	fmt.Fprintln(os.Stdout)
 
-	status, err := c.ExecuteOrchestration(ctx, client.OrchestrationRequest{
+	status, err := c.ExecuteOrchestration(ctx, &client.OrchestrationRequest{
 		RunID: runID,
 		Steps: reflexionSteps(),
 	})

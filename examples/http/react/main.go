@@ -6,9 +6,8 @@
 // reasoning with results until a final answer is produced.
 //
 // Framework APIs demonstrated:
-//   - client.ExecuteAgent — start a ReAct agent run
+//   - client.StartRun — start an AgentOS run
 //   - client.WaitForCompletion — poll until terminal state
-//   - client.ListMessages — read the conversation
 //
 // Prerequisites: running GoAgent instance (docker compose up), LLM configured.
 package main
@@ -45,9 +44,14 @@ func main() {
 
 	fmt.Fprintf(os.Stdout, "=== ReAct Pattern ===\nRun ID: %s\n\n", runID)
 
-	status, err := c.ExecuteAgent(ctx, client.ExecuteRequest{
+	status, err := c.StartRun(ctx, &client.AgentOSRunRequest{
 		RunID:       runID,
+		ThreadID:    runID,
 		UserMessage: "What is 25 * 4 + 10? Calculate it and then search the web for cool facts about the result.",
+		Backend: client.BackendRef{
+			Kind: "native",
+			Name: "goagent-native",
+		},
 	})
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
@@ -64,17 +68,4 @@ func main() {
 	}
 
 	fmt.Fprintf(os.Stdout, "\nFinal status: lifecycle_state=%s step=%d\n", status.LifecycleState, status.Step)
-
-	messages, err := c.ListMessages(ctx, runID)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "Warning: ListMessages: %v\n", err)
-
-		return
-	}
-
-	fmt.Fprintf(os.Stdout, "Messages: %d\n", len(messages))
-
-	for i, m := range messages {
-		fmt.Fprintf(os.Stdout, "  [%d] %s\n", i, m)
-	}
 }

@@ -43,16 +43,16 @@ const (
 	pollTimeout  = 4 * time.Minute
 )
 
-//nolint:gochecknoglobals // config data — long spec map, not complex logic
-var delegateTeamSpec = map[string]any{
-	"id":   "research-coordinator-team",
-	"name": "Research Coordinator Team",
-	"agents": []map[string]any{
-		{
-			"id":        "coordinator",
-			"name":      "Research Coordinator",
-			"model_ref": "gpt-4.1-mini",
-			"system_prompt": `You are a research coordinator. You have access to the delegate_to_agent tool.
+func delegateTeamSpec() map[string]any {
+	return map[string]any{
+		"id":   "research-coordinator-team",
+		"name": "Research Coordinator Team",
+		"agents": []map[string]any{
+			{
+				"id":        "coordinator",
+				"name":      "Research Coordinator",
+				"model_ref": "gpt-4.1-mini",
+				"system_prompt": `You are a research coordinator. You have access to the delegate_to_agent tool.
 
 When you receive a complex multi-topic research request, do NOT try to answer everything yourself. Instead:
 
@@ -69,18 +69,19 @@ Benefits of delegation:
 - You can use cheaper/faster models for simpler sub-tasks
 
 Always delegate multi-topic research. Do not attempt to cover multiple topics yourself.`,
-		},
-	},
-	"steps": []map[string]any{
-		{
-			"id":        "coordinate",
-			"type":      "agent",
-			"agent_ref": "coordinator",
-			"input": map[string]any{
-				"message": "I need a comparison of Go vs Rust for building web APIs. Cover: performance, ecosystem, learning curve, deployment, and concurrency models.",
 			},
 		},
-	},
+		"steps": []map[string]any{
+			{
+				"id":        "coordinate",
+				"type":      "agent",
+				"agent_ref": "coordinator",
+				"input": map[string]any{
+					"message": "I need a comparison of Go vs Rust for building web APIs. Cover: performance, ecosystem, learning curve, deployment, and concurrency models.",
+				},
+			},
+		},
+	}
 }
 
 func main() {
@@ -110,9 +111,9 @@ func main() {
 	fmt.Fprintln(os.Stdout, "Task: Compare Go vs Rust for building web APIs")
 	fmt.Fprintln(os.Stdout)
 
-	status, err := c.ExecuteOrchestration(ctx, client.OrchestrationRequest{
+	status, err := c.ExecuteOrchestration(ctx, &client.OrchestrationRequest{
 		RunID:    runID,
-		TeamSpec: delegateTeamSpec,
+		TeamSpec: delegateTeamSpec(),
 	})
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)

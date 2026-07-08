@@ -51,7 +51,7 @@ func main() {
 	fmt.Fprintln(os.Stdout, "Flow: decompose → Split(worker tasks) → Join → synthesize")
 	fmt.Fprintln(os.Stdout)
 
-	status, err := c.ExecuteOrchestration(ctx, client.OrchestrationRequest{
+	status, err := c.ExecuteOrchestration(ctx, &client.OrchestrationRequest{
 		RunID: runID,
 		Steps: supervisorWorkerSteps(),
 	})

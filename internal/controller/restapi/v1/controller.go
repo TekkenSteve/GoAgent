@@ -3,11 +3,11 @@ package v1
 import (
 	"context"
 
-	"github.com/TekkenSteve/GoAgent/agentfw/stream"
+	agentos "github.com/TekkenSteve/GoAgent/agentos/control"
+	agentosplatform "github.com/TekkenSteve/GoAgent/agentos/platform"
+	"github.com/TekkenSteve/GoAgent/internal/agentfw/eventing"
+	"github.com/TekkenSteve/GoAgent/internal/usecase"
 	"github.com/TekkenSteve/GoAgent/pkg/logger"
-	"github.com/TekkenSteve/GoAgent/pkg/redis"
-	repostream "github.com/TekkenSteve/GoAgent/repo/stream"
-	"github.com/TekkenSteve/GoAgent/usecase"
 	"github.com/go-playground/validator/v10"
 )
 
@@ -21,21 +21,15 @@ type SignalWorkflowFn func(ctx context.Context, workflowID, signalName string, a
 
 // V1 -.
 type V1 struct {
-	t   usecase.AgentExecutor
-	o   usecase.OrchestrationExecutor
-	h   usecase.HistoryQuery
-	s   usecase.StreamExecutor
-	l   logger.Interface
-	v   *validator.Validate
-	rdb *redis.Redis
+	t usecase.AgentExecutor
+	o usecase.OrchestrationExecutor
+	l logger.Interface
+	v *validator.Validate
 
-	// Event Sourcing components (Phase 2+)
-	eventStore stream.EventStore
-	subscriber stream.Subscriber
-	gateway    stream.StatelessGateway
-
-	// WebSocket Hub for connection tracking (Phase 4)
-	wsHub          *repostream.WebSocketHub
-	cancelWorkflow CancelWorkflowFn // non-nil only when running with Temporal
-	signalWorkflow SignalWorkflowFn // non-nil only when running with Temporal
+	eventIngest     *eventing.Service
+	cancelWorkflow  CancelWorkflowFn // non-nil only when running with Temporal
+	signalWorkflow  SignalWorkflowFn // non-nil only when running with Temporal
+	agentOSRuntime  agentos.Runtime
+	planRuntime     agentos.PlanRuntime
+	platformRuntime agentosplatform.Runtime
 }

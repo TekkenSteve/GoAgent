@@ -1,0 +1,6 @@
+DROP TABLE IF EXISTS audit_logs;
+DROP TABLE IF EXISTS artifacts;
+DROP TABLE IF EXISTS run_backend_index;
+DROP TABLE IF EXISTS plan_events;
+DROP TABLE IF EXISTS plan_nodes;
+DROP TABLE IF EXISTS plans;

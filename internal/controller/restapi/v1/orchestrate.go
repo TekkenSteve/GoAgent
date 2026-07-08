@@ -1,11 +1,13 @@
 package v1
 
 import (
+	"encoding/json"
+	"fmt"
 	"net/http"
 
-	"github.com/TekkenSteve/GoAgent/entity"
 	"github.com/TekkenSteve/GoAgent/internal/controller/restapi/v1/request"
 	"github.com/TekkenSteve/GoAgent/internal/controller/restapi/v1/response"
+	"github.com/TekkenSteve/GoAgent/internal/entity"
 	"github.com/gofiber/fiber/v2"
 )
 
@@ -34,15 +36,14 @@ func (r *V1) orchestrate(ctx *fiber.Ctx) error {
 		return errorResponse(ctx, http.StatusBadRequest, err.Error())
 	}
 
-	status, err := r.o.ExecuteOrchestration(ctx.UserContext(), &entity.OrchestrationInput{
-		RunID:          req.RunID,
-		TeamSpec:       req.TeamSpec,
-		Steps:          req.Steps,
-		SystemPrompt:   req.SystemPrompt,
-		Message:        req.Message,
-		MaxDepth:       req.MaxDepth,
-		ContinuePolicy: req.ContinuePolicy,
-	})
+	input, err := nativeOrchestrationInput(&req)
+	if err != nil {
+		r.l.Error(err, "restapi - v1 - orchestrate - native decode")
+
+		return errorResponse(ctx, http.StatusBadRequest, err.Error())
+	}
+
+	status, err := r.o.ExecuteOrchestration(ctx.UserContext(), input)
 	if err != nil {
 		r.l.Error(err, "restapi - v1 - orchestrate")
 
@@ -50,6 +51,72 @@ func (r *V1) orchestrate(ctx *fiber.Ctx) error {
 	}
 
 	return ctx.Status(http.StatusOK).JSON(response.NewRunStatus(&status))
+}
+
+func nativeOrchestrationInput(req *request.Orchestrate) (*entity.OrchestrationInput, error) {
+	teamSpec, err := decodeNativeTeamSpec(req.TeamSpec)
+	if err != nil {
+		return nil, err
+	}
+
+	steps, err := decodeNativeSteps(req.Steps)
+	if err != nil {
+		return nil, err
+	}
+
+	continuePolicy, err := decodeNativeContinuePolicy(req.ContinuePolicy)
+	if err != nil {
+		return nil, err
+	}
+
+	return &entity.OrchestrationInput{
+		RunID:          req.RunID,
+		TeamSpec:       teamSpec,
+		Steps:          steps,
+		SystemPrompt:   req.SystemPrompt,
+		Message:        req.Message,
+		MaxDepth:       req.MaxDepth,
+		ContinuePolicy: continuePolicy,
+	}, nil
+}
+
+func decodeNativeTeamSpec(data json.RawMessage) (*entity.TeamSpec, error) {
+	if len(data) == 0 {
+		return nil, nil
+	}
+
+	var spec *entity.TeamSpec
+	if err := json.Unmarshal(data, &spec); err != nil {
+		return nil, fmt.Errorf("invalid team_spec: %w", err)
+	}
+
+	return spec, nil
+}
+
+func decodeNativeSteps(data json.RawMessage) ([]entity.Step, error) {
+	if len(data) == 0 {
+		return nil, nil
+	}
+
+	var steps []entity.Step
+	if err := json.Unmarshal(data, &steps); err != nil {
+		return nil, fmt.Errorf("invalid steps: %w", err)
+	}
+
+	return steps, nil
+}
+
+func decodeNativeContinuePolicy(data json.RawMessage) (entity.ContinuePolicy, error) {
+	if len(data) == 0 {
+		return entity.ContinuePolicy{}, nil
+	}
+
+	var policy entity.ContinuePolicy
+	if err := json.Unmarshal(data, &policy); err != nil {
+		return entity.ContinuePolicy{}, fmt.Errorf("invalid continue_policy: %w", err)
+	}
+
+	return policy, nil
 }
 
 // @Summary     Get orchestration workflow status

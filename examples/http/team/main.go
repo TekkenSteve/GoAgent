@@ -37,93 +37,44 @@ const (
 	pollTimeout  = 4 * time.Minute
 )
 
-//nolint:gochecknoglobals // config data — long spec map, not complex logic
-var teamTeamSpec = map[string]any{
-	"id":   "dev-team",
-	"name": "Software Development Team",
-	"agents": []map[string]any{
-		{
-			"id": "architect", "name": "Architect",
-			"model_ref": "gpt-4.1-mini", "system_prompt": "You design system architecture.",
+func teamTeamSpec() map[string]any {
+	return map[string]any{
+		"id": "dev-team", "name": "Software Development Team",
+		"agents": []map[string]any{
+			{"id": "architect", "name": "Architect", "model_ref": "gpt-4.1-mini", "system_prompt": "You design system architecture."},
+			{"id": "developer", "name": "Developer", "model_ref": "gpt-4.1-mini", "system_prompt": "You write Go code."},
+			{"id": "reviewer", "name": "Reviewer", "model_ref": "gpt-4.1-mini", "system_prompt": "You review code."},
 		},
-		{
-			"id": "developer", "name": "Developer",
-			"model_ref": "gpt-4.1-mini", "system_prompt": "You write Go code.",
-		},
-		{
-			"id": "reviewer", "name": "Reviewer",
-			"model_ref": "gpt-4.1-mini", "system_prompt": "You review code.",
-		},
-	},
-	"sub_teams": []map[string]any{
-		{
-			"id": "research-team", "name": "Research Team",
-			"agents": []map[string]any{
-				{
-					"id": "researcher", "name": "Researcher",
-					"model_ref": "gpt-4.1-mini", "system_prompt": "You research requirements.",
-					"tools": []map[string]any{{"name": "web_search", "required": true}},
+		"sub_teams": []map[string]any{
+			{
+				"id": "research-team", "name": "Research Team",
+				"agents": []map[string]any{
+					{"id": "researcher", "name": "Researcher", "model_ref": "gpt-4.1-mini", "system_prompt": "You research requirements.", "tools": []map[string]any{{"name": "web_search", "required": true}}},
+					{"id": "analyst", "name": "Analyst", "model_ref": "gpt-4.1-mini", "system_prompt": "You analyze feasibility."},
 				},
-				{
-					"id": "analyst", "name": "Analyst",
-					"model_ref": "gpt-4.1-mini", "system_prompt": "You analyze feasibility.",
+				"steps": []map[string]any{
+					{"id": "research", "type": "agent", "agent_ref": "researcher", "input": map[string]any{"message": "Research requirements for a task management API"}},
+					{"id": "analyze", "type": "agent", "agent_ref": "analyst", "input": map[string]any{"message": "Analyze the research findings"}, "depends_on": []string{"research"}},
 				},
 			},
-			"steps": []map[string]any{
-				{
-					"id": "research", "type": "agent", "agent_ref": "researcher",
-					"input": map[string]any{"message": "Research requirements for a task management API"},
+			{
+				"id": "qa-team", "name": "QA Team",
+				"agents": []map[string]any{
+					{"id": "tester", "name": "Tester", "model_ref": "gpt-4.1-mini", "system_prompt": "You write and run tests."},
+					{"id": "docs-writer", "name": "Docs Writer", "model_ref": "gpt-4.1-mini", "system_prompt": "You write documentation."},
 				},
-				{
-					"id": "analyze", "type": "agent", "agent_ref": "analyst",
-					"input":      map[string]any{"message": "Analyze the research findings"},
-					"depends_on": []string{"research"},
+				"steps": []map[string]any{
+					{"id": "test", "type": "agent", "agent_ref": "tester", "input": map[string]any{"message": "Write tests"}, "depends_on": []string{"dev-review"}},
+					{"id": "document", "type": "agent", "agent_ref": "docs-writer", "input": map[string]any{"message": "Write API documentation"}, "depends_on": []string{"test"}},
 				},
 			},
 		},
-		{
-			"id": "qa-team", "name": "QA Team",
-			"agents": []map[string]any{
-				{
-					"id": "tester", "name": "Tester",
-					"model_ref": "gpt-4.1-mini", "system_prompt": "You write and run tests.",
-				},
-				{
-					"id": "docs-writer", "name": "Docs Writer",
-					"model_ref": "gpt-4.1-mini", "system_prompt": "You write documentation.",
-				},
-			},
-			"steps": []map[string]any{
-				{
-					"id": "test", "type": "agent", "agent_ref": "tester",
-					"input":      map[string]any{"message": "Write tests"},
-					"depends_on": []string{"dev-review"},
-				},
-				{
-					"id": "document", "type": "agent", "agent_ref": "docs-writer",
-					"input":      map[string]any{"message": "Write API documentation"},
-					"depends_on": []string{"test"},
-				},
-			},
+		"steps": []map[string]any{
+			{"id": "design", "type": "agent", "agent_ref": "architect", "input": map[string]any{"message": "Design architecture"}, "depends_on": []string{"analyze"}},
+			{"id": "implement", "type": "agent", "agent_ref": "developer", "input": map[string]any{"message": "Implement the API"}, "depends_on": []string{"design"}},
+			{"id": "dev-review", "type": "agent", "agent_ref": "reviewer", "input": map[string]any{"message": "Review the implementation"}, "depends_on": []string{"implement"}},
 		},
-	},
-	"steps": []map[string]any{
-		{
-			"id": "design", "type": "agent", "agent_ref": "architect",
-			"input":      map[string]any{"message": "Design architecture"},
-			"depends_on": []string{"analyze"},
-		},
-		{
-			"id": "implement", "type": "agent", "agent_ref": "developer",
-			"input":      map[string]any{"message": "Implement the API"},
-			"depends_on": []string{"design"},
-		},
-		{
-			"id": "dev-review", "type": "agent", "agent_ref": "reviewer",
-			"input":      map[string]any{"message": "Review the implementation"},
-			"depends_on": []string{"implement"},
-		},
-	},
+	}
 }
 
 func main() {
@@ -150,9 +101,9 @@ func main() {
 	fmt.Fprintln(os.Stdout, "    └── QA Team (tester, docs-writer)")
 	fmt.Fprintln(os.Stdout)
 
-	status, err := c.ExecuteOrchestration(ctx, client.OrchestrationRequest{
+	status, err := c.ExecuteOrchestration(ctx, &client.OrchestrationRequest{
 		RunID:    runID,
-		TeamSpec: teamTeamSpec,
+		TeamSpec: teamTeamSpec(),
 	})
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)

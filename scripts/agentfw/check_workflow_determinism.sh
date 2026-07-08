@@ -5,9 +5,9 @@ ROOT="${1:-.}"
 cd "$ROOT"
 
 if command -v rg >/dev/null 2>&1; then
-  WORKFLOW_FILES="$(rg --files agentfw | rg '/workflow(_test)?\.go$' || true)"
+  WORKFLOW_FILES="$(rg --files internal/agentfw | rg '/workflow(_test)?\.go$' || true)"
 else
-  WORKFLOW_FILES="$(find agentfw -type f | grep -E '/workflow(_test)?\.go$' || true)"
+  WORKFLOW_FILES="$(find internal/agentfw -type f | grep -E '/workflow(_test)?\.go$' || true)"
 fi
 if [ -z "$WORKFLOW_FILES" ]; then
   echo "determinism-check: no workflow files found"

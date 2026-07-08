@@ -1,0 +1,499 @@
+package temporal
+
+import (
+	"context"
+	"fmt"
+	"io"
+
+	agentos "github.com/TekkenSteve/GoAgent/agentos/control"
+	agentoscore "github.com/TekkenSteve/GoAgent/agentos/core"
+	"github.com/TekkenSteve/GoAgent/internal/usecase/agentosplan"
+)
+
+// PlanActivities bridge Temporal PlanWorkflow decisions to AgentOS runtime calls.
+type PlanActivities struct {
+	Runtime             agentos.Runtime
+	PlanNodeStarter     PlanNodeStarter
+	Validator           agentosplan.Validator
+	PlanTransitionStore agentosplan.PlanTransitionStore
+	PlanEventPublisher  agentosplan.PlanEventPublisher
+	ArtifactStore       agentosplan.ArtifactStore
+	ArtifactSchemas     agentosplan.ArtifactSchemaCatalog
+	PlanDeltaProvider   agentosplan.PlanDeltaProvider
+	Expressions         agentosplan.ValueExpressionCompiler
+}
+
+// PlanNodeStarter starts backend-owned child runs and records plan-node route
+// ownership atomically at the AgentOS runtime boundary.
+type PlanNodeStarter interface {
+	StartPlanNode(ctx context.Context, planID, nodeID string, spec *agentos.RunSpec) (agentos.RunStatus, error)
+}
+
+// NewPlanActivitiesWithStores creates plan activities with explicit durable
+// state and event stores.
+func NewPlanActivitiesWithStores(
+	runtime agentos.Runtime,
+	capabilities []agentos.Capability,
+	transitionStore agentosplan.PlanTransitionStore,
+	eventPublisher agentosplan.PlanEventPublisher,
+	artifactStore agentosplan.ArtifactStore,
+) (*PlanActivities, error) {
+	catalog, err := agentosplan.NewStaticCapabilityCatalog(capabilities)
+	if err != nil {
+		return nil, err
+	}
+
+	return NewPlanActivitiesWithCatalog(runtime, catalog, transitionStore, eventPublisher, artifactStore)
+}
+
+// NewPlanActivitiesWithCatalog creates plan activities with an explicit
+// capability catalog. Production wiring should provide a durable catalog.
+func NewPlanActivitiesWithCatalog(
+	runtime agentos.Runtime,
+	catalog agentosplan.CapabilityCatalog,
+	transitionStore agentosplan.PlanTransitionStore,
+	eventPublisher agentosplan.PlanEventPublisher,
+	artifactStore agentosplan.ArtifactStore,
+) (*PlanActivities, error) {
+	return NewPlanActivitiesWithCatalogAndSchemas(runtime, catalog, nil, transitionStore, eventPublisher, artifactStore)
+}
+
+// NewPlanActivitiesWithCatalogAndSchemas creates plan activities with explicit
+// capability and artifact schema catalogs.
+func NewPlanActivitiesWithCatalogAndSchemas(
+	runtime agentos.Runtime,
+	catalog agentosplan.CapabilityCatalog,
+	artifactSchemas agentosplan.ArtifactSchemaCatalog,
+	transitionStore agentosplan.PlanTransitionStore,
+	eventPublisher agentosplan.PlanEventPublisher,
+	artifactStore agentosplan.ArtifactStore,
+) (*PlanActivities, error) {
+	if runtime == nil {
+		return nil, fmt.Errorf("%w: plan activity runtime is required", agentoscore.ErrInvalidRunPlan)
+	}
+
+	planNodeStarter, ok := runtime.(PlanNodeStarter)
+	if !ok {
+		return nil, fmt.Errorf("%w: plan activity runtime must support plan-node start", agentoscore.ErrInvalidRunPlan)
+	}
+
+	if transitionStore == nil {
+		return nil, fmt.Errorf("%w: plan transition store is required", agentoscore.ErrInvalidRunPlan)
+	}
+
+	if artifactStore == nil {
+		return nil, fmt.Errorf("%w: artifact store is required", agentoscore.ErrInvalidArtifact)
+	}
+
+	compiler, err := agentosplan.NewCELCompiler()
+	if err != nil {
+		return nil, err
+	}
+
+	return &PlanActivities{
+		Runtime:         runtime,
+		PlanNodeStarter: planNodeStarter,
+		Validator: agentosplan.Validator{
+			Expressions:     compiler,
+			Capabilities:    catalog,
+			ArtifactSchemas: artifactSchemas,
+		},
+		PlanTransitionStore: transitionStore,
+		PlanEventPublisher:  eventPublisher,
+		ArtifactStore:       artifactStore,
+		ArtifactSchemas:     artifactSchemas,
+		PlanDeltaProvider:   agentosplan.NewArtifactPlanDeltaProvider(artifactStore),
+		Expressions:         compiler,
+	}, nil
+}
+
+type validatePlanInput struct {
+	Spec agentos.RunPlanSpec
+}
+
+type ValidatePlanOutput struct {
+	Plan               agentosplan.ExecutablePlan
+	ControlsByNode     map[string][]agentoscore.ControlOperation
+	CapabilitiesByNode map[string]agentosplan.CapabilitySelectionTrace
+}
+
+// ValidatePlanActivity validates a RunPlan before workflow execution.
+func (a *PlanActivities) ValidatePlanActivity(ctx context.Context, input *validatePlanInput) (ValidatePlanOutput, error) {
+	plan, err := a.Validator.Validate(ctx, &input.Spec)
+	if err != nil {
+		return ValidatePlanOutput{}, err
+	}
+
+	controlsByNode, err := a.controlsByNode(ctx, &plan)
+	if err != nil {
+		return ValidatePlanOutput{}, err
+	}
+
+	capabilitiesByNode, err := a.capabilitiesByNode(ctx, &plan)
+	if err != nil {
+		return ValidatePlanOutput{}, err
+	}
+
+	return ValidatePlanOutput{
+		Plan:               plan,
+		ControlsByNode:     controlsByNode,
+		CapabilitiesByNode: capabilitiesByNode,
+	}, nil
+}
+
+func (a *PlanActivities) controlsByNode(ctx context.Context, plan *agentosplan.ExecutablePlan) (map[string][]agentoscore.ControlOperation, error) {
+	controlsByNode := make(map[string][]agentoscore.ControlOperation, len(plan.Spec.Nodes))
+	for i := range plan.Spec.Nodes {
+		node := &plan.Spec.Nodes[i]
+		if node.Capability == "" || a.Validator.Capabilities == nil {
+			controlsByNode[node.NodeID] = nil
+
+			continue
+		}
+
+		capability, ok, err := a.Validator.Capabilities.GetCapability(ctx, node.Run.Backend, node.Capability)
+		if err != nil {
+			return nil, err
+		}
+
+		if !ok {
+			return nil, fmt.Errorf("%w: node %q capability %s/%s/%s", agentoscore.ErrCapabilityNotFound, node.NodeID, node.Run.Backend.Kind, node.Run.Backend.Name, node.Capability)
+		}
+
+		controlsByNode[node.NodeID] = append([]agentoscore.ControlOperation(nil), capability.Controls...)
+	}
+
+	return controlsByNode, nil
+}
+
+func (a *PlanActivities) capabilitiesByNode(ctx context.Context, plan *agentosplan.ExecutablePlan) (map[string]agentosplan.CapabilitySelectionTrace, error) {
+	capabilitiesByNode := make(map[string]agentosplan.CapabilitySelectionTrace)
+
+	for i := range plan.Spec.Nodes {
+		node := &plan.Spec.Nodes[i]
+		if node.Capability == "" || a.Validator.Capabilities == nil {
+			continue
+		}
+
+		capability, ok, err := a.Validator.Capabilities.GetCapability(ctx, node.Run.Backend, node.Capability)
+		if err != nil {
+			return nil, err
+		}
+
+		if !ok {
+			return nil, fmt.Errorf("%w: node %q capability %s/%s/%s", agentoscore.ErrCapabilityNotFound, node.NodeID, node.Run.Backend.Kind, node.Run.Backend.Name, node.Capability)
+		}
+
+		capabilitiesByNode[node.NodeID] = agentosplan.NewCapabilitySelectionTrace(&capability)
+	}
+
+	return capabilitiesByNode, nil
+}
+
+type resolvePlanNodeInputInput struct {
+	Spec   agentos.RunPlanSpec
+	Status agentos.RunPlanStatus
+	Node   agentos.PlanNodeSpec
+	Edges  []agentos.PlanEdgeSpec
+}
+
+type ResolvePlanNodeInputOutput struct {
+	Input map[string]any
+	Trace agentosplan.InputResolutionTrace
+}
+
+// ResolvePlanNodeInputActivity resolves node input mapping before a child run starts.
+func (a *PlanActivities) ResolvePlanNodeInputActivity(ctx context.Context, input *resolvePlanNodeInputInput) (ResolvePlanNodeInputOutput, error) {
+	resolvedInput, err := agentosplan.ResolveRunInput(ctx, a.ArtifactStore, a.Expressions, &input.Spec, &input.Status, &input.Node, input.Edges)
+	if err != nil {
+		return ResolvePlanNodeInputOutput{}, err
+	}
+
+	return ResolvePlanNodeInputOutput{
+		Input: resolvedInput,
+		Trace: agentosplan.NewInputResolutionTrace(
+			resolvedInput,
+			input.Node.Inputs,
+			input.Edges,
+		),
+	}, nil
+}
+
+type startPlanNodeInput struct {
+	PlanID    string
+	AccountID string
+	ProjectID string
+	Node      agentos.PlanNodeSpec
+	Attempt   int32
+}
+
+type StartPlanNodeOutput struct {
+	Status agentos.RunStatus
+}
+
+// StartPlanNodeActivity starts one backend-owned child run.
+func (a *PlanActivities) StartPlanNodeActivity(ctx context.Context, input *startPlanNodeInput) (StartPlanNodeOutput, error) {
+	if a.Runtime == nil {
+		return StartPlanNodeOutput{}, fmt.Errorf("%w: plan activity runtime is required", agentoscore.ErrInvalidRunPlan)
+	}
+
+	attempt := input.Attempt
+	if attempt <= 0 {
+		attempt = 1
+	}
+
+	if input.Node.Run.IdempotencyKey == "" {
+		key, err := agentosplan.NodeStartIdempotencyKey(input.PlanID, input.Node.NodeID, attempt)
+		if err != nil {
+			return StartPlanNodeOutput{}, err
+		}
+
+		input.Node.Run.IdempotencyKey = key
+	}
+
+	if input.AccountID == "" {
+		return StartPlanNodeOutput{}, fmt.Errorf("%w: account id is required", agentoscore.ErrInvalidRunSpec)
+	}
+
+	if input.ProjectID == "" {
+		return StartPlanNodeOutput{}, fmt.Errorf("%w: project id is required", agentoscore.ErrInvalidRunSpec)
+	}
+
+	input.Node.Run.AccountID = input.AccountID
+	input.Node.Run.ProjectID = input.ProjectID
+
+	status, err := a.PlanNodeStarter.StartPlanNode(ctx, input.PlanID, input.Node.NodeID, &input.Node.Run)
+	if err != nil {
+		return StartPlanNodeOutput{}, err
+	}
+
+	if status.RunID == "" {
+		status.RunID = input.Node.Run.RunID
+	}
+
+	if status.RunID != input.Node.Run.RunID {
+		return StartPlanNodeOutput{}, fmt.Errorf("%w: backend returned run id %q for requested run %q", agentoscore.ErrInvalidRunSpec, status.RunID, input.Node.Run.RunID)
+	}
+
+	return StartPlanNodeOutput{Status: status}, nil
+}
+
+type persistPlanStateInput struct {
+	Spec           agentos.RunPlanSpec
+	Status         agentos.RunPlanStatus
+	Event          agentos.PlanEvent
+	IdempotencyKey string
+}
+
+type PersistPlanStateOutput struct {
+	Event agentos.PlanEvent
+}
+
+// PersistPlanStateActivity writes the latest reducer snapshot and appends the
+// corresponding public PlanEvent to the durable event source.
+func (a *PlanActivities) PersistPlanStateActivity(ctx context.Context, input *persistPlanStateInput) (PersistPlanStateOutput, error) {
+	if a.PlanTransitionStore == nil {
+		return PersistPlanStateOutput{}, fmt.Errorf("%w: plan transition store is required", agentoscore.ErrInvalidRunPlan)
+	}
+
+	snapshot := agentosplan.PlanStateSnapshot{
+		Spec:   input.Spec,
+		Status: input.Status,
+	}
+
+	event, err := a.PlanTransitionStore.PersistPlanTransition(ctx, &snapshot, &input.Event, input.IdempotencyKey)
+	if err != nil {
+		return PersistPlanStateOutput{}, err
+	}
+
+	if a.PlanEventPublisher != nil {
+		// Redis is a live transport only. The durable event source is the
+		// PlanTransitionStore above, so live publish failures must not block
+		// workflow progress or make Redis part of replay correctness.
+		if err := a.PlanEventPublisher.PublishPlanEvent(ctx, &event); err != nil {
+			fmt.Fprintf(io.Discard, "plan_activity: publish: %v\n", err)
+		}
+	}
+
+	return PersistPlanStateOutput{Event: event}, nil
+}
+
+type publishPlanArtifactsInput struct {
+	Spec   agentos.RunPlanSpec
+	Node   agentos.PlanNodeSpec
+	Status agentos.RunStatus
+}
+
+type PublishPlanArtifactsOutput struct {
+	Artifacts []agentoscore.ArtifactRef
+}
+
+// PublishPlanArtifactsActivity persists child-run artifact refs outside
+// workflow history. Backends that produce payloads must write those payloads to
+// the configured AgentOS ArtifactStore before returning refs; this activity
+// only claims the ref idempotently and returns metadata to the workflow.
+func (a *PlanActivities) PublishPlanArtifactsActivity(ctx context.Context, input *publishPlanArtifactsInput) (PublishPlanArtifactsOutput, error) {
+	if a.ArtifactStore == nil {
+		return PublishPlanArtifactsOutput{}, fmt.Errorf("%w: artifact store is required", agentoscore.ErrInvalidArtifact)
+	}
+
+	refs, err := normalizeRunArtifacts(input.Spec.PlanID, &input.Node, &input.Status)
+	if err != nil {
+		return PublishPlanArtifactsOutput{}, err
+	}
+
+	if runSucceeded(input.Status.LifecycleState) {
+		if err := a.validatePublishedArtifacts(ctx, &input.Spec, &input.Node, refs); err != nil {
+			return PublishPlanArtifactsOutput{}, err
+		}
+	}
+
+	stored := make([]agentoscore.ArtifactRef, 0, len(refs))
+	for i := range refs {
+		ref := refs[i]
+
+		key, err := agentosplan.ArtifactPublishIdempotencyKey(input.Spec.PlanID, input.Node.NodeID, input.Status.RunID, ref.Name)
+		if err != nil {
+			return PublishPlanArtifactsOutput{}, err
+		}
+
+		storedRef, err := a.ArtifactStore.Put(ctx, &ref, nil, key)
+		if err != nil {
+			return PublishPlanArtifactsOutput{}, err
+		}
+
+		stored = append(stored, storedRef)
+	}
+
+	return PublishPlanArtifactsOutput{Artifacts: stored}, nil
+}
+
+func (a *PlanActivities) validatePublishedArtifacts(ctx context.Context, spec *agentos.RunPlanSpec, node *agentos.PlanNodeSpec, refs []agentoscore.ArtifactRef) error {
+	if err := agentosplan.ValidateArtifactsAgainstSpecs(node.NodeID, node.Outputs, refs); err != nil {
+		return err
+	}
+
+	if err := agentosplan.ValidateArtifactPayloadsAgainstSchemas(ctx, a.ArtifactStore, a.ArtifactSchemas, spec, node, refs); err != nil {
+		return err
+	}
+
+	if node.Capability == "" || a.Validator.Capabilities == nil {
+		return nil
+	}
+
+	capability, ok, err := a.Validator.Capabilities.GetCapability(ctx, node.Run.Backend, node.Capability)
+	if err != nil {
+		return err
+	}
+
+	if !ok {
+		return fmt.Errorf("%w: node %q capability %s/%s/%s", agentoscore.ErrCapabilityNotFound, node.NodeID, node.Run.Backend.Kind, node.Run.Backend.Name, node.Capability)
+	}
+
+	if err := agentosplan.ValidateCapabilityOutputArtifacts(node.NodeID, capability.OutputSchema, refs); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+type evaluatePlanExpansionInput struct {
+	Spec           agentos.RunPlanSpec
+	Status         agentos.RunPlanStatus
+	Node           agentos.PlanNodeSpec
+	RunStatus      agentos.RunStatus
+	Artifacts      []agentoscore.ArtifactRef
+	ExpansionCount int32
+}
+
+type EvaluatePlanExpansionOutput struct {
+	Expanded           bool
+	Delta              agentosplan.PlanDelta
+	Spec               agentos.RunPlanSpec
+	Plan               agentosplan.ExecutablePlan
+	ControlsByNode     map[string][]agentoscore.ControlOperation
+	CapabilitiesByNode map[string]agentosplan.CapabilitySelectionTrace
+}
+
+// EvaluatePlanExpansionActivity materializes and validates workflow-owned
+// dynamic topology expansion after a child run publishes explicit plan_delta
+// artifacts.
+func (a *PlanActivities) EvaluatePlanExpansionActivity(ctx context.Context, input *evaluatePlanExpansionInput) (EvaluatePlanExpansionOutput, error) {
+	if a.PlanDeltaProvider == nil {
+		return EvaluatePlanExpansionOutput{}, fmt.Errorf("%w: plan delta provider is required", agentoscore.ErrInvalidRunPlan)
+	}
+
+	deltaInput := agentosplan.PlanDeltaInput{
+		Spec:           input.Spec,
+		Status:         input.Status,
+		Node:           input.Node,
+		RunStatus:      input.RunStatus,
+		Artifacts:      input.Artifacts,
+		ExpansionCount: input.ExpansionCount,
+	}
+
+	delta, ok, err := a.PlanDeltaProvider.NextPlanDelta(ctx, &deltaInput)
+	if err != nil || !ok {
+		return EvaluatePlanExpansionOutput{Expanded: false}, err
+	}
+
+	nextSpec, plan, err := agentosplan.ApplyDelta(ctx, a.Validator, &input.Spec, delta, input.ExpansionCount)
+	if err != nil {
+		return EvaluatePlanExpansionOutput{}, err
+	}
+
+	controlsByNode, err := a.controlsByNode(ctx, &plan)
+	if err != nil {
+		return EvaluatePlanExpansionOutput{}, err
+	}
+
+	capabilitiesByNode, err := a.capabilitiesByNode(ctx, &plan)
+	if err != nil {
+		return EvaluatePlanExpansionOutput{}, err
+	}
+
+	return EvaluatePlanExpansionOutput{
+		Expanded:           true,
+		Delta:              delta,
+		Spec:               nextSpec,
+		Plan:               plan,
+		ControlsByNode:     controlsByNode,
+		CapabilitiesByNode: capabilitiesByNode,
+	}, nil
+}
+
+type statusPlanNodeInput struct {
+	RunID string
+}
+
+type StatusPlanNodeOutput struct {
+	Status agentos.RunStatus
+}
+
+// StatusPlanNodeActivity queries one backend-owned child run.
+func (a *PlanActivities) StatusPlanNodeActivity(ctx context.Context, input statusPlanNodeInput) (StatusPlanNodeOutput, error) {
+	if a.Runtime == nil {
+		return StatusPlanNodeOutput{}, fmt.Errorf("%w: plan activity runtime is required", agentoscore.ErrInvalidRunPlan)
+	}
+
+	status, err := a.Runtime.Status(ctx, input.RunID)
+	if err != nil {
+		return StatusPlanNodeOutput{}, err
+	}
+
+	return StatusPlanNodeOutput{Status: status}, nil
+}
+
+type controlPlanNodeInput struct {
+	RunID   string
+	Control agentoscore.ControlRequest
+}
+
+// ControlPlanNodeActivity sends lifecycle control to one child run.
+func (a *PlanActivities) ControlPlanNodeActivity(ctx context.Context, input *controlPlanNodeInput) error {
+	if a.Runtime == nil {
+		return fmt.Errorf("%w: plan activity runtime is required", agentoscore.ErrInvalidRunPlan)
+	}
+
+	return a.Runtime.Control(ctx, input.RunID, &input.Control)
+}

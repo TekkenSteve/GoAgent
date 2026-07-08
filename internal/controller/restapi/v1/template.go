@@ -3,10 +3,10 @@ package v1
 import (
 	"net/http"
 
-	"github.com/TekkenSteve/GoAgent/entity"
 	"github.com/TekkenSteve/GoAgent/internal/controller/restapi/v1/request"
+	"github.com/TekkenSteve/GoAgent/internal/entity"
+	"github.com/TekkenSteve/GoAgent/internal/usecase"
 	"github.com/TekkenSteve/GoAgent/pkg/logger"
-	"github.com/TekkenSteve/GoAgent/usecase"
 	"github.com/gofiber/fiber/v2"
 )
 
