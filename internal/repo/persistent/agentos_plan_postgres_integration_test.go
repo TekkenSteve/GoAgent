@@ -21,8 +21,13 @@ import (
 	artifactblob "github.com/TekkenSteve/GoAgent/internal/repo/artifact"
 	"github.com/TekkenSteve/GoAgent/internal/usecase/agentosplan"
 	"github.com/TekkenSteve/GoAgent/internal/usecase/agentosruntime"
+	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 )
+
+const postgresIdentifierMaxBytes = 63
+const postgresIntegrationDatabasePrefix = "goagent_plan_"
+const postgresIntegrationDatabaseTokenLength = 12
 
 func TestAgentOSPlanPostgresDurablePersistence(t *testing.T) {
 	t.Parallel()
@@ -1562,7 +1567,11 @@ func newAgentOSPlanPostgresIntegrationDB(t *testing.T) (context.Context, *postgr
 		t.Fatal("GOAGENT_POSTGRES_TEST_URL is required for postgres_integration tests")
 	}
 	suffix := postgresIntegrationSuffix(t)
-	isolatedURL, cleanup := createPostgresIntegrationDatabase(t, pgURL, "goagent_plan_"+suffix)
+	isolatedURL, cleanup := createPostgresIntegrationDatabase(
+		t,
+		pgURL,
+		postgresIntegrationDatabasePrefix+suffix,
+	)
 	t.Cleanup(cleanup)
 
 	pg, err := postgres.New(isolatedURL, postgres.MaxPoolSize(1), postgres.ConnAttempts(1), postgres.ConnTimeout(100*time.Millisecond))
@@ -1632,10 +1641,15 @@ func postgresIntegrationSuffix(t *testing.T) string {
 
 	replacer := strings.NewReplacer("/", "_", "-", "_", ".", "_")
 	name := strings.ToLower(replacer.Replace(t.Name()))
-	if len(name) > 36 {
-		name = name[:36]
+	token := strings.ReplaceAll(uuid.NewString(), "-", "")[:postgresIntegrationDatabaseTokenLength]
+	nameBudget := postgresIdentifierMaxBytes -
+		len(postgresIntegrationDatabasePrefix) -
+		1 -
+		postgresIntegrationDatabaseTokenLength
+	if len(name) > nameBudget {
+		name = name[:nameBudget]
 	}
-	return fmt.Sprintf("%s_%d", name, time.Now().UTC().UnixNano())
+	return fmt.Sprintf("%s_%s", name, token)
 }
 
 func applyAgentOSPlanMigrations(t *testing.T, pg *postgres.Postgres) {
