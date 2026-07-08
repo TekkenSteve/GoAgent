@@ -243,11 +243,11 @@ INSERT INTO plan_commands (
 		},
 		PlanID: spec.PlanID,
 	}
-	firstEvent, err := planRepo.AppendPlanEvent(ctx, event, "plan-event-"+suffix)
+	firstEvent, err := planRepo.AppendPlanEvent(ctx, &event, "plan-event-"+suffix)
 	if err != nil {
 		t.Fatalf("AppendPlanEvent first: %v", err)
 	}
-	secondEvent, err := planRepo.AppendPlanEvent(ctx, event, "plan-event-"+suffix)
+	secondEvent, err := planRepo.AppendPlanEvent(ctx, &event, "plan-event-"+suffix)
 	if err != nil {
 		t.Fatalf("AppendPlanEvent replay: %v", err)
 	}
@@ -262,7 +262,7 @@ INSERT INTO plan_commands (
 		t.Fatalf("ListPlanEvents = %#v", events)
 	}
 	assertPostgresPlanEventScope(t, pg, firstEvent.EventID, spec.AccountID, spec.ProjectID)
-	if _, err := planRepo.ListPlanEvents(ctx, agentos.PlanStreamScope{
+	if _, err := planRepo.ListPlanEvents(ctx, &agentos.PlanStreamScope{
 		PlanID:    spec.PlanID,
 		AccountID: "acct-other",
 		ProjectID: spec.ProjectID,
@@ -294,7 +294,7 @@ INSERT INTO plan_commands (
 	if created || auditReplay.AuditID != audit.AuditID {
 		t.Fatalf("RecordAudit replay = %#v created=%v, want %#v created=false", auditReplay, created, audit)
 	}
-	audits, err := planRepo.ListAuditRecords(ctx, agentos.PlanAuditScope{
+	audits, err := planRepo.ListAuditRecords(ctx, &agentos.PlanAuditScope{
 		PlanID:    spec.PlanID,
 		AccountID: spec.AccountID,
 		ProjectID: spec.ProjectID,
@@ -313,7 +313,7 @@ INSERT INTO plan_commands (
 	if _, err := pg.Pool.Exec(ctx, `DELETE FROM audit_logs WHERE audit_id = $1`, audit.AuditID); err == nil {
 		t.Fatal("direct audit log delete succeeded, want append-only trigger rejection")
 	}
-	if _, err := planRepo.ListAuditRecords(ctx, agentos.PlanAuditScope{PlanID: spec.PlanID, AccountID: "acct-other", ProjectID: spec.ProjectID}); !errors.Is(err, agentoscore.ErrPlanRouteNotFound) {
+	if _, err := planRepo.ListAuditRecords(ctx, &agentos.PlanAuditScope{PlanID: spec.PlanID, AccountID: "acct-other", ProjectID: spec.ProjectID}); !errors.Is(err, agentoscore.ErrPlanRouteNotFound) {
 		t.Fatalf("ListAuditRecords mismatch error = %v, want ErrPlanRouteNotFound", err)
 	}
 
@@ -408,7 +408,7 @@ INSERT INTO plan_commands (
 	if refreshedFailedCommand.FailureReason != "temporal still unavailable" {
 		t.Fatalf("refreshed failed command reason = %q", refreshedFailedCommand.FailureReason)
 	}
-	recoverableCommands, err := planRepo.ListRecoverablePlanCommands(ctx, agentosplan.PlanCommandScope{
+	recoverableCommands, err := planRepo.ListRecoverablePlanCommands(ctx, &agentosplan.PlanCommandScope{
 		PlanID:    spec.PlanID,
 		AccountID: spec.AccountID,
 		ProjectID: spec.ProjectID,
@@ -801,10 +801,10 @@ func TestAgentOSPlanPostgresPersistPlanTransitionRejectsMissingPlan(t *testing.T
 	planRepo := NewAgentOSPlanRepo(pg)
 	spec := postgresIntegrationPlanSpec("plan-transition-missing-"+suffix, "plan-transition-missing-start-"+suffix)
 
-	_, err := planRepo.PersistPlanTransition(ctx, agentosplan.PlanStateSnapshot{
+	_, err := planRepo.PersistPlanTransition(ctx, &agentosplan.PlanStateSnapshot{
 		Spec:   spec,
 		Status: agentosplan.NewState(&spec, time.Now().UTC()).Status,
-	}, agentos.PlanEvent{
+	}, &agentos.PlanEvent{
 		Event:  agentoscore.Event{EventType: agentoscore.EventPlanStarted},
 		PlanID: spec.PlanID,
 	}, "plan-transition-missing-event-"+suffix)
@@ -834,11 +834,11 @@ func TestAgentOSPlanPostgresPlanEventIdempotencyDoesNotAdvanceSequence(t *testin
 		},
 		PlanID: spec.PlanID,
 	}
-	first, err := planRepo.AppendPlanEvent(ctx, event, "plan-event-key-"+suffix)
+	first, err := planRepo.AppendPlanEvent(ctx, &event, "plan-event-key-"+suffix)
 	if err != nil {
 		t.Fatalf("AppendPlanEvent first: %v", err)
 	}
-	replay, err := planRepo.AppendPlanEvent(ctx, event, "plan-event-key-"+suffix)
+	replay, err := planRepo.AppendPlanEvent(ctx, &event, "plan-event-key-"+suffix)
 	if err != nil {
 		t.Fatalf("AppendPlanEvent replay: %v", err)
 	}
@@ -894,11 +894,11 @@ func TestAgentOSPlanPostgresPlanEventIdempotencyDoesNotAdvanceSequence(t *testin
 	changed := event
 	changed.EventType = agentoscore.EventPlanFailed
 	changed.Payload = map[string]any{"state": "failed"}
-	if _, err := planRepo.AppendPlanEvent(ctx, changed, "plan-event-key-"+suffix); !errors.Is(err, agentoscore.ErrInvalidPlanEvent) {
+	if _, err := planRepo.AppendPlanEvent(ctx, &changed, "plan-event-key-"+suffix); !errors.Is(err, agentoscore.ErrInvalidPlanEvent) {
 		t.Fatalf("AppendPlanEvent changed replay error = %v, want ErrInvalidPlanEvent", err)
 	}
 
-	next, err := planRepo.AppendPlanEvent(ctx, agentos.PlanEvent{
+	next, err := planRepo.AppendPlanEvent(ctx, &agentos.PlanEvent{
 		Event: agentoscore.Event{
 			EventType: agentoscore.EventPlanSucceeded,
 			Timestamp: time.Date(2026, 6, 19, 12, 1, 0, 0, time.UTC),
@@ -939,7 +939,7 @@ func TestAgentOSPlanPostgresPersistPlanTransitionIsAtomic(t *testing.T) {
 		},
 		PlanID: spec.PlanID,
 	}
-	if _, err := planRepo.AppendPlanEvent(ctx, firstEvent, "transition-key-"+suffix); err != nil {
+	if _, err := planRepo.AppendPlanEvent(ctx, &firstEvent, "transition-key-"+suffix); err != nil {
 		t.Fatalf("AppendPlanEvent: %v", err)
 	}
 
@@ -953,10 +953,10 @@ func TestAgentOSPlanPostgresPersistPlanTransitionIsAtomic(t *testing.T) {
 		},
 		PlanID: spec.PlanID,
 	}
-	_, err := planRepo.PersistPlanTransition(ctx, agentosplan.PlanStateSnapshot{
+	_, err := planRepo.PersistPlanTransition(ctx, &agentosplan.PlanStateSnapshot{
 		Spec:   spec,
 		Status: next,
-	}, changedEvent, "transition-key-"+suffix)
+	}, &changedEvent, "transition-key-"+suffix)
 	if !errors.Is(err, agentoscore.ErrInvalidPlanEvent) {
 		t.Fatalf("PersistPlanTransition error = %v, want ErrInvalidPlanEvent", err)
 	}
@@ -997,10 +997,10 @@ func TestAgentOSPlanPostgresPersistPlanTransitionRejectsSnapshotReplayMismatch(t
 		},
 		PlanID: spec.PlanID,
 	}
-	if _, err := planRepo.PersistPlanTransition(ctx, agentosplan.PlanStateSnapshot{
+	if _, err := planRepo.PersistPlanTransition(ctx, &agentosplan.PlanStateSnapshot{
 		Spec:   spec,
 		Status: running,
-	}, event, "transition-replay-key-"+suffix); err != nil {
+	}, &event, "transition-replay-key-"+suffix); err != nil {
 		t.Fatalf("PersistPlanTransition first: %v", err)
 	}
 	var transitionDigest string
@@ -1022,10 +1022,10 @@ WHERE plan_id = $1 AND idempotency_key = $2`,
 	changed := running
 	changed.LifecycleState = agentos.PlanLifecycleFailed
 	changed.Reason = "same event different snapshot"
-	_, err := planRepo.PersistPlanTransition(ctx, agentosplan.PlanStateSnapshot{
+	_, err := planRepo.PersistPlanTransition(ctx, &agentosplan.PlanStateSnapshot{
 		Spec:   spec,
 		Status: changed,
-	}, event, "transition-replay-key-"+suffix)
+	}, &event, "transition-replay-key-"+suffix)
 	if !errors.Is(err, agentoscore.ErrInvalidRunPlan) {
 		t.Fatalf("PersistPlanTransition replay mismatch error = %v, want ErrInvalidRunPlan", err)
 	}
@@ -1057,7 +1057,7 @@ func TestAgentOSPlanPostgresAppendPlanEventRequiresIdempotencyKey(t *testing.T) 
 		t.Fatalf("CreatePlan: %v", err)
 	}
 
-	_, err := planRepo.AppendPlanEvent(ctx, agentos.PlanEvent{
+	_, err := planRepo.AppendPlanEvent(ctx, &agentos.PlanEvent{
 		Event:  agentoscore.Event{EventType: agentoscore.EventPlanStarted},
 		PlanID: spec.PlanID,
 	}, "")
@@ -1128,7 +1128,7 @@ func TestAgentOSPlanPostgresPlanRefsAndMetricCheckpoints(t *testing.T) {
 			},
 		},
 	}
-	if err := planRepo.SavePlanMetricCheckpoint(ctx, checkpoint); err != nil {
+	if err := planRepo.SavePlanMetricCheckpoint(ctx, &checkpoint); err != nil {
 		t.Fatalf("SavePlanMetricCheckpoint: %v", err)
 	}
 	loaded, exists, err := planRepo.GetPlanMetricCheckpoint(ctx, checkpoint.ExporterID, ref)
@@ -1142,15 +1142,15 @@ func TestAgentOSPlanPostgresPlanRefsAndMetricCheckpoints(t *testing.T) {
 	advanced := checkpoint
 	advanced.Sequence = 5
 	advanced.Projection.NodeStartedAt = nil
-	if err := planRepo.SavePlanMetricCheckpoint(ctx, advanced); err != nil {
+	if err := planRepo.SavePlanMetricCheckpoint(ctx, &advanced); err != nil {
 		t.Fatalf("SavePlanMetricCheckpoint advanced: %v", err)
 	}
-	if err := planRepo.SavePlanMetricCheckpoint(ctx, checkpoint); !errors.Is(err, agentoscore.ErrInvalidRunPlan) {
+	if err := planRepo.SavePlanMetricCheckpoint(ctx, &checkpoint); !errors.Is(err, agentoscore.ErrInvalidRunPlan) {
 		t.Fatalf("SavePlanMetricCheckpoint rewind error = %v, want ErrInvalidRunPlan", err)
 	}
 	tenantMismatch := advanced
 	tenantMismatch.AccountID = "acct-other"
-	if err := planRepo.SavePlanMetricCheckpoint(ctx, tenantMismatch); !errors.Is(err, agentoscore.ErrPlanRouteNotFound) {
+	if err := planRepo.SavePlanMetricCheckpoint(ctx, &tenantMismatch); !errors.Is(err, agentoscore.ErrPlanRouteNotFound) {
 		t.Fatalf("SavePlanMetricCheckpoint tenant mismatch error = %v, want ErrPlanRouteNotFound", err)
 	}
 
@@ -1395,11 +1395,11 @@ func TestAgentOSArtifactPostgresRejectsDifferentIdempotencyReplay(t *testing.T) 
 			Required:       true,
 		},
 	}
-	status := agentos.RunPlanStatus{
+	artifactStatus := agentos.RunPlanStatus{
 		PlanID:    spec.PlanID,
 		Artifacts: []agentoscore.ArtifactRef{first},
 	}
-	mapped, err := agentosplan.ResolveRunInput(ctx, artifactStore, nil, &spec, &status, &node, nil)
+	mapped, err := agentosplan.ResolveRunInput(ctx, artifactStore, nil, &spec, &artifactStatus, &node, nil)
 	if err != nil {
 		t.Fatalf("ResolveRunInput from postgres artifact: %v", err)
 	}
@@ -1437,8 +1437,8 @@ func postgresIntegrationPlanSpec(planID, idempotencyKey string) agentos.RunPlanS
 	}
 }
 
-func postgresIntegrationPlanStreamScope(spec agentos.RunPlanSpec) agentos.PlanStreamScope {
-	return agentos.PlanStreamScope{
+func postgresIntegrationPlanStreamScope(spec agentos.RunPlanSpec) *agentos.PlanStreamScope {
+	return &agentos.PlanStreamScope{
 		PlanID:    spec.PlanID,
 		AccountID: spec.AccountID,
 		ProjectID: spec.ProjectID,
@@ -1672,6 +1672,8 @@ func applyAgentOSPlanMigrations(t *testing.T, pg *postgres.Postgres) {
 		"20260620000019_constrain_plan_state_json.up.sql",
 		"20260620000020_constrain_run_backend_plan_tenant.up.sql",
 		"20260620000021_constrain_plan_record_tenants.up.sql",
+		"20260621000001_create_agentos_processes.up.sql",
+		"20260621000002_create_agentos_process_platform_stores.up.sql",
 	} {
 		path := filepath.Join("..", "..", "..", "migrations", migration)
 		data, err := os.ReadFile(path)

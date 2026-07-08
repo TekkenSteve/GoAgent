@@ -1481,7 +1481,15 @@ INSERT INTO audit_logs (
 		)
 	}
 
-	return agentosplan.AuditRecord{}, nil
+	stored, exists, err := r.GetAuditRecord(ctx, ref)
+	if err != nil {
+		return agentosplan.AuditRecord{}, err
+	}
+	if !exists {
+		return agentosplan.AuditRecord{}, fmt.Errorf("AgentOSPlanRepo - RecordAudit - insert: inserted audit record not found")
+	}
+
+	return stored, nil
 }
 
 func resolveUniqueInsertConflict[T any](err error, operation string, lookup func() (T, bool, error), validate func(*T) error) (T, error) {
