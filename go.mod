@@ -35,7 +35,7 @@ require (
 	github.com/knadh/koanf/parsers/yaml v1.1.0
 	github.com/knadh/koanf/providers/file v1.2.0
 	github.com/knadh/koanf/v2 v2.2.0
-	github.com/mark3labs/mcp-go v0.52.0
+	github.com/mark3labs/mcp-go v0.54.0
 	github.com/maximhq/bifrost/core v1.5.10
 	github.com/nats-io/nats.go v1.50.0
 	github.com/nexus-rpc/sdk-go v0.1.0
