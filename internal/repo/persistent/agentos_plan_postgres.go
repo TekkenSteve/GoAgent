@@ -17,6 +17,8 @@ import (
 	"github.com/jackc/pgx/v5"
 )
 
+var errInsertedAuditRecordNotFound = errors.New("inserted audit record not found")
+
 // errcheckIgnore is a helper for intentional error discards.
 func errcheckIgnore(_ error) {}
 
@@ -1485,8 +1487,12 @@ INSERT INTO audit_logs (
 	if err != nil {
 		return agentosplan.AuditRecord{}, err
 	}
+
 	if !exists {
-		return agentosplan.AuditRecord{}, fmt.Errorf("AgentOSPlanRepo - RecordAudit - insert: inserted audit record not found")
+		return agentosplan.AuditRecord{}, fmt.Errorf(
+			"AgentOSPlanRepo - RecordAudit - insert: %w",
+			errInsertedAuditRecordNotFound,
+		)
 	}
 
 	return stored, nil
