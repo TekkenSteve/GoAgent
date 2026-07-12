@@ -6,9 +6,8 @@ import (
 )
 
 const (
-	currentPlanWorkflowVersion             = 1
-	currentProcessWorkflowVersion          = 1
-	currentScheduleDispatchWorkflowVersion = 1
+	currentPlanWorkflowVersion    = 1
+	currentProcessWorkflowVersion = 1
 )
 
 var errTemporalWorkflowVersionInvalid = errors.New("agentos temporal workflow version: invalid")
@@ -22,7 +21,6 @@ func agentOSWorkflowVersionPins() []workflowVersionPin {
 	return []workflowVersionPin{
 		{Name: PlanWorkflowName, Version: currentPlanWorkflowVersion},
 		{Name: ProcessWorkflowName, Version: currentProcessWorkflowVersion},
-		{Name: ScheduleDispatchWorkflowName, Version: currentScheduleDispatchWorkflowVersion},
 	}
 }
 
@@ -32,10 +30,6 @@ func validatePlanWorkflowVersion(got int) error {
 
 func validateProcessWorkflowVersion(got int) error {
 	return validateWorkflowVersion(ProcessWorkflowName, got, currentProcessWorkflowVersion)
-}
-
-func validateScheduleDispatchWorkflowVersion(got int) error {
-	return validateWorkflowVersion(ScheduleDispatchWorkflowName, got, currentScheduleDispatchWorkflowVersion)
 }
 
 func validateWorkflowVersion(workflowName string, got, want int) error {

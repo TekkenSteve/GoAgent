@@ -6,7 +6,6 @@ import (
 	"slices"
 	"testing"
 
-	agentosproc "github.com/TekkenSteve/GoAgent/agentos/process"
 	"github.com/TekkenSteve/GoAgent/internal/agentfw/orchestration"
 	"github.com/TekkenSteve/GoAgent/internal/usecase/agentosprocess"
 	"github.com/nexus-rpc/sdk-go/nexus"
@@ -170,15 +169,9 @@ func TestAgentOSOwnedWorkflowRegistrationsHaveVersionPins(t *testing.T) {
 	if err := kit.Register(workers.workerSet()); err != nil {
 		t.Fatalf("Register: %v", err)
 	}
-	if err := RegisterScheduleDispatcher(workers.trigger, func(context.Context, agentosproc.ScheduleDispatch) error {
-		return nil
-	}); err != nil {
-		t.Fatalf("RegisterScheduleDispatcher: %v", err)
-	}
 
 	registered := append([]string{}, workers.planControl.workflows...)
 	registered = append(registered, workers.processControl.workflows...)
-	registered = append(registered, workers.trigger.workflows...)
 
 	for _, pin := range agentOSWorkflowVersionPins() {
 		if !slices.Contains(registered, pin.Name) {
