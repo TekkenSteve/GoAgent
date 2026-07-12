@@ -33,4 +33,5 @@ func TestAgentOSWorkflowVersionPinsCoverOwnedWorkflows(t *testing.T) {
 
 	require.Contains(t, names, PlanWorkflowName)
 	require.Contains(t, names, ProcessWorkflowName)
+	require.Contains(t, names, ScheduleDispatchWorkflowName)
 }
