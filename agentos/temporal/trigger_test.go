@@ -2,6 +2,7 @@ package temporal
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"testing"
 	"time"
@@ -14,6 +15,8 @@ import (
 	temporalmocks "go.temporal.io/sdk/mocks"
 	"go.temporal.io/sdk/workflow"
 )
+
+var errTemporaryTriggerDispatcherOutage = errors.New("temporary trigger dispatcher outage")
 
 func TestTriggerRuntimeCreateMapsPortableTriggerDefinition(t *testing.T) {
 	t.Parallel()
@@ -167,6 +170,38 @@ func TestTriggerDispatchWorkflowDeliversUniqueExecutionIdentity(t *testing.T) {
 	require.NotEmpty(t, delivered.DeliveryID)
 	require.Contains(t, delivered.DeliveryID, "trigger-delivery-test:")
 	require.False(t, delivered.TriggeredAt.IsZero())
+}
+
+func TestTriggerDispatchWorkflowRetriesWithStableDeliveryIdentity(t *testing.T) {
+	t.Parallel()
+
+	env := newAgentOSTemporalWorkflowTestEnv()
+	env.RegisterWorkflowWithOptions(TriggerDispatchWorkflow, workflow.RegisterOptions{Name: TriggerDispatchWorkflowName})
+
+	var deliveries []agentosproc.TriggerDelivery
+
+	env.RegisterActivityWithOptions(func(_ context.Context, delivery agentosproc.TriggerDelivery) error {
+		deliveries = append(deliveries, delivery)
+		if len(deliveries) == 1 {
+			return errTemporaryTriggerDispatcherOutage
+		}
+
+		return nil
+	}, activity.RegisterOptions{Name: DispatchTriggerActivityName})
+
+	spec := temporalTestTriggerSpec()
+
+	env.SetStartWorkflowOptions(client.StartWorkflowOptions{ID: "trigger-delivery-retry"})
+	env.ExecuteWorkflow(TriggerDispatchWorkflow, &triggerDispatchWorkflowInput{
+		Trigger:         spec.TriggerRef,
+		Target:          spec.Target,
+		WorkflowVersion: currentTriggerDispatchWorkflowVersion,
+	})
+
+	require.True(t, env.IsWorkflowCompleted())
+	require.NoError(t, env.GetWorkflowError())
+	require.Len(t, deliveries, 2)
+	require.Equal(t, deliveries[0].DeliveryID, deliveries[1].DeliveryID)
 }
 
 func TestRegisterTriggerDispatcherRegistersVersionedWorkload(t *testing.T) {

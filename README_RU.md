@@ -99,8 +99,6 @@ make compose-up-all
   - `GET /v1/templates/` — список шаблонов
   - `GET /v1/templates/{template_id}` — детали шаблона
   - `DELETE /v1/templates/{template_id}` — удаление шаблона
-- **Триггеры API**:
-  - `POST /v1/triggers/events` — запуск события вебхука
 - **PostgreSQL**: `postgres://user:myAwEsOm3pa55@w0rd@127.0.0.1:5432/db`
 
 ## Структура проекта

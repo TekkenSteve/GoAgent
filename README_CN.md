@@ -99,8 +99,6 @@ make compose-up-all
   - `GET /v1/templates/` — 模板列表
   - `GET /v1/templates/{template_id}` — 模板详情
   - `DELETE /v1/templates/{template_id}` — 删除模板
-- **触发器 API**:
-  - `POST /v1/triggers/events` — 触发事件 webhook
 - **PostgreSQL**: `postgres://user:myAwEsOm3pa55@w0rd@127.0.0.1:5432/db`
 
 ## 项目结构

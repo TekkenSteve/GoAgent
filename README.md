@@ -99,8 +99,6 @@ make compose-up-all
   - `GET /v1/templates/` — List templates
   - `GET /v1/templates/{template_id}` — Get template details
   - `DELETE /v1/templates/{template_id}` — Delete template
-- **Triggers API**:
-  - `POST /v1/triggers/events` — Fire trigger event webhook
 - **PostgreSQL**: `postgres://user:myAwEsOm3pa55@w0rd@127.0.0.1:5432/db`
 
 ## Project Structure

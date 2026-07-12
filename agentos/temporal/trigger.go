@@ -27,6 +27,9 @@ const (
 	// one due trigger delivery.
 	DispatchTriggerActivityName    = "AgentOSDispatchTrigger"
 	triggerDispatchActivityTimeout = 30 * time.Second
+	triggerDispatchRetryInitial    = time.Second
+	triggerDispatchRetryMaximum    = time.Minute
+	triggerDispatchRetryBackoff    = 2
 )
 
 var (
@@ -38,8 +41,11 @@ var (
 	errTriggerWorkerRequired        = errors.New("agentos temporal trigger runtime: worker is required")
 )
 
-// TriggerDispatcher receives immutable trigger deliveries. It must persist
-// DeliveryID as its idempotency key before starting application-owned work.
+// TriggerDispatcher receives immutable trigger deliveries. It must durably
+// accept DeliveryID as its idempotency key before starting application-owned
+// work. Returning an ordinary error requests a retry with the same DeliveryID.
+// Return a Temporal non-retryable application error only when the delivery
+// cannot ever be accepted by this application.
 type TriggerDispatcher func(context.Context, agentosproc.TriggerDelivery) error
 
 // TriggerRuntime implements process.TriggerRuntime with Temporal Schedule
@@ -335,9 +341,9 @@ type triggerDispatchWorkflowInput struct {
 }
 
 // TriggerDispatchWorkflow creates one immutable delivery identity from its
-// Temporal execution and passes it exactly once to the registered dispatcher.
-// The dispatcher persists DeliveryID before starting external work; activity
-// retries are disabled to prevent duplicate external execution.
+// Temporal execution and hands it to the registered dispatcher until it is
+// durably accepted or explicitly rejected. Dispatcher retries retain the same
+// DeliveryID, so application-owned work remains idempotent across failures.
 func TriggerDispatchWorkflow(ctx workflow.Context, input *triggerDispatchWorkflowInput) error {
 	if input == nil {
 		return temporal.NewNonRetryableApplicationError("trigger dispatch input is required", "validation", nil)
@@ -368,7 +374,11 @@ func TriggerDispatchWorkflow(ctx workflow.Context, input *triggerDispatchWorkflo
 	}
 	activityCtx := workflow.WithActivityOptions(ctx, workflow.ActivityOptions{
 		StartToCloseTimeout: triggerDispatchActivityTimeout,
-		RetryPolicy:         &temporal.RetryPolicy{MaximumAttempts: 1},
+		RetryPolicy: &temporal.RetryPolicy{
+			InitialInterval:    triggerDispatchRetryInitial,
+			BackoffCoefficient: triggerDispatchRetryBackoff,
+			MaximumInterval:    triggerDispatchRetryMaximum,
+		},
 	})
 
 	return workflow.ExecuteActivity(activityCtx, DispatchTriggerActivityName, delivery).Get(activityCtx, nil)
