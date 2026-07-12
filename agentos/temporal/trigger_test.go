@@ -10,6 +10,7 @@ import (
 	agentosproc "github.com/TekkenSteve/GoAgent/agentos/process"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
+	"go.temporal.io/api/serviceerror"
 	"go.temporal.io/sdk/activity"
 	"go.temporal.io/sdk/client"
 	temporalmocks "go.temporal.io/sdk/mocks"
@@ -54,7 +55,7 @@ func TestTriggerRuntimeCreateMapsPortableTriggerDefinition(t *testing.T) {
 
 	runtime, err := newTriggerRuntime(schedules, "trigger-dispatch")
 	require.NoError(t, err)
-	require.NoError(t, runtime.CreateTrigger(ctx, &spec, agentosproc.TriggerCreateOptions{Paused: true, Note: " review required "}))
+	require.NoError(t, runtime.ApplyTrigger(ctx, &spec, agentosproc.TriggerCreateOptions{Paused: true, Note: " review required "}))
 }
 
 func TestTemporalTriggerScheduleIDIsTenantScopedAndOpaque(t *testing.T) {
@@ -80,6 +81,7 @@ func TestTriggerRuntimeUpdatePreservesLifecycleState(t *testing.T) {
 	spec := temporalTestTriggerSpec()
 	paused := &client.ScheduleState{Paused: true, Note: "waiting for review"}
 
+	schedules.On("Create", ctx, mock.Anything).Return(nil, serviceerror.NewAlreadyExist("trigger exists")).Once()
 	schedules.On("GetHandle", ctx, temporalTriggerScheduleID(&spec.TriggerRef)).Return(handle).Once()
 	handle.On("Update", ctx, mock.Anything).Run(func(args mock.Arguments) {
 		options, ok := args.Get(1).(client.ScheduleUpdateOptions)
@@ -95,7 +97,7 @@ func TestTriggerRuntimeUpdatePreservesLifecycleState(t *testing.T) {
 
 	runtime, err := newTriggerRuntime(schedules, "trigger-dispatch")
 	require.NoError(t, err)
-	require.NoError(t, runtime.UpdateTrigger(ctx, &spec))
+	require.NoError(t, runtime.ApplyTrigger(ctx, &spec, agentosproc.TriggerCreateOptions{}))
 }
 
 func TestTriggerRuntimeObserveProjectsTemporalState(t *testing.T) {

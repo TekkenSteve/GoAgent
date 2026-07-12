@@ -12,6 +12,7 @@ import (
 
 	agentosproc "github.com/TekkenSteve/GoAgent/agentos/process"
 	enumspb "go.temporal.io/api/enums/v1"
+	"go.temporal.io/api/serviceerror"
 	"go.temporal.io/sdk/activity"
 	"go.temporal.io/sdk/client"
 	"go.temporal.io/sdk/temporal"
@@ -78,9 +79,10 @@ func newTriggerRuntime(schedules client.ScheduleClient, dispatchQueue string) (*
 	return &TriggerRuntime{schedules: schedules, dispatchQueue: strings.TrimSpace(dispatchQueue)}, nil
 }
 
-// CreateTrigger creates one durable Temporal Schedule resource with its
-// initial lifecycle state applied atomically.
-func (r *TriggerRuntime) CreateTrigger(ctx context.Context, spec *agentosproc.TriggerSpec, options agentosproc.TriggerCreateOptions) error {
+// ApplyTrigger creates or updates one durable Temporal Schedule resource. On
+// creation, options atomically set the initial lifecycle state. On update,
+// Temporal's existing lifecycle state is retained.
+func (r *TriggerRuntime) ApplyTrigger(ctx context.Context, spec *agentosproc.TriggerSpec, options agentosproc.TriggerCreateOptions) error {
 	if err := r.validateConfigured(); err != nil {
 		return err
 	}
@@ -90,21 +92,18 @@ func (r *TriggerRuntime) CreateTrigger(ctx context.Context, spec *agentosproc.Tr
 	}
 
 	_, err := r.schedules.Create(ctx, temporalTriggerOptions(spec, options, r.dispatchQueue))
+	if err == nil {
+		return nil
+	}
 
-	return err
+	if !isTriggerAlreadyExists(err) {
+		return err
+	}
+
+	return r.updateTrigger(ctx, spec)
 }
 
-// UpdateTrigger replaces timing, delivery policy, and target while preserving
-// the observed paused state and note set by lifecycle operations.
-func (r *TriggerRuntime) UpdateTrigger(ctx context.Context, spec *agentosproc.TriggerSpec) error {
-	if err := r.validateConfigured(); err != nil {
-		return err
-	}
-
-	if err := agentosproc.ValidateTriggerSpec(spec); err != nil {
-		return err
-	}
-
+func (r *TriggerRuntime) updateTrigger(ctx context.Context, spec *agentosproc.TriggerSpec) error {
 	return r.scheduleHandle(ctx, &spec.TriggerRef).Update(ctx, client.ScheduleUpdateOptions{
 		DoUpdate: func(input client.ScheduleUpdateInput) (*client.ScheduleUpdate, error) {
 			definition := temporalTriggerDefinition(spec, r.dispatchQueue, input.Description.Schedule.State)
@@ -112,6 +111,12 @@ func (r *TriggerRuntime) UpdateTrigger(ctx context.Context, spec *agentosproc.Tr
 			return &client.ScheduleUpdate{Schedule: &definition}, nil
 		},
 	})
+}
+
+func isTriggerAlreadyExists(err error) bool {
+	var alreadyExists *serviceerror.AlreadyExists
+
+	return errors.As(err, &alreadyExists)
 }
 
 // PauseTrigger pauses future recurring deliveries and records the supplied

@@ -156,11 +156,12 @@ type TriggerNowRequest struct {
 }
 
 // TriggerRuntime manages generic recurring trigger declarations and their
-// lifecycle. Applications own domain configuration and consume TriggerDelivery
-// values through a dispatcher worker.
+// lifecycle. ApplyTrigger makes the durable timing resource match a desired
+// declaration while preserving its current mutable lifecycle state.
+// Applications own domain configuration and consume TriggerDelivery values
+// through a dispatcher worker.
 type TriggerRuntime interface {
-	CreateTrigger(context.Context, *TriggerSpec, TriggerCreateOptions) error
-	UpdateTrigger(context.Context, *TriggerSpec) error
+	ApplyTrigger(context.Context, *TriggerSpec, TriggerCreateOptions) error
 	PauseTrigger(context.Context, *TriggerRef, string) error
 	ResumeTrigger(context.Context, *TriggerRef, string) error
 	DeleteTrigger(context.Context, *TriggerRef) error
