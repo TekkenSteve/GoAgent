@@ -8,7 +8,7 @@ import (
 const (
 	currentPlanWorkflowVersion            = 1
 	currentProcessWorkflowVersion         = 1
-	currentTriggerDispatchWorkflowVersion = 1
+	currentTriggerDispatchWorkflowVersion = 2
 )
 
 var errTemporalWorkflowVersionInvalid = errors.New("agentos temporal workflow version: invalid")

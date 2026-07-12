@@ -17,7 +17,10 @@ import (
 	"go.temporal.io/sdk/workflow"
 )
 
-var errTemporaryTriggerDispatcherOutage = errors.New("temporary trigger dispatcher outage")
+var (
+	errTemporaryTriggerDispatcherOutage = errors.New("temporary trigger dispatcher outage")
+	errPermanentTriggerDispatcherOutage = errors.New("permanent trigger dispatcher outage")
+)
 
 func TestTriggerRuntimeCreateMapsPortableTriggerDefinition(t *testing.T) {
 	t.Parallel()
@@ -49,6 +52,9 @@ func TestTriggerRuntimeCreateMapsPortableTriggerDefinition(t *testing.T) {
 		require.Equal(t, temporalTriggerWorkflowID(&spec.TriggerRef), action.ID)
 		require.Equal(t, TriggerDispatchWorkflowName, action.Workflow)
 		require.Equal(t, "trigger-dispatch", action.TaskQueue)
+		input, ok := action.Args[0].(*triggerDispatchWorkflowInput)
+		require.True(t, ok)
+		require.Equal(t, spec.Policy.Delivery, input.Delivery)
 
 		return true
 	})).Return(nil, nil).Once()
@@ -162,6 +168,7 @@ func TestTriggerDispatchWorkflowDeliversUniqueExecutionIdentity(t *testing.T) {
 	env.ExecuteWorkflow(TriggerDispatchWorkflow, &triggerDispatchWorkflowInput{
 		Trigger:         spec.TriggerRef,
 		Target:          spec.Target,
+		Delivery:        spec.Policy.Delivery,
 		WorkflowVersion: currentTriggerDispatchWorkflowVersion,
 	})
 
@@ -197,6 +204,7 @@ func TestTriggerDispatchWorkflowRetriesWithStableDeliveryIdentity(t *testing.T) 
 	env.ExecuteWorkflow(TriggerDispatchWorkflow, &triggerDispatchWorkflowInput{
 		Trigger:         spec.TriggerRef,
 		Target:          spec.Target,
+		Delivery:        spec.Policy.Delivery,
 		WorkflowVersion: currentTriggerDispatchWorkflowVersion,
 	})
 
@@ -204,6 +212,36 @@ func TestTriggerDispatchWorkflowRetriesWithStableDeliveryIdentity(t *testing.T) 
 	require.NoError(t, env.GetWorkflowError())
 	require.Len(t, deliveries, 2)
 	require.Equal(t, deliveries[0].DeliveryID, deliveries[1].DeliveryID)
+}
+
+func TestTriggerDispatchWorkflowHonorsConfiguredRetryLimit(t *testing.T) {
+	t.Parallel()
+
+	env := newAgentOSTemporalWorkflowTestEnv()
+	env.RegisterWorkflowWithOptions(TriggerDispatchWorkflow, workflow.RegisterOptions{Name: TriggerDispatchWorkflowName})
+
+	attempts := 0
+
+	env.RegisterActivityWithOptions(func(context.Context, agentosproc.TriggerDelivery) error {
+		attempts++
+
+		return errPermanentTriggerDispatcherOutage
+	}, activity.RegisterOptions{Name: DispatchTriggerActivityName})
+
+	spec := temporalTestTriggerSpec()
+	spec.Policy.Delivery.Retry.MaximumAttempts = 2
+
+	env.SetStartWorkflowOptions(client.StartWorkflowOptions{ID: "trigger-delivery-limit"})
+	env.ExecuteWorkflow(TriggerDispatchWorkflow, &triggerDispatchWorkflowInput{
+		Trigger:         spec.TriggerRef,
+		Target:          spec.Target,
+		Delivery:        spec.Policy.Delivery,
+		WorkflowVersion: currentTriggerDispatchWorkflowVersion,
+	})
+
+	require.True(t, env.IsWorkflowCompleted())
+	require.Error(t, env.GetWorkflowError())
+	require.Equal(t, 2, attempts)
 }
 
 func TestRegisterTriggerDispatcherRegistersVersionedWorkload(t *testing.T) {
@@ -231,6 +269,15 @@ func temporalTestTriggerSpec() agentosproc.TriggerSpec {
 		Policy: agentosproc.TriggerPolicy{
 			Overlap:       agentosproc.TriggerOverlapBufferOne,
 			CatchupWindow: 5 * time.Minute,
+			Delivery: agentosproc.TriggerDeliveryPolicy{
+				StartToCloseTimeout: 30 * time.Second,
+				Retry: agentosproc.TriggerDeliveryRetryPolicy{
+					InitialInterval:    time.Second,
+					MaximumInterval:    time.Minute,
+					BackoffCoefficient: 2,
+					MaximumAttempts:    0,
+				},
+			},
 		},
 	}
 }

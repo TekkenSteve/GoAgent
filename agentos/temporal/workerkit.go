@@ -6,7 +6,6 @@ import (
 
 	"github.com/TekkenSteve/GoAgent/internal/agentfw/orchestration"
 	"go.temporal.io/sdk/activity"
-	"go.temporal.io/sdk/worker"
 	"go.temporal.io/sdk/workflow"
 )
 
@@ -27,20 +26,28 @@ var (
 	errWorkerKitPlanCommandReconcilerNotConfigured = errors.New("agentos temporal workerkit: plan command reconciler is not configured")
 )
 
-// WorkerSet contains one Temporal worker per workload class.
+// WorkloadRegistrar is the smallest Temporal worker capability AgentOS needs
+// to install its workloads. Hosts retain ownership of worker construction and
+// lifecycle, so registration does not depend on unrelated SDK worker methods.
+type WorkloadRegistrar interface {
+	RegisterWorkflowWithOptions(any, workflow.RegisterOptions)
+	RegisterActivityWithOptions(any, activity.RegisterOptions)
+}
+
+// WorkerSet contains one workload registrar per Temporal workload class.
 type WorkerSet struct {
-	PlanControl     worker.Worker
-	PlanActivity    worker.Worker
-	ProcessControl  worker.Worker
-	ProcessActivity worker.Worker
-	NativeControl   worker.Worker
-	NativeLLM       worker.Worker
-	NativeTool      worker.Worker
-	Stream          worker.Worker
+	PlanControl     WorkloadRegistrar
+	PlanActivity    WorkloadRegistrar
+	ProcessControl  WorkloadRegistrar
+	ProcessActivity WorkloadRegistrar
+	NativeControl   WorkloadRegistrar
+	NativeLLM       WorkloadRegistrar
+	NativeTool      WorkloadRegistrar
+	Stream          WorkloadRegistrar
 }
 
 // RegisterPlanWorkflow installs the AgentOS RunPlan workflow into an existing worker.
-func RegisterPlanWorkflow(w worker.Worker) error {
+func RegisterPlanWorkflow(w WorkloadRegistrar) error {
 	if w == nil {
 		return errWorkerKitNilWorker
 	}
@@ -53,7 +60,7 @@ func RegisterPlanWorkflow(w worker.Worker) error {
 }
 
 // RegisterPlanActivities installs AgentOS RunPlan activities into an existing worker.
-func RegisterPlanActivities(w worker.Worker, activities *PlanActivities) error {
+func RegisterPlanActivities(w WorkloadRegistrar, activities *PlanActivities) error {
 	if w == nil {
 		return errWorkerKitNilWorker
 	}
@@ -91,7 +98,7 @@ func RegisterPlanActivities(w worker.Worker, activities *PlanActivities) error {
 }
 
 // RegisterProcessWorkflow installs the AgentOS process workflow into an existing worker.
-func RegisterProcessWorkflow(w worker.Worker) error {
+func RegisterProcessWorkflow(w WorkloadRegistrar) error {
 	if w == nil {
 		return errWorkerKitNilWorker
 	}
@@ -104,7 +111,7 @@ func RegisterProcessWorkflow(w worker.Worker) error {
 }
 
 // RegisterProcessActivities installs AgentOS process activities into an existing worker.
-func RegisterProcessActivities(w worker.Worker, activities *ProcessActivities) error {
+func RegisterProcessActivities(w WorkloadRegistrar, activities *ProcessActivities) error {
 	if w == nil {
 		return errWorkerKitNilWorker
 	}
@@ -188,7 +195,7 @@ func (k *WorkerKit) registerNativeWorkloads(workers *WorkerSet) error {
 	return nil
 }
 
-func (k *WorkerKit) registerNativeControlWorkloads(w worker.Worker) {
+func (k *WorkerKit) registerNativeControlWorkloads(w WorkloadRegistrar) {
 	w.RegisterWorkflowWithOptions(orchestration.AgentWorkflow, workflow.RegisterOptions{
 		Name: orchestration.AgentWorkflowName,
 	})
@@ -200,7 +207,7 @@ func (k *WorkerKit) registerNativeControlWorkloads(w worker.Worker) {
 	})
 }
 
-func (k *WorkerKit) registerNativeActivityWorkloads(llmWorker, toolWorker worker.Worker) {
+func (k *WorkerKit) registerNativeActivityWorkloads(llmWorker, toolWorker WorkloadRegistrar) {
 	llmWorker.RegisterActivityWithOptions(k.activities.LLMStepActivity, activity.RegisterOptions{
 		Name: orchestration.LLMStepActivityName,
 	})
@@ -209,7 +216,7 @@ func (k *WorkerKit) registerNativeActivityWorkloads(llmWorker, toolWorker worker
 	})
 }
 
-func (k *WorkerKit) registerStreamWorkloads(w worker.Worker) {
+func (k *WorkerKit) registerStreamWorkloads(w WorkloadRegistrar) {
 	w.RegisterWorkflowWithOptions(orchestration.StreamAgentWorkflow, workflow.RegisterOptions{
 		Name: orchestration.StreamWorkflowName,
 	})

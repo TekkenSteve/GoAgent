@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math"
 	"strings"
 	"time"
 
@@ -34,6 +35,11 @@ var (
 	errTriggerCatchupWindowInvalid = errors.New("trigger catchup window is invalid")
 	errTriggerOverlapPolicyInvalid = errors.New("trigger overlap policy is invalid")
 	errTriggerTimeZoneInvalid      = errors.New("trigger time zone is invalid")
+	errTriggerDeliveryTimeout      = errors.New("trigger delivery timeout is invalid")
+	errTriggerRetryInitial         = errors.New("trigger retry initial interval is invalid")
+	errTriggerRetryMaximum         = errors.New("trigger retry maximum interval is invalid")
+	errTriggerRetryBackoff         = errors.New("trigger retry backoff coefficient is invalid")
+	errTriggerRetryAttempts        = errors.New("trigger retry maximum attempts is invalid")
 )
 
 // TriggerRef identifies an application-owned trigger inside an account/project
@@ -83,11 +89,30 @@ type TriggerTiming struct {
 	TimeZone        string         `json:"time_zone"`
 }
 
-// TriggerPolicy controls durable delivery behavior for a trigger.
+// TriggerDeliveryRetryPolicy controls retries after a dispatcher returns an
+// ordinary error. MaximumAttempts of zero means retry attempts are unbounded.
+type TriggerDeliveryRetryPolicy struct {
+	InitialInterval    time.Duration `json:"initial_interval"`
+	MaximumInterval    time.Duration `json:"maximum_interval"`
+	BackoffCoefficient float64       `json:"backoff_coefficient"`
+	MaximumAttempts    int32         `json:"maximum_attempts"`
+}
+
+// TriggerDeliveryPolicy controls the execution of one due delivery. Every
+// trigger declares this policy explicitly so timing adapters never invent
+// operational behavior for an application.
+type TriggerDeliveryPolicy struct {
+	StartToCloseTimeout time.Duration              `json:"start_to_close_timeout"`
+	Retry               TriggerDeliveryRetryPolicy `json:"retry"`
+}
+
+// TriggerPolicy controls durable scheduling and delivery behavior for a
+// trigger.
 type TriggerPolicy struct {
-	Overlap        TriggerOverlapPolicy `json:"overlap"`
-	CatchupWindow  time.Duration        `json:"catchup_window"`
-	PauseOnFailure bool                 `json:"pause_on_failure,omitempty"`
+	Overlap        TriggerOverlapPolicy  `json:"overlap"`
+	CatchupWindow  time.Duration         `json:"catchup_window"`
+	PauseOnFailure bool                  `json:"pause_on_failure,omitempty"`
+	Delivery       TriggerDeliveryPolicy `json:"delivery"`
 }
 
 // TriggerSpec is a generic recurring trigger declaration. Target is an opaque
@@ -167,6 +192,48 @@ type TriggerRuntime interface {
 	DeleteTrigger(context.Context, *TriggerRef) error
 	ObserveTrigger(context.Context, *TriggerRef) (TriggerObservation, error)
 	TriggerNow(context.Context, *TriggerRef, TriggerNowRequest) error
+}
+
+// TriggerDeclaration is the desired state an application persists for one
+// trigger. Mutable lifecycle state stays in the timing adapter and is not
+// overwritten during reconciliation.
+type TriggerDeclaration struct {
+	Spec          TriggerSpec          `json:"spec"`
+	CreateOptions TriggerCreateOptions `json:"create_options"`
+}
+
+// TriggerDeclarationStore provides application-owned trigger declarations to
+// a reconciler. Deletion remains an explicit application lifecycle operation:
+// callers delete a runtime trigger when they delete its persisted declaration.
+type TriggerDeclarationStore interface {
+	ListTriggerDeclarations(context.Context) ([]TriggerDeclaration, error)
+}
+
+// ReconcileTriggerDeclarations applies every persisted declaration to a
+// runtime. This is safe to call at process startup because ApplyTrigger is
+// declarative and preserves existing mutable lifecycle state.
+func ReconcileTriggerDeclarations(ctx context.Context, runtime TriggerRuntime, store TriggerDeclarationStore) error {
+	if runtime == nil {
+		return fmt.Errorf("%w: trigger runtime is required", core.ErrInvalidTrigger)
+	}
+
+	if store == nil {
+		return fmt.Errorf("%w: trigger declaration store is required", core.ErrInvalidTrigger)
+	}
+
+	declarations, err := store.ListTriggerDeclarations(ctx)
+	if err != nil {
+		return err
+	}
+
+	for i := range declarations {
+		declaration := &declarations[i]
+		if err := runtime.ApplyTrigger(ctx, &declaration.Spec, declaration.CreateOptions); err != nil {
+			return fmt.Errorf("reconcile trigger %q: %w", declaration.Spec.TriggerID, err)
+		}
+	}
+
+	return nil
 }
 
 // ValidateTriggerSpec checks portable trigger invariants. Cron and calendar
@@ -324,7 +391,38 @@ func ValidateTriggerPolicy(policy TriggerPolicy) error {
 		return errTriggerCatchupWindowInvalid
 	}
 
-	return ValidateTriggerOverlapPolicy(policy.Overlap)
+	if err := ValidateTriggerOverlapPolicy(policy.Overlap); err != nil {
+		return err
+	}
+
+	return ValidateTriggerDeliveryPolicy(policy.Delivery)
+}
+
+// ValidateTriggerDeliveryPolicy validates the portable execution and retry
+// policy carried by every delivery workflow.
+func ValidateTriggerDeliveryPolicy(policy TriggerDeliveryPolicy) error {
+	if policy.StartToCloseTimeout <= 0 {
+		return errTriggerDeliveryTimeout
+	}
+
+	retry := policy.Retry
+	if retry.InitialInterval <= 0 {
+		return errTriggerRetryInitial
+	}
+
+	if retry.MaximumInterval < retry.InitialInterval {
+		return errTriggerRetryMaximum
+	}
+
+	if retry.BackoffCoefficient < 1 || math.IsNaN(retry.BackoffCoefficient) || math.IsInf(retry.BackoffCoefficient, 0) {
+		return errTriggerRetryBackoff
+	}
+
+	if retry.MaximumAttempts < 0 {
+		return errTriggerRetryAttempts
+	}
+
+	return nil
 }
 
 // ValidateTriggerOverlapPolicy validates a policy used by a scheduled or

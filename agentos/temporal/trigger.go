@@ -8,7 +8,6 @@ import (
 	"errors"
 	"fmt"
 	"strings"
-	"time"
 
 	agentosproc "github.com/TekkenSteve/GoAgent/agentos/process"
 	enumspb "go.temporal.io/api/enums/v1"
@@ -26,11 +25,7 @@ const (
 	TriggerDispatchWorkflowName = "AgentOSTriggerDispatchWorkflow"
 	// DispatchTriggerActivityName invokes an application-owned dispatcher for
 	// one due trigger delivery.
-	DispatchTriggerActivityName    = "AgentOSDispatchTrigger"
-	triggerDispatchActivityTimeout = 30 * time.Second
-	triggerDispatchRetryInitial    = time.Second
-	triggerDispatchRetryMaximum    = time.Minute
-	triggerDispatchRetryBackoff    = 2
+	DispatchTriggerActivityName = "AgentOSDispatchTrigger"
 )
 
 var (
@@ -312,6 +307,7 @@ func temporalTriggerAction(spec *agentosproc.TriggerSpec, queue string) *client.
 		Args: []any{&triggerDispatchWorkflowInput{
 			Trigger:         spec.TriggerRef,
 			Target:          spec.Target,
+			Delivery:        spec.Policy.Delivery,
 			WorkflowVersion: currentTriggerDispatchWorkflowVersion,
 		}},
 	}
@@ -340,9 +336,10 @@ func temporalTriggerIdentity(ref *agentosproc.TriggerRef) string {
 }
 
 type triggerDispatchWorkflowInput struct {
-	Trigger         agentosproc.TriggerRef  `json:"trigger"`
-	Target          agentosproc.ResourceRef `json:"target"`
-	WorkflowVersion int                     `json:"workflow_version"`
+	Trigger         agentosproc.TriggerRef            `json:"trigger"`
+	Target          agentosproc.ResourceRef           `json:"target"`
+	Delivery        agentosproc.TriggerDeliveryPolicy `json:"delivery"`
+	WorkflowVersion int                               `json:"workflow_version"`
 }
 
 // TriggerDispatchWorkflow creates one immutable delivery identity from its
@@ -366,6 +363,10 @@ func TriggerDispatchWorkflow(ctx workflow.Context, input *triggerDispatchWorkflo
 		return temporal.NewNonRetryableApplicationError("trigger target must belong to the trigger tenant scope", "validation", nil)
 	}
 
+	if err := agentosproc.ValidateTriggerDeliveryPolicy(input.Delivery); err != nil {
+		return temporal.NewNonRetryableApplicationError(err.Error(), "validation", err)
+	}
+
 	if err := validateTriggerDispatchWorkflowVersion(input.WorkflowVersion); err != nil {
 		return temporal.NewNonRetryableApplicationError(err.Error(), "validation", err)
 	}
@@ -378,11 +379,12 @@ func TriggerDispatchWorkflow(ctx workflow.Context, input *triggerDispatchWorkflo
 		TriggeredAt: workflow.Now(ctx),
 	}
 	activityCtx := workflow.WithActivityOptions(ctx, workflow.ActivityOptions{
-		StartToCloseTimeout: triggerDispatchActivityTimeout,
+		StartToCloseTimeout: input.Delivery.StartToCloseTimeout,
 		RetryPolicy: &temporal.RetryPolicy{
-			InitialInterval:    triggerDispatchRetryInitial,
-			BackoffCoefficient: triggerDispatchRetryBackoff,
-			MaximumInterval:    triggerDispatchRetryMaximum,
+			InitialInterval:    input.Delivery.Retry.InitialInterval,
+			BackoffCoefficient: input.Delivery.Retry.BackoffCoefficient,
+			MaximumInterval:    input.Delivery.Retry.MaximumInterval,
+			MaximumAttempts:    input.Delivery.Retry.MaximumAttempts,
 		},
 	})
 
@@ -391,7 +393,7 @@ func TriggerDispatchWorkflow(ctx workflow.Context, input *triggerDispatchWorkflo
 
 // RegisterTriggerDispatcher registers the generic trigger workflow and its
 // application-owned delivery activity on an explicit Temporal worker.
-func RegisterTriggerDispatcher(w worker.Worker, dispatcher TriggerDispatcher) error {
+func RegisterTriggerDispatcher(w WorkloadRegistrar, dispatcher TriggerDispatcher) error {
 	if w == nil {
 		return errTriggerWorkerRequired
 	}

@@ -1,6 +1,7 @@
 package process
 
 import (
+	"context"
 	"errors"
 	"testing"
 	"time"
@@ -39,6 +40,8 @@ func TestValidateTriggerSpecRejectsInvalidDeclarations(t *testing.T) {
 		}},
 		{name: "invalid overlap", edit: func(spec *TriggerSpec) { spec.Policy.Overlap = "unknown" }},
 		{name: "invalid catchup", edit: func(spec *TriggerSpec) { spec.Policy.CatchupWindow = 0 }},
+		{name: "invalid delivery timeout", edit: func(spec *TriggerSpec) { spec.Policy.Delivery.StartToCloseTimeout = 0 }},
+		{name: "invalid delivery retry", edit: func(spec *TriggerSpec) { spec.Policy.Delivery.Retry.MaximumInterval = 500 * time.Millisecond }},
 	}
 
 	for _, tt := range tests {
@@ -81,6 +84,32 @@ func TestValidateTriggerRefAndDeliveryRequireTenantScope(t *testing.T) {
 	}
 }
 
+func TestReconcileTriggerDeclarationsAppliesEveryDeclaration(t *testing.T) {
+	t.Parallel()
+
+	first := validTriggerSpec()
+	second := validTriggerSpec()
+	second.TriggerID = "trigger-2"
+	second.Target.ResourceID = "automation-2"
+	runtime := &recordingTriggerRuntime{}
+	store := triggerDeclarationStore{declarations: []TriggerDeclaration{
+		{Spec: first},
+		{Spec: second, CreateOptions: TriggerCreateOptions{Paused: true}},
+	}}
+
+	if err := ReconcileTriggerDeclarations(t.Context(), runtime, store); err != nil {
+		t.Fatalf("ReconcileTriggerDeclarations: %v", err)
+	}
+
+	if len(runtime.applied) != 2 {
+		t.Fatalf("applied declarations = %d, want 2", len(runtime.applied))
+	}
+
+	if !runtime.applied[1].options.Paused {
+		t.Fatal("second declaration did not retain creation options")
+	}
+}
+
 func validTriggerSpec() TriggerSpec {
 	return TriggerSpec{
 		TriggerRef: TriggerRef{TriggerID: "trigger-1", AccountID: "account-1", ProjectID: "project-1"},
@@ -97,6 +126,52 @@ func validTriggerSpec() TriggerSpec {
 		Policy: TriggerPolicy{
 			Overlap:       TriggerOverlapBufferOne,
 			CatchupWindow: 5 * time.Minute,
+			Delivery: TriggerDeliveryPolicy{
+				StartToCloseTimeout: 30 * time.Second,
+				Retry: TriggerDeliveryRetryPolicy{
+					InitialInterval:    time.Second,
+					MaximumInterval:    time.Minute,
+					BackoffCoefficient: 2,
+					MaximumAttempts:    0,
+				},
+			},
 		},
 	}
+}
+
+type recordingTriggerRuntime struct {
+	applied []appliedTriggerDeclaration
+}
+
+type appliedTriggerDeclaration struct {
+	spec    TriggerSpec
+	options TriggerCreateOptions
+}
+
+func (r *recordingTriggerRuntime) ApplyTrigger(_ context.Context, spec *TriggerSpec, options TriggerCreateOptions) error {
+	r.applied = append(r.applied, appliedTriggerDeclaration{spec: *spec, options: options})
+
+	return nil
+}
+
+func (*recordingTriggerRuntime) PauseTrigger(context.Context, *TriggerRef, string) error { return nil }
+
+func (*recordingTriggerRuntime) ResumeTrigger(context.Context, *TriggerRef, string) error { return nil }
+
+func (*recordingTriggerRuntime) DeleteTrigger(context.Context, *TriggerRef) error { return nil }
+
+func (*recordingTriggerRuntime) ObserveTrigger(context.Context, *TriggerRef) (TriggerObservation, error) {
+	return TriggerObservation{}, nil
+}
+
+func (*recordingTriggerRuntime) TriggerNow(context.Context, *TriggerRef, TriggerNowRequest) error {
+	return nil
+}
+
+type triggerDeclarationStore struct {
+	declarations []TriggerDeclaration
+}
+
+func (s triggerDeclarationStore) ListTriggerDeclarations(context.Context) ([]TriggerDeclaration, error) {
+	return s.declarations, nil
 }
