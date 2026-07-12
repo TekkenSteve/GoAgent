@@ -6,6 +6,5 @@ func testWorkflowTaskQueues() WorkflowTaskQueues {
 		NativeLLM:     "test-native-llm",
 		NativeTool:    "test-native-tool",
 		Stream:        "test-stream",
-		Trigger:       "test-trigger",
 	}
 }

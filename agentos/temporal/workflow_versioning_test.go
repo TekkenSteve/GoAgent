@@ -12,8 +12,13 @@ func TestValidateWorkflowVersion(t *testing.T) {
 	t.Parallel()
 
 	require.NoError(t, validatePlanWorkflowVersion(currentPlanWorkflowVersion))
+	require.NoError(t, validateTriggerDispatchWorkflowVersion(currentTriggerDispatchWorkflowVersion))
 
 	err := validatePlanWorkflowVersion(currentPlanWorkflowVersion + 1)
+	require.Error(t, err)
+	require.True(t, errors.Is(err, errTemporalWorkflowVersionInvalid))
+
+	err = validateTriggerDispatchWorkflowVersion(currentTriggerDispatchWorkflowVersion + 1)
 	require.Error(t, err)
 	require.True(t, errors.Is(err, errTemporalWorkflowVersionInvalid))
 }
@@ -33,4 +38,5 @@ func TestAgentOSWorkflowVersionPinsCoverOwnedWorkflows(t *testing.T) {
 
 	require.Contains(t, names, PlanWorkflowName)
 	require.Contains(t, names, ProcessWorkflowName)
+	require.Contains(t, names, TriggerDispatchWorkflowName)
 }

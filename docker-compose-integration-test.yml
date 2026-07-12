@@ -57,7 +57,6 @@ services:
       AGENTFW_TEMPORAL_NATIVE_LLM_TASK_QUEUE: "agentfw-native-llm"
       AGENTFW_TEMPORAL_NATIVE_TOOL_TASK_QUEUE: "agentfw-native-tool"
       AGENTFW_TEMPORAL_STREAM_TASK_QUEUE: "agentfw-stream"
-      AGENTFW_TEMPORAL_TRIGGER_TASK_QUEUE: "agentfw-trigger"
       AGENTFW_LLM_CONFIG_PATH: "/config/llm.yaml"
       AGENTFW_TEMPORAL_EXTERNAL_BACKENDS_JSON: '[{"name":"mock-temporal","task_queue":"mock-agent-backends","workflow_type":"MockAgentWorkflow","query_type":"agentos.run.status","signals":{"cancel":"agentos.control.cancel"}}]'
       AGENTFW_HTTP_BACKENDS_JSON: '[{"name":"mock-http","endpoint":"http://mock-agent-backends:8080"}]'

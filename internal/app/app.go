@@ -24,7 +24,6 @@ import (
 	"github.com/TekkenSteve/GoAgent/internal/agentfw/tool"
 	"github.com/TekkenSteve/GoAgent/internal/controller/restapi"
 	restapiv1 "github.com/TekkenSteve/GoAgent/internal/controller/restapi/v1"
-	"github.com/TekkenSteve/GoAgent/internal/entity"
 	"github.com/TekkenSteve/GoAgent/internal/pkg/postgres"
 	goredis "github.com/TekkenSteve/GoAgent/internal/pkg/redis"
 	"github.com/TekkenSteve/GoAgent/internal/repo/agentos/planstream"
@@ -49,7 +48,6 @@ import (
 	billingpkg "github.com/TekkenSteve/GoAgent/internal/usecase/billing"
 	agentfwusecase "github.com/TekkenSteve/GoAgent/internal/usecase/executor"
 	templatepkg "github.com/TekkenSteve/GoAgent/internal/usecase/template"
-	triggerpkg "github.com/TekkenSteve/GoAgent/internal/usecase/trigger"
 	"github.com/TekkenSteve/GoAgent/pkg/httpserver"
 	"github.com/TekkenSteve/GoAgent/pkg/logger"
 )
@@ -69,7 +67,6 @@ type appInfrastructure struct {
 	messageRepo     *temporalrepo.MessageRepo
 	agentRepo       *cached.AgentRepo
 	templateRepo    *temporalrepo.WorkflowTemplateRepo
-	triggerRepo     *temporalrepo.TriggerRepo
 	runBackendIndex *temporalrepo.RunBackendIndexRepo
 	templateUC      *templatepkg.UseCase
 	fwCfg           agentfwconfig.Config
@@ -87,7 +84,6 @@ func initInfrastructure(cfg *config.Config, l *logger.Logger) *appInfrastructure
 	persistentAgentRepo := temporalrepo.NewAgentRepo(pg)
 	agentRepo := cached.NewAgentRepo(persistentAgentRepo)
 	templateRepo := temporalrepo.NewWorkflowTemplateRepo(pg)
-	triggerRepo := temporalrepo.NewTriggerRepo(pg)
 	runBackendIndex := temporalrepo.NewRunBackendIndexRepo(pg)
 	templateUC := templatepkg.New(templateRepo)
 	ctx := context.Background()
@@ -112,7 +108,7 @@ func initInfrastructure(cfg *config.Config, l *logger.Logger) *appInfrastructure
 	return &appInfrastructure{
 		pg: pg, rdb: rdb, eventIngest: eventIngest, eventStore: eventStore,
 		messageRepo: messageRepo, agentRepo: agentRepo, templateRepo: templateRepo,
-		triggerRepo: triggerRepo, runBackendIndex: runBackendIndex, templateUC: templateUC,
+		runBackendIndex: runBackendIndex, templateUC: templateUC,
 		fwCfg: fwCfg,
 	}
 }
@@ -129,14 +125,13 @@ func Run(cfg *config.Config) {
 		agentUC         *agent.UseCase
 		cancelWorkflow  restapiv1.CancelWorkflowFn
 		signalWorkflow  restapiv1.SignalWorkflowFn
-		triggerUC       *triggerpkg.UseCase
 	)
 
 	infra := initInfrastructure(cfg, l)
 
 	defer func() { infra.pg.Close(); infra.rdb.Close() }()
 
-	tc := initTemporalComponents(l, cfg, &infra.fwCfg, infra.pg, infra.rdb, infra.messageRepo, infra.agentRepo, infra.templateRepo, infra.triggerRepo, infra.runBackendIndex, infra.templateUC, infra.eventStore)
+	tc := initTemporalComponents(l, cfg, &infra.fwCfg, infra.pg, infra.rdb, infra.messageRepo, infra.agentRepo, infra.runBackendIndex, infra.templateUC, infra.eventStore)
 	if tc != nil {
 		defer tc.Stop(l)
 
@@ -145,7 +140,6 @@ func Run(cfg *config.Config) {
 		planRuntime = tc.planRuntime
 		platformRuntime = tc.platformRuntime
 		agentUC = tc.agentUC
-		triggerUC = tc.triggerUC
 		cancelWorkflow = tc.cancelWorkflow
 		signalWorkflow = tc.signalWorkflow
 	}
@@ -169,7 +163,7 @@ func Run(cfg *config.Config) {
 		l.Warn("app - Run - stream executor unavailable (agent usecase not initialized)")
 	}
 
-	runHTTPServer(cfg, l, agentExecutor, orchExecutor, cancelWorkflow, signalWorkflow, infra.templateUC, triggerUC, infra.eventIngest, agentOSRuntime, planRuntime, platformRuntime, temporalRuntime)
+	runHTTPServer(cfg, l, agentExecutor, orchExecutor, cancelWorkflow, signalWorkflow, infra.templateUC, infra.eventIngest, agentOSRuntime, planRuntime, platformRuntime, temporalRuntime)
 }
 
 func initAgentExecutor(temporalRuntime *agentfwruntime.TemporalRuntime, agentOSRuntime agentos.Runtime, fwCfg *agentfwconfig.Config) (usecase.AgentExecutor, usecase.OrchestrationExecutor, error) {
@@ -194,10 +188,10 @@ func initAgentExecutor(temporalRuntime *agentfwruntime.TemporalRuntime, agentOSR
 	return agentExecutor, orchExecutor, nil
 }
 
-func runHTTPServer(cfg *config.Config, l *logger.Logger, agentExecutor usecase.AgentExecutor, orchExecutor usecase.OrchestrationExecutor, cancelWorkflow restapiv1.CancelWorkflowFn, signalWorkflow restapiv1.SignalWorkflowFn, templateUC *templatepkg.UseCase, triggerUC *triggerpkg.UseCase, eventIngest *eventing.Service, agentOSRuntime agentos.Runtime, planRuntime agentos.PlanRuntime, platformRuntime agentosplatform.Runtime, temporalRuntime *agentfwruntime.TemporalRuntime) {
+func runHTTPServer(cfg *config.Config, l *logger.Logger, agentExecutor usecase.AgentExecutor, orchExecutor usecase.OrchestrationExecutor, cancelWorkflow restapiv1.CancelWorkflowFn, signalWorkflow restapiv1.SignalWorkflowFn, templateUC *templatepkg.UseCase, eventIngest *eventing.Service, agentOSRuntime agentos.Runtime, planRuntime agentos.PlanRuntime, platformRuntime agentosplatform.Runtime, temporalRuntime *agentfwruntime.TemporalRuntime) {
 	httpServer := httpserver.New(l, httpserver.Port(cfg.HTTP.Port), httpserver.Prefork(cfg.HTTP.UsePreforkMode))
 	restapi.NewRouter(httpServer.App, cfg, agentExecutor, orchExecutor, l,
-		cancelWorkflow, signalWorkflow, templateUC, triggerUC, eventIngest, agentOSRuntime, planRuntime, platformRuntime)
+		cancelWorkflow, signalWorkflow, templateUC, eventIngest, agentOSRuntime, planRuntime, platformRuntime)
 	httpServer.Start()
 
 	interrupt := make(chan os.Signal, 1)
@@ -231,7 +225,6 @@ type temporalComponents struct {
 	planMetrics         *agentosplan.PlanMetricsExporterLoop
 	batchWriter         *pipelinepkg.BatchWriter
 	agentUC             *agent.UseCase
-	triggerUC           *triggerpkg.UseCase
 	toolRegistry        *toolkit.ToolRegistry
 	cancelWorkflow      restapiv1.CancelWorkflowFn
 	signalWorkflow      restapiv1.SignalWorkflowFn
@@ -440,7 +433,7 @@ func newAgentOSProjectionRuntime(l *logger.Logger, stores agentOSProcessPlatform
 }
 
 func initTemporalComponents(l *logger.Logger, cfg *config.Config, fwCfg *agentfwconfig.Config, pg *postgres.Postgres, rdb *goredis.Redis,
-	messageRepo *temporalrepo.MessageRepo, agentRepo *cached.AgentRepo, templateRepo *temporalrepo.WorkflowTemplateRepo, triggerRepo *temporalrepo.TriggerRepo,
+	messageRepo *temporalrepo.MessageRepo, agentRepo *cached.AgentRepo,
 	runBackendIndex *temporalrepo.RunBackendIndexRepo, templateUC *templatepkg.UseCase, eventStore stream.EventStore,
 ) *temporalComponents {
 	runtime, err := agentfwruntime.NewTemporalRuntime(&fwCfg.Temporal)
@@ -453,8 +446,8 @@ func initTemporalComponents(l *logger.Logger, cfg *config.Config, fwCfg *agentfw
 		l.Fatal(fmt.Errorf("app - Run - LoadLLMProviders: %w", err))
 	}
 
-	comp := initAgentComponents(l, cfg, fwCfg, pg, rdb, runtime, llmResult, messageRepo, agentRepo, templateRepo, triggerRepo, eventStore)
-	registerToolsOnRegistry(l, comp.toolRegistry, comp.triggerUC, comp.triggerScheduler)
+	comp := initAgentComponents(l, cfg, pg, rdb, llmResult, messageRepo, agentRepo, eventStore)
+	registerToolsOnRegistry(l, comp.toolRegistry)
 
 	if err := templateUC.EnsureDefault(context.Background()); err != nil {
 		l.Warn("app - Run - ensure default template: %v", err)
@@ -484,7 +477,6 @@ func initTemporalComponents(l *logger.Logger, cfg *config.Config, fwCfg *agentfw
 		planMetrics:         planMetrics,
 		batchWriter:         comp.batchWriter,
 		agentUC:             comp.agentUC,
-		triggerUC:           comp.triggerUC,
 		toolRegistry:        comp.toolRegistry,
 		cancelWorkflow:      cancelWorkflow,
 		signalWorkflow:      signalWorkflow,
@@ -701,7 +693,6 @@ func agentOSTemporalTaskQueues(taskQueues *agentfwconfig.TaskQueues) agentostemp
 		NativeLLM:       taskQueues.NativeLLM,
 		NativeTool:      taskQueues.NativeTool,
 		Stream:          taskQueues.Stream,
-		Trigger:         taskQueues.Trigger,
 	}
 }
 
@@ -847,27 +838,21 @@ func temporalExternalBackends(l logger.Interface, cfg *config.Config) []agentost
 
 // initAgentComponentsResult holds the results of initAgentComponents.
 type initAgentComponentsResult struct {
-	llmProvider      *webapi.BifrostProvider
-	toolRegistry     *toolkit.ToolRegistry
-	batchWriter      *pipelinepkg.BatchWriter
-	agentUC          *agent.UseCase
-	triggerUC        *triggerpkg.UseCase
-	triggerScheduler *temporalrepo.TemporalTriggerScheduler
-	activities       *orchestration.AgentActivities
+	llmProvider  *webapi.BifrostProvider
+	toolRegistry *toolkit.ToolRegistry
+	batchWriter  *pipelinepkg.BatchWriter
+	agentUC      *agent.UseCase
+	activities   *orchestration.AgentActivities
 }
 
 func initAgentComponents(
 	l *logger.Logger,
 	cfg *config.Config,
-	fwCfg *agentfwconfig.Config,
 	pg *postgres.Postgres,
 	rdb *goredis.Redis,
-	runtime *agentfwruntime.TemporalRuntime,
 	llmResult *webapi.LLMProvidersResult,
 	messageRepo *temporalrepo.MessageRepo,
 	agentRepo *cached.AgentRepo,
-	templateRepo *temporalrepo.WorkflowTemplateRepo,
-	triggerRepo *temporalrepo.TriggerRepo,
 	eventStore stream.EventStore,
 ) *initAgentComponentsResult {
 	llmProvider, err := initBifrostProvider(cfg, llmResult, l)
@@ -895,16 +880,6 @@ func initAgentComponents(
 	agentUC := agent.New(llmProvider, toolExecutor, wal, agentCompressor, toolRegistry, agentRepo)
 	agentUC.SetLogger(l)
 
-	workflowTaskQueues := orchestration.WorkflowTaskQueues{
-		NativeControl: fwCfg.Temporal.TaskQueues.NativeControl,
-		NativeLLM:     fwCfg.Temporal.TaskQueues.NativeLLM,
-		NativeTool:    fwCfg.Temporal.TaskQueues.NativeTool,
-		Stream:        fwCfg.Temporal.TaskQueues.Stream,
-		Trigger:       fwCfg.Temporal.TaskQueues.Trigger,
-	}
-	triggerScheduler := temporalrepo.NewTemporalTriggerScheduler(runtime.Client, fwCfg.Temporal.TaskQueues.Trigger, &workflowTaskQueues)
-	triggerUC := triggerpkg.New(triggerRepo, triggerScheduler, templateRepo)
-
 	mcpManager := mcpRepo.NewManager()
 	if toolRegistry != nil {
 		mcpManager.SetRegistry(toolRegistry)
@@ -912,71 +887,19 @@ func initAgentComponents(
 	}
 
 	activities := orchestration.NewAgentActivities(agentUC, eventStore, l).
-		WithTemplateRepo(templateRepo).
-		WithTriggerUC(triggerUC).
 		WithMCPManager(mcpManager).
 		WithBilling(billingUC)
 	l.Info("app - Run - agent components initialized")
 
-	return &initAgentComponentsResult{llmProvider, toolRegistry, batchWriter, agentUC, triggerUC, triggerScheduler, activities}
+	return &initAgentComponentsResult{llmProvider, toolRegistry, batchWriter, agentUC, activities}
 }
 
-func registerToolsOnRegistry(l *logger.Logger, toolRegistry *toolkit.ToolRegistry, triggerUC *triggerpkg.UseCase, triggerScheduler *temporalrepo.TemporalTriggerScheduler) {
+func registerToolsOnRegistry(l *logger.Logger, toolRegistry *toolkit.ToolRegistry) {
 	agentCreator := func(_ context.Context, _, _, _, _ string, _ []string) error {
 		return nil
 	}
 	if err := toolRegistry.Register(toolkit.NewAgentCreationTool(agentCreator)); err != nil {
 		l.Warn("app - Run - register agent_creation_tool: %v", err)
-	}
-
-	triggerCreator := func(ctx context.Context, templateID, name, cronExpression, agentPrompt string, templateVars []string, templateVarsVals map[string]string) (string, error) {
-		t, err := triggerUC.Create(ctx, &entity.CreateTriggerRequest{
-			TemplateID:       templateID,
-			Name:             name,
-			TriggerType:      entity.TriggerSchedule,
-			CronExpression:   cronExpression,
-			AgentPrompt:      agentPrompt,
-			TemplateVars:     templateVars,
-			TemplateVarsVals: templateVarsVals,
-		})
-		if err != nil {
-			return "", err
-		}
-
-		return t.ID, nil
-	}
-
-	triggerScheduleFn := func(ctx context.Context, triggerID, _ string) error {
-		trigger, err := triggerUC.Get(ctx, triggerID)
-		if err != nil {
-			return err
-		}
-
-		return triggerScheduler.Schedule(ctx, &trigger)
-	}
-	if err := toolRegistry.Register(toolkit.NewTriggerTool(triggerCreator, triggerScheduleFn)); err != nil {
-		l.Warn("app - Run - register create_trigger: %v", err)
-	}
-
-	triggerLister := func(ctx context.Context, templateID string) ([]entity.TriggerSpec, error) {
-		return triggerUC.ListByTemplate(ctx, templateID)
-	}
-	if err := toolRegistry.Register(toolkit.NewListTriggersTool(triggerLister)); err != nil {
-		l.Warn("app - Run - register list_triggers: %v", err)
-	}
-
-	triggerToggler := func(ctx context.Context, triggerID string, isActive bool) (entity.TriggerSpec, error) {
-		return triggerUC.Toggle(ctx, triggerID, isActive)
-	}
-	if err := toolRegistry.Register(toolkit.NewToggleTriggerTool(triggerToggler)); err != nil {
-		l.Warn("app - Run - register toggle_trigger: %v", err)
-	}
-
-	triggerDeleter := func(ctx context.Context, triggerID string) error {
-		return triggerUC.Delete(ctx, triggerID)
-	}
-	if err := toolRegistry.Register(toolkit.NewDeleteTriggerTool(triggerDeleter)); err != nil {
-		l.Warn("app - Run - register delete_trigger: %v", err)
 	}
 }
 

@@ -26,7 +26,7 @@ import (
 // @BasePath    /v1
 func NewRouter(app *fiber.App, cfg *config.Config, t usecase.AgentExecutor, o usecase.OrchestrationExecutor, l logger.Interface,
 	cancelWorkflow v1.CancelWorkflowFn, signalWorkflow v1.SignalWorkflowFn,
-	m usecase.TemplateManager, eh usecase.TriggerEventHandler,
+	m usecase.TemplateManager,
 	eventIngest *eventing.Service,
 	agentOSRuntime agentos.Runtime,
 	agentOSPlanRuntime agentos.PlanRuntime,
@@ -54,6 +54,6 @@ func NewRouter(app *fiber.App, cfg *config.Config, t usecase.AgentExecutor, o us
 	// Routers
 	apiV1Group := app.Group("/v1")
 	{
-		v1.NewRoutes(apiV1Group, t, o, l, cancelWorkflow, signalWorkflow, m, eh, eventIngest, agentOSRuntime, agentOSPlanRuntime, agentOSPlatformRuntime)
+		v1.NewRoutes(apiV1Group, t, o, l, cancelWorkflow, signalWorkflow, m, eventIngest, agentOSRuntime, agentOSPlanRuntime, agentOSPlatformRuntime)
 	}
 }

@@ -28,4 +28,6 @@ var (
 	ErrInvalidGovernedActionScope = errors.New("agentos: invalid governed action scope")
 	ErrInvalidWorkset             = errors.New("agentos: invalid workset")
 	ErrInvalidWorksetScope        = errors.New("agentos: invalid workset scope")
+	ErrInvalidTrigger             = errors.New("agentos: invalid trigger")
+	ErrInvalidTriggerScope        = errors.New("agentos: invalid trigger scope")
 )

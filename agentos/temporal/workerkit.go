@@ -37,7 +37,6 @@ type WorkerSet struct {
 	NativeLLM       worker.Worker
 	NativeTool      worker.Worker
 	Stream          worker.Worker
-	Trigger         worker.Worker
 }
 
 // RegisterPlanWorkflow installs the AgentOS RunPlan workflow into an existing worker.
@@ -178,14 +177,13 @@ func (k *WorkerKit) registerPlanWorkloads(workers *WorkerSet) error {
 }
 
 func (k *WorkerKit) registerNativeWorkloads(workers *WorkerSet) error {
-	if workers.NativeControl == nil || workers.NativeLLM == nil || workers.NativeTool == nil || workers.Stream == nil || workers.Trigger == nil {
+	if workers.NativeControl == nil || workers.NativeLLM == nil || workers.NativeTool == nil || workers.Stream == nil {
 		return errWorkerKitWorkersRequired
 	}
 
 	k.registerNativeControlWorkloads(workers.NativeControl)
 	k.registerNativeActivityWorkloads(workers.NativeLLM, workers.NativeTool)
 	k.registerStreamWorkloads(workers.Stream)
-	k.registerTriggerWorkloads(workers.Trigger)
 
 	return nil
 }
@@ -226,15 +224,6 @@ func (k *WorkerKit) registerStreamWorkloads(w worker.Worker) {
 	})
 	w.RegisterActivityWithOptions(k.activities.FinishStreamActivity, activity.RegisterOptions{
 		Name: orchestration.FinishStreamActivityName,
-	})
-}
-
-func (k *WorkerKit) registerTriggerWorkloads(w worker.Worker) {
-	w.RegisterWorkflowWithOptions(orchestration.TriggerFireWorkflow, workflow.RegisterOptions{
-		Name: orchestration.TriggerFireWorkflowName,
-	})
-	w.RegisterActivityWithOptions(k.activities.FireTriggerActivity, activity.RegisterOptions{
-		Name: orchestration.FireTriggerActivityName,
 	})
 }
 

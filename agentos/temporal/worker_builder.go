@@ -8,7 +8,6 @@ import (
 
 	"github.com/TekkenSteve/GoAgent/internal/agentfw/orchestration"
 	agenttool "github.com/TekkenSteve/GoAgent/internal/agentfw/tool"
-	"github.com/TekkenSteve/GoAgent/internal/entity"
 	"github.com/TekkenSteve/GoAgent/internal/pkg/postgres"
 	goredis "github.com/TekkenSteve/GoAgent/internal/pkg/redis"
 	"github.com/TekkenSteve/GoAgent/internal/repo/agentos/planstream"
@@ -26,7 +25,6 @@ import (
 	"github.com/TekkenSteve/GoAgent/internal/usecase/agentosplan"
 	billingpkg "github.com/TekkenSteve/GoAgent/internal/usecase/billing"
 	templatepkg "github.com/TekkenSteve/GoAgent/internal/usecase/template"
-	triggerpkg "github.com/TekkenSteve/GoAgent/internal/usecase/trigger"
 	"github.com/TekkenSteve/GoAgent/pkg/logger"
 	"go.temporal.io/sdk/client"
 )
@@ -304,7 +302,6 @@ func buildWorkerKit(ctx context.Context, deps *workerDependencies) (*WorkerKit, 
 	persistentAgentRepo := temporalrepo.NewAgentRepo(deps.postgres)
 	agentRepo := cached.NewAgentRepo(persistentAgentRepo)
 	templateRepo := temporalrepo.NewWorkflowTemplateRepo(deps.postgres)
-	triggerRepo := temporalrepo.NewTriggerRepo(deps.postgres)
 	templateUC := templatepkg.New(templateRepo)
 
 	llmResult, err := webapi.LoadLLMProviders(deps.cfg.LLMConfigPath)
@@ -335,26 +332,16 @@ func buildWorkerKit(ctx context.Context, deps *workerDependencies) (*WorkerKit, 
 
 	agentUC := agent.New(llmProvider, toolExecutor, wal, agentCompressor, toolRegistry, agentRepo)
 	agentUC.SetLogger(deps.logger)
-	workflowTaskQueues := orchestration.WorkflowTaskQueues{
-		NativeControl: deps.cfg.TemporalTaskQueues.NativeControl,
-		NativeLLM:     deps.cfg.TemporalTaskQueues.NativeLLM,
-		NativeTool:    deps.cfg.TemporalTaskQueues.NativeTool,
-		Stream:        deps.cfg.TemporalTaskQueues.Stream,
-		Trigger:       deps.cfg.TemporalTaskQueues.Trigger,
-	}
-	triggerScheduler := temporalrepo.NewTemporalTriggerScheduler(deps.temporalClient, deps.cfg.TemporalTaskQueues.Trigger, &workflowTaskQueues)
-	triggerUC := triggerpkg.New(triggerRepo, triggerScheduler, templateRepo)
+
 	mcpManager := mcpRepo.NewManager()
 	mcpManager.SetRegistry(toolRegistry)
 
 	eventSequencer := repostream.NewRedisSequencer(deps.redis)
 	eventStore := repostream.NewRedisEventStore(deps.redis, eventSequencer)
 	activities := orchestration.NewAgentActivities(agentUC, eventStore, deps.logger).
-		WithTemplateRepo(templateRepo).
-		WithTriggerUC(triggerUC).
 		WithMCPManager(mcpManager).
 		WithBilling(billingUC)
-	registerToolsOnRegistry(deps.logger, toolRegistry, triggerUC, triggerScheduler)
+	registerToolsOnRegistry(deps.logger, toolRegistry)
 
 	if deps.cfg.EnsureDefaultTemplate {
 		if err := templateUC.EnsureDefault(ctx); err != nil && deps.logger != nil {
@@ -365,10 +352,8 @@ func buildWorkerKit(ctx context.Context, deps *workerDependencies) (*WorkerKit, 
 	return &WorkerKit{activities: activities}, batchWriter, nil
 }
 
-func registerToolsOnRegistry(l *logger.Logger, toolRegistry *toolkit.ToolRegistry, triggerUC *triggerpkg.UseCase, triggerScheduler *temporalrepo.TemporalTriggerScheduler) {
+func registerToolsOnRegistry(l *logger.Logger, toolRegistry *toolkit.ToolRegistry) {
 	registerAgentCreationTool(l, toolRegistry)
-	registerTriggerCreationTool(l, toolRegistry, triggerUC, triggerScheduler)
-	registerTriggerManagementTools(l, toolRegistry, triggerUC)
 }
 
 func registerAgentCreationTool(l *logger.Logger, toolRegistry *toolkit.ToolRegistry) {
@@ -377,60 +362,6 @@ func registerAgentCreationTool(l *logger.Logger, toolRegistry *toolkit.ToolRegis
 	}
 	if err := toolRegistry.Register(toolkit.NewAgentCreationTool(agentCreator)); err != nil && l != nil {
 		l.Warn("agentos temporal worker - register agent_creation_tool: %v", err)
-	}
-}
-
-func registerTriggerCreationTool(l *logger.Logger, toolRegistry *toolkit.ToolRegistry, triggerUC *triggerpkg.UseCase, triggerScheduler *temporalrepo.TemporalTriggerScheduler) {
-	triggerCreator := func(ctx context.Context, templateID, name, cronExpression, agentPrompt string, templateVars []string, templateVarsVals map[string]string) (string, error) {
-		t, err := triggerUC.Create(ctx, &entity.CreateTriggerRequest{
-			TemplateID:       templateID,
-			Name:             name,
-			TriggerType:      entity.TriggerSchedule,
-			CronExpression:   cronExpression,
-			AgentPrompt:      agentPrompt,
-			TemplateVars:     templateVars,
-			TemplateVarsVals: templateVarsVals,
-		})
-		if err != nil {
-			return "", err
-		}
-
-		return t.ID, nil
-	}
-
-	triggerScheduleFn := func(ctx context.Context, triggerID, _ string) error {
-		trigger, err := triggerUC.Get(ctx, triggerID)
-		if err != nil {
-			return err
-		}
-
-		return triggerScheduler.Schedule(ctx, &trigger)
-	}
-	if err := toolRegistry.Register(toolkit.NewTriggerTool(triggerCreator, triggerScheduleFn)); err != nil && l != nil {
-		l.Warn("agentos temporal worker - register create_trigger: %v", err)
-	}
-}
-
-func registerTriggerManagementTools(l *logger.Logger, toolRegistry *toolkit.ToolRegistry, triggerUC *triggerpkg.UseCase) {
-	triggerLister := func(ctx context.Context, templateID string) ([]entity.TriggerSpec, error) {
-		return triggerUC.ListByTemplate(ctx, templateID)
-	}
-	if err := toolRegistry.Register(toolkit.NewListTriggersTool(triggerLister)); err != nil && l != nil {
-		l.Warn("agentos temporal worker - register list_triggers: %v", err)
-	}
-
-	triggerToggler := func(ctx context.Context, triggerID string, isActive bool) (entity.TriggerSpec, error) {
-		return triggerUC.Toggle(ctx, triggerID, isActive)
-	}
-	if err := toolRegistry.Register(toolkit.NewToggleTriggerTool(triggerToggler)); err != nil && l != nil {
-		l.Warn("agentos temporal worker - register toggle_trigger: %v", err)
-	}
-
-	triggerDeleter := func(ctx context.Context, triggerID string) error {
-		return triggerUC.Delete(ctx, triggerID)
-	}
-	if err := toolRegistry.Register(toolkit.NewDeleteTriggerTool(triggerDeleter)); err != nil && l != nil {
-		l.Warn("agentos temporal worker - register delete_trigger: %v", err)
 	}
 }
 

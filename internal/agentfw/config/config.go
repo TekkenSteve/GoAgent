@@ -47,7 +47,6 @@ type TaskQueues struct {
 	NativeLLM       string
 	NativeTool      string
 	Stream          string
-	Trigger         string
 }
 
 var ErrTemporalTaskQueuesInvalid = errors.New("agentfw temporal task queues: invalid")
@@ -63,7 +62,6 @@ func DefaultTaskQueues() TaskQueues {
 		NativeLLM:       "agentfw-native-llm",
 		NativeTool:      "agentfw-native-tool",
 		Stream:          "agentfw-stream",
-		Trigger:         "agentfw-trigger",
 	}
 }
 
@@ -82,7 +80,6 @@ func (q *TaskQueues) QueueNames() []string {
 		q.NativeLLM,
 		q.NativeTool,
 		q.Stream,
-		q.Trigger,
 	}
 
 	seen := make(map[string]struct{}, len(ordered))
@@ -122,7 +119,6 @@ func (q *TaskQueues) Validate() error {
 		{label: "native llm", value: q.NativeLLM},
 		{label: "native tool", value: q.NativeTool},
 		{label: "stream", value: q.Stream},
-		{label: "trigger", value: q.Trigger},
 	}
 
 	seen := make(map[string]string, len(fields))

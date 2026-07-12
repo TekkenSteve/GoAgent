@@ -59,7 +59,7 @@ deps: ### deps tidy + verify
 .PHONY: deps
 
 deps-audit: ### check dependencies vulnerabilities
-	govulncheck ./...
+	$(GO) tool govulncheck ./...
 .PHONY: deps-audit
 
 fix-diff: ### Show code changes by `go fix`
@@ -68,8 +68,8 @@ fix-diff: ### Show code changes by `go fix`
 
 format: ### Run code formatter
 	$(GO) fix ./...
-	gofumpt -l -w .
-	gci write . --skip-generated -s standard -s default
+	$(GO) tool gofumpt -l -w .
+	$(GO) tool gci write . --skip-generated -s standard -s default
 .PHONY: format
 
 run: deps swag-v1 ### swag run for API v1
@@ -82,7 +82,7 @@ docker-rm-volume: ### remove docker volume
 .PHONY: docker-rm-volume
 
 linter-golangci: ### check by golangci linter
-	golangci-lint run
+	$(GO) tool golangci-lint run
 .PHONY: linter-golangci
 
 linter-hadolint: ### check by hadolint linter
@@ -135,8 +135,8 @@ postgres-integration-test: ### run Postgres-backed AgentOS persistence integrati
 .PHONY: postgres-integration-test
 
 mock: ### run mockgen
-	mockgen -source ./internal/repo/contracts.go -package usecase_test > ./internal/usecase/mocks_repo_test.go
-	mockgen -source ./internal/usecase/contracts.go -package usecase_test > ./internal/usecase/mocks_usecase_test.go
+	$(GO) tool mockgen -source ./internal/repo/contracts.go -package usecase_test > ./internal/usecase/mocks_repo_test.go
+	$(GO) tool mockgen -source ./internal/usecase/contracts.go -package usecase_test > ./internal/usecase/mocks_usecase_test.go
 .PHONY: mock
 
 migrate-create:  ### create new migration

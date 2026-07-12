@@ -17,7 +17,6 @@ type TaskQueues struct {
 	NativeLLM       string
 	NativeTool      string
 	Stream          string
-	Trigger         string
 }
 
 var ErrTemporalTaskQueuesInvalid = errors.New("agentos temporal task queues: invalid")
@@ -57,7 +56,6 @@ func (q *TaskQueues) agentFWTaskQueues() agentfwconfig.TaskQueues {
 		NativeLLM:       q.NativeLLM,
 		NativeTool:      q.NativeTool,
 		Stream:          q.Stream,
-		Trigger:         q.Trigger,
 	}
 }
 
@@ -75,6 +73,5 @@ func taskQueuesFromAgentFW(q *agentfwconfig.TaskQueues) TaskQueues {
 		NativeLLM:       q.NativeLLM,
 		NativeTool:      q.NativeTool,
 		Stream:          q.Stream,
-		Trigger:         q.Trigger,
 	}
 }

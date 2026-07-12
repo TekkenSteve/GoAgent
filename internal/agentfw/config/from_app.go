@@ -23,7 +23,6 @@ func FromAppConfig(cfg *appconfig.Config) Config {
 		NativeLLM:       cfg.AgentFW.TemporalNativeLLMTaskQueue,
 		NativeTool:      cfg.AgentFW.TemporalNativeToolTaskQueue,
 		Stream:          cfg.AgentFW.TemporalStreamTaskQueue,
-		Trigger:         cfg.AgentFW.TemporalTriggerTaskQueue,
 	}
 	base.Temporal.MaxConcurrentWorkflowTaskPollers = cfg.AgentFW.MaxConcurrentWorkflowTaskPollers
 	base.Temporal.MaxConcurrentActivityTaskPollers = cfg.AgentFW.MaxConcurrentActivityTaskPollers

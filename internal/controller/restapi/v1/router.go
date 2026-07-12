@@ -15,7 +15,7 @@ import (
 // passed as parameters, all route groups registered inside.
 func NewRoutes(apiV1Group fiber.Router, t usecase.AgentExecutor, o usecase.OrchestrationExecutor, l logger.Interface,
 	cancelWorkflow CancelWorkflowFn, signalWorkflow SignalWorkflowFn,
-	m usecase.TemplateManager, eh usecase.TriggerEventHandler,
+	m usecase.TemplateManager,
 	eventIngest *eventing.Service,
 	agentOSRuntime agentos.Runtime,
 	planRuntime agentos.PlanRuntime,
@@ -23,7 +23,6 @@ func NewRoutes(apiV1Group fiber.Router, t usecase.AgentExecutor, o usecase.Orche
 ) {
 	r := newV1(t, o, l, cancelWorkflow, signalWorkflow, eventIngest, agentOSRuntime, planRuntime, platformRuntime)
 	registerTemplateRoutes(apiV1Group, m, l)
-	registerTriggerRoutes(apiV1Group, eh, t, l)
 	registerOrchestrationRoutes(apiV1Group, r, o)
 	registerAgentOSRoutes(apiV1Group, r, eventIngest, agentOSRuntime, planRuntime, platformRuntime)
 }
@@ -60,13 +59,6 @@ func registerTemplateRoutes(apiV1Group fiber.Router, m usecase.TemplateManager, 
 		tplGroup.Get("/", tpl.list)
 		tplGroup.Get("/:template_id", tpl.get)
 		tplGroup.Delete("/:template_id", tpl.delete)
-	}
-}
-
-func registerTriggerRoutes(apiV1Group fiber.Router, eh usecase.TriggerEventHandler, t usecase.AgentExecutor, l logger.Interface) {
-	if eh != nil {
-		th := &triggerWebhookHandler{eh: eh, t: t, l: l}
-		apiV1Group.Post("/triggers/events", th.handleEvent)
 	}
 }
 

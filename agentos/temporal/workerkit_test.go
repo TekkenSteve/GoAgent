@@ -6,6 +6,7 @@ import (
 	"slices"
 	"testing"
 
+	agentosproc "github.com/TekkenSteve/GoAgent/agentos/process"
 	"github.com/TekkenSteve/GoAgent/internal/agentfw/orchestration"
 	"github.com/TekkenSteve/GoAgent/internal/usecase/agentosprocess"
 	"github.com/nexus-rpc/sdk-go/nexus"
@@ -170,8 +171,16 @@ func TestAgentOSOwnedWorkflowRegistrationsHaveVersionPins(t *testing.T) {
 		t.Fatalf("Register: %v", err)
 	}
 
+	triggerWorker := &fakeWorker{}
+	if err := RegisterTriggerDispatcher(triggerWorker, func(context.Context, agentosproc.TriggerDelivery) error {
+		return nil
+	}); err != nil {
+		t.Fatalf("RegisterTriggerDispatcher: %v", err)
+	}
+
 	registered := append([]string{}, workers.planControl.workflows...)
 	registered = append(registered, workers.processControl.workflows...)
+	registered = append(registered, triggerWorker.workflows...)
 
 	for _, pin := range agentOSWorkflowVersionPins() {
 		if !slices.Contains(registered, pin.Name) {
@@ -205,7 +214,6 @@ func TestWorkerKitRegistersNativeWorkloadsOnDedicatedWorkers(t *testing.T) {
 	assertNativeControlRegistrations(t, workers.nativeControl)
 	assertNativeActivityRegistrations(t, workers.nativeLLM, workers.nativeTool)
 	assertStreamRegistrations(t, workers.stream)
-	assertTriggerRegistrations(t, workers.trigger)
 }
 
 func assertNativeControlRegistrations(t *testing.T, worker *fakeWorker) {
@@ -253,18 +261,6 @@ func assertStreamRegistrations(t *testing.T, worker *fakeWorker) {
 		if !worker.activityRegistered(name) {
 			t.Fatalf("stream activity %q was not isolated on stream worker; got %#v", name, worker.activities)
 		}
-	}
-}
-
-func assertTriggerRegistrations(t *testing.T, worker *fakeWorker) {
-	t.Helper()
-
-	if !worker.workflowRegistered(orchestration.TriggerFireWorkflowName) {
-		t.Fatalf("trigger workflow was not isolated on trigger worker; got %#v", worker.workflows)
-	}
-
-	if !worker.activityRegistered(orchestration.FireTriggerActivityName) {
-		t.Fatalf("trigger activity was not isolated on trigger worker; got %#v", worker.activities)
 	}
 }
 
@@ -323,7 +319,6 @@ type fakeWorkers struct {
 	nativeLLM       *fakeWorker
 	nativeTool      *fakeWorker
 	stream          *fakeWorker
-	trigger         *fakeWorker
 }
 
 func fakeWorkerSet() fakeWorkers {
@@ -336,7 +331,6 @@ func fakeWorkerSet() fakeWorkers {
 		nativeLLM:       &fakeWorker{},
 		nativeTool:      &fakeWorker{},
 		stream:          &fakeWorker{},
-		trigger:         &fakeWorker{},
 	}
 }
 
@@ -350,6 +344,5 @@ func (w fakeWorkers) workerSet() *WorkerSet {
 		NativeLLM:       w.nativeLLM,
 		NativeTool:      w.nativeTool,
 		Stream:          w.stream,
-		Trigger:         w.trigger,
 	}
 }

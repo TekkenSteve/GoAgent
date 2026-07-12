@@ -37,11 +37,6 @@ func (r DefaultRegistrar) RegisterWorkflows(rt *TemporalRuntime) error {
 		return err
 	}
 
-	triggerWorker, err := r.requiredWorker(rt, rt.TaskQueues.Trigger, "trigger")
-	if err != nil {
-		return err
-	}
-
 	nativeControlWorker.RegisterWorkflowWithOptions(orchestration.AgentWorkflow, workflow.RegisterOptions{
 		Name: orchestration.AgentWorkflowName,
 	})
@@ -50,9 +45,6 @@ func (r DefaultRegistrar) RegisterWorkflows(rt *TemporalRuntime) error {
 	})
 	nativeControlWorker.RegisterWorkflowWithOptions(orchestration.Workflow, workflow.RegisterOptions{
 		Name: orchestration.OrchestrationWorkflowName,
-	})
-	triggerWorker.RegisterWorkflowWithOptions(orchestration.TriggerFireWorkflow, workflow.RegisterOptions{
-		Name: orchestration.TriggerFireWorkflowName,
 	})
 
 	return nil
@@ -84,11 +76,6 @@ func (r DefaultRegistrar) RegisterActivities(rt *TemporalRuntime) error {
 		return err
 	}
 
-	triggerWorker, err := r.requiredWorker(rt, rt.TaskQueues.Trigger, "trigger")
-	if err != nil {
-		return err
-	}
-
 	// Register each activity individually with the name the workflow uses
 	// (RegisterActivity without options would use the reflection-based function name,
 	// which won't match the workflow's activity type name).
@@ -112,9 +99,6 @@ func (r DefaultRegistrar) RegisterActivities(rt *TemporalRuntime) error {
 	})
 	streamWorker.RegisterActivityWithOptions(r.activities.FinishStreamActivity, activity.RegisterOptions{
 		Name: orchestration.FinishStreamActivityName,
-	})
-	triggerWorker.RegisterActivityWithOptions(r.activities.FireTriggerActivity, activity.RegisterOptions{
-		Name: orchestration.FireTriggerActivityName,
 	})
 
 	return nil

@@ -39,7 +39,6 @@ func NewExecutorTemporal(c client.Client, cfg *config.Temporal) (*ExecutorTempor
 		NativeLLM:     cfg.TaskQueues.NativeLLM,
 		NativeTool:    cfg.TaskQueues.NativeTool,
 		Stream:        cfg.TaskQueues.Stream,
-		Trigger:       cfg.TaskQueues.Trigger,
 	}
 
 	return &ExecutorTemporal{

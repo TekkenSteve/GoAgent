@@ -1,0 +1,41 @@
+CREATE TABLE workflow_triggers (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    template_id UUID NOT NULL REFERENCES workflow_templates(id) ON DELETE CASCADE,
+    account_id UUID NOT NULL,
+    name VARCHAR(255) NOT NULL,
+    description TEXT NOT NULL DEFAULT '',
+    trigger_type VARCHAR(20) NOT NULL CHECK (trigger_type IN ('schedule', 'event')),
+    cron_expression VARCHAR(100) NOT NULL DEFAULT '',
+    event_slug VARCHAR(255) NOT NULL DEFAULT '',
+    agent_prompt TEXT NOT NULL DEFAULT '',
+    config JSONB NOT NULL DEFAULT '{}',
+    template_vars TEXT[] NOT NULL DEFAULT '{}',
+    is_active BOOLEAN NOT NULL DEFAULT TRUE,
+    last_fired_at TIMESTAMP WITH TIME ZONE,
+    created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
+    template_vars_vals JSONB NOT NULL DEFAULT '{}'
+);
+
+CREATE INDEX idx_workflow_triggers_account_id ON workflow_triggers(account_id);
+CREATE INDEX idx_workflow_triggers_template_id ON workflow_triggers(template_id);
+CREATE INDEX idx_workflow_triggers_type ON workflow_triggers(trigger_type);
+CREATE INDEX idx_workflow_triggers_event_slug ON workflow_triggers(event_slug) WHERE trigger_type = 'event';
+
+CREATE TABLE trigger_event_logs (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    trigger_id UUID NOT NULL REFERENCES workflow_triggers(id) ON DELETE CASCADE,
+    template_id UUID NOT NULL,
+    trigger_type VARCHAR(20) NOT NULL,
+    success BOOLEAN NOT NULL DEFAULT TRUE,
+    message TEXT NOT NULL DEFAULT '',
+    fired_at TIMESTAMP WITH TIME ZONE NOT NULL,
+    created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
+    event_data TEXT NOT NULL DEFAULT '',
+    agent_prompt TEXT NOT NULL DEFAULT '',
+    exec_variables JSONB NOT NULL DEFAULT '{}'
+);
+
+CREATE INDEX idx_trigger_event_logs_trigger_id ON trigger_event_logs(trigger_id);
+CREATE INDEX idx_trigger_event_logs_fired_at ON trigger_event_logs(fired_at);
+CREATE INDEX idx_trigger_event_logs_success ON trigger_event_logs(success);

@@ -90,7 +90,6 @@ type (
 		TemporalNativeLLMTaskQueue       string `env:"AGENTFW_TEMPORAL_NATIVE_LLM_TASK_QUEUE" envDefault:"agentfw-native-llm"`
 		TemporalNativeToolTaskQueue      string `env:"AGENTFW_TEMPORAL_NATIVE_TOOL_TASK_QUEUE" envDefault:"agentfw-native-tool"`
 		TemporalStreamTaskQueue          string `env:"AGENTFW_TEMPORAL_STREAM_TASK_QUEUE" envDefault:"agentfw-stream"`
-		TemporalTriggerTaskQueue         string `env:"AGENTFW_TEMPORAL_TRIGGER_TASK_QUEUE" envDefault:"agentfw-trigger"`
 		// TemporalExternalBackendsJSON is a JSON array of temporal_external backend configs.
 		TemporalExternalBackendsJSON string `env:"AGENTFW_TEMPORAL_EXTERNAL_BACKENDS_JSON" envDefault:"[]"`
 		// HTTPBackendsJSON is a JSON array of HTTP backend configs.

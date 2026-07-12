@@ -34,19 +34,6 @@ func (q *WorkflowTaskQueues) ValidateStreamAgent() error {
 	})
 }
 
-func (q *WorkflowTaskQueues) ValidateTriggerFire() error {
-	if q == nil {
-		return fmt.Errorf("%w: task queues are required", ErrWorkflowTaskQueuesInvalid)
-	}
-
-	return validateWorkflowTaskQueues([]workflowTaskQueueField{
-		{label: "trigger activity", value: q.Trigger},
-		{label: "native control", value: q.NativeControl},
-		{label: "native llm activity", value: q.NativeLLM},
-		{label: "native tool activity", value: q.NativeTool},
-	})
-}
-
 type workflowTaskQueueField struct {
 	label string
 	value string

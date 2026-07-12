@@ -308,45 +308,6 @@ func (mr *MockToolDefProviderMockRecorder) Definitions() *gomock.Call {
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Definitions", reflect.TypeOf((*MockToolDefProvider)(nil).Definitions))
 }
 
-// MockTriggerEventHandler is a mock of TriggerEventHandler interface.
-type MockTriggerEventHandler struct {
-	ctrl     *gomock.Controller
-	recorder *MockTriggerEventHandlerMockRecorder
-	isgomock struct{}
-}
-
-// MockTriggerEventHandlerMockRecorder is the mock recorder for MockTriggerEventHandler.
-type MockTriggerEventHandlerMockRecorder struct {
-	mock *MockTriggerEventHandler
-}
-
-// NewMockTriggerEventHandler creates a new mock instance.
-func NewMockTriggerEventHandler(ctrl *gomock.Controller) *MockTriggerEventHandler {
-	mock := &MockTriggerEventHandler{ctrl: ctrl}
-	mock.recorder = &MockTriggerEventHandlerMockRecorder{mock}
-	return mock
-}
-
-// EXPECT returns an object that allows the caller to indicate expected use.
-func (m *MockTriggerEventHandler) EXPECT() *MockTriggerEventHandlerMockRecorder {
-	return m.recorder
-}
-
-// HandleEvent mocks base method.
-func (m *MockTriggerEventHandler) HandleEvent(ctx context.Context, eventSlug string, payload map[string]string) ([]entity.TriggerFireResult, error) {
-	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "HandleEvent", ctx, eventSlug, payload)
-	ret0, _ := ret[0].([]entity.TriggerFireResult)
-	ret1, _ := ret[1].(error)
-	return ret0, ret1
-}
-
-// HandleEvent indicates an expected call of HandleEvent.
-func (mr *MockTriggerEventHandlerMockRecorder) HandleEvent(ctx, eventSlug, payload any) *gomock.Call {
-	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "HandleEvent", reflect.TypeOf((*MockTriggerEventHandler)(nil).HandleEvent), ctx, eventSlug, payload)
-}
-
 // MockTemplateManager is a mock of TemplateManager interface.
 type MockTemplateManager struct {
 	ctrl     *gomock.Controller
