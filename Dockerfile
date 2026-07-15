@@ -10,13 +10,15 @@ RUN go mod download
 # Step 2: Builder
 FROM golang:1.26-alpine3.23 AS builder
 
+ARG TARGET=app
+
 COPY --from=modules /go/pkg /go/pkg
 COPY . /app
 
 WORKDIR /app
 
 RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 \
-    go build -tags migrate -o /bin/app ./cmd/app
+	go build -o /bin/app ./cmd/${TARGET}
 
 # Step 3: Final
 FROM scratch
