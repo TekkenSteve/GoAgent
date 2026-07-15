@@ -129,6 +129,24 @@ func TestWorkerKitRegistersPlanWorkflowAndActivities(t *testing.T) {
 	}
 }
 
+func TestPlanWorkerKitRegistersOnlyPlanWorkloads(t *testing.T) {
+	t.Parallel()
+
+	kit := &PlanWorkerKit{planActivities: newTestPlanActivities(t, &fakePlanRuntime{})}
+	control := &fakeWorker{}
+	activity := &fakeWorker{}
+
+	if err := kit.Register(&PlanWorkerSet{Control: control, Activity: activity}); err != nil {
+		t.Fatalf("Register: %v", err)
+	}
+	if !control.workflowRegistered(PlanWorkflowName) {
+		t.Fatalf("plan workflow was not registered: %#v", control.workflows)
+	}
+	if !activity.activityRegistered(StartPlanNodeActivityName) {
+		t.Fatalf("plan activity was not registered: %#v", activity.activities)
+	}
+}
+
 func TestWorkerKitRegistersProcessWorkflowAndActivities(t *testing.T) {
 	t.Parallel()
 

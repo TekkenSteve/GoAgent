@@ -18,6 +18,21 @@ type WorkerKit struct {
 	closeFns              []func() error
 }
 
+// PlanWorkerKit owns only the durable RunPlan workload. Applications that use
+// external backends do not need to construct unrelated native-agent or process
+// workers merely to run AgentOS PlanControl.
+type PlanWorkerKit struct {
+	planActivities        *PlanActivities
+	planCommandReconciler *planCommandReconciler
+	closeFns              []func() error
+}
+
+// PlanWorkerSet identifies the two Temporal workers required by RunPlan.
+type PlanWorkerSet struct {
+	Control  WorkloadRegistrar
+	Activity WorkloadRegistrar
+}
+
 var (
 	errWorkerKitNilWorker                          = errors.New("agentos temporal workerkit: nil worker")
 	errWorkerKitWorkersRequired                    = errors.New("agentos temporal workerkit: worker set is required")
@@ -159,6 +174,38 @@ func (k *WorkerKit) Register(workers *WorkerSet) error {
 	return k.registerNativeWorkloads(workers)
 }
 
+// Register installs only the RunPlan workflow and activities.
+func (k *PlanWorkerKit) Register(workers *PlanWorkerSet) error {
+	if k == nil || workers == nil || workers.Control == nil || workers.Activity == nil {
+		return errWorkerKitWorkersRequired
+	}
+
+	if err := RegisterPlanWorkflow(workers.Control); err != nil {
+		return err
+	}
+
+	return RegisterPlanActivities(workers.Activity, k.planActivities)
+}
+
+// RecoverPlanCommands redelivers pending RunPlan commands without requiring
+// process or native-agent workers.
+func (k *PlanWorkerKit) RecoverPlanCommands(ctx context.Context, limit int) (PlanCommandRecoveryResult, error) {
+	if k == nil || k.planCommandReconciler == nil {
+		return PlanCommandRecoveryResult{}, errWorkerKitPlanCommandReconcilerNotConfigured
+	}
+
+	return k.planCommandReconciler.Recover(ctx, limit)
+}
+
+// StartPlanCommandRecovery starts periodic recovery for this plan-only kit.
+func (k *PlanWorkerKit) StartPlanCommandRecovery(ctx context.Context, cfg PlanCommandRecoveryLoopConfig, observer PlanCommandRecoveryObserver) (*PlanCommandRecoveryLoop, error) {
+	if k == nil {
+		return nil, errWorkerKitPlanCommandReconcilerNotConfigured
+	}
+
+	return StartPlanCommandRecovery(ctx, k, cfg, observer)
+}
+
 func (k *WorkerKit) registerProcessWorkloads(workers *WorkerSet) error {
 	if workers == nil || workers.ProcessControl == nil || workers.ProcessActivity == nil {
 		return errWorkerKitWorkersRequired
@@ -267,6 +314,20 @@ func (k *WorkerKit) StartPlanCommandRecovery(ctx context.Context, cfg PlanComman
 
 // Close releases resources owned by the kit.
 func (k *WorkerKit) Close() error {
+	if k == nil {
+		return nil
+	}
+
+	var err error
+	for _, closeFn := range k.closeFns {
+		err = errors.Join(err, closeFn())
+	}
+
+	return err
+}
+
+// Close releases resources owned by the plan-only kit.
+func (k *PlanWorkerKit) Close() error {
 	if k == nil {
 		return nil
 	}

@@ -67,6 +67,34 @@ func newWorkerKit(ctx context.Context, cfg *WorkerConfig) (*WorkerKit, error) {
 	return kit, nil
 }
 
+// NewPlanWorkerKit creates the minimal worker registration kit required by
+// the AgentOS RunPlan control plane.
+func NewPlanWorkerKit(ctx context.Context, cfg *WorkerConfig) (*PlanWorkerKit, error) {
+	resources, err := openWorkerResources(ctx, cfg)
+	if err != nil {
+		return nil, err
+	}
+
+	infra, err := initWorkerPlanRuntime(ctx, cfg, resources.postgres, resources.redis, resources.temporalClient)
+	if err != nil {
+		resources.close()
+
+		return nil, err
+	}
+
+	return &PlanWorkerKit{
+		planActivities:        infra.planActivities,
+		planCommandReconciler: newPlanCommandReconciler(newPlanTemporalClient(resources.temporalClient), &cfg.TemporalTaskQueues, infra.planStore, infra.planStore, infra.planStore),
+		closeFns: []func() error{
+			infra.planClose,
+			func() error {
+				resources.close()
+				return nil
+			},
+		},
+	}, nil
+}
+
 type workerResources struct {
 	cfg            *WorkerConfig
 	logger         *logger.Logger
