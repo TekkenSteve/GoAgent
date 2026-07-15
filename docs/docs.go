@@ -3431,6 +3431,9 @@ const docTemplate = `{
                 "event_type": {
                     "$ref": "#/definitions/core.EventType"
                 },
+                "external_event_id": {
+                    "type": "string"
+                },
                 "node_id": {
                     "type": "string"
                 },

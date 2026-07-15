@@ -417,15 +417,16 @@ func ValidatePlanEventIdempotency(existing, requested *agentos.PlanEvent) error 
 }
 
 type planEventIdempotencyFields struct {
-	PlanID    string                `json:"plan_id"`
-	AccountID string                `json:"account_id"`
-	ProjectID string                `json:"project_id"`
-	NodeID    string                `json:"node_id,omitempty"`
-	RunID     string                `json:"run_id,omitempty"`
-	ThreadID  string                `json:"thread_id,omitempty"`
-	EventType agentoscore.EventType `json:"event_type"`
-	Source    string                `json:"source,omitempty"`
-	Payload   map[string]any        `json:"payload"`
+	PlanID          string                `json:"plan_id"`
+	AccountID       string                `json:"account_id"`
+	ProjectID       string                `json:"project_id"`
+	NodeID          string                `json:"node_id,omitempty"`
+	RunID           string                `json:"run_id,omitempty"`
+	ThreadID        string                `json:"thread_id,omitempty"`
+	EventType       agentoscore.EventType `json:"event_type"`
+	Source          string                `json:"source,omitempty"`
+	ExternalEventID string                `json:"external_event_id,omitempty"`
+	Payload         map[string]any        `json:"payload"`
 }
 
 func planEventIdempotencyIdentity(event *agentos.PlanEvent) planEventIdempotencyFields {
@@ -438,7 +439,8 @@ func planEventIdempotencyIdentity(event *agentos.PlanEvent) planEventIdempotency
 		ThreadID:  event.ThreadID,
 		EventType: event.EventType,
 		Source:    event.Source,
-		Payload:   normalizeEventPayload(event.Payload),
+		ExternalEventID: event.ExternalEventID,
+		Payload:         normalizeEventPayload(event.Payload),
 	}
 }
 

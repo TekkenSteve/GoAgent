@@ -26,6 +26,7 @@ type planRuntime struct {
 	postgres       *postgres.Postgres
 	planEvents     agentosplan.PlanEventStore
 	planLiveEvents agentosplan.PlanEventSubscriber
+	planPublisher  agentosplan.PlanEventPublisher
 	planIndex      agentosplan.PlanIndex
 	artifactStore  agentosplan.ArtifactStore
 	commandStore   agentosplan.PlanCommandStore
@@ -149,7 +150,9 @@ func newPlanRuntimeWithClient(ctx context.Context, cfg *RuntimeConfig, c planTem
 		}
 
 		rt.redis = rdb
-		rt.planLiveEvents = planstream.NewRedisPlanEventStream(rdb)
+		stream := planstream.NewRedisPlanEventStream(rdb)
+		rt.planLiveEvents = stream
+		rt.planPublisher = stream
 	}
 
 	pg, err := newRuntimePostgres(cfg)
@@ -387,6 +390,103 @@ func (r *planRuntime) ControlPlan(ctx context.Context, ref agentos.PlanRef, cont
 	}
 
 	return nil
+}
+
+// IngestExternalPlanEvent records a backend-originated node event in the
+// durable AgentOS plan stream, then publishes the persisted event to live
+// subscribers. The backend event ID is scoped to the plan as its idempotency
+// key; AgentOS assigns the canonical event sequence and event ID.
+func (r *planRuntime) IngestExternalPlanEvent(ctx context.Context, incoming *agentos.ExternalPlanEvent) (agentos.PlanEvent, error) {
+	if r == nil {
+		return agentos.PlanEvent{}, errPlanRuntimeNotConfigured
+	}
+	if r.planEvents == nil {
+		return agentos.PlanEvent{}, errPlanRuntimePlanEventStoreRequired
+	}
+	if r.planPublisher == nil {
+		return agentos.PlanEvent{}, fmt.Errorf("agentos temporal plan runtime: plan event publisher is not configured")
+	}
+	if err := validateExternalPlanEvent(incoming); err != nil {
+		return agentos.PlanEvent{}, err
+	}
+
+	spec, _, err := r.authorizePlan(ctx, incoming.Plan)
+	if err != nil {
+		return agentos.PlanEvent{}, err
+	}
+	if err := validateExternalPlanNode(&spec, incoming); err != nil {
+		return agentos.PlanEvent{}, err
+	}
+
+	event := agentos.PlanEvent{
+		Event:           incoming.Event,
+		PlanID:          incoming.Plan.PlanID,
+		AccountID:       incoming.Plan.AccountID,
+		ProjectID:       incoming.Plan.ProjectID,
+		NodeID:          incoming.NodeID,
+		ExternalEventID: incoming.Event.EventID,
+	}
+	// The durable event store owns this identity. The external identity remains
+	// available through ExternalEventID and is used for idempotency.
+	event.EventID = ""
+	event.Sequence = 0
+
+	stored, err := r.planEvents.AppendPlanEvent(ctx, &event, incoming.Event.EventID)
+	if err != nil {
+		return agentos.PlanEvent{}, err
+	}
+	if err := r.planPublisher.PublishPlanEvent(ctx, &stored); err != nil {
+		return agentos.PlanEvent{}, fmt.Errorf("agentos temporal plan runtime: publish ingested event: %w", err)
+	}
+
+	return stored, nil
+}
+
+func validateExternalPlanEvent(incoming *agentos.ExternalPlanEvent) error {
+	if incoming == nil {
+		return fmt.Errorf("%w: external plan event is required", agentoscore.ErrInvalidPlanEvent)
+	}
+	if err := agentosplan.ValidatePlanRef(incoming.Plan); err != nil {
+		return err
+	}
+	if incoming.NodeID == "" {
+		return fmt.Errorf("%w: external plan event node id is required", agentoscore.ErrInvalidPlanEvent)
+	}
+	if incoming.Event.EventID == "" {
+		return fmt.Errorf("%w: external plan event id is required", agentoscore.ErrInvalidPlanEvent)
+	}
+	if incoming.Event.EventType == "" {
+		return fmt.Errorf("%w: external plan event type is required", agentoscore.ErrInvalidPlanEvent)
+	}
+	if incoming.Event.RunID == "" {
+		return fmt.Errorf("%w: external plan event run id is required", agentoscore.ErrInvalidPlanEvent)
+	}
+	if incoming.Event.Source == "" {
+		return fmt.Errorf("%w: external plan event source is required", agentoscore.ErrInvalidPlanEvent)
+	}
+	if incoming.Event.Timestamp.IsZero() {
+		return fmt.Errorf("%w: external plan event timestamp is required", agentoscore.ErrInvalidPlanEvent)
+	}
+	if incoming.Event.Sequence <= 0 {
+		return fmt.Errorf("%w: external plan event sequence must be positive", agentoscore.ErrInvalidPlanEvent)
+	}
+
+	return nil
+}
+
+func validateExternalPlanNode(spec *agentos.RunPlanSpec, incoming *agentos.ExternalPlanEvent) error {
+	for _, node := range spec.Nodes {
+		if node.NodeID != incoming.NodeID {
+			continue
+		}
+		if node.Run.RunID != incoming.Event.RunID {
+			return fmt.Errorf("%w: external event run %q does not match node %q run %q", agentoscore.ErrInvalidPlanEvent, incoming.Event.RunID, incoming.NodeID, node.Run.RunID)
+		}
+
+		return nil
+	}
+
+	return fmt.Errorf("%w: external event node %q is not in plan %q", agentoscore.ErrInvalidPlanEvent, incoming.NodeID, spec.PlanID)
 }
 
 func (r *planRuntime) validateControlPlanRequest(ctx context.Context, ref agentos.PlanRef, control *agentoscore.ControlRequest) error {

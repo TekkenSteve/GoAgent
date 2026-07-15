@@ -310,10 +310,20 @@ type PlanDebugTraceScope struct {
 // PlanEvent is the public event envelope for plan-level events.
 type PlanEvent struct {
 	core.Event
-	PlanID    string `json:"plan_id"`
-	AccountID string `json:"account_id"`
-	ProjectID string `json:"project_id"`
-	NodeID    string `json:"node_id,omitempty"`
+	PlanID          string `json:"plan_id"`
+	AccountID       string `json:"account_id"`
+	ProjectID       string `json:"project_id"`
+	NodeID          string `json:"node_id,omitempty"`
+	ExternalEventID string `json:"external_event_id,omitempty"`
+}
+
+// ExternalPlanEvent is an event reported by a backend that executes a plan
+// node outside the AgentOS process. Event.EventID is the backend's stable
+// delivery identity and is used as the durable idempotency key.
+type ExternalPlanEvent struct {
+	Event  core.Event `json:"event"`
+	Plan   PlanRef    `json:"plan"`
+	NodeID string     `json:"node_id"`
 }
 
 // PlanDebugTrace is a typed debug projection over durable plan events. It keeps

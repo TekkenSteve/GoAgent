@@ -23,6 +23,7 @@ type PlanRuntime interface {
 	DescribePlan(ctx context.Context, ref PlanRef) (RunPlanDescription, error)
 	SignalPlan(ctx context.Context, ref PlanRef, signal *core.Signal) error
 	ControlPlan(ctx context.Context, ref PlanRef, control *core.ControlRequest) error
+	IngestExternalPlanEvent(ctx context.Context, event *ExternalPlanEvent) (PlanEvent, error)
 	SubscribePlan(ctx context.Context, scope *PlanStreamScope) (core.Subscription, error)
 	ListPlanEvents(ctx context.Context, scope *PlanEventScope) ([]PlanEvent, error)
 	ListPlanDebugTraces(ctx context.Context, scope *PlanDebugTraceScope) ([]PlanDebugTrace, error)
