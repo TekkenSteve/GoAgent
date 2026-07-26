@@ -89,6 +89,7 @@ func NewPlanWorkerKit(ctx context.Context, cfg *WorkerConfig) (*PlanWorkerKit, e
 			infra.planClose,
 			func() error {
 				resources.close()
+
 				return nil
 			},
 		},

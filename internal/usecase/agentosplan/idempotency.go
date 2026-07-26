@@ -431,14 +431,14 @@ type planEventIdempotencyFields struct {
 
 func planEventIdempotencyIdentity(event *agentos.PlanEvent) planEventIdempotencyFields {
 	return planEventIdempotencyFields{
-		PlanID:    event.PlanID,
-		AccountID: event.AccountID,
-		ProjectID: event.ProjectID,
-		NodeID:    event.NodeID,
-		RunID:     event.RunID,
-		ThreadID:  event.ThreadID,
-		EventType: event.EventType,
-		Source:    event.Source,
+		PlanID:          event.PlanID,
+		AccountID:       event.AccountID,
+		ProjectID:       event.ProjectID,
+		NodeID:          event.NodeID,
+		RunID:           event.RunID,
+		ThreadID:        event.ThreadID,
+		EventType:       event.EventType,
+		Source:          event.Source,
 		ExternalEventID: event.ExternalEventID,
 		Payload:         normalizeEventPayload(event.Payload),
 	}

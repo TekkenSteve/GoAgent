@@ -14,30 +14,48 @@ import (
 	_ "github.com/golang-migrate/migrate/v4/source/file"
 )
 
+var errPostgresURLRequired = errors.New("PG_URL is required")
+
 func main() {
+	if err := run(); err != nil {
+		log.Fatal(err)
+	}
+}
+
+func run() (runErr error) {
 	databaseURL := strings.TrimSpace(os.Getenv("PG_URL"))
 	if databaseURL == "" {
-		log.Fatal("PG_URL is required")
+		return errPostgresURLRequired
 	}
 
 	migrationsURL := strings.TrimSpace(os.Getenv("AGENTOS_MIGRATIONS_URL"))
 	if migrationsURL == "" {
 		migrationsURL = "file://migrations"
 	}
+
 	migrator, err := migrate.New(migrationsURL, postgresURL(databaseURL))
 	if err != nil {
-		log.Fatalf("open migrations: %v", err)
+		return fmt.Errorf("open migrations: %w", err)
 	}
-	defer migrator.Close()
+
+	defer func() {
+		sourceErr, databaseErr := migrator.Close()
+		runErr = errors.Join(runErr, sourceErr, databaseErr)
+	}()
+
 	if err := migrator.Up(); err != nil && !errors.Is(err, migrate.ErrNoChange) {
-		log.Fatalf("apply migrations: %v", err)
+		return fmt.Errorf("apply migrations: %w", err)
 	}
+
 	log.Print("AgentOS migrations are current")
+
+	return nil
 }
 
 func postgresURL(value string) string {
 	if strings.Contains(value, "?") {
 		return value
 	}
+
 	return fmt.Sprintf("%s?sslmode=disable", value)
 }

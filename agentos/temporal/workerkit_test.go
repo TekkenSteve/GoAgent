@@ -134,16 +134,18 @@ func TestPlanWorkerKitRegistersOnlyPlanWorkloads(t *testing.T) {
 
 	kit := &PlanWorkerKit{planActivities: newTestPlanActivities(t, &fakePlanRuntime{})}
 	control := &fakeWorker{}
-	activity := &fakeWorker{}
+	activityWorker := &fakeWorker{}
 
-	if err := kit.Register(&PlanWorkerSet{Control: control, Activity: activity}); err != nil {
+	if err := kit.Register(&PlanWorkerSet{Control: control, Activity: activityWorker}); err != nil {
 		t.Fatalf("Register: %v", err)
 	}
+
 	if !control.workflowRegistered(PlanWorkflowName) {
 		t.Fatalf("plan workflow was not registered: %#v", control.workflows)
 	}
-	if !activity.activityRegistered(StartPlanNodeActivityName) {
-		t.Fatalf("plan activity was not registered: %#v", activity.activities)
+
+	if !activityWorker.activityRegistered(StartPlanNodeActivityName) {
+		t.Fatalf("plan activity was not registered: %#v", activityWorker.activities)
 	}
 }
 

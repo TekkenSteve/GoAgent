@@ -25,9 +25,11 @@ import (
 	"github.com/jackc/pgx/v5"
 )
 
-const postgresIdentifierMaxBytes = 63
-const postgresIntegrationDatabasePrefix = "goagent_plan_"
-const postgresIntegrationDatabaseTokenLength = 12
+const (
+	postgresIdentifierMaxBytes             = 63
+	postgresIntegrationDatabasePrefix      = "goagent_plan_"
+	postgresIntegrationDatabaseTokenLength = 12
+)
 
 func TestAgentOSPlanPostgresDurablePersistence(t *testing.T) {
 	t.Parallel()

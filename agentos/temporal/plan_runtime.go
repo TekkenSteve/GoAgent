@@ -38,6 +38,7 @@ type planRuntime struct {
 var (
 	errPlanRuntimePlanIndexRequired      = errors.New("agentos temporal plan runtime: plan index is not configured")
 	errPlanRuntimePlanEventStoreRequired = errors.New("agentos temporal plan runtime: plan event store is not configured")
+	errPlanRuntimePlanPublisherRequired  = errors.New("agentos temporal plan runtime: plan event publisher is not configured")
 	errPlanRuntimeArtifactStoreRequired  = errors.New("agentos temporal plan runtime: artifact store is not configured")
 	errPlanRuntimeCommandStoreRequired   = errors.New("agentos temporal plan runtime: plan command store is not configured")
 	errPlanRuntimeAuditStoreRequired     = errors.New("agentos temporal plan runtime: audit store is not configured")
@@ -400,12 +401,15 @@ func (r *planRuntime) IngestExternalPlanEvent(ctx context.Context, incoming *age
 	if r == nil {
 		return agentos.PlanEvent{}, errPlanRuntimeNotConfigured
 	}
+
 	if r.planEvents == nil {
 		return agentos.PlanEvent{}, errPlanRuntimePlanEventStoreRequired
 	}
+
 	if r.planPublisher == nil {
-		return agentos.PlanEvent{}, fmt.Errorf("agentos temporal plan runtime: plan event publisher is not configured")
+		return agentos.PlanEvent{}, errPlanRuntimePlanPublisherRequired
 	}
+
 	if err := validateExternalPlanEvent(incoming); err != nil {
 		return agentos.PlanEvent{}, err
 	}
@@ -414,6 +418,7 @@ func (r *planRuntime) IngestExternalPlanEvent(ctx context.Context, incoming *age
 	if err != nil {
 		return agentos.PlanEvent{}, err
 	}
+
 	if err := validateExternalPlanNode(&spec, incoming); err != nil {
 		return agentos.PlanEvent{}, err
 	}
@@ -435,6 +440,7 @@ func (r *planRuntime) IngestExternalPlanEvent(ctx context.Context, incoming *age
 	if err != nil {
 		return agentos.PlanEvent{}, err
 	}
+
 	if err := r.planPublisher.PublishPlanEvent(ctx, &stored); err != nil {
 		return agentos.PlanEvent{}, fmt.Errorf("agentos temporal plan runtime: publish ingested event: %w", err)
 	}
@@ -446,27 +452,35 @@ func validateExternalPlanEvent(incoming *agentos.ExternalPlanEvent) error {
 	if incoming == nil {
 		return fmt.Errorf("%w: external plan event is required", agentoscore.ErrInvalidPlanEvent)
 	}
+
 	if err := agentosplan.ValidatePlanRef(incoming.Plan); err != nil {
 		return err
 	}
+
 	if incoming.NodeID == "" {
 		return fmt.Errorf("%w: external plan event node id is required", agentoscore.ErrInvalidPlanEvent)
 	}
+
 	if incoming.Event.EventID == "" {
 		return fmt.Errorf("%w: external plan event id is required", agentoscore.ErrInvalidPlanEvent)
 	}
+
 	if incoming.Event.EventType == "" {
 		return fmt.Errorf("%w: external plan event type is required", agentoscore.ErrInvalidPlanEvent)
 	}
+
 	if incoming.Event.RunID == "" {
 		return fmt.Errorf("%w: external plan event run id is required", agentoscore.ErrInvalidPlanEvent)
 	}
+
 	if incoming.Event.Source == "" {
 		return fmt.Errorf("%w: external plan event source is required", agentoscore.ErrInvalidPlanEvent)
 	}
+
 	if incoming.Event.Timestamp.IsZero() {
 		return fmt.Errorf("%w: external plan event timestamp is required", agentoscore.ErrInvalidPlanEvent)
 	}
+
 	if incoming.Event.Sequence <= 0 {
 		return fmt.Errorf("%w: external plan event sequence must be positive", agentoscore.ErrInvalidPlanEvent)
 	}
@@ -475,10 +489,12 @@ func validateExternalPlanEvent(incoming *agentos.ExternalPlanEvent) error {
 }
 
 func validateExternalPlanNode(spec *agentos.RunPlanSpec, incoming *agentos.ExternalPlanEvent) error {
-	for _, node := range spec.Nodes {
+	for i := range spec.Nodes {
+		node := &spec.Nodes[i]
 		if node.NodeID != incoming.NodeID {
 			continue
 		}
+
 		if node.Run.RunID != incoming.Event.RunID {
 			return fmt.Errorf("%w: external event run %q does not match node %q run %q", agentoscore.ErrInvalidPlanEvent, incoming.Event.RunID, incoming.NodeID, node.Run.RunID)
 		}

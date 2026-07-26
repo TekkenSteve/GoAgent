@@ -875,6 +875,17 @@ func (r *fakePlanRuntime) ControlPlan(_ context.Context, ref agentos.PlanRef, co
 	return nil
 }
 
+func (r *fakePlanRuntime) IngestExternalPlanEvent(_ context.Context, event *agentos.ExternalPlanEvent) (agentos.PlanEvent, error) {
+	return agentos.PlanEvent{
+		Event:           event.Event,
+		PlanID:          event.Plan.PlanID,
+		AccountID:       event.Plan.AccountID,
+		ProjectID:       event.Plan.ProjectID,
+		NodeID:          event.NodeID,
+		ExternalEventID: event.Event.EventID,
+	}, nil
+}
+
 func (r *fakePlanRuntime) SubscribePlan(_ context.Context, scope *agentos.PlanStreamScope) (agentoscore.Subscription, error) {
 	r.scope = *scope
 

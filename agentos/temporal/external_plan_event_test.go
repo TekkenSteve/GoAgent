@@ -18,13 +18,16 @@ func TestPlanRuntimeIngestExternalPlanEventPersistsAndPublishes(t *testing.T) {
 	runtime := &planRuntime{planIndex: store, planEvents: store, planPublisher: publisher}
 
 	input := externalPlanEventInput(ref, "node-1", "run-1", "backend-event-1")
+
 	stored, err := runtime.IngestExternalPlanEvent(t.Context(), &input)
 	if err != nil {
 		t.Fatalf("IngestExternalPlanEvent: %v", err)
 	}
+
 	if stored.ExternalEventID != input.Event.EventID || stored.EventID == input.Event.EventID {
 		t.Fatalf("stored event identities = %#v", stored)
 	}
+
 	if stored.Sequence != 1 || !publisher.called || publisher.event.EventID != stored.EventID {
 		t.Fatalf("stored=%#v publisher=%#v", stored, publisher)
 	}
@@ -33,6 +36,7 @@ func TestPlanRuntimeIngestExternalPlanEventPersistsAndPublishes(t *testing.T) {
 	if err != nil {
 		t.Fatalf("IngestExternalPlanEvent replay: %v", err)
 	}
+
 	if replay.EventID != stored.EventID || replay.Sequence != stored.Sequence {
 		t.Fatalf("replay=%#v stored=%#v", replay, stored)
 	}
@@ -55,6 +59,7 @@ func TestPlanRuntimeIngestExternalPlanEventRejectsWrongNodeRunAndScope(t *testin
 	}
 
 	wrongScope := externalPlanEventInput(ref, "node-1", "run-1", "backend-event-3")
+
 	wrongScope.Plan.AccountID = "other-account"
 	if _, err := runtime.IngestExternalPlanEvent(t.Context(), &wrongScope); !errors.Is(err, agentoscore.ErrPlanRouteNotFound) {
 		t.Fatalf("wrong scope error = %v, want ErrPlanRouteNotFound", err)
@@ -78,6 +83,7 @@ func externalEventPlanStore(t *testing.T) (*agentosplan.MemoryPlanStore, agentos
 			},
 		}},
 	}
+
 	status := agentosplan.NewState(&spec, time.Now().UTC()).Status
 	if _, _, err := store.CreatePlan(t.Context(), &spec, &status); err != nil {
 		t.Fatalf("CreatePlan: %v", err)
