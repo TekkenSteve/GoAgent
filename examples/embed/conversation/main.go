@@ -1,8 +1,3 @@
-// examples/embed/conversation/main.go
-//
-// Embedded runtime usage through the public AgentOS boundary.
-//
-//	go run examples/embed/conversation/main.go
 package main
 
 import (
@@ -10,56 +5,46 @@ import (
 	"fmt"
 	"log"
 	"os"
-	"time"
 
 	agentos "github.com/TekkenSteve/GoAgent/agentos/control"
-	agentostemporal "github.com/TekkenSteve/GoAgent/agentos/temporal"
+	agentosconversation "github.com/TekkenSteve/GoAgent/agentos/conversation"
 )
 
 func main() {
-	ctx := context.Background()
-
-	cfg := agentostemporal.RuntimeConfig{
-		TemporalAddress:    env("AGENTFW_TEMPORAL_ADDRESS", "127.0.0.1:7233"),
-		TemporalNamespace:  env("AGENTFW_TEMPORAL_NAMESPACE", "default"),
-		TemporalTaskQueues: agentostemporal.DefaultTaskQueues(),
-		PostgresURL:        os.Getenv("PG_URL"),
-		RedisURL:           os.Getenv("REDIS_URL"),
+	if err := run(); err != nil {
+		log.Fatal(err)
 	}
-
-	rt, err := agentostemporal.NewRuntime(ctx, &cfg)
-	if err != nil {
-		log.Fatalf("new runtime: %v", err)
-	}
-
-	runID := fmt.Sprintf("embed-conv-%d", time.Now().UnixMilli())
-
-	spec := agentos.RunSpec{
-		RunID:        runID,
-		ThreadID:     runID,
-		AccountID:    "demo-account",
-		ModelRef:     "gpt-4.1-mini",
-		SystemPrompt: "You are a concise assistant.",
-		UserMessage:  "What is clean architecture?",
-		RequestedAt:  time.Now().UTC(),
-		Backend:      agentos.BackendRef{Kind: agentos.BackendKindNative, Name: agentos.BackendNameGoAgentNative},
-	}
-
-	status, err := rt.Start(ctx, &spec)
-	if err != nil {
-		rt.Close()
-
-		log.Fatalf("start run: %v", err)
-	}
-	defer rt.Close()
-
-	fmt.Fprintf(os.Stdout, "run started: id=%s state=%s\n", status.RunID, status.LifecycleState)
 }
 
-func env(key, fallback string) string {
-	if value := os.Getenv(key); value != "" {
-		return value
+func run() error {
+	ctx := context.Background()
+
+	runtime, err := agentosconversation.NewRuntime(ctx, agentosconversation.Config{
+		PostgresURL: os.Getenv("AGENTOS_PG_URL"),
+		RedisURL:    os.Getenv("AGENTOS_REDIS_URL"),
+	})
+	if err != nil {
+		return err
 	}
 
-	return fallback
+	defer func() {
+		if err := runtime.Close(); err != nil {
+			log.Printf("close conversation runtime: %v", err)
+		}
+	}()
+
+	run, err := runtime.StartRun(ctx, &agentos.StartConversationRunSpec{
+		ThreadID:       "example-thread",
+		AccountID:      "example-account",
+		ProjectID:      "example-project",
+		UserMessage:    "Create a concise study plan.",
+		IdempotencyKey: "example-request",
+	})
+	if err != nil {
+		return err
+	}
+
+	_, err = fmt.Fprintln(os.Stdout, run.RunID)
+
+	return err
 }
