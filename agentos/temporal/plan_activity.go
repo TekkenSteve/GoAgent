@@ -497,3 +497,17 @@ func (a *PlanActivities) ControlPlanNodeActivity(ctx context.Context, input *con
 
 	return a.Runtime.Control(ctx, input.RunID, &input.Control)
 }
+
+type signalPlanNodeInput struct {
+	RunID  string
+	Signal agentoscore.Signal
+}
+
+// SignalPlanNodeActivity delivers a non-control signal to one child run.
+func (a *PlanActivities) SignalPlanNodeActivity(ctx context.Context, input *signalPlanNodeInput) error {
+	if a.Runtime == nil {
+		return fmt.Errorf("%w: plan activity runtime is required", agentoscore.ErrInvalidRunPlan)
+	}
+
+	return a.Runtime.Signal(ctx, input.RunID, &input.Signal)
+}

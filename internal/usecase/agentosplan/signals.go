@@ -29,23 +29,30 @@ func ValidatePlanSignal(signal *agentoscore.Signal) error {
 		return fmt.Errorf("%w: signal actor id is required", agentoscore.ErrInvalidSignal)
 	}
 
-	switch signal.Type {
-	case agentoscore.SignalPlanNodeRetry:
+	if signal.Type == agentoscore.SignalPlanNodeRetry {
 		if _, err := PlanSignalNodeID(signal); err != nil {
 			return err
 		}
 
 		return nil
-	case agentoscore.SignalPlanApprove, agentoscore.SignalPlanReject:
-		return nil
-	case agentoscore.SignalControlPause, agentoscore.SignalControlResume, agentoscore.SignalControlCancel,
-		agentoscore.SignalUserMessage, agentoscore.SignalUserApproval, agentoscore.SignalUserReject,
-		agentoscore.SignalToolResult, agentoscore.SignalHumanFeedback, agentoscore.SignalConfigPatch,
-		agentoscore.SignalMemoryPatch:
-		return fmt.Errorf("%w: unsupported plan signal %q", agentoscore.ErrInvalidSignal, signal.Type)
-	default:
-		return fmt.Errorf("%w: unsupported plan signal %q", agentoscore.ErrInvalidSignal, signal.Type)
 	}
+
+	supportedSignals := map[agentoscore.SignalType]struct{}{
+		agentoscore.SignalPlanApprove:   {},
+		agentoscore.SignalPlanReject:    {},
+		agentoscore.SignalUserMessage:   {},
+		agentoscore.SignalUserApproval:  {},
+		agentoscore.SignalUserReject:    {},
+		agentoscore.SignalToolResult:    {},
+		agentoscore.SignalHumanFeedback: {},
+		agentoscore.SignalConfigPatch:   {},
+		agentoscore.SignalMemoryPatch:   {},
+	}
+	if _, supported := supportedSignals[signal.Type]; supported {
+		return nil
+	}
+
+	return fmt.Errorf("%w: unsupported plan signal %q", agentoscore.ErrInvalidSignal, signal.Type)
 }
 
 // PlanSignalNodeID returns the target node id from a node-scoped plan signal.

@@ -24,6 +24,7 @@ const (
 	ResolvePlanNodeInputActivityName  = "AgentOSResolvePlanNodeInput"
 	StartPlanNodeActivityName         = "AgentOSStartPlanNode"
 	StatusPlanNodeActivityName        = "AgentOSStatusPlanNode"
+	SignalPlanNodeActivityName        = "AgentOSSignalPlanNode"
 	ControlPlanNodeActivityName       = "AgentOSControlPlanNode"
 	PublishPlanArtifactsActivityName  = "AgentOSPublishPlanArtifacts"
 	EvaluatePlanExpansionActivityName = "AgentOSEvaluatePlanExpansion"
@@ -1303,14 +1304,37 @@ func applyPlanSignal(activityCtx, workflowCtx workflow.Context, spec *agentos.Ru
 		return approvePlanFromSignal(activityCtx, workflowCtx, spec, state, signal, result)
 	case agentoscore.SignalPlanReject:
 		return rejectPlanFromSignal(activityCtx, workflowCtx, spec, state, controlsByNode, signal, result)
-	case agentoscore.SignalControlPause, agentoscore.SignalControlResume, agentoscore.SignalControlCancel,
-		agentoscore.SignalUserMessage, agentoscore.SignalUserApproval, agentoscore.SignalUserReject,
+	case agentoscore.SignalControlPause, agentoscore.SignalControlResume, agentoscore.SignalControlCancel:
+		return result, nil
+	case agentoscore.SignalUserMessage, agentoscore.SignalUserApproval, agentoscore.SignalUserReject,
 		agentoscore.SignalToolResult, agentoscore.SignalHumanFeedback, agentoscore.SignalConfigPatch,
 		agentoscore.SignalMemoryPatch:
+		if err := signalActivePlanNodes(activityCtx, state, signal); err != nil {
+			return result, err
+		}
+
 		return result, nil
 	default:
 		return result, nil
 	}
+}
+
+func signalActivePlanNodes(activityCtx workflow.Context, state *agentosplan.State, signal *agentoscore.Signal) error {
+	for i := range state.Status.Nodes {
+		node := &state.Status.Nodes[i]
+		if node.LifecycleState != agentos.PlanNodeRunning || node.RunID == "" {
+			continue
+		}
+
+		if err := workflow.ExecuteActivity(activityCtx, SignalPlanNodeActivityName, signalPlanNodeInput{
+			RunID:  node.RunID,
+			Signal: *signal,
+		}).Get(activityCtx, nil); err != nil {
+			return err
+		}
+	}
+
+	return nil
 }
 
 func retryPlanNodeFromSignal(activityCtx, workflowCtx workflow.Context, spec *agentos.RunPlanSpec, state *agentosplan.State, nodes map[string]agentos.PlanNodeSpec, signal *agentoscore.Signal, result planSignalDrainResult) (planSignalDrainResult, error) {

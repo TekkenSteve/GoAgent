@@ -93,6 +93,9 @@ func RegisterPlanActivities(w WorkloadRegistrar, activities *PlanActivities) err
 	w.RegisterActivityWithOptions(activities.StartPlanNodeActivity, activity.RegisterOptions{
 		Name: StartPlanNodeActivityName,
 	})
+	w.RegisterActivityWithOptions(activities.SignalPlanNodeActivity, activity.RegisterOptions{
+		Name: SignalPlanNodeActivityName,
+	})
 	w.RegisterActivityWithOptions(activities.StatusPlanNodeActivity, activity.RegisterOptions{
 		Name: StatusPlanNodeActivityName,
 	})
