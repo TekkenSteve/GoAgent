@@ -23,3 +23,5 @@ bin/
 vendor/
 
 coverage.txt
+
+archive/
