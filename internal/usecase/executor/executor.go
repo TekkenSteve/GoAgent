@@ -1,3 +1,4 @@
+// Package executor runs agent operations against the configured backend.
 package executor
 
 import (
@@ -11,6 +12,7 @@ import (
 	"github.com/TekkenSteve/GoAgent/internal/repo"
 )
 
+// ErrUnknownOperation is returned when the requested operation is not supported.
 var ErrUnknownOperation = errors.New("unknown operation")
 
 // UseCase -.

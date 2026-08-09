@@ -22,6 +22,7 @@ import (
 // @Failure     400 {object} response.Error
 // @Failure     500 {object} response.Error
 // @Router      /orchestration/execute [post]
+// The workflow is executed and tracked durably.
 func (r *V1) orchestrate(ctx *fiber.Ctx) error {
 	var req request.Orchestrate
 	if err := ctx.BodyParser(&req); err != nil {
@@ -128,6 +129,7 @@ func decodeNativeContinuePolicy(data json.RawMessage) (entity.ContinuePolicy, er
 // @Success     200 {object} response.RunStatus
 // @Failure     500 {object} response.Error
 // @Router      /orchestration/status/{run_id} [get]
+// The status reports workflow progress and outcome.
 func (r *V1) orchestrationStatus(ctx *fiber.Ctx) error {
 	runID := ctx.Params("run_id")
 

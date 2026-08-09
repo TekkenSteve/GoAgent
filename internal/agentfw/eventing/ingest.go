@@ -1,3 +1,5 @@
+// Package eventing ingests external backend events into the normalized
+// AgentOS event stream.
 package eventing
 
 import (
@@ -12,6 +14,8 @@ import (
 const duplicateEventSequence int64 = 0
 
 var (
+	// ErrInvalidEvent is returned when an ingested event is missing a
+	// required field or has an unsupported event type.
 	ErrInvalidEvent   = errors.New("agentos event ingest: invalid event")
 	errIngestNilStore = errors.New("agentos event ingest: nil event store")
 )

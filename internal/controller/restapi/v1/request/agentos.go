@@ -1,3 +1,4 @@
+// Package request defines the v1 API request payloads.
 package request
 
 import (
@@ -57,10 +58,12 @@ type AgentOSPlanSignal struct {
 	SentAt         time.Time              `json:"sent_at,omitzero"`
 }
 
+// GetAccountID returns the tenant account ID of the plan signal.
 func (r *AgentOSPlanSignal) GetAccountID() string {
 	return r.AccountID
 }
 
+// GetProjectID returns the tenant project ID of the plan signal.
 func (r *AgentOSPlanSignal) GetProjectID() string {
 	return r.ProjectID
 }
@@ -76,10 +79,12 @@ type AgentOSPlanControl struct {
 	Metadata       map[string]string            `json:"metadata,omitempty"`
 }
 
+// GetAccountID returns the tenant account ID of the plan control operation.
 func (r *AgentOSPlanControl) GetAccountID() string {
 	return r.AccountID
 }
 
+// GetProjectID returns the tenant project ID of the plan control operation.
 func (r *AgentOSPlanControl) GetProjectID() string {
 	return r.ProjectID
 }
@@ -93,6 +98,7 @@ type AgentOSPlanStreamScope struct {
 	AfterSequence int64  `query:"after_sequence"`
 }
 
+// Validate checks that the stream scope carries the required tenant account and project IDs.
 func (r *AgentOSPlanStreamScope) Validate() error {
 	return validateAgentOSTenantScope(r.AccountID, r.ProjectID)
 }
@@ -107,6 +113,7 @@ type AgentOSPlanEventScope struct {
 	Limit         int    `query:"limit"`
 }
 
+// Validate checks that the event scope carries the required tenant account and project IDs.
 func (r *AgentOSPlanEventScope) Validate() error {
 	return validateAgentOSTenantScope(r.AccountID, r.ProjectID)
 }
@@ -121,6 +128,7 @@ type AgentOSPlanDebugTraceScope struct {
 	Limit         int    `query:"limit"`
 }
 
+// Validate checks that the debug trace scope carries the required tenant account and project IDs.
 func (r *AgentOSPlanDebugTraceScope) Validate() error {
 	return validateAgentOSTenantScope(r.AccountID, r.ProjectID)
 }
@@ -135,6 +143,7 @@ type AgentOSPlanAuditScope struct {
 	Limit     int                     `query:"limit"`
 }
 
+// Validate checks that the audit scope carries the required tenant account and project IDs.
 func (r *AgentOSPlanAuditScope) Validate() error {
 	return validateAgentOSTenantScope(r.AccountID, r.ProjectID)
 }
@@ -148,6 +157,7 @@ type AgentOSPlanArtifactScope struct {
 	Limit     int    `query:"limit"`
 }
 
+// Validate checks that the artifact scope carries the required tenant account and project IDs.
 func (r *AgentOSPlanArtifactScope) Validate() error {
 	return validateAgentOSTenantScope(r.AccountID, r.ProjectID)
 }
@@ -158,6 +168,7 @@ type AgentOSPlanScope struct {
 	ProjectID string `query:"project_id" validate:"required"`
 }
 
+// Validate checks that the plan scope carries the required tenant account and project IDs.
 func (r *AgentOSPlanScope) Validate() error {
 	return validateAgentOSTenantScope(r.AccountID, r.ProjectID)
 }
@@ -171,6 +182,7 @@ type AgentOSPlanConsoleScope struct {
 	ArtifactLimit int    `query:"artifact_limit"`
 }
 
+// Validate checks that the console scope carries the required tenant account and project IDs.
 func (r *AgentOSPlanConsoleScope) Validate() error {
 	return validateAgentOSTenantScope(r.AccountID, r.ProjectID)
 }
@@ -200,6 +212,7 @@ type AgentOSProcessScope struct {
 	Limit          int                         `query:"limit"`
 }
 
+// Validate checks that the process scope carries the required tenant account and project IDs.
 func (r *AgentOSProcessScope) Validate() error {
 	return validateAgentOSTenantScope(r.AccountID, r.ProjectID)
 }
@@ -210,6 +223,7 @@ type AgentOSProcessRef struct {
 	ProjectID string `query:"project_id" validate:"required"`
 }
 
+// Validate checks that the process ref carries the required tenant account and project IDs.
 func (r *AgentOSProcessRef) Validate() error {
 	return validateAgentOSTenantScope(r.AccountID, r.ProjectID)
 }
@@ -226,6 +240,7 @@ type AgentOSLedgerScope struct {
 	Limit         int                            `query:"limit"`
 }
 
+// Validate checks that the ledger scope carries the required tenant account and project IDs.
 func (r *AgentOSLedgerScope) Validate() error {
 	return validateAgentOSTenantScope(r.AccountID, r.ProjectID)
 }
@@ -242,6 +257,7 @@ type AgentOSActionScope struct {
 	Limit          int                         `query:"limit"`
 }
 
+// Validate checks that the action scope carries the required tenant account and project IDs.
 func (r *AgentOSActionScope) Validate() error {
 	return validateAgentOSTenantScope(r.AccountID, r.ProjectID)
 }
@@ -252,6 +268,7 @@ type AgentOSActionRef struct {
 	ProjectID string `query:"project_id" validate:"required"`
 }
 
+// Validate checks that the action ref carries the required tenant account and project IDs.
 func (r *AgentOSActionRef) Validate() error {
 	return validateAgentOSTenantScope(r.AccountID, r.ProjectID)
 }
@@ -268,6 +285,7 @@ type AgentOSWorksetScope struct {
 	Limit          int                         `query:"limit"`
 }
 
+// Validate checks that the workset scope carries the required tenant account and project IDs.
 func (r *AgentOSWorksetScope) Validate() error {
 	return validateAgentOSTenantScope(r.AccountID, r.ProjectID)
 }
@@ -278,6 +296,7 @@ type AgentOSWorksetRef struct {
 	ProjectID string `query:"project_id" validate:"required"`
 }
 
+// Validate checks that the workset ref carries the required tenant account and project IDs.
 func (r *AgentOSWorksetRef) Validate() error {
 	return validateAgentOSTenantScope(r.AccountID, r.ProjectID)
 }
@@ -292,6 +311,7 @@ type AgentOSResourceScope struct {
 	Limit          int                         `query:"limit"`
 }
 
+// Validate checks that the resource scope carries the required tenant account and project IDs.
 func (r *AgentOSResourceScope) Validate() error {
 	return validateAgentOSTenantScope(r.AccountID, r.ProjectID)
 }

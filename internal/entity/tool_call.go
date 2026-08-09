@@ -4,8 +4,11 @@ package entity
 type Tier string // @name entity.Tier
 
 const (
-	TierFree       Tier = "free"
-	TierPro        Tier = "pro"
+	// TierFree is the free subscription tier.
+	TierFree Tier = "free"
+	// TierPro is the paid subscription tier.
+	TierPro Tier = "pro"
+	// TierEnterprise is the enterprise subscription tier.
 	TierEnterprise Tier = "enterprise"
 )
 
@@ -50,9 +53,12 @@ type ToolResult struct {
 type ExecutionIsolation string // @name entity.ExecutionIsolation
 
 const (
-	IsolationNone          ExecutionIsolation = "none"
+	// IsolationNone applies no isolation policy to tool executions.
+	IsolationNone ExecutionIsolation = "none"
+	// IsolationReadCommitted allows concurrent tool executions that only observe committed results.
 	IsolationReadCommitted ExecutionIsolation = "read_committed"
-	IsolationSerializable  ExecutionIsolation = "serializable"
+	// IsolationSerializable serializes concurrent tool executions.
+	IsolationSerializable ExecutionIsolation = "serializable"
 )
 
 // ToolResultRecord is a warm-state normalized tool output payload.

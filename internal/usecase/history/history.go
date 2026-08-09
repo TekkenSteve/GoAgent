@@ -1,3 +1,4 @@
+// Package history records agent execution history.
 package history
 
 import (

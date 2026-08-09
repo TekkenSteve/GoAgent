@@ -3,6 +3,8 @@ package runtimeops
 // ErrorCategory is the runtime taxonomy category.
 type ErrorCategory string
 
+// UserError, ToolError, ProviderError, InfraError, and DeterminismError are
+// the runtime error taxonomy categories.
 const (
 	UserError        ErrorCategory = "UserError"
 	ToolError        ErrorCategory = "ToolError"

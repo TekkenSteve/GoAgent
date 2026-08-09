@@ -33,6 +33,7 @@ func NewAgentOSArtifactRepo(pg *postgres.Postgres, blob artifactblob.BlobStore) 
 	return &AgentOSArtifactRepo{Postgres: pg, blob: blob}
 }
 
+// Put publishes an artifact under the given reference, storing payload bytes in the blob store and metadata in Postgres.
 func (r *AgentOSArtifactRepo) Put(ctx context.Context, artifact *agentoscore.ArtifactRef, payload any, idempotencyKey string) (agentoscore.ArtifactRef, error) {
 	ref := *artifact
 
@@ -290,6 +291,7 @@ func (r *AgentOSArtifactRepo) existingArtifactPublish(ctx context.Context, ref *
 	return existing, true, nil
 }
 
+// Get loads an artifact by scope, returning its reference and decoded payload.
 func (r *AgentOSArtifactRepo) Get(ctx context.Context, scope *agentos.PlanArtifactScope) (agentoscore.ArtifactRef, any, error) {
 	if err := agentosplan.ValidatePlanArtifactScope(scope); err != nil {
 		return agentoscore.ArtifactRef{}, nil, err
@@ -342,6 +344,7 @@ func decodeStoredArtifactPayload(ref *agentoscore.ArtifactRef, data []byte) (any
 	return agentosplan.DecodeArtifactPayload(data, ref.MediaType)
 }
 
+// List returns artifact references matching the given plan artifact scope.
 func (r *AgentOSArtifactRepo) List(ctx context.Context, scope *agentos.PlanArtifactScope) ([]agentoscore.ArtifactRef, error) {
 	if err := agentosplan.ValidatePlanArtifactScope(scope); err != nil {
 		return nil, err

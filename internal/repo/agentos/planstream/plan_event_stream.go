@@ -1,3 +1,4 @@
+// Package planstream streams AgentOS plan events from the plan store.
 package planstream
 
 import (

@@ -1,3 +1,4 @@
+// Package pipeline buffers and replays pipeline records with a write-ahead log.
 package pipeline
 
 import (
@@ -12,6 +13,7 @@ import (
 	"github.com/TekkenSteve/GoAgent/pkg/logger"
 )
 
+// ErrUnknownWriteType is returned when a WAL entry has an unrecognized write type.
 var ErrUnknownWriteType = errors.New("unknown write type")
 
 const (
@@ -50,12 +52,14 @@ type BatchWriter struct {
 // BatchWriterOption configures the BatchWriter.
 type BatchWriterOption func(*BatchWriter)
 
+// WithFlushInterval sets the flush interval for the BatchWriter.
 func WithFlushInterval(d time.Duration) BatchWriterOption {
 	return func(b *BatchWriter) {
 		b.flushInterval = d
 	}
 }
 
+// WithBatchSize sets the batch size for the BatchWriter.
 func WithBatchSize(n int) BatchWriterOption {
 	return func(b *BatchWriter) {
 		b.batchSize = n

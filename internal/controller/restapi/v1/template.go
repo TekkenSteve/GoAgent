@@ -17,7 +17,7 @@ type templateHandler struct {
 	l logger.Interface
 }
 
-// importYAML handles POST /v1/templates/import
+// importYAML handles POST /v1/templates/import.
 func (r *templateHandler) importYAML(ctx *fiber.Ctx) error {
 	var req request.TemplateImport
 	if err := ctx.BodyParser(&req); err != nil {
@@ -63,7 +63,7 @@ func (r *templateHandler) list(ctx *fiber.Ctx) error {
 	})
 }
 
-// get handles GET /v1/templates/:template_id
+// get handles GET /v1/templates/:template_id.
 func (r *templateHandler) get(ctx *fiber.Ctx) error {
 	templateID := ctx.Params("template_id")
 	if templateID == "" {
@@ -80,7 +80,7 @@ func (r *templateHandler) get(ctx *fiber.Ctx) error {
 	return ctx.Status(http.StatusOK).JSON(tpl)
 }
 
-// delete handles DELETE /v1/templates/:template_id
+// delete handles DELETE /v1/templates/:template_id.
 func (r *templateHandler) delete(ctx *fiber.Ctx) error {
 	templateID := ctx.Params("template_id")
 	if templateID == "" {

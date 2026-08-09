@@ -1,3 +1,4 @@
+// Package natsrpc implements request-reply RPC over NATS.
 package natsrpc
 
 import "errors"

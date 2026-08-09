@@ -1,3 +1,4 @@
+// Package grpcbackend implements an AgentOS backend over gRPC.
 package grpcbackend
 
 import (

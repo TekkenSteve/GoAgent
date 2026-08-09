@@ -1,3 +1,4 @@
+// Package main demonstrates embedding the AgentOS conversation runtime.
 package main
 
 import (

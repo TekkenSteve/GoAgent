@@ -1,3 +1,4 @@
+// Package persistent implements repository storage on PostgreSQL.
 package persistent
 
 import (

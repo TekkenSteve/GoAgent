@@ -23,6 +23,7 @@ func NewAgentOSLedgerRepo(pg *postgres.Postgres) *AgentOSLedgerRepo {
 	return &AgentOSLedgerRepo{Postgres: pg}
 }
 
+// AppendLedgerEntry validates and appends a new ledger entry with a tenant-scoped sequence number, returning the stored entry.
 func (r *AgentOSLedgerRepo) AppendLedgerEntry(ctx context.Context, spec *agentos.LedgerEntrySpec) (agentos.LedgerEntry, error) {
 	if err := agentos.ValidateLedgerEntrySpec(spec); err != nil {
 		return agentos.LedgerEntry{}, err
@@ -57,6 +58,7 @@ func (r *AgentOSLedgerRepo) AppendLedgerEntry(ctx context.Context, spec *agentos
 	return r.insertLedgerEntry(ctx, spec)
 }
 
+// ListLedgerEntries returns ledger entries matching the given scope, ordered by sequence ascending.
 func (r *AgentOSLedgerRepo) ListLedgerEntries(ctx context.Context, scope *agentos.LedgerScope) ([]agentos.LedgerEntry, error) {
 	if err := agentos.ValidateLedgerScope(scope); err != nil {
 		return nil, err

@@ -25,6 +25,7 @@ func NewAgentOSProcessRepo(pg *postgres.Postgres) *AgentOSProcessRepo {
 	return &AgentOSProcessRepo{pg}
 }
 
+// CreateProcess persists a new process from its spec and status, returning the stored status and whether the process was newly created.
 func (r *AgentOSProcessRepo) CreateProcess(ctx context.Context, spec *agentos.Spec, status *agentos.Status) (agentos.Status, bool, error) {
 	if err := agentos.ValidateProcessSpec(spec); err != nil {
 		return agentos.Status{}, false, err
@@ -57,6 +58,7 @@ func (r *AgentOSProcessRepo) CreateProcess(ctx context.Context, spec *agentos.Sp
 	return normalizedStatus, true, nil
 }
 
+// GetProcessByRef loads a process spec and status by tenant-scoped reference.
 func (r *AgentOSProcessRepo) GetProcessByRef(ctx context.Context, ref agentos.Ref) (agentos.Spec, agentos.Status, bool, error) {
 	if err := agentos.ValidateProcessRef(ref); err != nil {
 		return agentos.Spec{}, agentos.Status{}, false, err
@@ -69,6 +71,7 @@ func (r *AgentOSProcessRepo) GetProcessByRef(ctx context.Context, ref agentos.Re
 	}, "GetProcessByRef")
 }
 
+// ListProcesses returns process statuses matching the given scope filters.
 func (r *AgentOSProcessRepo) ListProcesses(ctx context.Context, scope *agentos.Scope) ([]agentos.Status, error) {
 	if err := agentos.ValidateScope(scope); err != nil {
 		return nil, err
@@ -155,6 +158,7 @@ func scanProcessStatuses(rows pgx.Rows) ([]agentos.Status, error) {
 	return statuses, nil
 }
 
+// UpdateProcessStatus applies a process status update idempotently and returns the resulting status.
 func (r *AgentOSProcessRepo) UpdateProcessStatus(
 	ctx context.Context,
 	status *agentos.Status,
@@ -244,6 +248,7 @@ func (r *AgentOSProcessRepo) applyProcessStatusUpdate(
 	return *status, nil
 }
 
+// AppendProcessEvent appends a process event with a process-scoped sequence number, deduplicating by idempotency key.
 func (r *AgentOSProcessRepo) AppendProcessEvent(
 	ctx context.Context,
 	event *agentos.Event,
@@ -293,6 +298,7 @@ func (r *AgentOSProcessRepo) AppendProcessEvent(
 	return prepared, nil
 }
 
+// ListProcessEvents returns process events matching the given event scope, ordered by sequence.
 func (r *AgentOSProcessRepo) ListProcessEvents(ctx context.Context, scope *agentos.EventScope) ([]agentos.Event, error) {
 	if err := agentos.ValidateProcessEventScope(scope); err != nil {
 		return nil, err

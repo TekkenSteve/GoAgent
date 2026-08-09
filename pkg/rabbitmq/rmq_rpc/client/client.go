@@ -1,3 +1,4 @@
+// Package client implements the RabbitMQ RPC client.
 package client
 
 import (

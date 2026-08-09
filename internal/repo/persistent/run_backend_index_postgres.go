@@ -27,12 +27,14 @@ func NewRunBackendIndexRepo(pg *postgres.Postgres) *RunBackendIndexRepo {
 	return &RunBackendIndexRepo{pg}
 }
 
+// Bind records run backend ownership for a run.
 func (r *RunBackendIndexRepo) Bind(ctx context.Context, spec *agentos.RunSpec, status *agentos.RunStatus) error {
 	record := agentosruntime.RunBackendIndexRecordFromRunSpec(spec, status)
 
 	return r.upsert(ctx, &record, true)
 }
 
+// BindPlanNode records run backend ownership for a plan node run after validating node ownership.
 func (r *RunBackendIndexRepo) BindPlanNode(ctx context.Context, planID, nodeID string, spec *agentos.RunSpec, status *agentos.RunStatus) error {
 	record := agentosruntime.RunBackendIndexRecordFromPlanNode(planID, nodeID, spec, status)
 	if err := r.validatePlanNodeOwnership(ctx, &record); err != nil {
@@ -42,6 +44,7 @@ func (r *RunBackendIndexRepo) BindPlanNode(ctx context.Context, planID, nodeID s
 	return r.upsert(ctx, &record, true)
 }
 
+// Resolve returns the backend that owns the given run ID.
 func (r *RunBackendIndexRepo) Resolve(ctx context.Context, runID string) (agentos.BackendRef, error) {
 	record, exists, err := r.Get(ctx, runID)
 	if err != nil {
@@ -58,6 +61,7 @@ func (r *RunBackendIndexRepo) Resolve(ctx context.Context, runID string) (agento
 	}, nil
 }
 
+// Get loads the run backend index record for the given run ID.
 func (r *RunBackendIndexRepo) Get(ctx context.Context, runID string) (entity.RunBackendIndexRecord, bool, error) {
 	query, args, err := r.Builder.
 		Select(runBackendIndexColumns()...).
@@ -76,6 +80,7 @@ func (r *RunBackendIndexRepo) Get(ctx context.Context, runID string) (entity.Run
 	return record, exists, nil
 }
 
+// GetRunBackend loads the backend ownership for the given run ID.
 func (r *RunBackendIndexRepo) GetRunBackend(ctx context.Context, runID string) (agentos.RunBackendOwnership, bool, error) {
 	record, exists, err := r.Get(ctx, runID)
 	if err != nil || !exists {

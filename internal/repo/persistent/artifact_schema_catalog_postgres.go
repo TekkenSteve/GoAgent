@@ -25,6 +25,7 @@ func NewAgentOSArtifactSchemaCatalogRepo(pg *postgres.Postgres) *AgentOSArtifact
 	return &AgentOSArtifactSchemaCatalogRepo{Postgres: pg}
 }
 
+// RegisterArtifactSchema upserts an artifact JSON Schema declaration, returning the stored schema and whether it was newly registered.
 func (r *AgentOSArtifactSchemaCatalogRepo) RegisterArtifactSchema(ctx context.Context, schema agentos.ArtifactSchema, idempotencyKey string) (agentos.ArtifactSchema, bool, error) {
 	normalized, err := agentosplan.NormalizeArtifactSchema(schema)
 	if err != nil {
@@ -155,6 +156,7 @@ func validateArtifactSchemaIdempotencyKey(normalized agentos.ArtifactSchema, ide
 	return nil
 }
 
+// GetArtifactSchema loads the raw JSON Schema registered under the given schema reference.
 func (r *AgentOSArtifactSchemaCatalogRepo) GetArtifactSchema(ctx context.Context, schemaRef string) (json.RawMessage, bool, error) {
 	sql, args, err := r.Builder.
 		Select("schema_json").

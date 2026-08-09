@@ -65,6 +65,7 @@ func AttachIdentityToEvent(event *StreamEvent, id RunIdentity) error {
 	return nil
 }
 
+// AttachIdentityToUsage injects identity into a usage record.
 func AttachIdentityToUsage(record *UsageRecord, id RunIdentity) error {
 	if record == nil {
 		return ErrRecordCannotBeNil

@@ -1,3 +1,4 @@
+// Package template manages workflow templates.
 package template
 
 import (
@@ -11,9 +12,12 @@ import (
 )
 
 var (
-	ErrTemplateNameRequired    = errors.New("template name is required")
+	// ErrTemplateNameRequired is returned when a template is created without a name.
+	ErrTemplateNameRequired = errors.New("template name is required")
+	// ErrTemplateAccountRequired is returned when a template is created without an account_id.
 	ErrTemplateAccountRequired = errors.New("template account_id is required")
-	ErrTemplateNotFound        = errors.New("template not found")
+	// ErrTemplateNotFound is returned when the requested template does not exist.
+	ErrTemplateNotFound = errors.New("template not found")
 )
 
 // UseCase handles workflow template management and orchestration input preparation.

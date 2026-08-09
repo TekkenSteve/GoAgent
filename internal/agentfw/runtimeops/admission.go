@@ -1,3 +1,6 @@
+// Package runtimeops implements runtime operational primitives for the agent
+// framework: admission control, error categorization, event streaming, and
+// run identity propagation.
 package runtimeops
 
 import (

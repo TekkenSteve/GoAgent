@@ -12,9 +12,12 @@ import (
 )
 
 var (
-	ErrToolMetaNameEmpty     = errors.New("tool meta name must not be empty")
+	// ErrToolMetaNameEmpty is returned when a tool's metadata name is empty.
+	ErrToolMetaNameEmpty = errors.New("tool meta name must not be empty")
+	// ErrToolAlreadyRegistered is returned when a tool with the same name is already registered.
 	ErrToolAlreadyRegistered = errors.New("tool already registered")
-	ErrToolNotFound          = errors.New("tool not found in registry")
+	// ErrToolNotFound is returned when a tool is not found in the registry.
+	ErrToolNotFound = errors.New("tool not found in registry")
 )
 
 // ToolRegistry maps tool names to implementations and serves dual purposes:
@@ -25,7 +28,7 @@ type ToolRegistry struct {
 	tools map[string]Tool
 }
 
-// New creates an empty registry.
+// NewRegistry creates an empty tool registry.
 func NewRegistry() *ToolRegistry {
 	return &ToolRegistry{
 		tools: make(map[string]Tool),

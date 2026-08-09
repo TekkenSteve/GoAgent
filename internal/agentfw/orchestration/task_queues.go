@@ -7,8 +7,14 @@ import (
 	"go.temporal.io/sdk/temporal"
 )
 
+// ErrWorkflowTaskQueuesInvalid reports invalid or missing workflow task
+// queue configuration; it is returned by the WorkflowTaskQueues validation
+// methods.
 var ErrWorkflowTaskQueuesInvalid = errors.New("agentfw workflow task queues: invalid")
 
+// ValidateNativeAgent ensures the task queues required by the native agent
+// workflow (control, LLM activity, tool activity) are set and mutually
+// distinct.
 func (q *WorkflowTaskQueues) ValidateNativeAgent() error {
 	if q == nil {
 		return fmt.Errorf("%w: task queues are required", ErrWorkflowTaskQueuesInvalid)
@@ -21,6 +27,9 @@ func (q *WorkflowTaskQueues) ValidateNativeAgent() error {
 	})
 }
 
+// ValidateStreamAgent ensures the task queues required by the stream agent
+// workflow (control, stream activity, LLM activity, tool activity) are set
+// and mutually distinct.
 func (q *WorkflowTaskQueues) ValidateStreamAgent() error {
 	if q == nil {
 		return fmt.Errorf("%w: task queues are required", ErrWorkflowTaskQueuesInvalid)

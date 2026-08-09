@@ -10,6 +10,7 @@ import (
 	"github.com/maximhq/bifrost/core/schemas"
 )
 
+// ErrLLMNoProviders is returned when the LLM configuration declares no providers.
 var ErrLLMNoProviders = errors.New("LLM config has no providers")
 
 // ...

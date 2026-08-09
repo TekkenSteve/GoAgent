@@ -1,3 +1,4 @@
+// Package temporalexternal runs AgentOS plans on an external Temporal service.
 package temporalexternal
 
 import (

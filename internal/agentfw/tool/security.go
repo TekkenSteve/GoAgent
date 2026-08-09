@@ -7,6 +7,8 @@ import (
 // ExecutionIsolation indicates where a tool should be executed.
 type ExecutionIsolation string
 
+// ExecutionIsolationShared and ExecutionIsolationIsolated are the supported
+// execution isolation boundaries for tools.
 const (
 	ExecutionIsolationShared   ExecutionIsolation = "shared"   // Execute in shared worker pool
 	ExecutionIsolationIsolated ExecutionIsolation = "isolated" // Execute in isolated sandbox

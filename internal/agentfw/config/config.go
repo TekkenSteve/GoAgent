@@ -1,3 +1,5 @@
+// Package config provides runtime settings for the agent framework,
+// including Temporal client and task queue configuration.
 package config
 
 import (
@@ -49,6 +51,8 @@ type TaskQueues struct {
 	Stream          string
 }
 
+// ErrTemporalTaskQueuesInvalid reports that the Temporal task queues are
+// missing or not mutually distinct; it is returned by TaskQueues.Validate.
 var ErrTemporalTaskQueuesInvalid = errors.New("agentfw temporal task queues: invalid")
 
 // DefaultTaskQueues returns the production-oriented AgentOS queue split.

@@ -64,11 +64,14 @@ type GRPCMethodNames struct {
 	Status  string
 }
 
+// ArtifactStoreBackend selects the blob store implementation used for large plan artifacts.
 type ArtifactStoreBackend string
 
 const (
+	// ArtifactStoreBackendLocal stores artifacts on the local filesystem.
 	ArtifactStoreBackendLocal ArtifactStoreBackend = "local"
-	ArtifactStoreBackendS3    ArtifactStoreBackend = "s3"
+	// ArtifactStoreBackendS3 stores artifacts in an S3-compatible bucket.
+	ArtifactStoreBackendS3 ArtifactStoreBackend = "s3"
 )
 
 // ArtifactStoreConfig selects the blob store used for large AgentOS plan
@@ -79,10 +82,12 @@ type ArtifactStoreConfig struct {
 	S3      S3ArtifactStoreConfig
 }
 
+// LocalArtifactStoreConfig configures the local filesystem artifact backend.
 type LocalArtifactStoreConfig struct {
 	Root string
 }
 
+// S3ArtifactStoreConfig configures the S3-compatible artifact backend.
 type S3ArtifactStoreConfig struct {
 	Bucket          string
 	Region          string

@@ -6,10 +6,14 @@ const defaultMaxTokens = 4096
 type MessageRole string // @name entity.MessageRole
 
 const (
-	RoleUser      MessageRole = "user"
+	// RoleUser is the message role for user input.
+	RoleUser MessageRole = "user"
+	// RoleAssistant is the message role for model output.
 	RoleAssistant MessageRole = "assistant"
-	RoleTool      MessageRole = "tool"
-	RoleSystem    MessageRole = "system"
+	// RoleTool is the message role for tool execution results.
+	RoleTool MessageRole = "tool"
+	// RoleSystem is the message role for system instructions.
+	RoleSystem MessageRole = "system"
 )
 
 // ToolCallFunction contains the function details of a tool call.
@@ -68,9 +72,13 @@ type ToolFuncDef struct {
 type FinishReason string // @name entity.FinishReason
 
 const (
-	FinishStop          FinishReason = "stop"
-	FinishToolCalls     FinishReason = "tool_calls"
-	FinishLength        FinishReason = "length"
+	// FinishStop indicates the model finished generating normally.
+	FinishStop FinishReason = "stop"
+	// FinishToolCalls indicates the model finished because tool calls were requested.
+	FinishToolCalls FinishReason = "tool_calls"
+	// FinishLength indicates the model stopped because the token limit was reached.
+	FinishLength FinishReason = "length"
+	// FinishContentFilter indicates the model stopped because the response was filtered.
 	FinishContentFilter FinishReason = "content_filter"
 )
 

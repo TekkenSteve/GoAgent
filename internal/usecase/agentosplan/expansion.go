@@ -31,10 +31,13 @@ type ArtifactPlanDeltaProvider struct {
 	Store ArtifactStore
 }
 
+// NewArtifactPlanDeltaProvider creates a plan delta provider backed by the given artifact store.
 func NewArtifactPlanDeltaProvider(store ArtifactStore) ArtifactPlanDeltaProvider {
 	return ArtifactPlanDeltaProvider{Store: store}
 }
 
+// NextPlanDelta loads the plan_delta artifacts published by completed child runs,
+// decodes each into a plan expansion, and merges them into a single combined delta.
 func (p ArtifactPlanDeltaProvider) NextPlanDelta(ctx context.Context, input *PlanDeltaInput) (delta PlanDelta, expanded bool, err error) {
 	refs := planDeltaArtifacts(input.Artifacts)
 	if len(refs) == 0 {
@@ -86,6 +89,7 @@ func (p ArtifactPlanDeltaProvider) NextPlanDelta(ctx context.Context, input *Pla
 	return combined, true, nil
 }
 
+// DecodePlanDeltaPayload decodes a stored plan delta artifact payload into a PlanDelta.
 func DecodePlanDeltaPayload(payload any) (PlanDelta, error) {
 	if delta, ok := payload.(PlanDelta); ok {
 		return delta, nil

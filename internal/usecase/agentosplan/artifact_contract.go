@@ -1,3 +1,4 @@
+// Package agentosplan implements durable AgentOS plan use cases.
 package agentosplan
 
 import (

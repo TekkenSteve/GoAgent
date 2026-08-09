@@ -1,3 +1,4 @@
+// Package core defines the public AgentOS control types shared across runtimes.
 package core
 
 import (
@@ -9,8 +10,11 @@ import (
 type ControlOperation string
 
 const (
-	ControlPause  ControlOperation = "pause"
+	// ControlPause requests that a run pause its active work.
+	ControlPause ControlOperation = "pause"
+	// ControlResume requests that a run resume its paused work.
 	ControlResume ControlOperation = "resume"
+	// ControlCancel requests that a run cancel its active work.
 	ControlCancel ControlOperation = "cancel"
 )
 

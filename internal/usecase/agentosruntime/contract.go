@@ -1,3 +1,4 @@
+// Package agentosruntime hosts AgentOS runtimes for the use-case layer.
 package agentosruntime
 
 import (

@@ -1,3 +1,4 @@
+// Package agentosledger implements the AgentOS process ledger use cases.
 package agentosledger
 
 import (

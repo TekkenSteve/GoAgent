@@ -24,6 +24,7 @@ type ExponentialBackoff struct {
 	MaxRetry  int
 }
 
+// Delay returns the wait duration before the given retry attempt, with exponential backoff and jitter.
 func (e *ExponentialBackoff) Delay(attempt int) time.Duration {
 	exp := float64(e.BaseDelay)
 	for range attempt {
@@ -39,6 +40,7 @@ func (e *ExponentialBackoff) Delay(attempt int) time.Duration {
 	return time.Duration(jitter)
 }
 
+// ShouldRetry reports whether the given failed attempt should be retried.
 func (e *ExponentialBackoff) ShouldRetry(attempt int, _ error) bool {
 	return attempt < e.MaxRetry
 }

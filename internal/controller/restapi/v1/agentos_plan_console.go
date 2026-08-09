@@ -50,6 +50,7 @@ const (
 // @Failure     404 {object} response.Error
 // @Failure     500 {object} response.Error
 // @Router      /agentos/plans/{plan_id}/console [get]
+// The console renders run state, events, audits, and artifact refs for the plan.
 func (r *V1) agentOSPlanConsole(ctx *fiber.Ctx) error {
 	if r.planRuntime == nil {
 		return errorResponse(ctx, http.StatusNotFound, "agentos plan runtime is not configured")
@@ -639,6 +640,7 @@ func agentOSPlanConsoleBytes(size int64) string {
 }
 
 const (
+	// NEUTRAL is the CSS class name for the neutral gray visual state used by plan console controls and badges.
 	NEUTRAL                = "neutral"
 	agentOSPlanConsoleHTML = `<!doctype html>
 <html lang="en">

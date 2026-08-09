@@ -1,3 +1,4 @@
+// Package conversation implements a durable conversation runtime for AgentOS agents.
 package conversation
 
 import (

@@ -1,3 +1,4 @@
+// Package toolkit registers and retrieves agent toolkit tools.
 package toolkit
 
 import (
@@ -65,6 +66,7 @@ type agentConfig struct {
 	tools                            []string
 }
 
+// ErrAgentCreateFieldRequired is returned when a required agent creation argument is missing.
 var ErrAgentCreateFieldRequired = fmt.Errorf("agent_creation_tool: missing required field")
 
 func parseAgentArgs(args map[string]any) (*agentConfig, error) {

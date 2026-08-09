@@ -1,3 +1,5 @@
+// Package runtime wires agent framework components into Temporal workers and
+// manages their start and stop lifecycle.
 package runtime
 
 import (

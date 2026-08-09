@@ -1,3 +1,4 @@
+// Package loader loads agent configurations from repositories.
 package loader
 
 import (

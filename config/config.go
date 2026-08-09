@@ -1,3 +1,4 @@
+// Package config loads and validates the GoAgent application configuration.
 package config
 
 import (
@@ -182,10 +183,12 @@ type ArtifactStoreConfig struct {
 	S3      S3ArtifactStoreConfig
 }
 
+// LocalArtifactStoreConfig holds artifact blob storage settings for the local filesystem backend.
 type LocalArtifactStoreConfig struct {
 	Root string
 }
 
+// S3ArtifactStoreConfig holds artifact blob storage settings for the S3 backend.
 type S3ArtifactStoreConfig struct {
 	Bucket          string
 	Region          string
@@ -256,6 +259,7 @@ func (c *AgentOS) ArtifactSchemas() ([]agentos.ArtifactSchema, error) {
 	return schemas, nil
 }
 
+// ArtifactStoreConfig maps the AgentOS artifact store env settings into an ArtifactStoreConfig.
 func (c *AgentOS) ArtifactStoreConfig() ArtifactStoreConfig {
 	return ArtifactStoreConfig{
 		Backend: c.ArtifactStoreBackend,

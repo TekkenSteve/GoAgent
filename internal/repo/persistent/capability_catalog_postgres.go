@@ -24,6 +24,7 @@ func NewAgentOSCapabilityCatalogRepo(pg *postgres.Postgres) *AgentOSCapabilityCa
 	return &AgentOSCapabilityCatalogRepo{Postgres: pg}
 }
 
+// RegisterCapability upserts a backend capability declaration, returning the stored capability and whether it was newly registered.
 func (r *AgentOSCapabilityCatalogRepo) RegisterCapability(ctx context.Context, capability *agentos.Capability, idempotencyKey string) (agentos.Capability, bool, error) {
 	existing, exists, err := r.existingCapabilityByIdempotencyKey(ctx, capability, idempotencyKey)
 	if err != nil {
@@ -157,6 +158,7 @@ func (r *AgentOSCapabilityCatalogRepo) resolveCapabilityUniqueViolation(ctx cont
 	return agentos.Capability{}, false, fmt.Errorf("AgentOSCapabilityCatalogRepo - RegisterCapability - upsert: %w", scanErr)
 }
 
+// GetCapability loads the capability registered for the given backend and name.
 func (r *AgentOSCapabilityCatalogRepo) GetCapability(ctx context.Context, backend agentos.BackendRef, name string) (agentos.Capability, bool, error) {
 	sql, args, err := r.Builder.
 		Select("capability_json").

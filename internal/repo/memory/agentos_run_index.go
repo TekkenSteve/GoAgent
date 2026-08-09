@@ -91,6 +91,7 @@ func mergeRunBackendIndexRecord(existing, requested *entity.RunBackendIndexRecor
 	return merged
 }
 
+// GetRunBackend returns the backend ownership bound to the given run ID, and whether an entry exists.
 func (i *AgentOSRunIndex) GetRunBackend(_ context.Context, runID string) (agentos.RunBackendOwnership, bool, error) {
 	if runID == "" {
 		return agentos.RunBackendOwnership{}, false, fmt.Errorf("%w: run id is required", agentoscore.ErrInvalidRunSpec)

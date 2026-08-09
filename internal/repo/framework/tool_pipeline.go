@@ -1,3 +1,4 @@
+// Package framework stores agent framework records.
 package framework
 
 import (

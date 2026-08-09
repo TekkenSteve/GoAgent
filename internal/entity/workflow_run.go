@@ -26,12 +26,19 @@ type WorkflowRun struct {
 type LifecycleState string // @name entity.LifecycleState
 
 const (
-	LifecycleCreated   LifecycleState = "created"
-	LifecycleRunning   LifecycleState = "running"
-	LifecyclePaused    LifecycleState = "paused"
-	LifecycleResumed   LifecycleState = "resumed"
+	// LifecycleCreated marks a run that has been created but not yet started.
+	LifecycleCreated LifecycleState = "created"
+	// LifecycleRunning marks a run currently executing.
+	LifecycleRunning LifecycleState = "running"
+	// LifecyclePaused marks a run paused mid-execution.
+	LifecyclePaused LifecycleState = "paused"
+	// LifecycleResumed marks a run that resumed after a pause.
+	LifecycleResumed LifecycleState = "resumed"
+	// LifecycleCompleted marks a run that finished successfully.
 	LifecycleCompleted LifecycleState = "completed"
-	LifecycleFailed    LifecycleState = "failed"
+	// LifecycleFailed marks a run that failed.
+	LifecycleFailed LifecycleState = "failed"
+	// LifecycleCancelled marks a run that was canceled.
 	LifecycleCancelled LifecycleState = "canceled"
 )
 

@@ -10,13 +10,21 @@ import (
 )
 
 const (
-	ProcessWorkflowName              = "AgentOSProcessWorkflow"
-	ProcessStatusQueryName           = "agentos.process.status"
-	ProcessSignalName                = "agentos.process.signal"
-	ProcessControlSignalName         = "agentos.process.control"
-	StartProcessActivityName         = "AgentOSStartProcess"
-	SignalProcessActivityName        = "AgentOSSignalProcess"
-	ControlProcessActivityName       = "AgentOSControlProcess"
+	// ProcessWorkflowName is the Temporal workflow type that runs durable AgentOS processes.
+	ProcessWorkflowName = "AgentOSProcessWorkflow"
+	// ProcessStatusQueryName is the Temporal query name that returns the process's status.
+	ProcessStatusQueryName = "agentos.process.status"
+	// ProcessSignalName is the Temporal signal name that delivers process-level signals.
+	ProcessSignalName = "agentos.process.signal"
+	// ProcessControlSignalName is the Temporal signal name that delivers process control requests.
+	ProcessControlSignalName = "agentos.process.control"
+	// StartProcessActivityName is the Temporal activity name that starts a process.
+	StartProcessActivityName = "AgentOSStartProcess"
+	// SignalProcessActivityName is the Temporal activity name that signals a process.
+	SignalProcessActivityName = "AgentOSSignalProcess"
+	// ControlProcessActivityName is the Temporal activity name that sends control to a process.
+	ControlProcessActivityName = "AgentOSControlProcess"
+	// FireProcessTimerActivityName is the Temporal activity name that fires a process timer.
 	FireProcessTimerActivityName     = "AgentOSFireProcessTimer"
 	defaultProcessSignalBufferLength = 64
 )

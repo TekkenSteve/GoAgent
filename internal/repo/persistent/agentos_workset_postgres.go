@@ -22,6 +22,7 @@ func NewAgentOSWorksetRepo(pg *postgres.Postgres) *AgentOSWorksetRepo {
 	return &AgentOSWorksetRepo{Postgres: pg}
 }
 
+// CreateWorkset persists a new workset from its spec and status, returning the stored status and whether the workset was newly created.
 func (r *AgentOSWorksetRepo) CreateWorkset(ctx context.Context, spec *agentos.WorksetSpec, status *agentos.WorksetStatus) (agentos.WorksetStatus, bool, error) {
 	if err := validatePostgresCreateWorkset(spec, status); err != nil {
 		return agentos.WorksetStatus{}, false, err
@@ -48,6 +49,7 @@ func (r *AgentOSWorksetRepo) CreateWorkset(ctx context.Context, spec *agentos.Wo
 	return r.insertWorkset(ctx, spec, status)
 }
 
+// GetWorkset loads a workset spec and status by tenant-scoped reference.
 func (r *AgentOSWorksetRepo) GetWorkset(ctx context.Context, ref agentos.WorksetRef) (agentos.WorksetSpec, agentos.WorksetStatus, bool, error) {
 	if err := agentos.ValidateWorksetRef(ref); err != nil {
 		return agentos.WorksetSpec{}, agentos.WorksetStatus{}, false, err
@@ -61,6 +63,7 @@ func (r *AgentOSWorksetRepo) GetWorkset(ctx context.Context, ref agentos.Workset
 	)
 }
 
+// ListWorksets returns workset statuses matching the given scope filters.
 func (r *AgentOSWorksetRepo) ListWorksets(ctx context.Context, scope *agentos.WorksetScope) ([]agentos.WorksetStatus, error) {
 	if err := agentos.ValidateWorksetScope(scope); err != nil {
 		return nil, err
@@ -71,6 +74,7 @@ func (r *AgentOSWorksetRepo) ListWorksets(ctx context.Context, scope *agentos.Wo
 	return listProcessPlatformStatuses[agentos.WorksetStatus](ctx, r.Postgres, &query)
 }
 
+// ApplyChunkResult idempotently applies a chunk result and returns the resulting workset status.
 func (r *AgentOSWorksetRepo) ApplyChunkResult(ctx context.Context, ref agentos.WorksetRef, result *agentos.WorksetChunkResult, status *agentos.WorksetStatus) (agentos.WorksetStatus, error) {
 	if err := validatePostgresApplyChunkResult(ref, result, status); err != nil {
 		return agentos.WorksetStatus{}, err
@@ -103,6 +107,7 @@ func (r *AgentOSWorksetRepo) ApplyChunkResult(ctx context.Context, ref agentos.W
 	return r.applyWorksetChunkResult(ctx, ref, result, &normalized)
 }
 
+// UpdateWorksetStatus applies a workset status update idempotently and returns the resulting status.
 func (r *AgentOSWorksetRepo) UpdateWorksetStatus(ctx context.Context, status *agentos.WorksetStatus, idempotencyKey string) (agentos.WorksetStatus, error) {
 	if err := validatePostgresWorksetStatus(status, idempotencyKey); err != nil {
 		return agentos.WorksetStatus{}, err

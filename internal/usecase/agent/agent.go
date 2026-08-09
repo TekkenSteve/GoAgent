@@ -1,3 +1,4 @@
+// Package agent implements the agent execution use cases.
 package agent
 
 import (
@@ -16,8 +17,10 @@ import (
 )
 
 var (
+	// ErrAgentRepoNotAvailable is returned when the agent repository is not configured.
 	ErrAgentRepoNotAvailable = errors.New("agent repo not available")
-	ErrAgentNotFound         = errors.New("agent not found")
+	// ErrAgentNotFound is returned when the requested agent does not exist.
+	ErrAgentNotFound = errors.New("agent not found")
 )
 
 const maxToolRounds = 10

@@ -1,3 +1,4 @@
+// Package agentosprocess implements AgentOS process use cases.
 package agentosprocess
 
 import (

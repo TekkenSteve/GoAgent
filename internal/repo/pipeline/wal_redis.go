@@ -28,7 +28,9 @@ const (
 type WriteType string
 
 const (
-	WriteTypeMessage    WriteType = "message"
+	// WriteTypeMessage is the WAL write type for message records.
+	WriteTypeMessage WriteType = "message"
+	// WriteTypeToolResult is the WAL write type for tool result records.
 	WriteTypeToolResult WriteType = "tool_result"
 )
 

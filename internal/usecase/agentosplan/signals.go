@@ -7,7 +7,9 @@ import (
 )
 
 const (
+	// SignalPayloadNodeID is the signal payload key for the node identifier in node-scoped plan signals.
 	SignalPayloadNodeID = agentoscore.SignalPayloadNodeID
+	// SignalPayloadReason is the signal payload key for the reason in plan signals.
 	SignalPayloadReason = agentoscore.SignalPayloadReason
 )
 

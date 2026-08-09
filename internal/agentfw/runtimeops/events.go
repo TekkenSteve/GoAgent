@@ -16,6 +16,8 @@ var ErrInvalidSchemaVersion = errors.New("invalid schema version")
 // EventType identifies stream event categories.
 type EventType string
 
+// EventTypeStatus and the other EventType constants identify the stream
+// event categories.
 const (
 	EventTypeStatus  EventType = "status"
 	EventTypeChunk   EventType = "chunk"

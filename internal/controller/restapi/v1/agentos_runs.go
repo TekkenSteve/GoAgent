@@ -22,6 +22,7 @@ import (
 // @Failure     404 {object} response.Error
 // @Failure     500 {object} response.Error
 // @Router      /agentos/runs [post]
+// The run is started on its declared backend.
 func (r *V1) startAgentOSRun(ctx *fiber.Ctx) error {
 	if r.agentOSRuntime == nil {
 		return errorResponse(ctx, http.StatusNotFound, "agentos runtime is not configured")
@@ -81,6 +82,7 @@ func isNativeAgentOSBackend(ref agentos.BackendRef) bool {
 // @Failure     404 {object} response.Error
 // @Failure     500 {object} response.Error
 // @Router      /agentos/runs/{run_id}/signals [post]
+// The signal is forwarded to the active run.
 func (r *V1) signalAgentOSRun(ctx *fiber.Ctx) error {
 	if r.agentOSRuntime == nil {
 		return errorResponse(ctx, http.StatusNotFound, "agentos runtime is not configured")
@@ -124,6 +126,7 @@ func (r *V1) signalAgentOSRun(ctx *fiber.Ctx) error {
 // @Failure     404 {object} response.Error
 // @Failure     500 {object} response.Error
 // @Router      /agentos/runs/{run_id}/control [post]
+// The control operation is applied to the run.
 func (r *V1) controlAgentOSRun(ctx *fiber.Ctx) error {
 	if r.agentOSRuntime == nil {
 		return errorResponse(ctx, http.StatusNotFound, "agentos runtime is not configured")
@@ -163,6 +166,7 @@ func (r *V1) controlAgentOSRun(ctx *fiber.Ctx) error {
 // @Failure     404 {object} response.Error
 // @Failure     500 {object} response.Error
 // @Router      /agentos/runs/{run_id}/status [get]
+// The status aggregates run state and events.
 func (r *V1) statusAgentOSRun(ctx *fiber.Ctx) error {
 	if r.agentOSRuntime == nil {
 		return errorResponse(ctx, http.StatusNotFound, "agentos runtime is not configured")

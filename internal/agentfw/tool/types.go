@@ -9,6 +9,8 @@ import (
 // Tier is a subscription tier used by tool authorization policy.
 type Tier string
 
+// TierFree, TierPro, and TierEnterprise are the subscription tiers used by
+// tool authorization policy.
 const (
 	TierFree       Tier = "free"
 	TierPro        Tier = "pro"
@@ -37,6 +39,8 @@ type RawResult struct {
 // IsolationLevel indicates the execution isolation semantics.
 type IsolationLevel string
 
+// IsolationNone, IsolationReadCommitted, and IsolationSerializable are the
+// execution isolation semantics available to tools.
 const (
 	IsolationNone          IsolationLevel = "none"
 	IsolationReadCommitted IsolationLevel = "read_committed"

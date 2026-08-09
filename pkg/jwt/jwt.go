@@ -1,3 +1,4 @@
+// Package jwt issues and verifies JSON Web Tokens.
 package jwt
 
 import (

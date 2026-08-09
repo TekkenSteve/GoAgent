@@ -1,3 +1,4 @@
+// Package agentosaction implements governed AgentOS action use cases.
 package agentosaction
 
 import (

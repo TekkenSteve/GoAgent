@@ -22,6 +22,7 @@ func NewAgentOSActionRepo(pg *postgres.Postgres) *AgentOSActionRepo {
 	return &AgentOSActionRepo{Postgres: pg}
 }
 
+// CreateAction validates and persists a governed action spec with its initial status, returning the stored status and whether the action was newly created.
 func (r *AgentOSActionRepo) CreateAction(ctx context.Context, spec *agentos.GovernedActionSpec, status *agentos.GovernedActionStatus) (agentos.GovernedActionStatus, bool, error) {
 	if err := agentos.ValidateGovernedActionSpec(spec); err != nil {
 		return agentos.GovernedActionStatus{}, false, err
@@ -52,6 +53,7 @@ func (r *AgentOSActionRepo) CreateAction(ctx context.Context, spec *agentos.Gove
 	return r.insertAction(ctx, spec, status)
 }
 
+// GetAction loads a governed action by reference, returning its spec, status, and whether it exists.
 func (r *AgentOSActionRepo) GetAction(ctx context.Context, ref agentos.ActionRef) (agentos.GovernedActionSpec, agentos.GovernedActionStatus, bool, error) {
 	if err := agentos.ValidateActionRef(ref); err != nil {
 		return agentos.GovernedActionSpec{}, agentos.GovernedActionStatus{}, false, err
@@ -65,6 +67,7 @@ func (r *AgentOSActionRepo) GetAction(ctx context.Context, ref agentos.ActionRef
 	)
 }
 
+// ListActions returns governed action statuses matching the given scope filters.
 func (r *AgentOSActionRepo) ListActions(ctx context.Context, scope *agentos.ActionScope) ([]agentos.GovernedActionStatus, error) {
 	if err := agentos.ValidateActionScope(scope); err != nil {
 		return nil, err
@@ -75,6 +78,7 @@ func (r *AgentOSActionRepo) ListActions(ctx context.Context, scope *agentos.Acti
 	return listProcessPlatformStatuses[agentos.GovernedActionStatus](ctx, r.Postgres, &query)
 }
 
+// UpdateActionStatus applies a governed action status update idempotently and returns the resulting status.
 func (r *AgentOSActionRepo) UpdateActionStatus(ctx context.Context, status *agentos.GovernedActionStatus, idempotencyKey string) (agentos.GovernedActionStatus, error) {
 	if err := validatePostgresActionStatus(status, idempotencyKey); err != nil {
 		return agentos.GovernedActionStatus{}, err

@@ -1,3 +1,4 @@
+// Package agentosbatch implements batched AgentOS operation use cases.
 package agentosbatch
 
 import (

@@ -26,6 +26,7 @@ type RunSpec struct {
 // BackendKind identifies the execution substrate used by an agent backend.
 type BackendKind string
 
+// BackendKind values identifying the execution substrate used by an agent backend.
 const (
 	BackendKindNative           BackendKind = "native"
 	BackendKindTemporalExternal BackendKind = "temporal_external"

@@ -1,3 +1,4 @@
+// Package cached provides read-through caching for repository lookups.
 package cached
 
 import (
@@ -11,7 +12,9 @@ import (
 )
 
 var (
-	ErrAgentNotFound        = errors.New("agent not found")
+	// ErrAgentNotFound is returned when no agent record matches the requested ID.
+	ErrAgentNotFound = errors.New("agent not found")
+	// ErrUnexpectedCacheEntry is returned when the cache contains a value of an unexpected type.
 	ErrUnexpectedCacheEntry = errors.New("cache: unexpected entry type")
 )
 

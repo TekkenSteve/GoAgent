@@ -1,3 +1,4 @@
+// Package restapi wires the HTTP router and its dependencies.
 package restapi
 
 import (
@@ -24,6 +25,7 @@ import (
 // @version     1.0
 // @host        localhost:8080
 // @BasePath    /v1
+// Routes under /v1 expose the API; /healthz and /swagger serve probes and docs.
 func NewRouter(app *fiber.App, cfg *config.Config, t usecase.AgentExecutor, o usecase.OrchestrationExecutor, l logger.Interface,
 	cancelWorkflow v1.CancelWorkflowFn, signalWorkflow v1.SignalWorkflowFn,
 	m usecase.TemplateManager,

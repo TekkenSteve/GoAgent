@@ -19,6 +19,7 @@ type TaskQueues struct {
 	Stream          string
 }
 
+// ErrTemporalTaskQueuesInvalid reports missing or invalid Temporal task queues.
 var ErrTemporalTaskQueuesInvalid = errors.New("agentos temporal task queues: invalid")
 
 // DefaultTaskQueues returns the production-oriented AgentOS queue split.

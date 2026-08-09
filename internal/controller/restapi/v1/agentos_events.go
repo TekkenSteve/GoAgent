@@ -1,3 +1,4 @@
+// Package v1 implements the version 1 REST API handlers.
 package v1
 
 import (
@@ -29,6 +30,7 @@ type ingestAgentOSEventResponse struct {
 // @Failure     404 {object} response.Error
 // @Failure     500 {object} response.Error
 // @Router      /agentos/runs/{run_id}/events [post]
+// The normalized event is validated and forwarded to the AgentOS event stream.
 func (r *V1) ingestAgentOSEvent(c *fiber.Ctx) error {
 	if r.eventIngest == nil {
 		return errorResponse(c, fiber.StatusNotFound, "agentos event ingest is not configured")

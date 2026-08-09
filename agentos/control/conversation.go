@@ -1,3 +1,5 @@
+// Package control defines the public contracts for AgentOS control-plane
+// primitives: runs, plans, and durable conversations.
 package control
 
 import (
@@ -7,8 +9,10 @@ import (
 	"github.com/TekkenSteve/GoAgent/agentos/core"
 )
 
+// ConversationSchemaVersion is the schema version of conversation artifacts.
 const ConversationSchemaVersion = "agentos.conversation.v1"
 
+// Conversation event type constants emitted for a conversation run.
 const (
 	ConversationEventRunStarted         core.EventType = "RUN_STARTED"
 	ConversationEventTextMessageStart   core.EventType = "TEXT_MESSAGE_START"
@@ -18,6 +22,7 @@ const (
 	ConversationEventRunError           core.EventType = "RUN_ERROR"
 )
 
+// Conversation run lifecycle state constants.
 const (
 	ConversationRunPending     = "pending"
 	ConversationRunRunning     = "running"
@@ -27,12 +32,14 @@ const (
 	ConversationRunError       = "error"
 )
 
+// Conversation run outcome constants.
 const (
 	ConversationOutcomeNormal    = "normal"
 	ConversationOutcomeInterrupt = "interrupt"
 	ConversationOutcomeCancelled = "cancelled" //nolint:misspell // agentos.conversation.v1 uses this wire value.
 )
 
+// ConversationRuntime manages durable conversation runs, events, and threads.
 type ConversationRuntime interface {
 	StartRun(context.Context, *StartConversationRunSpec) (ConversationRun, error)
 	IngestEvent(context.Context, *ExternalConversationEvent) (ConversationEvent, error)
@@ -41,6 +48,7 @@ type ConversationRuntime interface {
 	Close() error
 }
 
+// Attachment describes a file attached to a conversation message.
 type Attachment struct {
 	FileID   string         `json:"file_id"`
 	Filename string         `json:"filename"`
@@ -49,6 +57,7 @@ type Attachment struct {
 	Metadata map[string]any `json:"metadata,omitempty"`
 }
 
+// ConversationMessage is a durable message in a conversation thread.
 type ConversationMessage struct {
 	MessageID   string         `json:"message_id"`
 	ThreadID    string         `json:"thread_id"`
@@ -63,6 +72,7 @@ type ConversationMessage struct {
 	CompletedAt time.Time      `json:"completed_at,omitzero" schema:"optional"`
 }
 
+// ConversationInterrupt requests operator input during a conversation run.
 type ConversationInterrupt struct {
 	InterruptID string         `json:"interrupt_id"`
 	Type        string         `json:"type"`
@@ -71,11 +81,13 @@ type ConversationInterrupt struct {
 	Metadata    map[string]any `json:"metadata,omitempty"`
 }
 
+// ConversationResume carries the operator response to a ConversationInterrupt.
 type ConversationResume struct {
 	InterruptID string `json:"interrupt_id"`
 	Response    any    `json:"response"`
 }
 
+// ConversationRun is the durable lifecycle view of one conversation run.
 type ConversationRun struct {
 	RunID       string                 `json:"run_id"`
 	ThreadID    string                 `json:"thread_id"`
@@ -92,6 +104,7 @@ type ConversationRun struct {
 	CompletedAt time.Time              `json:"completed_at,omitzero" schema:"optional"`
 }
 
+// StartConversationRunSpec requests the start of a conversation run.
 type StartConversationRunSpec struct {
 	RunID           string              `json:"run_id"`
 	ThreadID        string              `json:"thread_id"`
@@ -108,6 +121,7 @@ type StartConversationRunSpec struct {
 	RequestedAt     time.Time           `json:"requested_at,omitzero" schema:"optional"`
 }
 
+// ExternalConversationEvent is a conversation event reported from outside AgentOS.
 type ExternalConversationEvent struct {
 	ThreadID       string         `json:"thread_id"`
 	RunID          string         `json:"run_id"`
@@ -121,6 +135,7 @@ type ExternalConversationEvent struct {
 	Payload        map[string]any `json:"payload,omitempty"`
 }
 
+// ConversationEvent is a durable event in a conversation thread.
 type ConversationEvent struct {
 	SchemaVersion  string         `json:"schema_version"`
 	EventID        string         `json:"event_id"`
@@ -135,6 +150,7 @@ type ConversationEvent struct {
 	Payload        map[string]any `json:"payload,omitempty"`
 }
 
+// ThreadScope selects a conversation thread for queries and subscriptions.
 type ThreadScope struct {
 	ThreadID   string `json:"thread_id"`
 	AccountID  string `json:"account_id"`
@@ -142,6 +158,7 @@ type ThreadScope struct {
 	EventLimit int    `json:"event_limit,omitempty"`
 }
 
+// ThreadStreamScope selects the events to stream from a conversation thread.
 type ThreadStreamScope struct {
 	ThreadID      string `json:"thread_id"`
 	AccountID     string `json:"account_id"`
@@ -149,6 +166,7 @@ type ThreadStreamScope struct {
 	AfterSequence int64  `json:"after_sequence,omitempty"`
 }
 
+// ThreadSnapshot is a point-in-time read view of a conversation thread.
 type ThreadSnapshot struct {
 	SchemaVersion string                `json:"schema_version"`
 	ThreadID      string                `json:"thread_id"`

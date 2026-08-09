@@ -1,3 +1,4 @@
+// Package client implements the NATS RPC client.
 package client
 
 import (

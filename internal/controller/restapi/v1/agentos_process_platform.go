@@ -28,6 +28,7 @@ type restQueryValidator interface {
 // @Failure     404 {object} response.Error
 // @Failure     500 {object} response.Error
 // @Router      /agentos/processes [post]
+// The process is started and tracked durably.
 func (r *V1) startAgentOSProcess(ctx *fiber.Ctx) error {
 	if r.platformRuntime == nil {
 		return errorResponse(ctx, http.StatusNotFound, "agentos platform runtime is not configured")
@@ -64,6 +65,7 @@ func (r *V1) startAgentOSProcess(ctx *fiber.Ctx) error {
 // @Failure     404 {object} response.Error
 // @Failure     500 {object} response.Error
 // @Router      /agentos/processes [get]
+// The list is filtered by account and project scope.
 func (r *V1) listAgentOSProcesses(ctx *fiber.Ctx) error {
 	return withPlatformQueryScope(r, ctx, "process scope", func(req request.AgentOSProcessScope) (any, error) {
 		return r.platformRuntime.ListProcesses(ctx.UserContext(), &agentosprocess.Scope{
@@ -92,6 +94,7 @@ func (r *V1) listAgentOSProcesses(ctx *fiber.Ctx) error {
 // @Failure     404 {object} response.Error
 // @Failure     500 {object} response.Error
 // @Router      /agentos/processes/{process_id} [get]
+// The description exposes process state and inputs.
 func (r *V1) describeAgentOSProcess(ctx *fiber.Ctx) error {
 	return r.withProcessRef(ctx, func(ref agentosprocess.Ref) error {
 		description, err := r.platformRuntime.DescribeProcess(ctx.UserContext(), ref)
@@ -117,6 +120,7 @@ func (r *V1) describeAgentOSProcess(ctx *fiber.Ctx) error {
 // @Failure     404 {object} response.Error
 // @Failure     500 {object} response.Error
 // @Router      /agentos/processes/{process_id}/status [get]
+// The status aggregates process state and events.
 func (r *V1) statusAgentOSProcess(ctx *fiber.Ctx) error {
 	return r.withProcessRef(ctx, func(ref agentosprocess.Ref) error {
 		status, err := r.platformRuntime.StatusProcess(ctx.UserContext(), ref)
@@ -140,6 +144,7 @@ func (r *V1) statusAgentOSProcess(ctx *fiber.Ctx) error {
 // @Failure     404 {object} response.Error
 // @Failure     500 {object} response.Error
 // @Router      /agentos/ledger [post]
+// The entry is appended to the process ledger.
 func (r *V1) appendAgentOSLedgerEntry(ctx *fiber.Ctx) error {
 	if r.platformRuntime == nil {
 		return errorResponse(ctx, http.StatusNotFound, "agentos platform runtime is not configured")
@@ -177,6 +182,7 @@ func (r *V1) appendAgentOSLedgerEntry(ctx *fiber.Ctx) error {
 // @Failure     404 {object} response.Error
 // @Failure     500 {object} response.Error
 // @Router      /agentos/ledger [get]
+// The entries are filtered by account, project, and process.
 func (r *V1) listAgentOSLedgerEntries(ctx *fiber.Ctx) error {
 	var req request.AgentOSLedgerScope
 
@@ -199,6 +205,7 @@ func (r *V1) listAgentOSLedgerEntries(ctx *fiber.Ctx) error {
 // @Failure     404 {object} response.Error
 // @Failure     500 {object} response.Error
 // @Router      /agentos/actions [post]
+// The action is registered for governed execution.
 func (r *V1) requestAgentOSAction(ctx *fiber.Ctx) error {
 	if r.platformRuntime == nil {
 		return errorResponse(ctx, http.StatusNotFound, "agentos platform runtime is not configured")
@@ -236,6 +243,7 @@ func (r *V1) requestAgentOSAction(ctx *fiber.Ctx) error {
 // @Failure     404 {object} response.Error
 // @Failure     500 {object} response.Error
 // @Router      /agentos/actions [get]
+// The actions are filtered by account, project, and process.
 func (r *V1) listAgentOSActions(ctx *fiber.Ctx) error {
 	var req request.AgentOSActionScope
 
@@ -260,6 +268,7 @@ func (r *V1) listAgentOSActions(ctx *fiber.Ctx) error {
 // @Failure     404 {object} response.Error
 // @Failure     500 {object} response.Error
 // @Router      /agentos/actions/{action_id} [get]
+// The status reports the action lifecycle state.
 func (r *V1) statusAgentOSAction(ctx *fiber.Ctx) error {
 	return r.withActionRef(ctx, func(ref agentosprocess.ActionRef) error {
 		status, err := r.platformRuntime.StatusAction(ctx.UserContext(), ref)
@@ -286,6 +295,7 @@ func (r *V1) statusAgentOSAction(ctx *fiber.Ctx) error {
 // @Failure     404 {object} response.Error
 // @Failure     500 {object} response.Error
 // @Router      /agentos/actions/{action_id}/dry-run [post]
+// The dry-run records the intended action without executing it.
 func (r *V1) recordAgentOSActionDryRun(ctx *fiber.Ctx) error {
 	return withAgentOSActionTransition[agentosprocess.ActionDryRunResult](r, ctx, func(ref agentosprocess.ActionRef, result *agentosprocess.ActionDryRunResult) (agentosprocess.GovernedActionStatus, error) {
 		return r.platformRuntime.RecordActionDryRun(ctx.UserContext(), ref, result)
@@ -307,6 +317,7 @@ func (r *V1) recordAgentOSActionDryRun(ctx *fiber.Ctx) error {
 // @Failure     404 {object} response.Error
 // @Failure     500 {object} response.Error
 // @Router      /agentos/actions/{action_id}/approval [post]
+// The approval resolves the action's pending decision.
 func (r *V1) resolveAgentOSActionApproval(ctx *fiber.Ctx) error {
 	return withAgentOSActionTransition[agentosprocess.ActionApprovalDecision](r, ctx, func(ref agentosprocess.ActionRef, decision *agentosprocess.ActionApprovalDecision) (agentosprocess.GovernedActionStatus, error) {
 		return r.platformRuntime.ResolveActionApproval(ctx.UserContext(), ref, decision)
@@ -328,6 +339,7 @@ func (r *V1) resolveAgentOSActionApproval(ctx *fiber.Ctx) error {
 // @Failure     404 {object} response.Error
 // @Failure     500 {object} response.Error
 // @Router      /agentos/actions/{action_id}/execution [post]
+// The execution is recorded for the completed action.
 func (r *V1) completeAgentOSAction(ctx *fiber.Ctx) error {
 	return withAgentOSActionTransition[agentosprocess.ActionExecutionResult](r, ctx, func(ref agentosprocess.ActionRef, result *agentosprocess.ActionExecutionResult) (agentosprocess.GovernedActionStatus, error) {
 		return r.platformRuntime.CompleteAction(ctx.UserContext(), ref, result)
@@ -349,6 +361,7 @@ func (r *V1) completeAgentOSAction(ctx *fiber.Ctx) error {
 // @Failure     404 {object} response.Error
 // @Failure     500 {object} response.Error
 // @Router      /agentos/actions/{action_id}/cancel [post]
+// The cancellation transitions the action out of pending state.
 func (r *V1) cancelAgentOSAction(ctx *fiber.Ctx) error {
 	return withAgentOSActionTransition[agentosprocess.ActionCancelRequest](r, ctx, func(ref agentosprocess.ActionRef, req *agentosprocess.ActionCancelRequest) (agentosprocess.GovernedActionStatus, error) {
 		return r.platformRuntime.CancelAction(ctx.UserContext(), ref, req)
@@ -367,6 +380,7 @@ func (r *V1) cancelAgentOSAction(ctx *fiber.Ctx) error {
 // @Failure     404 {object} response.Error
 // @Failure     500 {object} response.Error
 // @Router      /agentos/worksets [post]
+// The workset is started and tracked durably.
 func (r *V1) startAgentOSWorkset(ctx *fiber.Ctx) error {
 	if r.platformRuntime == nil {
 		return errorResponse(ctx, http.StatusNotFound, "agentos platform runtime is not configured")
@@ -404,6 +418,7 @@ func (r *V1) startAgentOSWorkset(ctx *fiber.Ctx) error {
 // @Failure     404 {object} response.Error
 // @Failure     500 {object} response.Error
 // @Router      /agentos/worksets [get]
+// The worksets are filtered by account and project scope.
 func (r *V1) listAgentOSWorksets(ctx *fiber.Ctx) error {
 	var req request.AgentOSWorksetScope
 
@@ -428,6 +443,7 @@ func (r *V1) listAgentOSWorksets(ctx *fiber.Ctx) error {
 // @Failure     404 {object} response.Error
 // @Failure     500 {object} response.Error
 // @Router      /agentos/worksets/{workset_id} [get]
+// The description exposes workset state and progress.
 func (r *V1) statusAgentOSWorkset(ctx *fiber.Ctx) error {
 	return r.withWorksetRef(ctx, func(ref agentosprocess.WorksetRef) error {
 		status, err := r.platformRuntime.StatusWorkset(ctx.UserContext(), ref)
@@ -456,6 +472,7 @@ func (r *V1) statusAgentOSWorkset(ctx *fiber.Ctx) error {
 // @Failure     404 {object} response.Error
 // @Failure     500 {object} response.Error
 // @Router      /agentos/resources [get]
+// The projections are filtered by account, project, and type.
 func (r *V1) getOrListAgentOSResources(ctx *fiber.Ctx) error {
 	return withPlatformQueryScope(r, ctx, "resource scope", func(req request.AgentOSResourceScope) (any, error) {
 		if req.ResourceID != "" {

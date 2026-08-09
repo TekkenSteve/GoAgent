@@ -5,7 +5,10 @@ package state
 type Layer string
 
 const (
-	LayerHot  Layer = "hot"
+	// LayerHot identifies the hot persistence layer.
+	LayerHot Layer = "hot"
+	// LayerWarm identifies the warm persistence layer.
 	LayerWarm Layer = "warm"
+	// LayerCold identifies the cold persistence layer.
 	LayerCold Layer = "cold"
 )

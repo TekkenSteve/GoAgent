@@ -15,6 +15,8 @@ import (
 // earlier delivery is still executing.
 type TriggerOverlapPolicy string
 
+// TriggerOverlapPolicy values controlling behavior when a delivery is due
+// while an earlier delivery is still executing.
 const (
 	TriggerOverlapSkip            TriggerOverlapPolicy = "skip"
 	TriggerOverlapBufferOne       TriggerOverlapPolicy = "buffer_one"

@@ -1,3 +1,4 @@
+// Package rmqrpc implements request-reply RPC over RabbitMQ.
 package rmqrpc
 
 import (

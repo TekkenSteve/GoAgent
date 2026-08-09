@@ -1,3 +1,5 @@
+// Package tool defines tool call authorization, execution isolation, and
+// execution pipeline types for the agent framework.
 package tool
 
 import (

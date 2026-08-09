@@ -12,7 +12,7 @@ import (
 	"github.com/jackc/pgx/v5"
 )
 
-// Sentinel errors.
+// ErrTemplateNotFound is returned when a workflow template is not found.
 var ErrTemplateNotFound = errors.New("template not found")
 
 // WorkflowTemplateRepo implements repo.WorkflowTemplateRepo with Postgres.

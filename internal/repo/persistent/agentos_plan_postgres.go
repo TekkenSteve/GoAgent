@@ -32,6 +32,7 @@ func NewAgentOSPlanRepo(pg *postgres.Postgres) *AgentOSPlanRepo {
 	return &AgentOSPlanRepo{pg}
 }
 
+// CreatePlan persists a new RunPlan from its spec and status, returning the stored status and whether the plan was newly created.
 func (r *AgentOSPlanRepo) CreatePlan(ctx context.Context, spec *agentos.RunPlanSpec, status *agentos.RunPlanStatus) (agentos.RunPlanStatus, bool, error) {
 	if spec.PlanID == "" {
 		return agentos.RunPlanStatus{}, false, fmt.Errorf("%w: plan id is required", agentoscore.ErrInvalidRunPlan)
@@ -144,6 +145,7 @@ func (r *AgentOSPlanRepo) createPlanState(ctx context.Context, snapshot *agentos
 	return normalized.Status, nil
 }
 
+// GetPlan loads the spec and status of the plan with the given ID.
 func (r *AgentOSPlanRepo) GetPlan(ctx context.Context, planID string) (agentos.RunPlanSpec, agentos.RunPlanStatus, bool, error) {
 	snapshot, exists, err := r.LoadPlanState(ctx, planID)
 	if err != nil || !exists {
@@ -153,6 +155,7 @@ func (r *AgentOSPlanRepo) GetPlan(ctx context.Context, planID string) (agentos.R
 	return snapshot.Spec, snapshot.Status, true, nil
 }
 
+// GetPlanByRef loads a plan's spec and status within the given tenant-scoped reference.
 func (r *AgentOSPlanRepo) GetPlanByRef(ctx context.Context, ref agentos.PlanRef) (agentos.RunPlanSpec, agentos.RunPlanStatus, bool, error) {
 	if err := agentosplan.ValidatePlanRef(ref); err != nil {
 		return agentos.RunPlanSpec{}, agentos.RunPlanStatus{}, false, err
@@ -174,6 +177,7 @@ func (r *AgentOSPlanRepo) GetPlanByRef(ctx context.Context, ref agentos.PlanRef)
 	return snapshot.Spec, snapshot.Status, true, nil
 }
 
+// ListPlanRefs returns plan references matching the given scope filters.
 func (r *AgentOSPlanRepo) ListPlanRefs(ctx context.Context, scope *agentosplan.PlanRefScope) ([]agentos.PlanRef, error) {
 	builder, err := r.planRefsBuilder(scope)
 	if err != nil {
@@ -237,6 +241,7 @@ func (r *AgentOSPlanRepo) planRefsBuilder(scope *agentosplan.PlanRefScope) (sq.S
 	return applyOptionalLimit(builder, scope.Limit), nil
 }
 
+// SavePlanState persists a full plan state snapshot, upserting the plan row and its node statuses.
 func (r *AgentOSPlanRepo) SavePlanState(ctx context.Context, snapshot *agentosplan.PlanStateSnapshot) error {
 	normalized, err := normalizePlanStateSnapshotForPostgres(snapshot)
 	if err != nil {
@@ -523,6 +528,7 @@ func (r *AgentOSPlanRepo) deleteStalePlanNodes(ctx context.Context, tx pgx.Tx, p
 	return nil
 }
 
+// LoadPlanState loads the plan state snapshot for the given plan ID, including node statuses.
 func (r *AgentOSPlanRepo) LoadPlanState(ctx context.Context, planID string) (agentosplan.PlanStateSnapshot, bool, error) {
 	if planID == "" {
 		return agentosplan.PlanStateSnapshot{}, false, fmt.Errorf("%w: plan id is required", agentoscore.ErrInvalidRunPlan)
@@ -693,6 +699,7 @@ WHERE plan_id = $1`, planID).Scan(&scope.AccountID, &scope.ProjectID)
 	return scope, true, nil
 }
 
+// PersistPlanTransition atomically saves the given plan state snapshot and appends its transition event idempotently.
 func (r *AgentOSPlanRepo) PersistPlanTransition(ctx context.Context, snapshot *agentosplan.PlanStateSnapshot, event *agentos.PlanEvent, idempotencyKey string) (agentos.PlanEvent, error) {
 	normalizedSnapshot, normalizedEvent, transitionIdentity, err := normalizePlanTransitionForPostgres(snapshot, event, idempotencyKey)
 	if err != nil {
@@ -804,6 +811,7 @@ FOR UPDATE`, planID).Scan(&scope.AccountID, &scope.ProjectID)
 	return scope, true, nil
 }
 
+// AppendPlanEvent appends a durable plan event with a monotonically increasing sequence number.
 func (r *AgentOSPlanRepo) AppendPlanEvent(ctx context.Context, event *agentos.PlanEvent, idempotencyKey string) (agentos.PlanEvent, error) {
 	normalizedEvent, err := normalizePlanEventAppendForPostgres(event, idempotencyKey)
 	if err != nil {
@@ -1061,6 +1069,7 @@ func (r *AgentOSPlanRepo) planEventByIdempotencyKeyWith(ctx context.Context, que
 	}, true, nil
 }
 
+// ListPlanEvents returns plan events matching the given stream scope, ordered by sequence.
 func (r *AgentOSPlanRepo) ListPlanEvents(ctx context.Context, scope *agentos.PlanStreamScope, limit int) ([]agentos.PlanEvent, error) {
 	if err := r.authorizePlanStreamScope(ctx, scope); err != nil {
 		return nil, err
@@ -1133,6 +1142,7 @@ func (r *AgentOSPlanRepo) planEventsBuilder(scope *agentos.PlanStreamScope, limi
 	return applyOptionalLimit(builder, limit)
 }
 
+// GetPlanMetricCheckpoint loads the metrics checkpoint stored by an exporter for a plan.
 func (r *AgentOSPlanRepo) GetPlanMetricCheckpoint(ctx context.Context, exporterID string, ref agentos.PlanRef) (agentosplan.PlanMetricCheckpoint, bool, error) {
 	if exporterID == "" {
 		return agentosplan.PlanMetricCheckpoint{}, false, fmt.Errorf("%w: metrics exporter id is required", agentoscore.ErrInvalidRunPlan)
@@ -1191,6 +1201,7 @@ func (r *AgentOSPlanRepo) GetPlanMetricCheckpoint(ctx context.Context, exporterI
 	return checkpoint, true, nil
 }
 
+// SavePlanMetricCheckpoint upserts a metrics checkpoint for a plan, rejecting backward sequence moves.
 func (r *AgentOSPlanRepo) SavePlanMetricCheckpoint(ctx context.Context, checkpoint *agentosplan.PlanMetricCheckpoint) error {
 	ref := agentos.PlanRef{
 		PlanID:    checkpoint.PlanID,
@@ -1255,6 +1266,7 @@ WHERE plan_metric_checkpoints.sequence <= EXCLUDED.sequence`,
 	return nil
 }
 
+// RecordPlanMetric persists a plan metric sample idempotently.
 func (r *AgentOSPlanRepo) RecordPlanMetric(ctx context.Context, sample *agentosplan.PlanMetricSample) error {
 	normalized := agentosplan.NormalizePlanMetricSample(sample)
 
@@ -1359,6 +1371,7 @@ func planMetricLabelsForStorage(labels map[string]string) map[string]string {
 	return labels
 }
 
+// RecordAudit persists an audit record for a plan, returning the stored record and whether it was newly created.
 func (r *AgentOSPlanRepo) RecordAudit(ctx context.Context, record *agentosplan.AuditRecord) (agentosplan.AuditRecord, bool, error) {
 	ref, scope, err := r.prepareAuditRecord(ctx, record)
 	if err != nil {
@@ -1521,6 +1534,7 @@ func resolveUniqueInsertConflict[T any](err error, operation string, lookup func
 	return existing, nil
 }
 
+// GetAuditRecord loads the audit record identified by the given reference.
 func (r *AgentOSPlanRepo) GetAuditRecord(ctx context.Context, ref agentosplan.AuditRef) (agentosplan.AuditRecord, bool, error) {
 	if err := agentosplan.ValidateAuditRef(ref); err != nil {
 		return agentosplan.AuditRecord{}, false, err
@@ -1578,6 +1592,7 @@ func (r *AgentOSPlanRepo) GetAuditRecord(ctx context.Context, ref agentosplan.Au
 	return record, true, nil
 }
 
+// ListAuditRecords returns audit records matching the given plan audit scope.
 func (r *AgentOSPlanRepo) ListAuditRecords(ctx context.Context, scope *agentos.PlanAuditScope) ([]agentos.PlanAuditRecord, error) {
 	if err := agentosplan.ValidatePlanAuditScope(scope); err != nil {
 		return nil, err
@@ -1722,6 +1737,7 @@ WHERE n.plan_id = $1
 	return nil
 }
 
+// RecordPlanCommand persists a plan command, returning the stored record and whether it was newly created.
 func (r *AgentOSPlanRepo) RecordPlanCommand(ctx context.Context, command *agentosplan.PlanCommandRecord) (agentosplan.PlanCommandRecord, bool, error) {
 	ref, err := r.preparePlanCommandRecord(ctx, command)
 	if err != nil {
@@ -1861,6 +1877,7 @@ INSERT INTO plan_commands (
 	return *command, nil
 }
 
+// GetPlanCommand loads the plan command identified by the given reference.
 func (r *AgentOSPlanRepo) GetPlanCommand(ctx context.Context, ref agentosplan.PlanCommandRef) (agentosplan.PlanCommandRecord, bool, error) {
 	if err := agentosplan.ValidatePlanCommandRef(ref); err != nil {
 		return agentosplan.PlanCommandRecord{}, false, err
@@ -1892,6 +1909,7 @@ func (r *AgentOSPlanRepo) GetPlanCommand(ctx context.Context, ref agentosplan.Pl
 	return command, true, nil
 }
 
+// ListRecoverablePlanCommands returns plan commands in recoverable states matching the given scope.
 func (r *AgentOSPlanRepo) ListRecoverablePlanCommands(ctx context.Context, scope *agentosplan.PlanCommandScope) ([]agentosplan.PlanCommandRecord, error) {
 	statuses, err := agentosplan.RecoverablePlanCommandStatuses(scope)
 	if err != nil {
@@ -1950,10 +1968,12 @@ func (r *AgentOSPlanRepo) recoverablePlanCommandsBuilder(scope *agentosplan.Plan
 	return applyOptionalLimit(builder, scope.Limit)
 }
 
+// MarkPlanCommandDelivered transitions a plan command to the delivered state.
 func (r *AgentOSPlanRepo) MarkPlanCommandDelivered(ctx context.Context, ref agentosplan.PlanCommandRef) (agentosplan.PlanCommandRecord, error) {
 	return r.updatePlanCommandStatus(ctx, ref, agentosplan.PlanCommandDelivered, "")
 }
 
+// MarkPlanCommandFailed transitions a plan command to the failed state with the given reason.
 func (r *AgentOSPlanRepo) MarkPlanCommandFailed(ctx context.Context, ref agentosplan.PlanCommandRef, reason string) (agentosplan.PlanCommandRecord, error) {
 	return r.updatePlanCommandStatus(ctx, ref, agentosplan.PlanCommandFailed, reason)
 }
