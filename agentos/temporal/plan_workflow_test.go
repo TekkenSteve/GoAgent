@@ -823,6 +823,114 @@ func TestPlanWorkflowApproveSignalUnblocksPausedPlan(t *testing.T) {
 	require.Equal(t, []string{"run-slow"}, mocks.started)
 	require.Len(t, mocks.controls, 1)
 	require.Equal(t, agentoscore.ControlPause, mocks.controls[0].Control.Operation)
+
+	// The approval gate is auditable in the final status: it records the gated
+	// scope, the approver, the rationale, and the policy version it decided on.
+	require.NotNil(t, result.Approval)
+	require.Equal(t, agentos.PlanApprovalApproved, result.Approval.LifecycleState)
+	require.Equal(t, []string{"slow"}, result.Approval.Gate.NodeIDs)
+	require.True(t, result.Approval.Gate.ExpiresAt.IsZero(), "no ApprovalTimeoutSeconds configured")
+	require.NotNil(t, result.Approval.Decision)
+	require.True(t, result.Approval.Decision.Approved)
+	require.Equal(t, "operator-1", result.Approval.Decision.ActorID)
+	require.NotEmpty(t, result.Approval.Decision.PolicyVersion)
+	require.Equal(t, result.Approval.Gate.PolicyVersion, result.Approval.Decision.PolicyVersion)
+	require.False(t, result.Approval.Decision.DecidedAt.IsZero())
+}
+
+func TestPlanWorkflowApprovalDecisionPersistedToEventLedger(t *testing.T) {
+	t.Parallel()
+
+	ref := agentos.BackendRef{Kind: agentos.BackendKindNative, Name: agentos.BackendNameGoAgentNative}
+	spec := agentos.RunPlanSpec{
+		PlanID:         "plan-approval-audit",
+		IdempotencyKey: "plan-start-approval-audit",
+		Nodes: []agentos.PlanNodeSpec{
+			{NodeID: "slow", Capability: "pausable", Run: agentos.RunSpec{RunID: "run-slow", Backend: ref}},
+		},
+	}
+	mocks := &planWorkflowMocks{
+		statusSequences: map[string][]agentos.RunStatus{
+			"run-slow": {
+				{RunID: "run-slow", LifecycleState: RUNNING},
+				{RunID: "run-slow", LifecycleState: RUNNING},
+				{RunID: "run-slow", LifecycleState: "completed"},
+			},
+		},
+	}
+	store := agentosplan.NewMemoryPlanStore()
+
+	planWorkflowTestSpec(&spec)
+	env := newPlanWorkflowTestEnvWithStores(t, mocks, []agentos.Capability{
+		{Backend: ref, Name: "pausable", Controls: []agentoscore.ControlOperation{agentoscore.ControlPause}},
+	}, store, agentosplan.NewMemoryArtifactStore(), &spec)
+	env.RegisterDelayedCallback(func() {
+		env.SignalWorkflow(PlanControlSignalName, agentoscore.ControlRequest{
+			Operation:      agentoscore.ControlPause,
+			IdempotencyKey: "pause-plan",
+		})
+	}, time.Second)
+	env.RegisterDelayedCallback(func() {
+		env.SignalWorkflow(PlanSignalName, agentoscore.Signal{
+			Type:           agentoscore.SignalPlanApprove,
+			IdempotencyKey: "approve-plan",
+			ActorID:        "operator-1",
+			Payload: map[string]any{
+				agentosplan.SignalPayloadReason: "approved by policy review",
+			},
+		})
+	}, 2*time.Second)
+
+	env.ExecuteWorkflow(PlanWorkflow, planWorkflowInputForTest(&spec))
+	require.True(t, env.IsWorkflowCompleted())
+	require.NoError(t, env.GetWorkflowError())
+
+	events, err := store.ListPlanEvents(context.Background(), planWorkflowEventScopePtr(&spec), 0)
+	require.NoError(t, err)
+
+	assertPlanApprovalAuditPayloads(t, events, "operator-1", "approved by policy review")
+}
+
+// assertPlanApprovalAuditPayloads verifies the durable ledger carries the
+// auditable gate on the plan.blocked event and the decision on plan.approved:
+// gated node references, the actor, the rationale, and the policy version.
+func assertPlanApprovalAuditPayloads(t *testing.T, events []agentos.PlanEvent, wantActor, wantReason string) {
+	t.Helper()
+
+	var approvedPayload, blockedPayload map[string]any
+
+	for i := range events {
+		if events[i].EventType == agentoscore.EventPlanBlocked {
+			blockedPayload = events[i].Payload
+
+			continue
+		}
+
+		if events[i].EventType == agentoscore.EventPlanApproved {
+			approvedPayload = events[i].Payload
+		}
+	}
+
+	require.NotNil(t, blockedPayload, "plan.blocked event not persisted")
+	approvalGate, ok := blockedPayload[agentosplan.PlanEventPayloadApproval].(map[string]any)
+	require.True(t, ok)
+	gate, ok := approvalGate["gate"].(map[string]any)
+	require.True(t, ok)
+	nodeIDs, ok := gate["node_ids"].([]any)
+	require.True(t, ok)
+	require.Equal(t, "slow", nodeIDs[0])
+
+	require.NotNil(t, approvedPayload, "plan.approved event not persisted")
+	approvalDecision, ok := approvedPayload[agentosplan.PlanEventPayloadApproval].(map[string]any)
+	require.True(t, ok)
+	decision, ok := approvalDecision["decision"].(map[string]any)
+	require.True(t, ok)
+	approved, ok := decision["approved"].(bool)
+	require.True(t, ok)
+	require.True(t, approved)
+	require.Equal(t, wantActor, decision["actor_id"])
+	require.Equal(t, wantReason, decision["reason"])
+	require.NotEmpty(t, decision["policy_version"])
 }
 
 func TestPlanWorkflowPauseControlPreflightsUnsupportedRunningNodes(t *testing.T) {

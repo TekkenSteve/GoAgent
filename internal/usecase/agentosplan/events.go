@@ -37,6 +37,10 @@ const (
 	planEventPayloadInputResolution = "input_resolution"
 	planEventPayloadCapability      = "capability"
 	planEventPayloadConditions      = "conditions"
+
+	// PlanEventPayloadApproval is the public event payload key for the auditable
+	// approval-gate context on plan.blocked/approved/rejected events.
+	PlanEventPayloadApproval = "approval"
 )
 
 func buildPlanEventPayload(spec *agentos.RunPlanSpec, status *agentos.RunPlanStatus, event *StateEvent) map[string]any {
@@ -50,8 +54,32 @@ func buildPlanEventPayload(spec *agentos.RunPlanSpec, status *agentos.RunPlanSta
 	addPlanEventArtifactPayload(payload, event)
 	addPlanEventBudgetPayload(payload, status, event)
 	addPlanEventTracePayload(payload, event)
+	addPlanEventApprovalPayload(payload, event)
 
 	return payload
+}
+
+// addPlanEventApprovalPayload records the auditable approval-gate context so
+// the durable event timeline shows what was gated and who decided.
+func addPlanEventApprovalPayload(payload map[string]any, event *StateEvent) {
+	if event.Approval == nil {
+		return
+	}
+
+	approval := map[string]any{}
+	if gate := event.Approval.Gate; gate.Summary != "" || len(gate.NodeIDs) > 0 || gate.PolicyVersion != "" {
+		approval["gate"] = gate
+	}
+
+	if decision := event.Approval.Decision; decision != nil {
+		approval["decision"] = decision
+	}
+
+	if len(approval) == 0 {
+		return
+	}
+
+	payload[PlanEventPayloadApproval] = approval
 }
 
 func addPlanEventIdentityPayload(payload map[string]any, event *StateEvent) {
@@ -175,20 +203,26 @@ func StateEventIdempotencyKey(planID string, event *StateEvent) (string, error) 
 }
 
 type stateEventIdempotencyFields struct {
-	Kind                   EventKind                  `json:"kind"`
-	NodeID                 string                     `json:"node_id,omitempty"`
-	RunID                  string                     `json:"run_id,omitempty"`
-	Reason                 string                     `json:"reason,omitempty"`
-	Attempt                int32                      `json:"attempt,omitempty"`
-	Expansion              *PlanDelta                 `json:"expansion,omitempty"`
-	Artifacts              []agentoscore.ArtifactRef  `json:"artifacts,omitempty"`
-	BudgetDelta            *agentos.PlanBudgetUsage   `json:"budget_delta,omitempty"`
-	InputTrace             *InputResolutionTrace      `json:"input_trace,omitempty"`
-	Capability             *CapabilitySelectionTrace  `json:"capability,omitempty"`
-	ConditionTraces        []ConditionEvaluationTrace `json:"condition_traces,omitempty"`
-	PreviousLifecycleState string                     `json:"previous_lifecycle_state,omitempty"`
-	NextLifecycleState     string                     `json:"next_lifecycle_state,omitempty"`
-	At                     *time.Time                 `json:"at,omitempty"`
+	Kind                   EventKind                   `json:"kind"`
+	NodeID                 string                      `json:"node_id,omitempty"`
+	RunID                  string                      `json:"run_id,omitempty"`
+	Reason                 string                      `json:"reason,omitempty"`
+	Attempt                int32                       `json:"attempt,omitempty"`
+	Expansion              *PlanDelta                  `json:"expansion,omitempty"`
+	Artifacts              []agentoscore.ArtifactRef   `json:"artifacts,omitempty"`
+	BudgetDelta            *agentos.PlanBudgetUsage    `json:"budget_delta,omitempty"`
+	InputTrace             *InputResolutionTrace       `json:"input_trace,omitempty"`
+	Capability             *CapabilitySelectionTrace   `json:"capability,omitempty"`
+	ConditionTraces        []ConditionEvaluationTrace  `json:"condition_traces,omitempty"`
+	PreviousLifecycleState string                      `json:"previous_lifecycle_state,omitempty"`
+	NextLifecycleState     string                      `json:"next_lifecycle_state,omitempty"`
+	At                     *time.Time                  `json:"at,omitempty"`
+	Approval               *stateEventApprovalIdentity `json:"approval,omitempty"`
+}
+
+type stateEventApprovalIdentity struct {
+	Gate     agentos.PlanApprovalGate      `json:"gate,omitzero" schema:"optional"`
+	Decision *agentos.PlanApprovalDecision `json:"decision,omitempty"`
 }
 
 func stateEventIdempotencyIdentity(event *StateEvent) stateEventIdempotencyFields {
@@ -207,7 +241,26 @@ func stateEventIdempotencyIdentity(event *StateEvent) stateEventIdempotencyField
 		PreviousLifecycleState: event.PreviousLifecycleState,
 		NextLifecycleState:     event.NextLifecycleState,
 		At:                     idempotencyTime(event.At),
+		Approval:               idempotencyApproval(event.Approval),
 	}
+}
+
+func idempotencyApproval(approval *StateEventApproval) *stateEventApprovalIdentity {
+	if approval == nil {
+		return nil
+	}
+
+	identity := stateEventApprovalIdentity{Gate: approval.Gate}
+	if approval.Decision != nil {
+		decision := *approval.Decision
+		identity.Decision = &decision
+	}
+
+	if identity.Gate.Summary == "" && len(identity.Gate.NodeIDs) == 0 && identity.Gate.PolicyVersion == "" && identity.Decision == nil {
+		return nil
+	}
+
+	return &identity
 }
 
 func idempotencyExpansion(expansion PlanDelta) *PlanDelta {

@@ -194,7 +194,64 @@ type RunPlanStatus struct {
 	// lifecycle state. It is zero outside the blocked state and anchors the
 	// ApprovalTimeoutSeconds gate.
 	BlockedAt time.Time `json:"blocked_at,omitzero" schema:"optional"`
+	// Approval is the live approval-gate projection. It is nil while no gate
+	// is active: a plan that is not blocked, or a blocked plan persisted before
+	// the auditable-approval feature (the decision is then derived lazily).
+	Approval *PlanApprovalStatus `json:"approval,omitempty"`
 }
+
+// PlanApprovalGate snapshots what a plan approval gate covers when the plan
+// enters the blocked lifecycle. It is derived deterministically from the plan
+// topology and policy so a later decision can be validated against the exact
+// scope that was gated. The semantics mirror GovernedAction approval, extended
+// with the plan-level policy version and expiry.
+type PlanApprovalGate struct {
+	// Summary describes what the gate covers (gated node count and plan id).
+	Summary string `json:"summary,omitempty"`
+	// NodeIDs are the precise plan-node references the gate covers: the nodes
+	// that resume or start once the gate is approved.
+	NodeIDs []string `json:"node_ids,omitempty"`
+	// RiskReason is the rationale for requiring approval (why the plan paused).
+	RiskReason string `json:"risk_reason,omitempty"`
+	// PolicyVersion is a deterministic fingerprint of the plan policy and node
+	// set at gate creation. It changes when the topology is replanned
+	// (PlanDelta), which invalidates an existing decision.
+	PolicyVersion string `json:"policy_version,omitempty"`
+	// RequestedAt is when the gate was created (plan entered blocked).
+	RequestedAt time.Time `json:"requested_at,omitzero" schema:"optional"`
+	// ExpiresAt is when the gate auto-rejects. Zero means no expiry
+	// (ApprovalTimeoutSeconds == 0).
+	ExpiresAt time.Time `json:"expires_at,omitzero" schema:"optional"`
+}
+
+// PlanApprovalDecision records an approver's decision for one approval gate.
+// It follows the GovernedAction decision shape (approved/actor/reason/decided
+// at) and additionally records which policy version the decision validated.
+type PlanApprovalDecision struct {
+	Approved      bool      `json:"approved"`
+	ActorID       string    `json:"actor_id,omitempty"`
+	Reason        string    `json:"reason,omitempty"`
+	PolicyVersion string    `json:"policy_version,omitempty"`
+	DecidedAt     time.Time `json:"decided_at,omitzero" schema:"optional"`
+}
+
+// PlanApprovalStatus is the live projection of a plan's approval gate.
+// LifecycleState is empty only when Approval is nil (no gate active).
+type PlanApprovalStatus struct {
+	LifecycleState string                `json:"lifecycle_state,omitempty"`
+	Gate           PlanApprovalGate      `json:"gate,omitzero" schema:"optional"`
+	Decision       *PlanApprovalDecision `json:"decision,omitempty"`
+}
+
+// Plan approval gate lifecycle constants. "stale" marks a gate whose policy
+// version no longer matches the active topology (the plan was replanned), so a
+// fresh gate is required before the plan may resume.
+const (
+	PlanApprovalPending  = "pending"
+	PlanApprovalApproved = "approved"
+	PlanApprovalRejected = "rejected"
+	PlanApprovalStale    = "stale"
+)
 
 // RunPlanDescription is the public, read-oriented view of a RunPlan. Topology
 // is built from the latest durable plan snapshot, including workflow-owned

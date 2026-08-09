@@ -1198,7 +1198,17 @@ func pausePlanFromControl(activityCtx, workflowCtx workflow.Context, spec *agent
 		return blockPlanAfterControlFailure(activityCtx, workflowCtx, spec, state, err)
 	}
 
-	evt27 := agentosplan.StateEvent{Kind: agentosplan.EventPlanBlocked, Reason: "pause requested"}
+	gate, err := agentosplan.NewPlanApprovalGate(spec, &state.Status, "pause requested", workflow.Now(workflowCtx))
+	if err != nil {
+		return result, err
+	}
+
+	evt27 := agentosplan.StateEvent{
+		Kind:     agentosplan.EventPlanBlocked,
+		Reason:   "pause requested",
+		Approval: &agentosplan.StateEventApproval{Gate: gate},
+	}
+
 	if err := applyPlanStateEvent(activityCtx, workflowCtx, spec, state, &evt27); err != nil {
 		return result, err
 	}
@@ -1225,7 +1235,17 @@ func resumePlanFromControl(activityCtx, workflowCtx workflow.Context, spec *agen
 
 func blockPlanAfterControlFailure(activityCtx, workflowCtx workflow.Context, spec *agentos.RunPlanSpec, state *agentosplan.State, controlErr error) (planControlDrainResult, error) {
 	result := planControlDrainResult{Paused: true}
-	evt29 := agentosplan.StateEvent{Kind: agentosplan.EventPlanBlocked, Reason: controlErr.Error()}
+
+	gate, err := agentosplan.NewPlanApprovalGate(spec, &state.Status, controlErr.Error(), workflow.Now(workflowCtx))
+	if err != nil {
+		return result, err
+	}
+
+	evt29 := agentosplan.StateEvent{
+		Kind:     agentosplan.EventPlanBlocked,
+		Reason:   controlErr.Error(),
+		Approval: &agentosplan.StateEventApproval{Gate: gate},
+	}
 
 	if persistErr := applyPlanStateEvent(activityCtx, workflowCtx, spec, state, &evt29); persistErr != nil {
 		return result, persistErr
@@ -1403,8 +1423,21 @@ func approvePlanFromSignal(activityCtx, workflowCtx workflow.Context, spec *agen
 		return result, fmt.Errorf("%w: approve requires blocked plan state", agentoscore.ErrInvalidSignal)
 	}
 
-	reason := agentosplan.PlanSignalReason(signal)
-	evt31 := agentosplan.StateEvent{Kind: agentosplan.EventPlanApproved, Reason: reason}
+	decision, err := agentosplan.PlanApprovalDecisionFromSignal(spec, &state.Status, signal, true, workflow.Now(workflowCtx))
+	if err != nil {
+		return result, err
+	}
+
+	approval, err := approvalEventForSignal(spec, &state.Status, decision.Reason, workflow.Now(workflowCtx), &decision)
+	if err != nil {
+		return result, err
+	}
+
+	evt31 := agentosplan.StateEvent{
+		Kind:     agentosplan.EventPlanApproved,
+		Reason:   decision.Reason,
+		Approval: approval,
+	}
 
 	if err := applyPlanStateEvent(activityCtx, workflowCtx, spec, state, &evt31); err != nil {
 		return result, err
@@ -1417,7 +1450,12 @@ func approvePlanFromSignal(activityCtx, workflowCtx workflow.Context, spec *agen
 }
 
 func rejectPlanFromSignal(activityCtx, workflowCtx workflow.Context, spec *agentos.RunPlanSpec, state *agentosplan.State, controlsByNode map[string][]agentoscore.ControlOperation, signal *agentoscore.Signal, result planSignalDrainResult) (planSignalDrainResult, error) {
-	reason := agentosplan.PlanSignalReason(signal)
+	decision, err := agentosplan.PlanApprovalDecisionFromSignal(spec, &state.Status, signal, false, workflow.Now(workflowCtx))
+	if err != nil {
+		return result, err
+	}
+
+	reason := decision.Reason
 	if reason == "" {
 		reason = "plan rejected"
 	}
@@ -1439,7 +1477,17 @@ func rejectPlanFromSignal(activityCtx, workflowCtx workflow.Context, spec *agent
 		return result, err
 	}
 
-	evt32 := agentosplan.StateEvent{Kind: agentosplan.EventPlanRejected, Reason: reason}
+	approval, err := approvalEventForSignal(spec, &state.Status, reason, workflow.Now(workflowCtx), &decision)
+	if err != nil {
+		return result, err
+	}
+
+	evt32 := agentosplan.StateEvent{
+		Kind:     agentosplan.EventPlanRejected,
+		Reason:   reason,
+		Approval: approval,
+	}
+
 	if err := applyPlanStateEvent(activityCtx, workflowCtx, spec, state, &evt32); err != nil {
 		return result, err
 	}
@@ -1448,6 +1496,27 @@ func rejectPlanFromSignal(activityCtx, workflowCtx workflow.Context, spec *agent
 	result.Progressed = true
 
 	return result, nil
+}
+
+// approvalEventForSignal builds the StateEvent approval payload for an
+// approve/reject decision. A blocked plan persisted before the
+// auditable-approval feature has no gate snapshot; a fresh gate is derived from
+// the live topology so the decision is still auditable. A reject of a
+// never-blocked plan records no gate (the decision stays in the durable event
+// ledger, where it belongs, without implying a gate existed).
+func approvalEventForSignal(spec *agentos.RunPlanSpec, status *agentos.RunPlanStatus, reason string, now time.Time, decision *agentos.PlanApprovalDecision) (*agentosplan.StateEventApproval, error) {
+	approval := &agentosplan.StateEventApproval{Decision: decision}
+
+	if status.Approval == nil && status.LifecycleState == agentos.PlanLifecycleBlocked {
+		gate, err := agentosplan.NewPlanApprovalGate(spec, status, reason, now)
+		if err != nil {
+			return nil, err
+		}
+
+		approval.Gate = gate
+	}
+
+	return approval, nil
 }
 
 func applyManualNodeRetry(activityCtx, workflowCtx workflow.Context, spec *agentos.RunPlanSpec, state *agentosplan.State, nodes map[string]agentos.PlanNodeSpec, signal *agentoscore.Signal) error {
