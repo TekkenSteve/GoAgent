@@ -64,25 +64,52 @@ func TestBudgetExceeded(t *testing.T) {
 	}
 }
 
+// assertDeadlinePolicy checks the four corners of a plan deadline predicate:
+// not expired just before the deadline, expired at the deadline, no deadline
+// configured (never expires), and no anchor time (never expires).
+func assertDeadlinePolicy(t *testing.T, policy agentos.PlanPolicy, anchor time.Time, timedOut func(agentos.PlanPolicy, time.Time, time.Time) bool) {
+	t.Helper()
+
+	if timedOut(policy, anchor, anchor.Add(9*time.Second)) {
+		t.Fatal("plan should not time out before the configured deadline")
+	}
+
+	if !timedOut(policy, anchor, anchor.Add(10*time.Second)) {
+		t.Fatal("plan should time out at the configured deadline")
+	}
+
+	if timedOut(agentos.PlanPolicy{}, anchor, anchor.Add(time.Hour)) {
+		t.Fatal("plan without deadline policy timed out")
+	}
+
+	if timedOut(policy, time.Time{}, anchor.Add(time.Hour)) {
+		t.Fatal("plan without anchor time timed out")
+	}
+}
+
 func TestPlanTimedOut(t *testing.T) {
 	t.Parallel()
 
 	startedAt := time.Date(2026, 6, 20, 12, 0, 0, 0, time.UTC)
 
-	policy := agentos.PlanPolicy{TimeoutSeconds: 10}
-	if PlanTimedOut(policy, startedAt, startedAt.Add(9*time.Second)) {
-		t.Fatal("plan should not time out before the configured deadline")
-	}
+	assertDeadlinePolicy(t, agentos.PlanPolicy{TimeoutSeconds: 10}, startedAt, PlanTimedOut)
+}
 
-	if !PlanTimedOut(policy, startedAt, startedAt.Add(10*time.Second)) {
-		t.Fatal("plan should time out at the configured deadline")
-	}
+func TestPlanBlockedTimedOut(t *testing.T) {
+	t.Parallel()
 
-	if PlanTimedOut(agentos.PlanPolicy{}, startedAt, startedAt.Add(time.Hour)) {
-		t.Fatal("plan without timeout policy timed out")
-	}
+	blockedAt := time.Date(2026, 6, 20, 12, 0, 0, 0, time.UTC)
 
-	if PlanTimedOut(policy, time.Time{}, startedAt.Add(time.Hour)) {
-		t.Fatal("plan without start time timed out")
+	assertDeadlinePolicy(t, agentos.PlanPolicy{ApprovalTimeoutSeconds: 10}, blockedAt, PlanBlockedTimedOut)
+}
+
+func TestPlanBlockedTimeoutReason(t *testing.T) {
+	t.Parallel()
+
+	got := PlanBlockedTimeoutReason(agentos.PlanPolicy{ApprovalTimeoutSeconds: 30})
+	want := "plan approval timed out after 30 seconds"
+
+	if got != want {
+		t.Fatalf("reason = %q, want %q", got, want)
 	}
 }

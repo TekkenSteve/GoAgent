@@ -16,19 +16,33 @@ import (
 type PlanMetricName string
 
 const (
-	PlanMetricPlanStartedTotal        PlanMetricName = "agentos_plan_started_total"
-	PlanMetricPlanCompletedTotal      PlanMetricName = "agentos_plan_completed_total"
-	PlanMetricPlanDurationSeconds     PlanMetricName = "agentos_plan_duration_seconds"
+	// PlanMetricPlanStartedTotal counts the number of plans that have started.
+	PlanMetricPlanStartedTotal PlanMetricName = "agentos_plan_started_total"
+	// PlanMetricPlanCompletedTotal counts the number of plans that have completed.
+	PlanMetricPlanCompletedTotal PlanMetricName = "agentos_plan_completed_total"
+	// PlanMetricPlanDurationSeconds measures plan runtime in seconds.
+	PlanMetricPlanDurationSeconds PlanMetricName = "agentos_plan_duration_seconds"
+	// PlanMetricPlanQueueLatencySeconds measures plan queue latency in seconds.
 	PlanMetricPlanQueueLatencySeconds PlanMetricName = "agentos_plan_queue_latency_seconds"
-	PlanMetricNodeStartedTotal        PlanMetricName = "agentos_plan_node_started_total"
-	PlanMetricNodeCompletedTotal      PlanMetricName = "agentos_plan_node_completed_total"
-	PlanMetricNodeDurationSeconds     PlanMetricName = "agentos_plan_node_duration_seconds"
+	// PlanMetricNodeStartedTotal counts the number of plan nodes that have started.
+	PlanMetricNodeStartedTotal PlanMetricName = "agentos_plan_node_started_total"
+	// PlanMetricNodeCompletedTotal counts the number of plan nodes that have completed.
+	PlanMetricNodeCompletedTotal PlanMetricName = "agentos_plan_node_completed_total"
+	// PlanMetricNodeDurationSeconds measures node runtime in seconds.
+	PlanMetricNodeDurationSeconds PlanMetricName = "agentos_plan_node_duration_seconds"
+	// PlanMetricNodeQueueLatencySeconds measures node queue latency in seconds.
 	PlanMetricNodeQueueLatencySeconds PlanMetricName = "agentos_plan_node_queue_latency_seconds"
-	PlanMetricBackendErrorsTotal      PlanMetricName = "agentos_plan_backend_errors_total"
-	PlanMetricArtifactPublishedBytes  PlanMetricName = "agentos_plan_artifact_published_bytes"
-	PlanMetricBudgetDeltaCents        PlanMetricName = "agentos_plan_budget_delta_cents"
-	PlanMetricBudgetSpentCents        PlanMetricName = "agentos_plan_budget_spent_cents"
-	PlanMetricDynamicExpansionsTotal  PlanMetricName = "agentos_plan_dynamic_expansions_total"
+	// PlanMetricBackendErrorsTotal counts backend errors.
+	PlanMetricBackendErrorsTotal PlanMetricName = "agentos_plan_backend_errors_total"
+	// PlanMetricArtifactPublishedBytes measures the bytes of artifacts published by nodes.
+	PlanMetricArtifactPublishedBytes PlanMetricName = "agentos_plan_artifact_published_bytes"
+	// PlanMetricBudgetDeltaCents measures plan budget deltas in cents.
+	PlanMetricBudgetDeltaCents PlanMetricName = "agentos_plan_budget_delta_cents"
+	// PlanMetricBudgetSpentCents measures plan budget spent in cents.
+	PlanMetricBudgetSpentCents PlanMetricName = "agentos_plan_budget_spent_cents"
+	// PlanMetricDynamicExpansionsTotal counts dynamic plan expansions.
+	PlanMetricDynamicExpansionsTotal PlanMetricName = "agentos_plan_dynamic_expansions_total"
+	// PlanMetricNodeRetryScheduledTotal counts scheduled node retries.
 	PlanMetricNodeRetryScheduledTotal PlanMetricName = "agentos_plan_node_retry_scheduled_total"
 )
 

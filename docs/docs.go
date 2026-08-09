@@ -2870,6 +2870,10 @@ const docTemplate = `{
         "control.PlanPolicy": {
             "type": "object",
             "properties": {
+                "approval_timeout_seconds": {
+                    "description": "ApprovalTimeoutSeconds bounds how long a plan may stay blocked waiting\nfor human approval (approve/reject signal). When it elapses the plan is\nauto-rejected. 0 disables the gate (plan waits indefinitely).",
+                    "type": "integer"
+                },
                 "budget_cents": {
                     "type": "integer"
                 },
@@ -3014,6 +3018,10 @@ const docTemplate = `{
                     "items": {
                         "$ref": "#/definitions/core.ArtifactRef"
                     }
+                },
+                "blocked_at": {
+                    "description": "BlockedAt records when the plan entered the blocked (awaiting-approval)\nlifecycle state. It is zero outside the blocked state and anchors the\nApprovalTimeoutSeconds gate.",
+                    "type": "string"
                 },
                 "budget_usage": {
                     "$ref": "#/definitions/control.PlanBudgetUsage"
@@ -3564,6 +3572,10 @@ const docTemplate = `{
                     "items": {
                         "$ref": "#/definitions/core.ArtifactRef"
                     }
+                },
+                "blocked_at": {
+                    "description": "BlockedAt records when the plan entered the blocked (awaiting-approval)\nlifecycle state. It is zero outside the blocked state and anchors the\nApprovalTimeoutSeconds gate.",
+                    "type": "string"
                 },
                 "budget_usage": {
                     "$ref": "#/definitions/control.PlanBudgetUsage"

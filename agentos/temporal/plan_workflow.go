@@ -16,19 +16,32 @@ import (
 )
 
 const (
-	PlanWorkflowName                  = "AgentOSPlanWorkflow"
-	PlanStatusQueryName               = "agentos.plan.status"
-	PlanSignalName                    = "agentos.plan.signal"
-	PlanControlSignalName             = "agentos.plan.control"
-	ValidatePlanActivityName          = "AgentOSValidatePlan"
-	ResolvePlanNodeInputActivityName  = "AgentOSResolvePlanNodeInput"
-	StartPlanNodeActivityName         = "AgentOSStartPlanNode"
-	StatusPlanNodeActivityName        = "AgentOSStatusPlanNode"
-	SignalPlanNodeActivityName        = "AgentOSSignalPlanNode"
-	ControlPlanNodeActivityName       = "AgentOSControlPlanNode"
-	PublishPlanArtifactsActivityName  = "AgentOSPublishPlanArtifacts"
+	// PlanWorkflowName is the Temporal workflow type that executes AgentOS plans.
+	PlanWorkflowName = "AgentOSPlanWorkflow"
+	// PlanStatusQueryName is the Temporal query name that returns the plan's aggregate status.
+	PlanStatusQueryName = "agentos.plan.status"
+	// PlanSignalName is the Temporal signal name that delivers plan-level signals.
+	PlanSignalName = "agentos.plan.signal"
+	// PlanControlSignalName is the Temporal signal name that delivers plan control requests.
+	PlanControlSignalName = "agentos.plan.control"
+	// ValidatePlanActivityName is the Temporal activity name that validates a plan.
+	ValidatePlanActivityName = "AgentOSValidatePlan"
+	// ResolvePlanNodeInputActivityName is the Temporal activity name that resolves a plan node input.
+	ResolvePlanNodeInputActivityName = "AgentOSResolvePlanNodeInput"
+	// StartPlanNodeActivityName is the Temporal activity name that starts a plan node.
+	StartPlanNodeActivityName = "AgentOSStartPlanNode"
+	// StatusPlanNodeActivityName is the Temporal activity name that reads a plan node status.
+	StatusPlanNodeActivityName = "AgentOSStatusPlanNode"
+	// SignalPlanNodeActivityName is the Temporal activity name that signals a plan node.
+	SignalPlanNodeActivityName = "AgentOSSignalPlanNode"
+	// ControlPlanNodeActivityName is the Temporal activity name that sends control to a plan node.
+	ControlPlanNodeActivityName = "AgentOSControlPlanNode"
+	// PublishPlanArtifactsActivityName is the Temporal activity name that publishes plan artifacts.
+	PublishPlanArtifactsActivityName = "AgentOSPublishPlanArtifacts"
+	// EvaluatePlanExpansionActivityName is the Temporal activity name that evaluates a plan expansion.
 	EvaluatePlanExpansionActivityName = "AgentOSEvaluatePlanExpansion"
-	PersistPlanStateActivityName      = "AgentOSPersistPlanState"
+	// PersistPlanStateActivityName is the Temporal activity name that persists plan state.
+	PersistPlanStateActivityName = "AgentOSPersistPlanState"
 )
 
 const (
@@ -36,8 +49,10 @@ const (
 	defaultActivityTimeout     = 5 * time.Minute
 	defaultActivityMaxAttempts = 3
 	defaultPlanParallelism     = 32
-	FAILED                     = "failed"
-	CANCELED                   = "canceled"
+	// FAILED marks a run lifecycle state in which the run failed.
+	FAILED = "failed"
+	// CANCELED marks a run lifecycle state in which the run was canceled.
+	CANCELED = "canceled"
 )
 
 type planWorkflowInput struct {
@@ -317,7 +332,14 @@ func applyPlanWorkflowPreScheduleGuards(
 	iterationCount int32,
 	paused bool,
 ) (planWorkflowPreScheduleResult, error) {
-	timedOut, err := applyPlanTimeoutGuard(runtime.ActivityCtx, runtime.WorkflowCtx, spec, state, validation.ControlsByNode)
+	timedOut, err := applyPlanDeadlineGuard(runtime.ActivityCtx, runtime.WorkflowCtx, spec, state, validation.ControlsByNode, planDeadlineGuardParams{
+		expired:        agentosplan.PlanTimedOut,
+		anchor:         func(s agentos.RunPlanStatus) time.Time { return s.StartedAt },
+		idempotencyKey: agentosplan.PlanTimeoutControlIdempotencyKey,
+		seconds:        func(p agentos.PlanPolicy) int64 { return p.TimeoutSeconds },
+		reason:         agentosplan.PlanTimeoutReason,
+		eventKind:      agentosplan.EventPlanFailed,
+	})
 	if err != nil || timedOut {
 		return planWorkflowPreScheduleResult{Done: timedOut}, err
 	}
@@ -328,6 +350,19 @@ func applyPlanWorkflowPreScheduleGuards(
 
 	if !paused {
 		return planWorkflowPreScheduleResult{}, nil
+	}
+
+	if timedOut, err := applyPlanDeadlineGuard(runtime.ActivityCtx, runtime.WorkflowCtx, spec, state, validation.ControlsByNode, planDeadlineGuardParams{
+		expired:        agentosplan.PlanBlockedTimedOut,
+		anchor:         func(s agentos.RunPlanStatus) time.Time { return s.BlockedAt },
+		idempotencyKey: agentosplan.PlanBlockedTimeoutControlIdempotencyKey,
+		seconds:        func(p agentos.PlanPolicy) int64 { return p.ApprovalTimeoutSeconds },
+		reason:         agentosplan.PlanBlockedTimeoutReason,
+		eventKind:      agentosplan.EventPlanRejected,
+	}); err != nil {
+		return planWorkflowPreScheduleResult{}, err
+	} else if timedOut {
+		return planWorkflowPreScheduleResult{Done: true}, nil
 	}
 
 	if err := continuePlanWorkflowIfNeeded(runtime.WorkflowCtx, input, spec, state, *expansionCount, iterationCount, runtime.ProcessedControls, runtime.ProcessedSignals); err != nil {
@@ -961,6 +996,31 @@ func cancelTimedOutNode(activityCtx workflow.Context, planID string, node *agent
 	return nil
 }
 
+// cancelActivePlanNodesAndFail cancels every active node run and then fails
+// the plan with the given event kind and reason. Shared by the budget, timeout
+// and blocked-approval guards, so each guard differs only in its deadline
+// predicate, idempotency key and failure kind.
+func cancelActivePlanNodesAndFail(activityCtx, workflowCtx workflow.Context, spec *agentos.RunPlanSpec, state *agentosplan.State, controlsByNode map[string][]agentoscore.ControlOperation, kind agentosplan.EventKind, idempotencyKey, reason string) error {
+	control := agentoscore.ControlRequest{
+		Operation:      agentoscore.ControlCancel,
+		IdempotencyKey: idempotencyKey,
+	}
+	if err := controlActivePlanNodes(activityCtx, spec.PlanID, &state.Status, &control, controlsByNode); err != nil {
+		return err
+	}
+
+	if err := markActivePlanNodesCanceled(activityCtx, workflowCtx, spec, state, reason); err != nil {
+		return err
+	}
+
+	evt := agentosplan.StateEvent{Kind: kind, Reason: reason}
+	if err := applyPlanStateEvent(activityCtx, workflowCtx, spec, state, &evt); err != nil {
+		return err
+	}
+
+	return nil
+}
+
 func applyPlanBudgetGuard(activityCtx, workflowCtx workflow.Context, spec *agentos.RunPlanSpec, state *agentosplan.State, controlsByNode map[string][]agentoscore.ControlOperation) (bool, error) {
 	if !agentosplan.BudgetExceeded(spec.Policy, state.Status.BudgetUsage) {
 		return false, nil
@@ -971,52 +1031,42 @@ func applyPlanBudgetGuard(activityCtx, workflowCtx workflow.Context, spec *agent
 		return false, err
 	}
 
-	control := agentoscore.ControlRequest{
-		Operation:      agentoscore.ControlCancel,
-		IdempotencyKey: key,
-	}
-	if err := controlActivePlanNodes(activityCtx, spec.PlanID, &state.Status, &control, controlsByNode); err != nil {
-		return false, err
-	}
-
 	reason := agentosplan.BudgetExceededReason(spec.Policy, state.Status.BudgetUsage)
-	if err := markActivePlanNodesCanceled(activityCtx, workflowCtx, spec, state, reason); err != nil {
-		return false, err
-	}
-
-	evt24 := agentosplan.StateEvent{Kind: agentosplan.EventPlanFailed, Reason: reason}
-	if err := applyPlanStateEvent(activityCtx, workflowCtx, spec, state, &evt24); err != nil {
+	if err := cancelActivePlanNodesAndFail(activityCtx, workflowCtx, spec, state, controlsByNode, agentosplan.EventPlanFailed, key, reason); err != nil {
 		return false, err
 	}
 
 	return true, nil
 }
 
-func applyPlanTimeoutGuard(activityCtx, workflowCtx workflow.Context, spec *agentos.RunPlanSpec, state *agentosplan.State, controlsByNode map[string][]agentoscore.ControlOperation) (bool, error) {
-	if !agentosplan.PlanTimedOut(spec.Policy, state.Status.StartedAt, workflow.Now(workflowCtx)) {
+// planDeadlineGuardParams supplies what differs between the wall-clock and
+// approval-timeout plan guards: which deadline predicate fires, which status
+// field anchors it, and which failure event and reason the plan receives.
+type planDeadlineGuardParams struct {
+	expired        func(agentos.PlanPolicy, time.Time, time.Time) bool
+	anchor         func(agentos.RunPlanStatus) time.Time
+	idempotencyKey func(string, time.Time, int64) (string, error)
+	seconds        func(agentos.PlanPolicy) int64
+	reason         func(agentos.PlanPolicy) string
+	eventKind      agentosplan.EventKind
+}
+
+// applyPlanDeadlineGuard trips the plan failure pipeline when a plan-level
+// deadline passes: cancel active nodes, then fail the plan under a stable
+// idempotency key so replays and retries never emit duplicate controls.
+func applyPlanDeadlineGuard(activityCtx, workflowCtx workflow.Context, spec *agentos.RunPlanSpec, state *agentosplan.State, controlsByNode map[string][]agentoscore.ControlOperation, params planDeadlineGuardParams) (bool, error) {
+	anchor := params.anchor(state.Status)
+	if !params.expired(spec.Policy, anchor, workflow.Now(workflowCtx)) {
 		return false, nil
 	}
 
-	key, err := agentosplan.PlanTimeoutControlIdempotencyKey(spec.PlanID, state.Status.StartedAt, spec.Policy.TimeoutSeconds)
+	key, err := params.idempotencyKey(spec.PlanID, anchor, params.seconds(spec.Policy))
 	if err != nil {
 		return false, err
 	}
 
-	control := agentoscore.ControlRequest{
-		Operation:      agentoscore.ControlCancel,
-		IdempotencyKey: key,
-	}
-	if err := controlActivePlanNodes(activityCtx, spec.PlanID, &state.Status, &control, controlsByNode); err != nil {
-		return false, err
-	}
-
-	reason := agentosplan.PlanTimeoutReason(spec.Policy)
-	if err := markActivePlanNodesCanceled(activityCtx, workflowCtx, spec, state, reason); err != nil {
-		return false, err
-	}
-
-	evt25 := agentosplan.StateEvent{Kind: agentosplan.EventPlanFailed, Reason: reason}
-	if err := applyPlanStateEvent(activityCtx, workflowCtx, spec, state, &evt25); err != nil {
+	reason := params.reason(spec.Policy)
+	if err := cancelActivePlanNodesAndFail(activityCtx, workflowCtx, spec, state, controlsByNode, params.eventKind, key, reason); err != nil {
 		return false, err
 	}
 

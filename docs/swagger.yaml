@@ -232,6 +232,12 @@ definitions:
     type: object
   control.PlanPolicy:
     properties:
+      approval_timeout_seconds:
+        description: |-
+          ApprovalTimeoutSeconds bounds how long a plan may stay blocked waiting
+          for human approval (approve/reject signal). When it elapses the plan is
+          auto-rejected. 0 disables the gate (plan waits indefinitely).
+        type: integer
       budget_cents:
         type: integer
       continue_as_new_events:
@@ -327,6 +333,12 @@ definitions:
         items:
           $ref: '#/definitions/core.ArtifactRef'
         type: array
+      blocked_at:
+        description: |-
+          BlockedAt records when the plan entered the blocked (awaiting-approval)
+          lifecycle state. It is zero outside the blocked state and anchors the
+          ApprovalTimeoutSeconds gate.
+        type: string
       budget_usage:
         $ref: '#/definitions/control.PlanBudgetUsage'
       lifecycle_state:
@@ -737,6 +749,12 @@ definitions:
         items:
           $ref: '#/definitions/core.ArtifactRef'
         type: array
+      blocked_at:
+        description: |-
+          BlockedAt records when the plan entered the blocked (awaiting-approval)
+          lifecycle state. It is zero outside the blocked state and anchors the
+          ApprovalTimeoutSeconds gate.
+        type: string
       budget_usage:
         $ref: '#/definitions/control.PlanBudgetUsage'
       lifecycle_state:

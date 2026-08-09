@@ -64,6 +64,7 @@ type PlanDeltaSpec struct {
 // EdgeTrigger selects which upstream node terminal state activates an edge.
 type EdgeTrigger string
 
+// EdgeTrigger values selecting the upstream terminal state that activates an edge.
 const (
 	EdgeOnSuccess  EdgeTrigger = "success"
 	EdgeOnError    EdgeTrigger = "error"
@@ -154,6 +155,10 @@ type PlanPolicy struct {
 	MaxParallelNodes    int32 `json:"max_parallel_nodes,omitempty"`
 	BudgetCents         int64 `json:"budget_cents,omitempty"`
 	TimeoutSeconds      int64 `json:"timeout_seconds,omitempty"`
+	// ApprovalTimeoutSeconds bounds how long a plan may stay blocked waiting
+	// for human approval (approve/reject signal). When it elapses the plan is
+	// auto-rejected. 0 disables the gate (plan waits indefinitely).
+	ApprovalTimeoutSeconds int64 `json:"approval_timeout_seconds,omitempty"`
 }
 
 // NodePolicy constrains one plan node.
@@ -166,6 +171,7 @@ type NodePolicy struct {
 // PlanJoinStrategy controls how converging dependencies unblock a node.
 type PlanJoinStrategy string
 
+// PlanJoinStrategy values controlling how converging dependencies unblock a node.
 const (
 	PlanJoinAll   PlanJoinStrategy = "all"
 	PlanJoinAny   PlanJoinStrategy = "any"
@@ -184,6 +190,10 @@ type RunPlanStatus struct {
 	Metadata       map[string]string  `json:"metadata,omitempty"`
 	StartedAt      time.Time          `json:"started_at,omitzero" schema:"optional"`
 	UpdatedAt      time.Time          `json:"updated_at,omitzero" schema:"optional"`
+	// BlockedAt records when the plan entered the blocked (awaiting-approval)
+	// lifecycle state. It is zero outside the blocked state and anchors the
+	// ApprovalTimeoutSeconds gate.
+	BlockedAt time.Time `json:"blocked_at,omitzero" schema:"optional"`
 }
 
 // RunPlanDescription is the public, read-oriented view of a RunPlan. Topology
@@ -393,6 +403,7 @@ type PlanConditionTrace struct {
 // PlanAuditAction identifies durable control-plane actions.
 type PlanAuditAction string
 
+// PlanAuditAction values identifying durable control-plane actions.
 const (
 	PlanAuditActionStart   PlanAuditAction = "plan.start"
 	PlanAuditActionSignal  PlanAuditAction = "plan.signal"
@@ -450,6 +461,7 @@ func ArtifactSchemaCatalogSpecJSONSchema() ([]byte, error) {
 // PlanSchemaKind identifies a public RunPlan authoring schema.
 type PlanSchemaKind string
 
+// PlanSchemaKind values identifying public RunPlan authoring schemas.
 const (
 	PlanSchemaKindRunPlan               PlanSchemaKind = "run-plan"
 	PlanSchemaKindPlanDelta             PlanSchemaKind = "plan-delta"

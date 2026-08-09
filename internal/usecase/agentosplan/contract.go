@@ -156,8 +156,11 @@ type PlanEventSubscriber interface {
 type AuditAction string
 
 const (
-	AuditActionPlanStart   AuditAction = "plan.start"
-	AuditActionPlanSignal  AuditAction = "plan.signal"
+	// AuditActionPlanStart is the audit action recorded when a plan starts.
+	AuditActionPlanStart AuditAction = "plan.start"
+	// AuditActionPlanSignal is the audit action recorded when a plan receives a signal.
+	AuditActionPlanSignal AuditAction = "plan.signal"
+	// AuditActionPlanControl is the audit action recorded when a plan receives a control operation.
 	AuditActionPlanControl AuditAction = "plan.control"
 )
 
@@ -184,6 +187,7 @@ type AuditRef struct {
 	IdempotencyKey string
 }
 
+// AuditRefFromRecord extracts the idempotent identity fields from a durable audit record.
 func AuditRefFromRecord(record *AuditRecord) AuditRef {
 	return AuditRef{
 		PlanID:         record.PlanID,
@@ -205,9 +209,12 @@ type AuditStore interface {
 type PlanCommandStatus string
 
 const (
-	PlanCommandPending   PlanCommandStatus = "pending"
+	// PlanCommandPending is the outbox state of a command written but not yet delivered.
+	PlanCommandPending PlanCommandStatus = "pending"
+	// PlanCommandDelivered is the terminal outbox state of a delivered command.
 	PlanCommandDelivered PlanCommandStatus = "delivered"
-	PlanCommandFailed    PlanCommandStatus = "failed"
+	// PlanCommandFailed is the outbox state of a command whose delivery failed and remains recoverable.
+	PlanCommandFailed PlanCommandStatus = "failed"
 )
 
 // PlanCommandRecord is the durable command/outbox entry written before
@@ -235,6 +242,7 @@ type PlanCommandRef struct {
 	IdempotencyKey string
 }
 
+// PlanCommandRefFromRecord extracts the idempotent identity fields from a durable plan command record.
 func PlanCommandRefFromRecord(command *PlanCommandRecord) PlanCommandRef {
 	return PlanCommandRef{
 		PlanID:         command.PlanID,

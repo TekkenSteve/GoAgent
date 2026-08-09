@@ -432,6 +432,61 @@ func TestPlanWorkflowCancelsActiveNodesWhenPlanTimesOut(t *testing.T) {
 	require.NotEmpty(t, mocks.controls[0].Control.IdempotencyKey)
 }
 
+func TestPlanWorkflowAutoRejectsBlockedPlanAfterApprovalTimeout(t *testing.T) {
+	t.Parallel()
+
+	ref := agentos.BackendRef{Kind: agentos.BackendKindNative, Name: agentos.BackendNameGoAgentNative}
+	spec := agentos.RunPlanSpec{
+		PlanID:         "plan-blocked-timeout",
+		IdempotencyKey: "plan-start-blocked-timeout",
+		Policy: agentos.PlanPolicy{
+			ApprovalTimeoutSeconds: 1,
+		},
+		Nodes: []agentos.PlanNodeSpec{
+			{NodeID: "slow", Run: agentos.RunSpec{RunID: "run-slow", Backend: ref}},
+		},
+	}
+	mocks := &planWorkflowMocks{
+		statuses: map[string]agentos.RunStatus{
+			"run-slow": {RunID: "run-slow", LifecycleState: RUNNING},
+		},
+	}
+
+	planWorkflowTestSpec(&spec)
+
+	// Restore the plan already blocked (awaiting approval) past its deadline:
+	// the first paused poll iteration must auto-reject it.
+	blockedAt := time.Now().Add(-2 * time.Second)
+	input := planWorkflowInputForTest(&spec)
+	input.Continued = true
+	input.Status = agentos.RunPlanStatus{
+		PlanID:         spec.PlanID,
+		LifecycleState: agentos.PlanLifecycleBlocked,
+		StartedAt:      blockedAt.Add(-time.Hour),
+		UpdatedAt:      blockedAt,
+		BlockedAt:      blockedAt,
+		Nodes: []agentos.PlanNodeStatus{
+			{NodeID: "slow", RunID: "run-slow", Backend: ref, LifecycleState: agentos.PlanNodeRunning, UpdatedAt: blockedAt},
+		},
+	}
+
+	env := newPlanWorkflowTestEnv(t, mocks, &spec)
+	env.ExecuteWorkflow(PlanWorkflow, input)
+
+	require.True(t, env.IsWorkflowCompleted())
+	require.NoError(t, env.GetWorkflowError())
+
+	var result agentos.RunPlanStatus
+	require.NoError(t, env.GetWorkflowResult(&result))
+	require.Equal(t, agentos.PlanLifecycleFailed, result.LifecycleState)
+	require.Contains(t, result.Reason, "approval timed out")
+	require.Empty(t, mocks.started)
+	require.Len(t, mocks.controls, 1)
+	require.Equal(t, "run-slow", mocks.controls[0].RunID)
+	require.Equal(t, agentoscore.ControlCancel, mocks.controls[0].Control.Operation)
+	require.NotEmpty(t, mocks.controls[0].Control.IdempotencyKey)
+}
+
 func TestPlanWorkflowCancelsActiveNodesWhenBudgetExceeded(t *testing.T) {
 	t.Parallel()
 

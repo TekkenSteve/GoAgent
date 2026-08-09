@@ -131,26 +131,46 @@ func restorePlanNodeStatus(nodes map[string]agentos.PlanNodeStatus, expectedNode
 type EventKind string
 
 const (
-	EventPlanStarted         EventKind = "plan.started"
-	EventPlanBlocked         EventKind = "plan.blocked"
-	EventPlanExpanded        EventKind = "plan.expanded"
-	EventPlanApproved        EventKind = "plan.approved"
-	EventPlanRejected        EventKind = "plan.rejected"
-	EventPlanSucceeded       EventKind = "plan.succeeded"
-	EventPlanFailed          EventKind = "plan.failed"
-	EventPlanCanceled        EventKind = "plan.canceled"
-	EventNodeReady           EventKind = "node.ready"
-	EventNodeStarted         EventKind = "node.started"
-	EventNodeSucceeded       EventKind = "node.succeeded"
-	EventNodeFailed          EventKind = "node.failed"
-	EventNodeRetryScheduled  EventKind = "node.retry_scheduled"
-	EventNodeSkipped         EventKind = "node.skipped"
-	EventNodeCanceled        EventKind = "node.canceled"
-	EventNodeInputResolved   EventKind = "node.input_resolved"
-	EventCapabilitySelected  EventKind = "capability.selected"
+	// EventPlanStarted is the reducer event for a plan entering the running lifecycle.
+	EventPlanStarted EventKind = "plan.started"
+	// EventPlanBlocked is the reducer event for a plan entering the blocked lifecycle.
+	EventPlanBlocked EventKind = "plan.blocked"
+	// EventPlanExpanded is the reducer event for a plan expansion.
+	EventPlanExpanded EventKind = "plan.expanded"
+	// EventPlanApproved is the reducer event for a blocked plan receiving approval.
+	EventPlanApproved EventKind = "plan.approved"
+	// EventPlanRejected is the reducer event for a blocked plan receiving rejection.
+	EventPlanRejected EventKind = "plan.rejected"
+	// EventPlanSucceeded is the reducer event for a plan reaching the succeeded lifecycle.
+	EventPlanSucceeded EventKind = "plan.succeeded"
+	// EventPlanFailed is the reducer event for a plan reaching the failed lifecycle.
+	EventPlanFailed EventKind = "plan.failed"
+	// EventPlanCanceled is the reducer event for a plan reaching the canceled lifecycle.
+	EventPlanCanceled EventKind = "plan.canceled"
+	// EventNodeReady is the reducer event for a node entering the ready lifecycle.
+	EventNodeReady EventKind = "node.ready"
+	// EventNodeStarted is the reducer event for a node starting a backend run.
+	EventNodeStarted EventKind = "node.started"
+	// EventNodeSucceeded is the reducer event for a node completing successfully.
+	EventNodeSucceeded EventKind = "node.succeeded"
+	// EventNodeFailed is the reducer event for a node failing.
+	EventNodeFailed EventKind = "node.failed"
+	// EventNodeRetryScheduled is the reducer event for a node retry being scheduled.
+	EventNodeRetryScheduled EventKind = "node.retry_scheduled"
+	// EventNodeSkipped is the reducer event for a node being skipped.
+	EventNodeSkipped EventKind = "node.skipped"
+	// EventNodeCanceled is the reducer event for a node being canceled.
+	EventNodeCanceled EventKind = "node.canceled"
+	// EventNodeInputResolved is the reducer event for a node's inputs being resolved.
+	EventNodeInputResolved EventKind = "node.input_resolved"
+	// EventCapabilitySelected is the reducer event for a capability being selected for a node.
+	EventCapabilitySelected EventKind = "capability.selected"
+	// EventConditionsEvaluated is the reducer event for node conditions being evaluated.
 	EventConditionsEvaluated EventKind = "conditions.evaluated"
-	EventArtifactsPublished  EventKind = "artifacts.published"
-	EventBudgetReported      EventKind = "budget.reported"
+	// EventArtifactsPublished is the reducer event for node artifacts being published.
+	EventArtifactsPublished EventKind = "artifacts.published"
+	// EventBudgetReported is the reducer event for plan budget usage being reported.
+	EventBudgetReported EventKind = "budget.reported"
 )
 
 // StateEvent transitions plan state.
@@ -256,6 +276,15 @@ func (s *State) applyPlanEvent(lifecycle string, event *StateEvent, at time.Time
 
 	if event.Kind == EventPlanStarted && s.Status.StartedAt.IsZero() {
 		s.Status.StartedAt = at
+	}
+
+	// BlockedAt anchors the ApprovalTimeoutSeconds gate: set when entering
+	// the blocked state, cleared on any transition out of it (node lifecycle
+	// events do not pass through here, so they never advance the clock).
+	if lifecycle == agentos.PlanLifecycleBlocked {
+		s.Status.BlockedAt = at
+	} else if !s.Status.BlockedAt.IsZero() {
+		s.Status.BlockedAt = time.Time{}
 	}
 }
 

@@ -315,6 +315,9 @@
         },
         "timeout_seconds": {
           "type": "integer"
+        },
+        "approval_timeout_seconds": {
+          "type": "integer"
         }
       },
       "additionalProperties": false

@@ -80,3 +80,20 @@ func PlanTimedOut(policy agentos.PlanPolicy, startedAt, now time.Time) bool {
 func PlanTimeoutReason(policy agentos.PlanPolicy) string {
 	return fmt.Sprintf("plan timed out after %d seconds", policy.TimeoutSeconds)
 }
+
+// PlanBlockedTimedOut reports whether a plan awaiting human approval has
+// exceeded its ApprovalTimeoutSeconds while blocked. The clock starts when
+// the plan entered the blocked state, not when it started.
+func PlanBlockedTimedOut(policy agentos.PlanPolicy, blockedAt, now time.Time) bool {
+	if policy.ApprovalTimeoutSeconds <= 0 || blockedAt.IsZero() {
+		return false
+	}
+
+	return !now.Before(blockedAt.Add(time.Duration(policy.ApprovalTimeoutSeconds) * time.Second))
+}
+
+// PlanBlockedTimeoutReason returns a stable public failure reason for
+// approval-timeout auto-rejections.
+func PlanBlockedTimeoutReason(policy agentos.PlanPolicy) string {
+	return fmt.Sprintf("plan approval timed out after %d seconds", policy.ApprovalTimeoutSeconds)
+}
