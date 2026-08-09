@@ -14,6 +14,7 @@ import (
 
 var errExecutorTemporalConfigRequired = errors.New("ExecutorTemporal - config is required")
 
+// ExecutorTemporal runs agent and orchestration workflows on a Temporal cluster.
 type ExecutorTemporal struct {
 	client client.Client
 	opts   options
@@ -25,6 +26,7 @@ type options struct {
 	workflowTaskQueues *orchestration.WorkflowTaskQueues
 }
 
+// NewExecutorTemporal creates an ExecutorTemporal bound to the given Temporal client and configuration.
 func NewExecutorTemporal(c client.Client, cfg *config.Temporal) (*ExecutorTemporal, error) {
 	if cfg == nil {
 		return nil, errExecutorTemporalConfigRequired
@@ -51,23 +53,26 @@ func NewExecutorTemporal(c client.Client, cfg *config.Temporal) (*ExecutorTempor
 	}, nil
 }
 
+// StartExecution starts the agent workflow for the given execute request.
 func (r *ExecutorTemporal) StartExecution(ctx context.Context, req *entity.ExecuteRequest) (entity.RunStatus, error) {
 	workflowID := r.opts.workflowIDPrefix + req.RunID
 
 	input := orchestration.AgentWorkflowInput{
-		RunID:            req.RunID,
-		AccountID:        req.AccountID,
-		SystemPrompt:     req.SystemPrompt,
-		Message:          req.UserMessage,
-		Config:           entity.LLMConfig{Model: req.ModelRef},
-		MCPServerConfigs: req.MCPServerConfigs,
-		AwaitUserInput:   req.AwaitUserInput,
-		TaskQueues:       *r.opts.workflowTaskQueues,
+		RunID:                 req.RunID,
+		AccountID:             req.AccountID,
+		SystemPrompt:          req.SystemPrompt,
+		Message:               req.UserMessage,
+		Config:                entity.LLMConfig{Model: req.ModelRef},
+		MCPServerConfigs:      req.MCPServerConfigs,
+		AwaitUserInput:        req.AwaitUserInput,
+		AwaitUserInputTimeout: time.Duration(req.AwaitUserInputTimeoutSeconds) * time.Second,
+		TaskQueues:            *r.opts.workflowTaskQueues,
 	}
 
 	opts := client.StartWorkflowOptions{
-		ID:        workflowID,
-		TaskQueue: r.opts.workflowTaskQueues.NativeControl,
+		ID:               workflowID,
+		TaskQueue:        r.opts.workflowTaskQueues.NativeControl,
+		SearchAttributes: orchestration.SearchAttributesForRun(req.RunID, "running"),
 	}
 
 	_, err := r.client.ExecuteWorkflow(ctx, opts, r.opts.workflowName, &input)
@@ -83,6 +88,7 @@ func (r *ExecutorTemporal) StartExecution(ctx context.Context, req *entity.Execu
 	}, nil
 }
 
+// GetStatus queries the agent workflow's current run status.
 func (r *ExecutorTemporal) GetStatus(ctx context.Context, runID string) (entity.RunStatus, error) {
 	workflowID := r.opts.workflowIDPrefix + runID
 
@@ -107,12 +113,14 @@ func (r *ExecutorTemporal) GetStatus(ctx context.Context, runID string) (entity.
 	}, nil
 }
 
+// StartOrchestration starts the orchestration workflow for the given input.
 func (r *ExecutorTemporal) StartOrchestration(ctx context.Context, input *entity.OrchestrationInput) (entity.RunStatus, error) {
 	workflowID := "orch-" + r.opts.workflowIDPrefix + input.RunID
 
 	opts := client.StartWorkflowOptions{
-		ID:        workflowID,
-		TaskQueue: r.opts.workflowTaskQueues.NativeControl,
+		ID:               workflowID,
+		TaskQueue:        r.opts.workflowTaskQueues.NativeControl,
+		SearchAttributes: orchestration.SearchAttributesForRun(input.RunID, "running"),
 	}
 
 	_, err := r.client.ExecuteWorkflow(ctx, opts, orchestration.OrchestrationWorkflowName, &orchestration.WorkflowInput{
@@ -131,6 +139,7 @@ func (r *ExecutorTemporal) StartOrchestration(ctx context.Context, input *entity
 	}, nil
 }
 
+// GetOrchestrationStatus queries the orchestration workflow's current status.
 func (r *ExecutorTemporal) GetOrchestrationStatus(ctx context.Context, runID string) (entity.RunStatus, error) {
 	workflowID := "orch-" + r.opts.workflowIDPrefix + runID
 
@@ -152,6 +161,7 @@ func (r *ExecutorTemporal) GetOrchestrationStatus(ctx context.Context, runID str
 	}, nil
 }
 
+// Pause signals the agent workflow to pause.
 func (r *ExecutorTemporal) Pause(ctx context.Context, runID string) error {
 	workflowID := r.opts.workflowIDPrefix + runID
 
@@ -162,6 +172,7 @@ func (r *ExecutorTemporal) Pause(ctx context.Context, runID string) error {
 	return nil
 }
 
+// Resume signals the agent workflow to resume.
 func (r *ExecutorTemporal) Resume(ctx context.Context, runID string) error {
 	workflowID := r.opts.workflowIDPrefix + runID
 
@@ -172,6 +183,7 @@ func (r *ExecutorTemporal) Resume(ctx context.Context, runID string) error {
 	return nil
 }
 
+// Cancel signals the agent workflow to cancel.
 func (r *ExecutorTemporal) Cancel(ctx context.Context, runID string) error {
 	workflowID := r.opts.workflowIDPrefix + runID
 
@@ -182,6 +194,7 @@ func (r *ExecutorTemporal) Cancel(ctx context.Context, runID string) error {
 	return nil
 }
 
+// SignalUserMessage delivers a user message signal to the running agent workflow.
 func (r *ExecutorTemporal) SignalUserMessage(ctx context.Context, runID string, message *orchestration.UserMessageSignal) error {
 	workflowID := r.opts.workflowIDPrefix + runID
 

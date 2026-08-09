@@ -9,6 +9,7 @@ import (
 
 	agentos "github.com/TekkenSteve/GoAgent/agentos/control"
 	agentoscore "github.com/TekkenSteve/GoAgent/agentos/core"
+	"github.com/TekkenSteve/GoAgent/internal/agentfw/orchestration"
 	"github.com/TekkenSteve/GoAgent/internal/pkg/postgres"
 	goredis "github.com/TekkenSteve/GoAgent/internal/pkg/redis"
 	"github.com/TekkenSteve/GoAgent/internal/repo/agentos/planstream"
@@ -43,13 +44,21 @@ var (
 	errPlanRuntimeCommandStoreRequired   = errors.New("agentos temporal plan runtime: plan command store is not configured")
 	errPlanRuntimeAuditStoreRequired     = errors.New("agentos temporal plan runtime: audit store is not configured")
 
-	ErrPlanRuntimePostgresURLRequired              = errors.New("agentos temporal plan runtime: postgres url is required")
-	ErrPlanRuntimeArtifactStoreBackendRequired     = errors.New("agentos temporal plan runtime: artifact store backend is required")
-	ErrPlanRuntimeArtifactStoreBackendUnknown      = errors.New("agentos temporal plan runtime: artifact store backend is unknown")
-	ErrPlanRuntimeArtifactStoreLocalRootRequired   = errors.New("agentos temporal plan runtime: artifact local root is required")
-	ErrPlanRuntimeArtifactStoreS3BucketRequired    = errors.New("agentos temporal plan runtime: artifact s3 bucket is required")
-	ErrPlanRuntimeArtifactStoreS3RegionRequired    = errors.New("agentos temporal plan runtime: artifact s3 region is required")
+	// ErrPlanRuntimePostgresURLRequired reports a missing Postgres URL in the plan runtime config.
+	ErrPlanRuntimePostgresURLRequired = errors.New("agentos temporal plan runtime: postgres url is required")
+	// ErrPlanRuntimeArtifactStoreBackendRequired reports a missing artifact store backend in the plan runtime config.
+	ErrPlanRuntimeArtifactStoreBackendRequired = errors.New("agentos temporal plan runtime: artifact store backend is required")
+	// ErrPlanRuntimeArtifactStoreBackendUnknown reports an unknown artifact store backend in the plan runtime config.
+	ErrPlanRuntimeArtifactStoreBackendUnknown = errors.New("agentos temporal plan runtime: artifact store backend is unknown")
+	// ErrPlanRuntimeArtifactStoreLocalRootRequired reports a missing artifact local root in the plan runtime config.
+	ErrPlanRuntimeArtifactStoreLocalRootRequired = errors.New("agentos temporal plan runtime: artifact local root is required")
+	// ErrPlanRuntimeArtifactStoreS3BucketRequired reports a missing artifact S3 bucket in the plan runtime config.
+	ErrPlanRuntimeArtifactStoreS3BucketRequired = errors.New("agentos temporal plan runtime: artifact s3 bucket is required")
+	// ErrPlanRuntimeArtifactStoreS3RegionRequired reports a missing artifact S3 region in the plan runtime config.
+	ErrPlanRuntimeArtifactStoreS3RegionRequired = errors.New("agentos temporal plan runtime: artifact s3 region is required")
+	// ErrPlanRuntimeArtifactStoreS3AccessKeyRequired reports a missing artifact S3 access key ID in the plan runtime config.
 	ErrPlanRuntimeArtifactStoreS3AccessKeyRequired = errors.New("agentos temporal plan runtime: artifact s3 access key id is required")
+	// ErrPlanRuntimeArtifactStoreS3SecretKeyRequired reports a missing artifact S3 secret access key in the plan runtime config.
 	ErrPlanRuntimeArtifactStoreS3SecretKeyRequired = errors.New("agentos temporal plan runtime: artifact s3 secret access key is required")
 )
 
@@ -158,9 +167,7 @@ func newPlanRuntimeWithClient(ctx context.Context, cfg *RuntimeConfig, c planTem
 
 	pg, err := newRuntimePostgres(cfg)
 	if err != nil {
-		_ = rt.Close()
-
-		return nil, fmt.Errorf("agentos temporal plan runtime postgres: %w", err)
+		return nil, errors.Join(fmt.Errorf("agentos temporal plan runtime postgres: %w", err), rt.Close())
 	}
 
 	rt.postgres = pg
@@ -174,9 +181,7 @@ func newPlanRuntimeWithClient(ctx context.Context, cfg *RuntimeConfig, c planTem
 
 	blobStore, err := artifactrepo.NewBlobStore(ctx, &artifactConfig)
 	if err != nil {
-		_ = rt.Close()
-
-		return nil, fmt.Errorf("agentos temporal plan runtime artifact store: %w", err)
+		return nil, errors.Join(fmt.Errorf("agentos temporal plan runtime artifact store: %w", err), rt.Close())
 	}
 
 	rt.artifactStore = temporalrepo.NewAgentOSArtifactRepo(pg, blobStore)
@@ -585,9 +590,7 @@ func (r *planRuntime) SubscribePlan(ctx context.Context, scope *agentos.PlanStre
 
 	catchUpEvents, err := r.planEvents.ListPlanEvents(ctx, &catchUpScope, 0)
 	if err != nil {
-		_ = live.Close()
-
-		return nil, err
+		return nil, errors.Join(err, live.Close())
 	}
 
 	replayEvents := append(append([]agentos.PlanEvent(nil), events...), catchUpEvents...)
@@ -829,8 +832,9 @@ func executePlanWorkflow(ctx context.Context, temporalClient planTemporalClient,
 	}
 
 	options := client.StartWorkflowOptions{
-		ID:        planWorkflowID(spec.PlanID),
-		TaskQueue: taskQueue,
+		ID:               planWorkflowID(spec.PlanID),
+		TaskQueue:        taskQueue,
+		SearchAttributes: orchestration.SearchAttributesForRun(spec.PlanID, "running"),
 	}
 
 	_, err := temporalClient.ExecuteWorkflow(ctx, &options, PlanWorkflowName, &planWorkflowInput{

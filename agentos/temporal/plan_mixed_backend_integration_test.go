@@ -112,7 +112,11 @@ func newMixedBackendAdapter(t *testing.T, planID, httpNodeID, summaryArtifact st
 	grpcServer := newMixedAdapterGRPCServer(t)
 	grpcBackend, err := grpcbackend.NewBackend(nil, &grpcbackend.Config{Name: grpcRef.Name, Target: grpcServer.target, Insecure: true})
 	require.NoError(t, err)
-	t.Cleanup(func() { _ = grpcBackend.Close() })
+	t.Cleanup(func() {
+		if err := grpcBackend.Close(); err != nil {
+			t.Errorf("close grpc backend: %v", err)
+		}
+	})
 
 	registry := agentosruntime.NewRegistry()
 	require.NoError(t, registry.Register(nativeRef, nativeBackend))

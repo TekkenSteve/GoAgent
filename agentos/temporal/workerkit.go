@@ -255,6 +255,12 @@ func (k *WorkerKit) registerNativeControlWorkloads(w WorkloadRegistrar) {
 	w.RegisterActivityWithOptions(k.activities.PrepareActivity, activity.RegisterOptions{
 		Name: orchestration.PrepareActivityName,
 	})
+	w.RegisterActivityWithOptions(k.activities.SnapshotHistoryActivity, activity.RegisterOptions{
+		Name: orchestration.SnapshotHistoryActivityName,
+	})
+	w.RegisterActivityWithOptions(k.activities.LoadHistoryActivity, activity.RegisterOptions{
+		Name: orchestration.LoadHistoryActivityName,
+	})
 }
 
 func (k *WorkerKit) registerNativeActivityWorkloads(llmWorker, toolWorker WorkloadRegistrar) {

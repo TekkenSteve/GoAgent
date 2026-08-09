@@ -3,6 +3,11 @@ set -eu
 
 NAMESPACE=${DEFAULT_NAMESPACE:-default}
 TEMPORAL_ADDRESS=${TEMPORAL_ADDRESS:-temporal:7233}
+# Search attributes used by GoAgent workflows
+# (internal/agentfw/orchestration/search_attributes.go). The server has no
+# dynamic-config key to auto-register these; they are registered against the
+# cluster metadata here, on every `docker compose up` (idempotent).
+SEARCH_ATTRIBUTES="goagent.run_id:Keyword goagent.lifecycle_state:Keyword goagent.model:Keyword goagent.iteration:Int goagent.last_tool:Keyword"
 MAX_ATTEMPTS=${TEMPORAL_HEALTH_CHECK_MAX_ATTEMPTS:-30}
 SLEEP_SECONDS=${TEMPORAL_HEALTH_CHECK_SLEEP_SECONDS:-5}
 
@@ -62,4 +67,23 @@ while :; do
   echo "Namespace operation not ready yet, waiting... (attempt $attempt/$MAX_ATTEMPTS)"
   attempt=$((attempt + 1))
   sleep "$SLEEP_SECONDS"
+done
+
+echo "Registering GoAgent search attributes..."
+
+for sa in $SEARCH_ATTRIBUTES; do
+  NAME=${sa%%:*}
+  TYPE=${sa##*:}
+
+  if temporal operator search-attribute list --address "$TEMPORAL_ADDRESS" --namespace "$NAMESPACE" 2>/dev/null | grep -q "^$NAME[[:space:]]"; then
+    echo "Search attribute '$NAME' already registered"
+    continue
+  fi
+
+  if temporal operator search-attribute create --name "$NAME" --type "$TYPE" --address "$TEMPORAL_ADDRESS" --namespace "$NAMESPACE" >/dev/null 2>&1; then
+    echo "Search attribute '$NAME' ($TYPE) registered"
+  else
+    echo "Failed to register search attribute '$NAME' ($TYPE)"
+    exit 1
+  fi
 done

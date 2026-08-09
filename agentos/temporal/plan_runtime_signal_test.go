@@ -475,7 +475,12 @@ func TestPlanRuntimeSubscribePlanEnforcesTenantScope(t *testing.T) {
 	if err != nil {
 		t.Fatalf("SubscribePlan scoped: %v", err)
 	}
-	defer sub.Close()
+
+	t.Cleanup(func() {
+		if err := sub.Close(); err != nil {
+			t.Errorf("close plan subscription: %v", err)
+		}
+	})
 
 	event := <-sub.Events()
 	if event.EventType != agentoscore.EventPlanStarted {
@@ -511,7 +516,12 @@ func TestPlanRuntimeSubscribePlanCatchesUpDurableEventsAfterLiveSubscribe(t *tes
 	if err != nil {
 		t.Fatalf("SubscribePlan: %v", err)
 	}
-	defer sub.Close()
+
+	t.Cleanup(func() {
+		if err := sub.Close(); err != nil {
+			t.Errorf("close plan subscription: %v", err)
+		}
+	})
 
 	first := <-sub.Events()
 

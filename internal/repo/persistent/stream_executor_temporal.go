@@ -49,8 +49,9 @@ func (e *TemporalStreamExecutor) ExecuteStream(ctx context.Context, req *entity.
 	}
 
 	_, err := e.client.ExecuteWorkflow(ctx, client.StartWorkflowOptions{
-		ID:        workflowID,
-		TaskQueue: e.taskQueue,
+		ID:               workflowID,
+		TaskQueue:        e.taskQueue,
+		SearchAttributes: orchestration.SearchAttributesForRun(req.RunID, "running"),
 	}, orchestration.StreamWorkflowName, &input)
 	if err != nil {
 		return fmt.Errorf("TemporalStreamExecutor - ExecuteStream - start workflow: %w", err)
@@ -58,6 +59,3 @@ func (e *TemporalStreamExecutor) ExecuteStream(ctx context.Context, req *entity.
 
 	return nil
 }
-
-// compile-time interface check.
-var _ usecase.StreamExecutor = (*TemporalStreamExecutor)(nil)

@@ -8,6 +8,7 @@ import (
 
 	agentoscore "github.com/TekkenSteve/GoAgent/agentos/core"
 	agentosproc "github.com/TekkenSteve/GoAgent/agentos/process"
+	"github.com/TekkenSteve/GoAgent/internal/agentfw/orchestration"
 	"github.com/TekkenSteve/GoAgent/internal/pkg/postgres"
 	temporalrepo "github.com/TekkenSteve/GoAgent/internal/repo/persistent"
 	"github.com/TekkenSteve/GoAgent/internal/usecase/agentosprocess"
@@ -228,8 +229,9 @@ func (r *processRuntime) executeProcessWorkflow(ctx context.Context, spec *agent
 	}
 
 	options := client.StartWorkflowOptions{
-		ID:        processWorkflowID(spec.ProcessID),
-		TaskQueue: r.taskQueue,
+		ID:               processWorkflowID(spec.ProcessID),
+		TaskQueue:        r.taskQueue,
+		SearchAttributes: orchestration.SearchAttributesForRun(spec.ProcessID, "running"),
 	}
 
 	_, err := r.temporalClient.ExecuteWorkflow(ctx, &options, ProcessWorkflowName, &processWorkflowInput{
