@@ -74,6 +74,122 @@ func TestProcessWorkflowRequiresCurrentWorkflowVersion(t *testing.T) {
 	require.Error(t, env.GetWorkflowError())
 }
 
+func TestProcessWorkflowContinuesAsNewWhenHistoryLimitReached(t *testing.T) {
+	t.Parallel()
+
+	spec := processWorkflowTestSpec("process-can-max-history")
+	spec.Policy = agentosproc.Policy{MaxHistoryEvents: 10}
+	env := newProcessWorkflowTestEnv(t)
+	env.SetCurrentHistoryLength(10)
+
+	env.ExecuteWorkflow(ProcessWorkflow, processWorkflowInputForTest(&spec))
+
+	require.True(t, env.IsWorkflowCompleted())
+	require.Error(t, env.GetWorkflowError())
+	require.True(t, workflow.IsContinueAsNewError(env.GetWorkflowError()))
+}
+
+func TestProcessWorkflowContinuesAsNewOnContinueAsNewEvents(t *testing.T) {
+	t.Parallel()
+
+	spec := processWorkflowTestSpec("process-can-proactive")
+	spec.Policy = agentosproc.Policy{ContinueAsNewEvents: 10, MaxHistoryEvents: 20}
+	env := newProcessWorkflowTestEnv(t)
+	env.SetCurrentHistoryLength(10)
+
+	env.ExecuteWorkflow(ProcessWorkflow, processWorkflowInputForTest(&spec))
+
+	require.True(t, env.IsWorkflowCompleted())
+	require.Error(t, env.GetWorkflowError())
+	require.True(t, workflow.IsContinueAsNewError(env.GetWorkflowError()))
+}
+
+func TestProcessWorkflowDoesNotContinueAsNewWithoutPolicy(t *testing.T) {
+	t.Parallel()
+
+	spec := processWorkflowTestSpec("process-can-disabled")
+	env := newProcessWorkflowTestEnv(t)
+	env.SetCurrentHistoryLength(1000)
+	env.RegisterDelayedCallback(func() {
+		env.SignalWorkflow(ProcessControlSignalName, agentoscore.ControlRequest{
+			Operation:      agentoscore.ControlCancel,
+			IdempotencyKey: "cancel-1",
+		})
+	}, time.Second)
+
+	env.ExecuteWorkflow(ProcessWorkflow, processWorkflowInputForTest(&spec))
+
+	require.True(t, env.IsWorkflowCompleted())
+	require.NoError(t, env.GetWorkflowError())
+
+	var result agentosproc.Status
+	require.NoError(t, env.GetWorkflowResult(&result))
+	require.Equal(t, agentosproc.ProcessCanceled, result.LifecycleState)
+}
+
+func TestEvaluateProcessContinuation(t *testing.T) {
+	t.Parallel()
+
+	require.False(t, evaluateProcessContinuation(nil, 1000).ShouldContinue)
+	require.False(t, evaluateProcessContinuation(&agentosproc.Policy{}, 1000).ShouldContinue)
+	require.False(t, evaluateProcessContinuation(&agentosproc.Policy{MaxHistoryEvents: 10}, 9).ShouldContinue)
+
+	proactive := evaluateProcessContinuation(&agentosproc.Policy{ContinueAsNewEvents: 10, MaxHistoryEvents: 20}, 10)
+	require.True(t, proactive.ShouldContinue)
+	require.Equal(t, "continue_as_new_events", proactive.Reason)
+
+	ceiling := evaluateProcessContinuation(&agentosproc.Policy{MaxHistoryEvents: 20}, 20)
+	require.True(t, ceiling.ShouldContinue)
+	require.Equal(t, "max_history_events", ceiling.Reason)
+}
+
+func TestContinuedProcessWorkflowInputCarriesTimers(t *testing.T) {
+	t.Parallel()
+
+	spec := processWorkflowTestSpec("process-can-continuation")
+	spec.Policy = agentosproc.Policy{MaxHistoryEvents: 10}
+	input := processWorkflowInputForTest(&spec)
+
+	firedTimer := agentosproc.TimerSpec{TimerID: "survey", AfterSeconds: 60, Signal: "process.timer.survey"}
+	timerState := []processWorkflowTimer{
+		{Timer: firedTimer, At: time.Date(2026, 7, 4, 12, 1, 0, 0, time.UTC), Fired: true},
+		{Timer: agentosproc.TimerSpec{TimerID: "follow-up", AfterSeconds: 300, Signal: "process.timer.follow-up"}, At: time.Date(2026, 7, 4, 12, 5, 0, 0, time.UTC), Fired: false},
+	}
+	timers := processWorkflowTimers{Timers: timerState}
+
+	next := continuedProcessWorkflowInput(input, &timers)
+
+	require.Equal(t, int32(1), next.ContinuationCount)
+	require.Equal(t, input.Spec, next.Spec)
+	require.Equal(t, input.WorkflowVersion, next.WorkflowVersion)
+	require.Equal(t, timerState, next.Timers)
+
+	// The continuation input must be independent of the live timer slice so
+	// later fires in the current run do not mutate the carried state.
+	require.NotSame(t, &timers.Timers[0], &next.Timers[0])
+}
+
+func TestNewProcessWorkflowTimersUsesCarriedState(t *testing.T) {
+	t.Parallel()
+
+	spec := processWorkflowTestSpec("process-timer-carry")
+	spec.Timers = []agentosproc.TimerSpec{
+		{TimerID: "follow-up", AfterSeconds: 300, Signal: "process.timer.follow-up"},
+	}
+
+	carried := []processWorkflowTimer{
+		{Timer: spec.Timers[0], At: time.Date(2026, 7, 4, 12, 5, 0, 0, time.UTC), Fired: true},
+	}
+
+	// A carried timer that already fired must not be re-armed with a fresh
+	// after_seconds schedule. The carried branch does not read the workflow
+	// clock, so a nil context is sufficient for this unit test.
+	timers := newProcessWorkflowTimers(nil, nil, processRefFromSpec(&spec), carried, spec.Timers)
+	require.Len(t, timers.Timers, 1)
+	require.True(t, timers.Timers[0].Fired)
+	require.Equal(t, time.Date(2026, 7, 4, 12, 5, 0, 0, time.UTC), timers.Timers[0].At)
+}
+
 func newProcessWorkflowTestEnv(t *testing.T) *testsuite.TestWorkflowEnvironment {
 	t.Helper()
 

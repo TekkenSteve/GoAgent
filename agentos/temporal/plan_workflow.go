@@ -49,6 +49,11 @@ const (
 	defaultActivityTimeout     = 5 * time.Minute
 	defaultActivityMaxAttempts = 3
 	defaultPlanParallelism     = 32
+	// planSearchAttributesVersionMarker is the workflow.GetVersion marker that
+	// gates lifecycle search-attribute upserts. Upserts emit history events, so
+	// executions started before the marker replay without them; new executions
+	// keep goagent.lifecycle_state fresh on every lifecycle transition.
+	planSearchAttributesVersionMarker = "agentos-plan-search-attributes"
 	// FAILED marks a run lifecycle state in which the run failed.
 	FAILED = "failed"
 	// CANCELED marks a run lifecycle state in which the run was canceled.
@@ -80,6 +85,12 @@ func PlanWorkflow(ctx workflow.Context, input *planWorkflowInput) (agentos.RunPl
 		return agentos.RunPlanStatus{}, err
 	}
 
+	// Executions started before the search-attributes change replay without the
+	// upserts, so their history stays identical; new executions keep the
+	// lifecycle visible to operators on every transition.
+	searchAttributesEnabled := workflow.GetVersion(ctx, planSearchAttributesVersionMarker, workflow.DefaultVersion, 1)
+	lifecycleSync := newLifecycleSearchAttributeSync(searchAttributesEnabled, setup.Spec.PlanID)
+
 	if err := workflow.SetQueryHandler(ctx, PlanStatusQueryName, func() (agentos.RunPlanStatus, error) {
 		return setup.State.Status, nil
 	}); err != nil {
@@ -99,16 +110,12 @@ func PlanWorkflow(ctx workflow.Context, input *planWorkflowInput) (agentos.RunPl
 
 	var validation ValidatePlanOutput
 	if err := workflow.ExecuteActivity(activityCtx, ValidatePlanActivityName, validatePlanInput{Spec: *setup.Spec}).Get(activityCtx, &validation); err != nil {
-		evt2 := agentosplan.StateEvent{Kind: agentosplan.EventPlanFailed, Reason: err.Error()}
-
-		return setup.State.Status, errors.Join(err, applyPlanStateEvent(activityCtx, ctx, setup.Spec, &setup.State, &evt2))
+		return failPlanWorkflowSetup(activityCtx, ctx, &setup, lifecycleSync, err.Error(), err)
 	}
 
 	compiler, err := agentosplan.NewCELCompiler()
 	if err != nil {
-		evt3 := agentosplan.StateEvent{Kind: agentosplan.EventPlanFailed, Reason: err.Error()}
-
-		return setup.State.Status, errors.Join(err, applyPlanStateEvent(activityCtx, ctx, setup.Spec, &setup.State, &evt3))
+		return failPlanWorkflowSetup(activityCtx, ctx, &setup, lifecycleSync, err.Error(), err)
 	}
 
 	expansionCount := input.ExpansionCount
@@ -121,6 +128,11 @@ func PlanWorkflow(ctx workflow.Context, input *planWorkflowInput) (agentos.RunPl
 		result, err := runPlanWorkflowIteration(&runtime, input, setup.Spec, &setup.State, &validation, &expansionCount, iterationCount, paused)
 		paused = result.Paused
 
+		// Sync on every lifecycle transition so a blocked/failed plan is
+		// immediately queryable; change-detection avoids per-iteration no-op
+		// upserts bloating history.
+		lifecycleSync.sync(ctx, setup.State.Status.LifecycleState)
+
 		if err != nil {
 			return setup.State.Status, err
 		}
@@ -129,6 +141,19 @@ func PlanWorkflow(ctx workflow.Context, input *planWorkflowInput) (agentos.RunPl
 			return setup.State.Status, nil
 		}
 	}
+}
+
+// failPlanWorkflowSetup records a setup failure (plan validation or CEL
+// compiler) as the terminal plan.failed event, syncs the visible lifecycle so
+// the failure is queryable, and returns the combined error.
+func failPlanWorkflowSetup(activityCtx, ctx workflow.Context, setup *planWorkflowSetup, lifecycleSync *lifecycleSearchAttributeSync, reason string, cause error) (agentos.RunPlanStatus, error) {
+	evt := agentosplan.StateEvent{Kind: agentosplan.EventPlanFailed, Reason: reason}
+
+	applyErr := applyPlanStateEvent(activityCtx, ctx, setup.Spec, &setup.State, &evt)
+
+	lifecycleSync.sync(ctx, setup.State.Status.LifecycleState)
+
+	return setup.State.Status, errors.Join(cause, applyErr)
 }
 
 type planWorkflowSetup struct {
