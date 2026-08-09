@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/TekkenSteve/GoAgent/internal/entity"
+	enumspb "go.temporal.io/api/enums/v1"
 	"go.temporal.io/sdk/workflow"
 )
 
@@ -24,6 +25,9 @@ var (
 
 // ——— Signal & query names ———
 
+// OrchestrationWorkflowName is the workflow type registered for the generic
+// step-queue interpreter; StepModifySignal and ExternalEventSignal are the
+// runtime signals that modify the queue or deliver external events.
 const (
 	activityStartToCloseTimeout = 10 * time.Minute
 	OrchestrationWorkflowName   = "agentfw.orchestration-workflow"
@@ -275,7 +279,13 @@ func executeAgentStep(ctx workflow.Context, queues *WorkflowTaskQueues, step *en
 
 	childOptions := workflow.ChildWorkflowOptions{
 		WorkflowID: fmt.Sprintf("agentfw-orch-%s-%s", step.ID, workflow.GetInfo(ctx).WorkflowExecution.RunID),
-		TaskQueue:  queues.NativeControl,
+		// Explicit policies, never implicit SDK defaults: the step agent is
+		// canceled gracefully (REQUEST_CANCEL) when the orchestration run
+		// terminates, and a retried launch may only bind to a previously
+		// failed execution (ALLOW_DUPLICATE_FAILED_ONLY), never a running one.
+		ParentClosePolicy:     enumspb.PARENT_CLOSE_POLICY_REQUEST_CANCEL,
+		WorkflowIDReusePolicy: enumspb.WORKFLOW_ID_REUSE_POLICY_ALLOW_DUPLICATE_FAILED_ONLY,
+		TaskQueue:             queues.NativeControl,
 	}
 
 	childCtx := workflow.WithChildOptions(ctx, childOptions)

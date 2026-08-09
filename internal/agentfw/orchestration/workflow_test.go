@@ -165,6 +165,32 @@ func TestAgentWorkflowV2_UserMessageSignalContinuesRun(t *testing.T) {
 	require.Equal(t, int32(2), result.Step)
 }
 
+func TestAgentWorkflowV2_WaitUserInputTimeout(t *testing.T) {
+	t.Parallel()
+
+	env := newWorkflowTestEnv()
+	input := testAgentWorkflowInput("run-v2-wait-timeout", "Hello")
+	input.AwaitUserInput = true
+	input.AwaitUserInputTimeout = 100 * time.Millisecond
+	env.ExecuteWorkflow(AgentWorkflow, input)
+
+	require.True(t, env.IsWorkflowCompleted())
+	require.NoError(t, env.GetWorkflowError())
+
+	var result WorkflowResult
+	require.NoError(t, env.GetWorkflowResult(&result))
+	require.Equal(t, string(entity.LifecycleCompleted), result.LifecycleState)
+
+	// The timeout must be visible as the status reason so operators can
+	// distinguish a timed-out wait from a normal completion.
+	var status RunStatus
+
+	resp, err := env.QueryWorkflow(QueryRunStatus)
+	require.NoError(t, err)
+	require.NoError(t, resp.Get(&status))
+	require.Equal(t, awaitingInputTimeoutReason, status.Reason)
+}
+
 func TestAgentWorkflowV2_ToolRound(t *testing.T) {
 	t.Parallel()
 
@@ -195,6 +221,128 @@ func TestAgentWorkflowV2_ToolRound(t *testing.T) {
 	require.NoError(t, env.GetWorkflowResult(&result))
 	require.Equal(t, "completed", result.LifecycleState)
 	require.Equal(t, int32(2), result.Step)
+}
+
+func TestEstimateMessagesStateSizeBytes(t *testing.T) {
+	t.Parallel()
+
+	require.Zero(t, estimateMessagesStateSizeBytes(nil))
+	require.Zero(t, estimateMessagesStateSizeBytes([]entity.Message{}))
+
+	msgs := []entity.Message{
+		{Role: entity.RoleUser, Content: "hello"},
+		{Role: entity.RoleAssistant, Content: "hi there"},
+	}
+
+	got := estimateMessagesStateSizeBytes(msgs)
+	require.Positive(t, got)
+
+	// Deterministic: the same history must yield the same estimate on replay.
+	require.Equal(t, got, estimateMessagesStateSizeBytes(msgs))
+}
+
+func TestAgentWorkflowV2_ContinueAsNewSnapshotsHistory(t *testing.T) {
+	t.Parallel()
+
+	var snapCalls []*SnapshotHistoryInput
+
+	var suite testsuite.WorkflowTestSuite
+
+	env := suite.NewTestWorkflowEnvironment()
+	env.RegisterWorkflowWithOptions(AgentWorkflow, workflow.RegisterOptions{
+		Name: AgentWorkflowName,
+	})
+	env.RegisterActivityWithOptions(mockPrepareActivity, activity.RegisterOptions{
+		Name: PrepareActivityName,
+	})
+
+	// Tool-call first, then text: the Continue-As-New decision only runs
+	// after the tool round, and a text-only round exits the run early.
+	mockLLM := &mockLLMStepWithTool{}
+	env.RegisterActivityWithOptions(mockLLM.fn, activity.RegisterOptions{
+		Name: LLMStepActivityName,
+	})
+	env.RegisterActivityWithOptions(mockToolExecActivity, activity.RegisterOptions{
+		Name: ToolExecActivityName,
+	})
+	env.RegisterActivityWithOptions(func(_ context.Context, input *SnapshotHistoryInput) (*SnapshotHistoryOutput, error) {
+		snapCalls = append(snapCalls, input)
+
+		return &SnapshotHistoryOutput{Ref: "snap://" + input.RunID}, nil
+	}, activity.RegisterOptions{Name: SnapshotHistoryActivityName})
+	env.RegisterActivityWithOptions(func(_ context.Context, _ *LoadHistoryInput) (*LoadHistoryOutput, error) {
+		return &LoadHistoryOutput{Messages: []entity.Message{
+			{Role: entity.RoleUser, Content: "restored"},
+		}}, nil
+	}, activity.RegisterOptions{Name: LoadHistoryActivityName})
+
+	input := testAgentWorkflowInput("run-v2-can-snap", "Hello")
+	input.ContinuePolicy = ContinueAsNewPolicy{StateSizeThresholdByte: 1, MaxContinuations: 3}
+	env.ExecuteWorkflow(AgentWorkflow, input)
+
+	require.True(t, env.IsWorkflowCompleted())
+
+	// The run must end with Continue-As-New, not a failure, and the snapshot
+	// activity must have been invoked exactly once with the conversation.
+	var canErr *workflow.ContinueAsNewError
+	require.ErrorAs(t, env.GetWorkflowError(), &canErr)
+	require.Len(t, snapCalls, 1)
+	require.Equal(t, "run-v2-can-snap", snapCalls[0].RunID)
+	require.Equal(t, 1, snapCalls[0].Round)
+	require.GreaterOrEqual(t, len(snapCalls[0].Messages), 2)
+}
+
+func TestAgentWorkflowV2_LoadsHistorySnapshot(t *testing.T) {
+	t.Parallel()
+
+	var llmInputs [][]entity.Message
+
+	var suite testsuite.WorkflowTestSuite
+
+	env := suite.NewTestWorkflowEnvironment()
+	env.RegisterWorkflowWithOptions(AgentWorkflow, workflow.RegisterOptions{
+		Name: AgentWorkflowName,
+	})
+	env.RegisterActivityWithOptions(mockPrepareActivity, activity.RegisterOptions{
+		Name: PrepareActivityName,
+	})
+	env.RegisterActivityWithOptions(func(_ context.Context, input *LLMStepInput) (*LLMStepOutput, error) {
+		llmInputs = append(llmInputs, input.Messages)
+
+		return &LLMStepOutput{
+			Content:      "restored response",
+			Usage:        entity.Usage{PromptTokens: 1, CompletionTokens: 1, TotalTokens: 2},
+			FinishReason: "stop",
+		}, nil
+	}, activity.RegisterOptions{Name: LLMStepActivityName})
+	env.RegisterActivityWithOptions(func(_ context.Context, input *LoadHistoryInput) (*LoadHistoryOutput, error) {
+		require.Equal(t, "snap://restored", input.Ref)
+
+		return &LoadHistoryOutput{Messages: []entity.Message{
+			{Role: entity.RoleUser, Content: "earlier"},
+			{Role: entity.RoleAssistant, Content: "earlier reply"},
+			{Role: entity.RoleUser, Content: "continue here"},
+		}}, nil
+	}, activity.RegisterOptions{Name: LoadHistoryActivityName})
+
+	input := testAgentWorkflowInput("run-v2-load-snap", "ignored initial message")
+	input.Continuation = ContinuationPayload{
+		RunID:              "run-v2-load-snap",
+		HistoryRef:         "snap://restored",
+		InitialRequestedAt: time.Now(),
+	}
+	env.ExecuteWorkflow(AgentWorkflow, input)
+
+	require.True(t, env.IsWorkflowCompleted())
+	require.NoError(t, env.GetWorkflowError())
+
+	// The LLM must see the restored conversation, not the initial request.
+	require.Len(t, llmInputs, 1)
+	require.Equal(t, []entity.Message{
+		{Role: entity.RoleUser, Content: "earlier"},
+		{Role: entity.RoleAssistant, Content: "earlier reply"},
+		{Role: entity.RoleUser, Content: "continue here"},
+	}, llmInputs[0])
 }
 
 func TestAgentWorkflowV2_Cancel(t *testing.T) {

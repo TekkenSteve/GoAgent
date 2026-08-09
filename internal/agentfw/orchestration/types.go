@@ -8,6 +8,9 @@ import (
 
 // ——— Workflow type names ———
 
+// AgentWorkflowName and StreamWorkflowName are the Temporal workflow types
+// for the native agent workflows; the remaining constants are the control
+// signals and query name they handle.
 const (
 	AgentWorkflowName  = "agentfw.agent-workflow.v1"
 	StreamWorkflowName = "agentfw.stream-workflow.v1"
@@ -28,14 +31,18 @@ const (
 
 // ——— Activity names ———
 
+// PrepareActivityName and the other activity name constants are the
+// Temporal activity types registered by AgentActivities.
 const (
-	PrepareActivityName        = "agentfw.prepare.v1"
-	LLMStepActivityName        = "agentfw.llm-step.v1"
-	LLMStreamActivityName      = "agentfw.llm-stream.v1"
-	ToolExecActivityName       = "agentfw.tool-exec.v1"
-	ToolExecStreamActivityName = "agentfw.tool-exec-stream.v1"
-	InitStreamActivityName     = "agentfw.init-stream.v1"
-	FinishStreamActivityName   = "agentfw.finish-stream.v1"
+	PrepareActivityName         = "agentfw.prepare.v1"
+	LLMStepActivityName         = "agentfw.llm-step.v1"
+	LLMStreamActivityName       = "agentfw.llm-stream.v1"
+	ToolExecActivityName        = "agentfw.tool-exec.v1"
+	ToolExecStreamActivityName  = "agentfw.tool-exec-stream.v1"
+	InitStreamActivityName      = "agentfw.init-stream.v1"
+	FinishStreamActivityName    = "agentfw.finish-stream.v1"
+	SnapshotHistoryActivityName = "agentfw.snapshot-history.v1"
+	LoadHistoryActivityName     = "agentfw.load-history.v1"
 )
 
 // ——— Activity input/output types ———
@@ -242,7 +249,10 @@ type AgentWorkflowInput struct {
 	ContinuePolicy   ContinueAsNewPolicy
 	Continuation     ContinuationPayload
 	AwaitUserInput   bool
-	TaskQueues       WorkflowTaskQueues
+	// AwaitUserInputTimeout bounds the waiting_input state so a run never
+	// waits for user input indefinitely. Zero uses defaultAwaitUserInputTimeout.
+	AwaitUserInputTimeout time.Duration
+	TaskQueues            WorkflowTaskQueues
 }
 
 // WorkflowInput wraps the business orchestration input with Temporal worker

@@ -88,6 +88,12 @@ func (r DefaultRegistrar) RegisterActivities(rt *TemporalRuntime) error {
 	nativeToolActivityWorker.RegisterActivityWithOptions(r.activities.ToolExecActivity, activity.RegisterOptions{
 		Name: orchestration.ToolExecActivityName,
 	})
+	nativeControlWorker.RegisterActivityWithOptions(r.activities.SnapshotHistoryActivity, activity.RegisterOptions{
+		Name: orchestration.SnapshotHistoryActivityName,
+	})
+	nativeControlWorker.RegisterActivityWithOptions(r.activities.LoadHistoryActivity, activity.RegisterOptions{
+		Name: orchestration.LoadHistoryActivityName,
+	})
 	streamWorker.RegisterActivityWithOptions(r.activities.InitStreamActivity, activity.RegisterOptions{
 		Name: orchestration.InitStreamActivityName,
 	})

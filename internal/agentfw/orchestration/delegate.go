@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/TekkenSteve/GoAgent/internal/entity"
+	enumspb "go.temporal.io/api/enums/v1"
 	"go.temporal.io/sdk/workflow"
 )
 
@@ -77,7 +78,17 @@ func executeDelegateTool(
 	}
 
 	childOptions := workflow.ChildWorkflowOptions{
-		WorkflowID:               fmt.Sprintf("delegate-%s", tc.ID),
+		WorkflowID: fmt.Sprintf("delegate-%s", tc.ID),
+		// Explicit policies, never implicit SDK defaults:
+		//   - REQUEST_CANCEL: the delegate child is canceled gracefully when
+		//     the parent run terminates — the child's own cancel handling stops
+		//     in-flight LLM/tool work instead of the parent being hard-killed
+		//     mid-inference (TERMINATE, the SDK default).
+		//   - ALLOW_DUPLICATE_FAILED_ONLY: a retried child launch with the same
+		//     WorkflowID may only bind to a previously failed execution, never
+		//     to a running one.
+		ParentClosePolicy:        enumspb.PARENT_CLOSE_POLICY_REQUEST_CANCEL,
+		WorkflowIDReusePolicy:    enumspb.WORKFLOW_ID_REUSE_POLICY_ALLOW_DUPLICATE_FAILED_ONLY,
 		WorkflowExecutionTimeout: delegateChildWorkflowTimeout,
 		TaskQueue:                taskQueues.NativeControl,
 	}

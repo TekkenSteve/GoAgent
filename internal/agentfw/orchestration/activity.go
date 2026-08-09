@@ -1,12 +1,18 @@
+// Package orchestration implements the Temporal workflows and activities
+// that execute step-based agent runs.
 package orchestration
 
 import (
 	"context"
+	"encoding/json"
+	"errors"
 	"fmt"
+	"sync/atomic"
 	"time"
 
 	"github.com/TekkenSteve/GoAgent/internal/agentfw/stream"
 	"github.com/TekkenSteve/GoAgent/internal/entity"
+	"github.com/TekkenSteve/GoAgent/internal/repo/artifact"
 	agentuc "github.com/TekkenSteve/GoAgent/internal/usecase/agent"
 	billinguc "github.com/TekkenSteve/GoAgent/internal/usecase/billing"
 	"github.com/TekkenSteve/GoAgent/pkg/logger"
@@ -17,13 +23,29 @@ const (
 	prepCompletePercent    = 100
 )
 
+// errHistoryBlobStoreRequired reports that a history snapshot cannot be
+// restored because no blob store is configured. Static so classification and
+// wrapping stay stable across call sites.
+var errHistoryBlobStoreRequired = errors.New("blob store is required to restore history snapshot")
+
 // AgentActivities provides Temporal activity implementations for agent execution.
 type AgentActivities struct {
 	agentUC    *agentuc.UseCase
 	billingUC  *billinguc.UseCase
 	eventStore stream.EventStore
 	mcpManager MCPManagerProvider
-	logger     logger.Interface
+	// blobStore backs the claim-check history snapshot (see
+	// SnapshotHistoryActivity). Optional: without it, long conversations stay
+	// in workflow state and continue-as-new carries no snapshot.
+	blobStore artifactBlobStore
+	logger    logger.Interface
+}
+
+// artifactBlobStore is the subset of artifact.BlobStore needed for history
+// snapshots (payloads written outside Temporal history).
+type artifactBlobStore interface {
+	Put(ctx context.Context, key string, payload []byte) (artifact.BlobObject, error)
+	Get(ctx context.Context, uri string) ([]byte, error)
 }
 
 // MCPManagerProvider is the subset of the MCP manager needed by activities.
@@ -52,6 +74,15 @@ func (a *AgentActivities) WithMCPManager(m MCPManagerProvider) *AgentActivities 
 // WithBilling sets the billing usecase for credit checks and usage deduction.
 func (a *AgentActivities) WithBilling(uc *billinguc.UseCase) *AgentActivities {
 	a.billingUC = uc
+
+	return a
+}
+
+// WithBlobStore enables claim-check history snapshots for Continue-As-New
+// (see SnapshotHistoryActivity). Without a blob store, workflows keep the
+// full conversation in their own state.
+func (a *AgentActivities) WithBlobStore(store artifactBlobStore) *AgentActivities {
+	a.blobStore = store
 
 	return a
 }
@@ -237,12 +268,21 @@ func (a *AgentActivities) prepMCP(ctx context.Context, input PrepMCPInput) *Prep
 
 // LLMStepActivity performs a single sync LLM call and returns the result.
 // Deducts usage cost from account balance after a successful LLM call.
+// Long inference is reported via heartbeats so a live activity is never
+// marked dead and retried (which would duplicate the LLM call and its cost).
 func (a *AgentActivities) LLMStepActivity(ctx context.Context, input *LLMStepInput) (*LLMStepOutput, error) {
 	a.logger.Info("LLMStepActivity: started, model=%s messages=%d tools=%d", input.Config.Model, len(input.Messages), len(input.Tools))
 
-	result, err := a.agentUC.LLMStep(ctx, input.RunID, input.Messages, input.Tools, input.Config)
+	stopHeartbeat := startHeartbeatLoop(ctx, func() any {
+		return heartbeatProgress{Phase: "llm-inference"}
+	})
+	defer stopHeartbeat()
+
+	result, err := retryRateLimited(ctx, func() (*agentuc.LLMStepResult, error) {
+		return a.agentUC.LLMStep(ctx, input.RunID, input.Messages, input.Tools, input.Config)
+	})
 	if err != nil {
-		return nil, fmt.Errorf("LLMStepActivity - LLMStep: %w", err)
+		return nil, toActivityError(fmt.Errorf("LLMStepActivity - LLMStep: %w", err))
 	}
 
 	a.logger.Info("LLMStepActivity: completed, finish_reason=%s tool_calls=%d", result.FinishReason, len(result.ToolCalls))
@@ -263,7 +303,14 @@ func (a *AgentActivities) LLMStepActivity(ctx context.Context, input *LLMStepInp
 }
 
 // ToolExecActivity performs a single tool execution and returns the result.
+// Long-running tools (web scrape, code execution) are reported via
+// heartbeats with the tool name as progress detail.
 func (a *AgentActivities) ToolExecActivity(ctx context.Context, input ToolInput) (*ToolOutput, error) {
+	stopHeartbeat := startHeartbeatLoop(ctx, func() any {
+		return heartbeatProgress{Phase: "tool-exec", ToolName: input.ToolName}
+	})
+	defer stopHeartbeat()
+
 	result, err := a.agentUC.ExecTool(ctx, input.RunID, entity.ToolCall{
 		ID:   input.ToolCallID,
 		Type: "function",
@@ -324,7 +371,9 @@ func (a *AgentActivities) InitStreamActivity(ctx context.Context, input *InitStr
 }
 
 // LLMStreamActivity performs a single streaming LLM call, writing delta events
-// to the EventStore. Heartbeat carries the last-written sequence for retry recovery.
+// to the EventStore. Heartbeats carry the count of deltas already written so
+// the platform can distinguish a live-but-slow stream from a dead worker
+// (a dead worker is retried quickly; a live stream is never killed mid-call).
 // Deducts usage cost from account balance after a successful LLM call.
 func (a *AgentActivities) LLMStreamActivity(ctx context.Context, input *LLMStreamInput) (*LLMStreamOutput, error) {
 	writer := &eventStoreWriter{
@@ -333,9 +382,16 @@ func (a *AgentActivities) LLMStreamActivity(ctx context.Context, input *LLMStrea
 		runID:     input.RunID,
 	}
 
-	result, err := a.agentUC.LLMStreamCall(ctx, input.RunID, input.Messages, input.Tools, input.Config, writer)
+	stopHeartbeat := startHeartbeatLoop(ctx, func() any {
+		return heartbeatProgress{Phase: "llm-stream", WrittenEvents: writer.written.Load()}
+	})
+	defer stopHeartbeat()
+
+	result, err := retryRateLimited(ctx, func() (*agentuc.LLMStepResult, error) {
+		return a.agentUC.LLMStreamCall(ctx, input.RunID, input.Messages, input.Tools, input.Config, writer)
+	})
 	if err != nil {
-		return nil, fmt.Errorf("LLMStreamActivity - LLMStreamCall: %w", err)
+		return nil, toActivityError(fmt.Errorf("LLMStreamActivity - LLMStreamCall: %w", err))
 	}
 
 	// Deduct usage cost after successful LLM call
@@ -355,6 +411,11 @@ func (a *AgentActivities) LLMStreamActivity(ctx context.Context, input *LLMStrea
 // ToolExecStreamActivity executes a tool and writes start/finish events to the EventStore.
 func (a *AgentActivities) ToolExecStreamActivity(ctx context.Context, input ToolInput) (*ToolOutput, error) {
 	sessionID, runID := input.RunID, input.RunID
+
+	stopHeartbeat := startHeartbeatLoop(ctx, func() any {
+		return heartbeatProgress{Phase: "tool-exec-stream", ToolName: input.ToolName}
+	})
+	defer stopHeartbeat()
 
 	// Write ToolExecStart
 	if _, err := a.eventStore.Append(ctx, sessionID, runID, entity.NewToolExecStartEvent(input.ToolCallID, input.ToolName)); err != nil {
@@ -407,14 +468,20 @@ func (a *AgentActivities) FinishStreamActivity(ctx context.Context, input Finish
 // ——— Internal helpers ———
 
 // eventStoreWriter implements usecase.StreamEventWriter by appending to EventStore.
+// written tracks the number of deltas delivered so the enclosing activity can
+// report stream progress in its heartbeats.
 type eventStoreWriter struct {
 	store     stream.EventStore
 	sessionID string
 	runID     string
+	written   atomic.Int64
 }
 
 func (w *eventStoreWriter) WriteEvent(ctx context.Context, event entity.StreamEvent) error {
 	_, err := w.store.Append(ctx, w.sessionID, w.runID, event)
+	if err == nil {
+		w.written.Add(1)
+	}
 
 	return err
 }
@@ -424,4 +491,80 @@ type FinishStreamInput struct {
 	SessionID string
 	RunID     string
 	Event     entity.StreamEvent
+}
+
+// SnapshotHistoryInput asks for the current message history to be snapshotted
+// outside workflow history (claim-check) so a continued workflow can reload it
+// by reference instead of carrying the full conversation in its input.
+type SnapshotHistoryInput struct {
+	RunID    string
+	Round    int
+	Messages []entity.Message
+}
+
+// SnapshotHistoryOutput carries the blob reference to hand to the continued
+// workflow. An empty Ref means no snapshot was taken (no blob store).
+type SnapshotHistoryOutput struct {
+	Ref string
+}
+
+// LoadHistoryInput references a history snapshot taken by SnapshotHistoryActivity.
+type LoadHistoryInput struct {
+	Ref string
+}
+
+// LoadHistoryOutput is the restored authoritative conversation.
+type LoadHistoryOutput struct {
+	Messages []entity.Message
+}
+
+// ——— History snapshot (claim-check) ———
+
+// historySnapshotKey derives an idempotent blob key from run + round, so a
+// retried snapshot overwrites the same blob instead of duplicating it.
+func historySnapshotKey(runID string, round int) string {
+	return fmt.Sprintf("agentfw-hist/%s/%d", runID, round)
+}
+
+// SnapshotHistoryActivity persists the current message history to the blob
+// store and returns a reference (claim-check pattern). With no blob store
+// configured it returns an empty ref and the workflow keeps the conversation
+// in its own state (pre-feature behavior).
+func (a *AgentActivities) SnapshotHistoryActivity(ctx context.Context, input *SnapshotHistoryInput) (*SnapshotHistoryOutput, error) {
+	if a.blobStore == nil {
+		return &SnapshotHistoryOutput{}, nil
+	}
+
+	payload, err := json.Marshal(input.Messages)
+	if err != nil {
+		return nil, fmt.Errorf("SnapshotHistoryActivity - marshal messages: %w", err)
+	}
+
+	obj, err := a.blobStore.Put(ctx, historySnapshotKey(input.RunID, input.Round), payload)
+	if err != nil {
+		return nil, fmt.Errorf("SnapshotHistoryActivity - blobStore.Put: %w", err)
+	}
+
+	return &SnapshotHistoryOutput{Ref: obj.URI}, nil
+}
+
+// LoadHistoryActivity restores a message history snapshot by reference. The
+// snapshot is the authoritative conversation: if it cannot be loaded, the
+// workflow fails rather than silently continuing with a partial conversation.
+func (a *AgentActivities) LoadHistoryActivity(ctx context.Context, input *LoadHistoryInput) (*LoadHistoryOutput, error) {
+	if a.blobStore == nil {
+		return nil, fmt.Errorf("LoadHistoryActivity - %w: ref %q", errHistoryBlobStoreRequired, input.Ref)
+	}
+
+	payload, err := a.blobStore.Get(ctx, input.Ref)
+	if err != nil {
+		return nil, fmt.Errorf("LoadHistoryActivity - blobStore.Get: %w", err)
+	}
+
+	var messages []entity.Message
+	if err := json.Unmarshal(payload, &messages); err != nil {
+		return nil, fmt.Errorf("LoadHistoryActivity - unmarshal messages: %w", err)
+	}
+
+	return &LoadHistoryOutput{Messages: messages}, nil
 }

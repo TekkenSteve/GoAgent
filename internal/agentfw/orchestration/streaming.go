@@ -80,9 +80,12 @@ func StreamAgentWorkflow(ctx workflow.Context, input *InitStreamInput) error {
 }
 
 // setupStreamActivityOptions configures activity options for the streaming workflow.
+// StartToCloseTimeout bounds a hung provider stream so it can never pin the
+// workflow forever; HeartbeatTimeout detects crashed workers quickly.
 func setupStreamActivityOptions(ctx workflow.Context, queues *WorkflowTaskQueues) workflow.Context {
 	ao := workflow.ActivityOptions{
-		HeartbeatTimeout: heartbeatTimeout,
+		StartToCloseTimeout: activityStartToCloseTimeout,
+		HeartbeatTimeout:    heartbeatTimeout,
 		RetryPolicy: &temporal.RetryPolicy{
 			InitialInterval: time.Second,
 			MaximumInterval: time.Minute,
