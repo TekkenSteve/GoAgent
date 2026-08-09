@@ -68,6 +68,60 @@ definitions:
       timeout_seconds:
         type: integer
     type: object
+  control.PlanApprovalDecision:
+    properties:
+      actor_id:
+        type: string
+      approved:
+        type: boolean
+      decided_at:
+        type: string
+      policy_version:
+        type: string
+      reason:
+        type: string
+    type: object
+  control.PlanApprovalGate:
+    properties:
+      expires_at:
+        description: |-
+          ExpiresAt is when the gate auto-rejects. Zero means no expiry
+          (ApprovalTimeoutSeconds == 0).
+        type: string
+      node_ids:
+        description: |-
+          NodeIDs are the precise plan-node references the gate covers: the nodes
+          that resume or start once the gate is approved.
+        items:
+          type: string
+        type: array
+      policy_version:
+        description: |-
+          PolicyVersion is a deterministic fingerprint of the plan policy and node
+          set at gate creation. It changes when the topology is replanned
+          (PlanDelta), which invalidates an existing decision.
+        type: string
+      requested_at:
+        description: RequestedAt is when the gate was created (plan entered blocked).
+        type: string
+      risk_reason:
+        description: RiskReason is the rationale for requiring approval (why the plan
+          paused).
+        type: string
+      summary:
+        description: Summary describes what the gate covers (gated node count and
+          plan id).
+        type: string
+    type: object
+  control.PlanApprovalStatus:
+    properties:
+      decision:
+        $ref: '#/definitions/control.PlanApprovalDecision'
+      gate:
+        $ref: '#/definitions/control.PlanApprovalGate'
+      lifecycle_state:
+        type: string
+    type: object
   control.PlanAuditAction:
     enum:
     - plan.start
@@ -329,6 +383,13 @@ definitions:
         items:
           type: string
         type: array
+      approval:
+        allOf:
+        - $ref: '#/definitions/control.PlanApprovalStatus'
+        description: |-
+          Approval is the live approval-gate projection. It is nil while no gate
+          is active: a plan that is not blocked, or a blocked plan persisted before
+          the auditable-approval feature (the decision is then derived lazily).
       artifacts:
         items:
           $ref: '#/definitions/core.ArtifactRef'
@@ -745,6 +806,13 @@ definitions:
         items:
           type: string
         type: array
+      approval:
+        allOf:
+        - $ref: '#/definitions/control.PlanApprovalStatus'
+        description: |-
+          Approval is the live approval-gate projection. It is nil while no gate
+          is active: a plan that is not blocked, or a blocked plan persisted before
+          the auditable-approval feature (the decision is then derived lazily).
       artifacts:
         items:
           $ref: '#/definitions/core.ArtifactRef'
