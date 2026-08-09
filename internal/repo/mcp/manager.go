@@ -11,9 +11,12 @@ import (
 )
 
 var (
+	// ErrMCPNotRegistered is returned when a server name is not registered with the manager.
 	ErrMCPNotRegistered = errors.New("mcp server not registered")
-	ErrMCPToolNotFound  = errors.New("mcp tool not found")
-	ErrMCPNotConnected  = errors.New("mcp server not connected")
+	// ErrMCPToolNotFound is returned when an MCP tool is not among the discovered tools.
+	ErrMCPToolNotFound = errors.New("mcp tool not found")
+	// ErrMCPNotConnected is returned when the MCP server hosting a tool is not connected.
+	ErrMCPNotConnected = errors.New("mcp server not connected")
 )
 
 // mcpToolEntry tracks a tool discovered from an MCP server.
@@ -137,9 +140,7 @@ func (m *Manager) connectLocked(ctx context.Context, cfg *ServerConfig) ([]entit
 
 	tools, err := client.ListTools(ctx)
 	if err != nil {
-		client.Close()
-
-		return nil, fmt.Errorf("discover tools from %q: %w", cfg.Name, err)
+		return nil, errors.Join(fmt.Errorf("discover tools from %q: %w", cfg.Name, err), client.Close())
 	}
 
 	m.mu.Lock()

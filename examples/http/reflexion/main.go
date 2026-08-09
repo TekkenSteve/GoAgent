@@ -20,6 +20,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"log"
 	"os"
 	"time"
 
@@ -47,30 +48,34 @@ func main() {
 	c := client.New(baseURL, accountID)
 	ctx := context.Background()
 
-	fmt.Fprintf(os.Stdout, "=== Reflexion Pattern ===\nRun ID: %s\n\n", runID)
-	fmt.Fprintln(os.Stdout, "Flow: generate → evaluate → [refine if needed] → conclude")
-	fmt.Fprintln(os.Stdout, "The eval step checks quality; OnResult appends a refine step on failure.")
-	fmt.Fprintln(os.Stdout)
+	writeStdoutf("=== Reflexion Pattern ===\nRun ID: %s\n\n", runID)
+
+	writeStdoutLine("Flow: generate → evaluate → [refine if needed] → conclude")
+
+	writeStdoutLine("The eval step checks quality; OnResult appends a refine step on failure.")
+
+	writeStdoutLine()
 
 	status, err := c.ExecuteOrchestration(ctx, &client.OrchestrationRequest{
 		RunID: runID,
 		Steps: reflexionSteps(),
 	})
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+		writeStderrf("Error: %v\n", err)
 		os.Exit(1)
 	}
 
-	fmt.Fprintf(os.Stdout, "Initial status: lifecycle_state=%s step=%d\n\n", status.LifecycleState, status.Step)
-	fmt.Fprintln(os.Stdout, "Polling for completion...")
+	writeStdoutf("Initial status: lifecycle_state=%s step=%d\n\n", status.LifecycleState, status.Step)
+
+	writeStdoutLine("Polling for completion...")
 
 	status, err = c.WaitForOrchestrationCompletion(ctx, runID, pollInterval, pollTimeout)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+		writeStderrf("Error: %v\n", err)
 		os.Exit(1)
 	}
 
-	fmt.Fprintf(os.Stdout, "\nFinal status: lifecycle_state=%s step=%d\n", status.LifecycleState, status.Step)
+	writeStdoutf("\nFinal status: lifecycle_state=%s step=%d\n", status.LifecycleState, status.Step)
 }
 
 func reflexionSteps() []map[string]any {
@@ -98,5 +103,23 @@ func reflexionSteps() []map[string]any {
 			"input":      map[string]any{"message": "Format the final version as a well-structured markdown document"},
 			"depends_on": []string{"evaluate"},
 		},
+	}
+}
+
+func writeStdoutf(format string, args ...any) {
+	if _, werr := fmt.Fprintf(os.Stdout, format, args...); werr != nil {
+		log.Fatalf("write stdout: %v", werr)
+	}
+}
+
+func writeStderrf(format string, args ...any) {
+	if _, werr := fmt.Fprintf(os.Stderr, format, args...); werr != nil {
+		log.Fatalf("write stderr: %v", werr)
+	}
+}
+
+func writeStdoutLine(args ...any) {
+	if _, werr := fmt.Fprintln(os.Stdout, args...); werr != nil {
+		log.Fatalf("write stdout: %v", werr)
 	}
 }

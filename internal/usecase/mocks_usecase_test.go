@@ -14,7 +14,6 @@ import (
 	reflect "reflect"
 
 	entity "github.com/TekkenSteve/GoAgent/internal/entity"
-	usecase "github.com/TekkenSteve/GoAgent/internal/usecase"
 	gomock "go.uber.org/mock/gomock"
 )
 
@@ -230,44 +229,6 @@ func (m *MockStreamEventWriter) WriteEvent(ctx context.Context, event entity.Str
 func (mr *MockStreamEventWriterMockRecorder) WriteEvent(ctx, event any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "WriteEvent", reflect.TypeOf((*MockStreamEventWriter)(nil).WriteEvent), ctx, event)
-}
-
-// MockStreamExecutor is a mock of StreamExecutor interface.
-type MockStreamExecutor struct {
-	ctrl     *gomock.Controller
-	recorder *MockStreamExecutorMockRecorder
-	isgomock struct{}
-}
-
-// MockStreamExecutorMockRecorder is the mock recorder for MockStreamExecutor.
-type MockStreamExecutorMockRecorder struct {
-	mock *MockStreamExecutor
-}
-
-// NewMockStreamExecutor creates a new mock instance.
-func NewMockStreamExecutor(ctrl *gomock.Controller) *MockStreamExecutor {
-	mock := &MockStreamExecutor{ctrl: ctrl}
-	mock.recorder = &MockStreamExecutorMockRecorder{mock}
-	return mock
-}
-
-// EXPECT returns an object that allows the caller to indicate expected use.
-func (m *MockStreamExecutor) EXPECT() *MockStreamExecutorMockRecorder {
-	return m.recorder
-}
-
-// ExecuteStream mocks base method.
-func (m *MockStreamExecutor) ExecuteStream(ctx context.Context, req *entity.StreamRequest, writer usecase.StreamEventWriter) error {
-	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "ExecuteStream", ctx, req, writer)
-	ret0, _ := ret[0].(error)
-	return ret0
-}
-
-// ExecuteStream indicates an expected call of ExecuteStream.
-func (mr *MockStreamExecutorMockRecorder) ExecuteStream(ctx, req, writer any) *gomock.Call {
-	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ExecuteStream", reflect.TypeOf((*MockStreamExecutor)(nil).ExecuteStream), ctx, req, writer)
 }
 
 // MockToolDefProvider is a mock of ToolDefProvider interface.

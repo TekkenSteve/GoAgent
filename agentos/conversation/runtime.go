@@ -15,17 +15,27 @@ import (
 )
 
 var (
-	ErrInvalidConversation   = errors.New("agentos conversation: invalid request")
-	ErrThreadNotFound        = errors.New("agentos conversation: thread not found")
-	ErrRunNotFound           = errors.New("agentos conversation: run not found")
-	ErrTenantMismatch        = errors.New("agentos conversation: tenant mismatch")
-	ErrRunAlreadyActive      = errors.New("agentos conversation: a run is already active")
-	ErrInterruptRequired     = errors.New("agentos conversation: unresolved interrupt requires resume")
-	ErrInterruptMismatch     = errors.New("agentos conversation: interrupt does not match")
+	// ErrInvalidConversation reports a malformed conversation request or configuration.
+	ErrInvalidConversation = errors.New("agentos conversation: invalid request")
+	// ErrThreadNotFound reports an unknown conversation thread.
+	ErrThreadNotFound = errors.New("agentos conversation: thread not found")
+	// ErrRunNotFound reports an unknown conversation run.
+	ErrRunNotFound = errors.New("agentos conversation: run not found")
+	// ErrTenantMismatch reports that the conversation belongs to a different tenant.
+	ErrTenantMismatch = errors.New("agentos conversation: tenant mismatch")
+	// ErrRunAlreadyActive reports that a run is already active on the thread.
+	ErrRunAlreadyActive = errors.New("agentos conversation: a run is already active")
+	// ErrInterruptRequired reports that an unresolved interrupt must be resumed before continuing.
+	ErrInterruptRequired = errors.New("agentos conversation: unresolved interrupt requires resume")
+	// ErrInterruptMismatch reports that the interrupt does not match the active one.
+	ErrInterruptMismatch = errors.New("agentos conversation: interrupt does not match")
+	// ErrOutOfOrderSourceEvent reports that a source event arrived out of order.
 	ErrOutOfOrderSourceEvent = errors.New("agentos conversation: source event is out of order")
-	ErrInvalidTransition     = errors.New("agentos conversation: invalid lifecycle transition")
+	// ErrInvalidTransition reports an invalid lifecycle transition for the current state.
+	ErrInvalidTransition = errors.New("agentos conversation: invalid lifecycle transition")
 )
 
+// Config holds Postgres and Redis connection settings plus the polling cadence for the durable conversation runtime.
 type Config struct {
 	PostgresURL           string
 	RedisURL              string
@@ -36,6 +46,7 @@ type Config struct {
 	RedisStreamExpiration time.Duration
 }
 
+// Runtime is the durable Postgres-backed conversation runtime, streaming live events over Redis when configured.
 type Runtime struct {
 	pool               *pgxpool.Pool
 	stream             *redisConversationStream
@@ -55,6 +66,7 @@ const (
 	conversationSubscriberBuf = 64
 )
 
+// NewRuntime connects Postgres (and Redis when configured) and returns a conversation Runtime.
 func NewRuntime(ctx context.Context, config Config) (agentos.ConversationRuntime, error) {
 	if strings.TrimSpace(config.PostgresURL) == "" {
 		return nil, fmt.Errorf("%w: postgres URL is required", ErrInvalidConversation)
@@ -111,10 +123,13 @@ func NewRuntime(ctx context.Context, config Config) (agentos.ConversationRuntime
 	return runtime, nil
 }
 
+// Close cancels background workers and closes the Redis stream and Postgres pool.
 func (r *Runtime) Close() error {
 	if r == nil {
 		return nil
 	}
+
+	var closeErr error
 
 	r.closeOnce.Do(func() {
 		if r.closeCancel != nil {
@@ -124,7 +139,7 @@ func (r *Runtime) Close() error {
 		r.workers.Wait()
 
 		if r.stream != nil {
-			_ = r.stream.Close()
+			closeErr = errors.Join(closeErr, r.stream.Close())
 		}
 
 		if r.pool != nil {
@@ -132,9 +147,10 @@ func (r *Runtime) Close() error {
 		}
 	})
 
-	return nil
+	return closeErr
 }
 
+// StartRun atomically persists a new conversation run with its initial user message and stream events.
 func (r *Runtime) StartRun(ctx context.Context, spec *agentos.StartConversationRunSpec) (agentos.ConversationRun, error) {
 	prepared, err := prepareStartSpec(spec)
 	if err != nil {
@@ -260,6 +276,7 @@ func appendUserMessageEvents(ctx context.Context, tx pgx.Tx, spec *agentos.Start
 	return nil
 }
 
+// IngestEvent appends an externally produced event to the run's durable event stream, enforcing source ordering and idempotency.
 func (r *Runtime) IngestEvent(ctx context.Context, incoming *agentos.ExternalConversationEvent) (agentos.ConversationEvent, error) {
 	event, err := prepareExternalEvent(incoming)
 	if err != nil {
@@ -331,6 +348,7 @@ func validateEventRunScope(run *agentos.ConversationRun, event *agentos.External
 	return nil
 }
 
+// GetThreadSnapshot reads a consistent read-only snapshot of a thread's messages, runs, and recent events.
 func (r *Runtime) GetThreadSnapshot(ctx context.Context, scope agentos.ThreadScope) (agentos.ThreadSnapshot, error) {
 	if err := validateScope(scope.ThreadID, scope.AccountID, scope.ProjectID); err != nil {
 		return agentos.ThreadSnapshot{}, err
@@ -414,6 +432,7 @@ func withConversationTx[T any](ctx context.Context, pool *pgxpool.Pool, options 
 	return result, nil
 }
 
+// SubscribeThread streams a thread's events, replaying persisted history before switching to live Redis delivery.
 func (r *Runtime) SubscribeThread(ctx context.Context, scope agentos.ThreadStreamScope) (core.Subscription, error) {
 	if err := validateScope(scope.ThreadID, scope.AccountID, scope.ProjectID); err != nil {
 		return nil, err

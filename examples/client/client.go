@@ -23,12 +23,17 @@ import (
 )
 
 const (
-	LifecycleStateCompleted    = "completed"
-	LifecycleStateFailed       = "failed"
-	LifecycleStateCanceled     = "canceled"
+	// LifecycleStateCompleted is the lifecycle state of a run that finished successfully.
+	LifecycleStateCompleted = "completed"
+	// LifecycleStateFailed is the lifecycle state of a run that failed.
+	LifecycleStateFailed = "failed"
+	// LifecycleStateCanceled is the lifecycle state of a run canceled before completion.
+	LifecycleStateCanceled = "canceled"
+	// LifecycleStateWaitingInput is the lifecycle state of a run waiting for business input.
 	LifecycleStateWaitingInput = "waiting_input"
 )
 
+// ErrWaitTimeout is returned when polling for a run status exceeds the caller-provided timeout.
 var ErrWaitTimeout = errors.New("wait timeout")
 
 const defaultHTTPTimeout = 30 * time.Second
@@ -53,7 +58,7 @@ func New(baseURL, accountID string) *Client {
 
 // Do sends a JSON request and decodes the response into result (if non-nil).
 // path is a URL path like "/v1/agentos/runs".
-func (c *Client) Do(ctx context.Context, method, path string, body, result any) error {
+func (c *Client) Do(ctx context.Context, method, path string, body, result any) (err error) {
 	var bodyReader io.Reader
 
 	if body != nil {
@@ -76,9 +81,14 @@ func (c *Client) Do(ctx context.Context, method, path string, body, result any) 
 	if err != nil {
 		return fmt.Errorf("http request: %w", err)
 	}
-	defer resp.Body.Close()
 
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+	defer func() {
+		if closeErr := resp.Body.Close(); closeErr != nil {
+			err = errors.Join(err, closeErr)
+		}
+	}()
+
+	if !is2xx(resp.StatusCode) {
 		respBody, readErr := io.ReadAll(resp.Body)
 		if readErr != nil {
 			return &APIError{Code: resp.StatusCode, Body: fmt.Sprintf("failed to read body: %v", readErr)}
@@ -91,6 +101,42 @@ func (c *Client) Do(ctx context.Context, method, path string, body, result any) 
 		if err := json.NewDecoder(resp.Body).Decode(result); err != nil {
 			return fmt.Errorf("decode response: %w", err)
 		}
+	}
+
+	return nil
+}
+
+func is2xx(code int) bool {
+	return code >= 200 && code < 300
+}
+
+func writePollError(err error) error {
+	if _, werr := fmt.Fprintf(os.Stderr, "  poll error: %v\n", err); werr != nil {
+		return fmt.Errorf("write poll error: %w", werr)
+	}
+
+	return nil
+}
+
+func pollOnce(status *RunStatus, err error) (stable bool, werr error) {
+	if err != nil {
+		if werr := writePollError(err); werr != nil {
+			return false, werr
+		}
+
+		return false, nil
+	}
+
+	if werr := writePollStatus(status); werr != nil {
+		return false, werr
+	}
+
+	return isStableRunState(status.LifecycleState), nil
+}
+
+func writePollStatus(status *RunStatus) error {
+	if _, werr := fmt.Fprintf(os.Stdout, "  lifecycle_state=%s step=%d\n", status.LifecycleState, status.Step); werr != nil {
+		return fmt.Errorf("write poll status: %w", werr)
 	}
 
 	return nil
@@ -113,14 +159,14 @@ func (c *Client) pollStatus(ctx context.Context, runID, pathPrefix, desc string,
 		var status RunStatus
 
 		err := c.Do(ctx, http.MethodGet, pathPrefix+runID, nil, &status)
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "  poll error: %v\n", err)
-		} else {
-			fmt.Fprintf(os.Stdout, "  lifecycle_state=%s step=%d\n", status.LifecycleState, status.Step)
 
-			if isStableRunState(status.LifecycleState) {
-				return &status, nil
-			}
+		stable, werr := pollOnce(&status, err)
+		if werr != nil {
+			return nil, werr
+		}
+
+		if stable {
+			return &status, nil
 		}
 
 		if time.Now().After(deadline) {
@@ -148,14 +194,14 @@ func (c *Client) WaitForCompletion(ctx context.Context, runID string, interval, 
 
 	for {
 		status, err := c.GetStatus(ctx, runID)
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "  poll error: %v\n", err)
-		} else {
-			fmt.Fprintf(os.Stdout, "  lifecycle_state=%s step=%d\n", status.LifecycleState, status.Step)
 
-			if isStableRunState(status.LifecycleState) {
-				return status, nil
-			}
+		stable, werr := pollOnce(status, err)
+		if werr != nil {
+			return nil, werr
+		}
+
+		if stable {
+			return status, nil
 		}
 
 		if time.Now().After(deadline) {

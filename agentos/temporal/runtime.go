@@ -31,6 +31,7 @@ type runtime struct {
 type runtimeRunBackendIndexFactory func(cfg *RuntimeConfig) (RunBackendIndex, func() error, error)
 
 var (
+	// ErrRuntimePostgresURLRequired reports a missing Postgres URL in the runtime config.
 	ErrRuntimePostgresURLRequired = errors.New("agentos temporal runtime: postgres url is required")
 
 	errRuntimeConfigRequired                 = errors.New("agentos temporal runtime: config is required")
@@ -97,22 +98,16 @@ func NewRuntime(ctx context.Context, cfg *RuntimeConfig, options ...RuntimeOptio
 
 	runtimeOpts, err := r.runtimeOptionsWithDefaultRunBackendIndex(cfg, buildRuntimeOptions(options))
 	if err != nil {
-		_ = r.Close()
-
-		return nil, err
+		return nil, errors.Join(err, r.Close())
 	}
 
 	executor, err := temporalrepo.NewExecutorTemporal(c, &fwTemporal)
 	if err != nil {
-		_ = r.Close()
-
-		return nil, err
+		return nil, errors.Join(err, r.Close())
 	}
 
 	if err := r.configureRouter(c, cfg, runtimeOpts, executor, subscriber); err != nil {
-		_ = r.Close()
-
-		return nil, err
+		return nil, errors.Join(err, r.Close())
 	}
 
 	return r, nil
@@ -153,22 +148,16 @@ func NewRuntimeWithClient(ctx context.Context, cfg *RuntimeConfig, c client.Clie
 
 	runtimeOpts, err := r.runtimeOptionsWithDefaultRunBackendIndex(cfg, buildRuntimeOptions(options))
 	if err != nil {
-		_ = r.Close()
-
-		return nil, err
+		return nil, errors.Join(err, r.Close())
 	}
 
 	executor, err := temporalrepo.NewExecutorTemporal(c, &fwTemporal)
 	if err != nil {
-		_ = r.Close()
-
-		return nil, err
+		return nil, errors.Join(err, r.Close())
 	}
 
 	if err := r.configureRouter(c, cfg, runtimeOpts, executor, subscriber); err != nil {
-		_ = r.Close()
-
-		return nil, err
+		return nil, errors.Join(err, r.Close())
 	}
 
 	return r, nil
@@ -297,9 +286,7 @@ func registerExternalBackends(registry *agentosruntime.Registry, temporalClient 
 		}
 
 		if err := registry.Register(internalConfig.Ref(), grpcBackend); err != nil {
-			_ = grpcBackend.Close()
-
-			return nil, err
+			return nil, errors.Join(err, grpcBackend.Close())
 		}
 
 		closers = append(closers, grpcBackend.Close)

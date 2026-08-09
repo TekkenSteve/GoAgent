@@ -1,3 +1,4 @@
+// Package usecase defines the application service interfaces and entrypoints.
 package usecase
 
 import (
@@ -29,10 +30,6 @@ type (
 	// Implementations write to Redis Stream, channel, etc.
 	StreamEventWriter interface {
 		WriteEvent(ctx context.Context, event entity.StreamEvent) error
-	}
-	// StreamExecutor executes agent steps with streaming output.
-	StreamExecutor interface {
-		ExecuteStream(ctx context.Context, req *entity.StreamRequest, writer StreamEventWriter) error
 	}
 	// ToolDefProvider supplies LLM function calling definitions for available tools.
 	// The agent usecase calls this to auto-populate tool definitions when none are

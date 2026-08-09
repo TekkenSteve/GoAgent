@@ -65,14 +65,18 @@ func run() error {
 		return fmt.Errorf("start plan: %w", err)
 	}
 
-	fmt.Fprintf(os.Stdout, "plan started: id=%s state=%s\n", status.PlanID, status.LifecycleState)
+	if _, werr := fmt.Fprintf(os.Stdout, "plan started: id=%s state=%s\n", status.PlanID, status.LifecycleState); werr != nil {
+		return fmt.Errorf("write plan status: %w", werr)
+	}
 
 	current, err := rt.StatusPlan(ctx, agentos.PlanRef{PlanID: planID, AccountID: accountID, ProjectID: projectID})
 	if err != nil {
 		return fmt.Errorf("status plan: %w", err)
 	}
 
-	fmt.Fprintf(os.Stdout, "plan status: id=%s state=%s active_runs=%d\n", current.PlanID, current.LifecycleState, len(current.ActiveRunIDs))
+	if _, werr := fmt.Fprintf(os.Stdout, "plan status: id=%s state=%s active_runs=%d\n", current.PlanID, current.LifecycleState, len(current.ActiveRunIDs)); werr != nil {
+		return fmt.Errorf("write plan status: %w", werr)
+	}
 
 	return nil
 }

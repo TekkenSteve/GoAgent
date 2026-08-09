@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log"
 	"net/http"
 	"strings"
 	"time"
@@ -191,7 +192,12 @@ func (s *ScrapeWebpage) scrape(ctx context.Context, url string) ScrapeResult {
 	if err != nil {
 		return ScrapeResult{URL: url, Success: false, Error: err.Error()}
 	}
-	defer resp.Body.Close()
+
+	defer func() {
+		if err := resp.Body.Close(); err != nil {
+			log.Printf("scrape webpage: close response body: %v", err)
+		}
+	}()
 
 	var fcResp firecrawlResp
 	if err := json.NewDecoder(resp.Body).Decode(&fcResp); err != nil {

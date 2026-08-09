@@ -30,15 +30,25 @@ import (
 )
 
 var (
-	ErrWorkerConfigRequired                   = errors.New("agentos temporal worker: config is required")
-	ErrWorkerPostgresURLRequired              = errors.New("agentos temporal worker: postgres url is required")
-	ErrWorkerRedisURLRequired                 = errors.New("agentos temporal worker: redis url is required")
-	ErrWorkerArtifactStoreBackendRequired     = errors.New("agentos temporal worker: artifact store backend is required")
-	ErrWorkerArtifactStoreBackendUnknown      = errors.New("agentos temporal worker: artifact store backend is unknown")
-	ErrWorkerArtifactStoreLocalRootRequired   = errors.New("agentos temporal worker: artifact local root is required")
-	ErrWorkerArtifactStoreS3BucketRequired    = errors.New("agentos temporal worker: artifact s3 bucket is required")
-	ErrWorkerArtifactStoreS3RegionRequired    = errors.New("agentos temporal worker: artifact s3 region is required")
+	// ErrWorkerConfigRequired reports a missing worker config.
+	ErrWorkerConfigRequired = errors.New("agentos temporal worker: config is required")
+	// ErrWorkerPostgresURLRequired reports a missing Postgres URL in the worker config.
+	ErrWorkerPostgresURLRequired = errors.New("agentos temporal worker: postgres url is required")
+	// ErrWorkerRedisURLRequired reports a missing Redis URL in the worker config.
+	ErrWorkerRedisURLRequired = errors.New("agentos temporal worker: redis url is required")
+	// ErrWorkerArtifactStoreBackendRequired reports a missing artifact store backend in the worker config.
+	ErrWorkerArtifactStoreBackendRequired = errors.New("agentos temporal worker: artifact store backend is required")
+	// ErrWorkerArtifactStoreBackendUnknown reports an unknown artifact store backend in the worker config.
+	ErrWorkerArtifactStoreBackendUnknown = errors.New("agentos temporal worker: artifact store backend is unknown")
+	// ErrWorkerArtifactStoreLocalRootRequired reports a missing artifact local root in the worker config.
+	ErrWorkerArtifactStoreLocalRootRequired = errors.New("agentos temporal worker: artifact local root is required")
+	// ErrWorkerArtifactStoreS3BucketRequired reports a missing artifact S3 bucket in the worker config.
+	ErrWorkerArtifactStoreS3BucketRequired = errors.New("agentos temporal worker: artifact s3 bucket is required")
+	// ErrWorkerArtifactStoreS3RegionRequired reports a missing artifact S3 region in the worker config.
+	ErrWorkerArtifactStoreS3RegionRequired = errors.New("agentos temporal worker: artifact s3 region is required")
+	// ErrWorkerArtifactStoreS3AccessKeyRequired reports a missing artifact S3 access key ID in the worker config.
 	ErrWorkerArtifactStoreS3AccessKeyRequired = errors.New("agentos temporal worker: artifact s3 access key id is required")
+	// ErrWorkerArtifactStoreS3SecretKeyRequired reports a missing artifact S3 secret access key in the worker config.
 	ErrWorkerArtifactStoreS3SecretKeyRequired = errors.New("agentos temporal worker: artifact s3 secret access key is required")
 )
 
@@ -150,10 +160,9 @@ func openWorkerResources(ctx context.Context, cfg *WorkerConfig) (*workerResourc
 		Namespace: fwTemporal.Namespace,
 	})
 	if err != nil {
-		_ = rdb.Close()
 		pg.Close()
 
-		return nil, fmt.Errorf("agentos temporal worker - temporal client: %w", err)
+		return nil, errors.Join(fmt.Errorf("agentos temporal worker - temporal client: %w", err), rdb.Close())
 	}
 
 	return &workerResources{
@@ -177,7 +186,11 @@ func (r *workerResources) dependencies() *workerDependencies {
 
 func (r *workerResources) close() {
 	r.temporalClient.Close()
-	_ = r.redis.Close()
+
+	if err := r.redis.Close(); err != nil {
+		r.logger.Error("worker - close redis", err)
+	}
+
 	r.postgres.Close()
 }
 
@@ -201,9 +214,7 @@ func configureWorkerPlanRuntime(kit *WorkerKit, cfg *WorkerConfig, resources *wo
 		},
 		infra.planClose,
 		func() error {
-			resources.redis.Close()
-
-			return nil
+			return resources.redis.Close()
 		},
 		func() error {
 			resources.postgres.Close()
@@ -260,16 +271,12 @@ func initWorkerPlanRuntime(ctx context.Context, cfg *WorkerConfig, pg *postgres.
 
 	planActivities, err := NewPlanActivitiesWithCatalogAndSchemas(planRuntime, capabilityCatalog, artifactSchemaCatalog, planStore, planEventStream, artifactStore)
 	if err != nil {
-		planRuntime.Close()
-
-		return nil, fmt.Errorf("agentos temporal worker - plan activities: %w", err)
+		return nil, errors.Join(fmt.Errorf("agentos temporal worker - plan activities: %w", err), planRuntime.Close())
 	}
 
 	processActivities, err := NewProcessActivities(processStore, processStore)
 	if err != nil {
-		planRuntime.Close()
-
-		return nil, fmt.Errorf("agentos temporal worker - process activities: %w", err)
+		return nil, errors.Join(fmt.Errorf("agentos temporal worker - process activities: %w", err), planRuntime.Close())
 	}
 
 	return &workerPlanRuntime{

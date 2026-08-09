@@ -3,6 +3,7 @@ package v1
 import (
 	"bufio"
 	"encoding/json"
+	"log"
 	"net/http"
 	"strconv"
 
@@ -30,6 +31,7 @@ const (
 // @Failure     404 {object} response.Error
 // @Failure     500 {object} response.Error
 // @Router      /agentos/plans [post]
+// The plan is started on its declared backend and tracked durably.
 func (r *V1) startAgentOSPlan(ctx *fiber.Ctx) error {
 	if r.planRuntime == nil {
 		return errorResponse(ctx, http.StatusNotFound, "agentos plan runtime is not configured")
@@ -59,6 +61,7 @@ func (r *V1) startAgentOSPlan(ctx *fiber.Ctx) error {
 // @Failure     404 {object} response.Error
 // @Failure     500 {object} response.Error
 // @Router      /agentos/plans/{plan_id}/status [get]
+// The status aggregates node outcomes, signals, and events for the plan.
 func (r *V1) statusAgentOSPlan(ctx *fiber.Ctx) error {
 	return r.withPlanRef(ctx, func(ref agentos.PlanRef) error {
 		status, err := r.planRuntime.StatusPlan(ctx.UserContext(), ref)
@@ -84,6 +87,7 @@ func (r *V1) statusAgentOSPlan(ctx *fiber.Ctx) error {
 // @Failure     404 {object} response.Error
 // @Failure     500 {object} response.Error
 // @Router      /agentos/plans/{plan_id}/description [get]
+// The description exposes the plan topology and aggregate status.
 func (r *V1) describeAgentOSPlan(ctx *fiber.Ctx) error {
 	return r.withPlanRef(ctx, func(ref agentos.PlanRef) error {
 		description, err := r.planRuntime.DescribePlan(ctx.UserContext(), ref)
@@ -154,6 +158,7 @@ func withPlanBody[T any](r *V1, ctx *fiber.Ctx, fn func(T) error) error {
 // @Failure     404 {object} response.Error
 // @Failure     500 {object} response.Error
 // @Router      /agentos/plans/{plan_id}/signals [post]
+// The signal is forwarded to the active plan run for business input.
 func (r *V1) signalAgentOSPlan(ctx *fiber.Ctx) error {
 	return withPlanActionBody(r, ctx, func(req request.AgentOSPlanSignal, ref agentos.PlanRef) error {
 		signal := agentoscore.Signal{
@@ -181,6 +186,7 @@ func (r *V1) signalAgentOSPlan(ctx *fiber.Ctx) error {
 // @Failure     404 {object} response.Error
 // @Failure     500 {object} response.Error
 // @Router      /agentos/plans/{plan_id}/control [post]
+// The control operation is applied to the active plan run.
 func (r *V1) controlAgentOSPlan(ctx *fiber.Ctx) error {
 	return withPlanActionBody(r, ctx, func(req request.AgentOSPlanControl, ref agentos.PlanRef) error {
 		control := agentoscore.ControlRequest{
@@ -256,6 +262,7 @@ func withQueryScope[T any](r *V1, ctx *fiber.Ctx, scopeName string, fn func(T) (
 // @Failure     404 {object} response.Error
 // @Failure     500 {object} response.Error
 // @Router      /agentos/plans/{plan_id}/audits [get]
+// The audit trail records plan mutations and node outcomes.
 func (r *V1) listAgentOSPlanAudits(ctx *fiber.Ctx) error {
 	return withQueryScope(r, ctx, "audit scope", func(req request.AgentOSPlanAuditScope) (any, error) {
 		return r.planRuntime.ListPlanAudits(ctx.UserContext(), &agentos.PlanAuditScope{
@@ -287,6 +294,7 @@ func (r *V1) listAgentOSPlanAudits(ctx *fiber.Ctx) error {
 // @Failure     404 {object} response.Error
 // @Failure     500 {object} response.Error
 // @Router      /agentos/plans/{plan_id}/artifacts [get]
+// The artifacts index lists refs produced by the plan's nodes.
 func (r *V1) listAgentOSPlanArtifacts(ctx *fiber.Ctx) error {
 	return withQueryScope(r, ctx, "artifact scope", func(req request.AgentOSPlanArtifactScope) (any, error) {
 		return r.planRuntime.ListPlanArtifacts(ctx.UserContext(), &agentos.PlanArtifactScope{
@@ -315,6 +323,7 @@ func (r *V1) listAgentOSPlanArtifacts(ctx *fiber.Ctx) error {
 // @Failure     404 {object} response.Error
 // @Failure     500 {object} response.Error
 // @Router      /agentos/plans/{plan_id}/artifacts/{artifact_id} [get]
+// The artifact payload is served from the plan's artifact store.
 func (r *V1) getAgentOSPlanArtifact(ctx *fiber.Ctx) error {
 	return withQueryScope(r, ctx, "artifact scope", func(req request.AgentOSPlanScope) (any, error) {
 		return r.planRuntime.GetPlanArtifact(ctx.UserContext(), &agentos.PlanArtifactScope{
@@ -344,6 +353,7 @@ func (r *V1) getAgentOSPlanArtifact(ctx *fiber.Ctx) error {
 // @Failure     404 {object} response.Error
 // @Failure     500 {object} response.Error
 // @Router      /agentos/plans/{plan_id}/events/history [get]
+// The history replays plan events in sequence order.
 func (r *V1) listAgentOSPlanEvents(ctx *fiber.Ctx) error {
 	return withQueryScope(r, ctx, "event scope", func(req request.AgentOSPlanEventScope) (any, error) {
 		return r.planRuntime.ListPlanEvents(ctx.UserContext(), &agentos.PlanEventScope{
@@ -376,6 +386,7 @@ func (r *V1) listAgentOSPlanEvents(ctx *fiber.Ctx) error {
 // @Failure     404 {object} response.Error
 // @Failure     500 {object} response.Error
 // @Router      /agentos/plans/{plan_id}/debug/traces [get]
+// The traces expose debug information for plan runs.
 func (r *V1) listAgentOSPlanDebugTraces(ctx *fiber.Ctx) error {
 	return withQueryScope(r, ctx, "debug trace scope", func(req request.AgentOSPlanDebugTraceScope) (any, error) {
 		return r.planRuntime.ListPlanDebugTraces(ctx.UserContext(), &agentos.PlanDebugTraceScope{
@@ -405,6 +416,7 @@ func (r *V1) listAgentOSPlanDebugTraces(ctx *fiber.Ctx) error {
 // @Failure     404 {object} response.Error
 // @Failure     500 {object} response.Error
 // @Router      /agentos/plans/{plan_id}/events [get]
+// The event stream replays plan events over SSE from the after_sequence cursor.
 func (r *V1) streamAgentOSPlanEvents(ctx *fiber.Ctx) error {
 	if r.planRuntime == nil {
 		return errorResponse(ctx, http.StatusNotFound, "agentos plan runtime is not configured")
@@ -435,7 +447,11 @@ func (r *V1) streamAgentOSPlanEvents(ctx *fiber.Ctx) error {
 	ctx.Set(fiber.HeaderCacheControl, "no-cache")
 	ctx.Set(fiber.HeaderConnection, "keep-alive")
 	ctx.Context().SetBodyStreamWriter(func(w *bufio.Writer) {
-		defer sub.Close()
+		defer func() {
+			if err := sub.Close(); err != nil {
+				log.Printf("agentos plan stream: close subscription: %v", err)
+			}
+		}()
 
 		for event := range sub.Events() {
 			if !writeAgentOSEventSSE(w, &event) {

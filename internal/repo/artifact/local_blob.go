@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"io"
 	"net/url"
 	"os"
 	"path"
@@ -65,6 +66,7 @@ func NewLocalBlobStore(root string) (*LocalBlobStore, error) {
 	return &LocalBlobStore{root: clean}, nil
 }
 
+// Put writes payload to the blob store under key and returns the stored blob's metadata.
 func (s *LocalBlobStore) Put(_ context.Context, key string, payload []byte) (BlobObject, error) {
 	pathOnDisk, err := s.pathForKey(key)
 	if err != nil {
@@ -93,18 +95,30 @@ func (s *LocalBlobStore) Put(_ context.Context, key string, payload []byte) (Blo
 	}, nil
 }
 
-func (s *LocalBlobStore) Get(_ context.Context, uri string) ([]byte, error) {
+// Get reads and returns the artifact payload stored at the given local blob URI.
+func (s *LocalBlobStore) Get(_ context.Context, uri string) (data []byte, err error) {
 	key, err := keyFromLocalURI(uri)
 	if err != nil {
 		return nil, err
 	}
 
-	pathOnDisk, err := s.pathForKey(key)
+	clean, err := s.cleanKey(key)
 	if err != nil {
 		return nil, err
 	}
 
-	data, err := os.ReadFile(pathOnDisk)
+	file, err := os.OpenInRoot(s.root, clean)
+	if err != nil {
+		return nil, fmt.Errorf("artifact local blob store: open: %w", err)
+	}
+
+	defer func() {
+		if closeErr := file.Close(); closeErr != nil {
+			err = errors.Join(err, fmt.Errorf("artifact local blob store: close: %w", closeErr))
+		}
+	}()
+
+	data, err = io.ReadAll(file)
 	if err != nil {
 		return nil, fmt.Errorf("artifact local blob store: read: %w", err)
 	}
@@ -112,19 +126,27 @@ func (s *LocalBlobStore) Get(_ context.Context, uri string) ([]byte, error) {
 	return data, nil
 }
 
-func (s *LocalBlobStore) pathForKey(key string) (string, error) {
+func (s *LocalBlobStore) cleanKey(key string) (string, error) {
 	if !filepath.IsLocal(key) {
 		return "", fmt.Errorf("%w: %q", errLocalBlobStoreInvalidKey, key)
 	}
 
 	clean := filepath.Clean(key)
 
-	pathOnDisk := filepath.Join(s.root, clean)
 	if !filepath.IsLocal(clean) {
 		return "", fmt.Errorf("%w: clean key %q", errLocalBlobStoreInvalidKey, key)
 	}
 
-	return pathOnDisk, nil
+	return clean, nil
+}
+
+func (s *LocalBlobStore) pathForKey(key string) (string, error) {
+	clean, err := s.cleanKey(key)
+	if err != nil {
+		return "", err
+	}
+
+	return filepath.Join(s.root, clean), nil
 }
 
 func localURI(key string) string {

@@ -1,3 +1,4 @@
+// Package mcp manages Model Context Protocol tool servers.
 package mcp
 
 import (
@@ -12,9 +13,12 @@ import (
 )
 
 var (
+	// ErrMCPUnsupportedTransport is returned when the configured MCP transport is not supported.
 	ErrMCPUnsupportedTransport = errors.New("unsupported transport")
-	ErrMCPNotStarted           = errors.New("mcp client not started")
-	ErrMCPToolError            = errors.New("mcp tool returned error")
+	// ErrMCPNotStarted is returned when an operation requires a client that has not been started.
+	ErrMCPNotStarted = errors.New("mcp client not started")
+	// ErrMCPToolError is returned when the MCP server reports an error while executing a tool.
+	ErrMCPToolError = errors.New("mcp tool returned error")
 )
 
 // Client connects to a single MCP server via the mcp-go library and provides
@@ -56,9 +60,7 @@ func (c *Client) Start(ctx context.Context) error {
 		},
 	}
 	if _, err := cl.Initialize(ctx, initReq); err != nil {
-		cl.Close()
-
-		return fmt.Errorf("initialize: %w", err)
+		return errors.Join(fmt.Errorf("initialize: %w", err), cl.Close())
 	}
 
 	return nil
@@ -85,9 +87,7 @@ func (c *Client) createClient(ctx context.Context) (*mcpclient.Client, error) {
 		}
 
 		if err := cl.Start(ctx); err != nil {
-			cl.Close()
-
-			return nil, fmt.Errorf("sse start: %w", err)
+			return nil, errors.Join(fmt.Errorf("sse start: %w", err), cl.Close())
 		}
 
 		return cl, nil
@@ -99,9 +99,7 @@ func (c *Client) createClient(ctx context.Context) (*mcpclient.Client, error) {
 		}
 
 		if err := cl.Start(ctx); err != nil {
-			cl.Close()
-
-			return nil, fmt.Errorf("streamable-http start: %w", err)
+			return nil, errors.Join(fmt.Errorf("streamable-http start: %w", err), cl.Close())
 		}
 
 		return cl, nil

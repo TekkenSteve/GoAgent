@@ -9,6 +9,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log"
 	"net/url"
 	"os"
 	"time"
@@ -53,17 +54,17 @@ func main() {
 		exitf("start plan: %v", err)
 	}
 
-	fmt.Fprintf(os.Stdout, "plan started: id=%s state=%s\n", status.PlanID, status.LifecycleState)
+	writeStdoutf("plan started: id=%s state=%s\n", status.PlanID, status.LifecycleState)
 
 	if err := c.Do(ctx, "GET", endpoint.planStatusPath(planID, accountID, projectID), nil, &status); err != nil {
 		exitf("status plan: %v", err)
 	}
 
-	fmt.Fprintf(os.Stdout, "plan status: id=%s state=%s active_runs=%d\n", status.PlanID, status.LifecycleState, len(status.ActiveRunIDs))
+	writeStdoutf("plan status: id=%s state=%s active_runs=%d\n", status.PlanID, status.LifecycleState, len(status.ActiveRunIDs))
 
 	for i := range status.Nodes {
 		node := &status.Nodes[i]
-		fmt.Fprintf(os.Stdout, "  node=%s backend=%s/%s state=%s run=%s\n", node.NodeID, node.Backend.Kind, node.Backend.Name, node.LifecycleState, node.RunID)
+		writeStdoutf("  node=%s backend=%s/%s state=%s run=%s\n", node.NodeID, node.Backend.Kind, node.Backend.Name, node.LifecycleState, node.RunID)
 	}
 }
 
@@ -122,6 +123,19 @@ func env(key, fallback string) string {
 }
 
 func exitf(format string, args ...any) {
-	fmt.Fprintf(os.Stderr, format+"\n", args...)
+	writeStderrf(format+"\n", args...)
+
 	os.Exit(1)
+}
+
+func writeStdoutf(format string, args ...any) {
+	if _, werr := fmt.Fprintf(os.Stdout, format, args...); werr != nil {
+		log.Fatalf("write stdout: %v", werr)
+	}
+}
+
+func writeStderrf(format string, args ...any) {
+	if _, werr := fmt.Fprintf(os.Stderr, format, args...); werr != nil {
+		log.Fatalf("write stderr: %v", werr)
+	}
 }

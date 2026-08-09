@@ -32,6 +32,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"log"
 	"os"
 	"time"
 
@@ -100,39 +101,72 @@ func main() {
 	c := client.New(baseURL, accountID)
 	ctx := context.Background()
 
-	fmt.Fprintf(os.Stdout, "=== Delegation Pattern (delegate_to_agent) ===\nRun ID: %s\n\n", runID)
-	fmt.Fprintln(os.Stdout, "How it works:")
-	fmt.Fprintln(os.Stdout, "  1. Coordinator receives a complex multi-topic research task")
-	fmt.Fprintln(os.Stdout, "  2. For each topic, coordinator calls delegate_to_agent to spawn")
-	fmt.Fprintln(os.Stdout, "     an ephemeral sub-agent with specialized instructions")
-	fmt.Fprintln(os.Stdout, "  3. Each sub-agent runs in an isolated child workflow")
-	fmt.Fprintln(os.Stdout, "  4. Coordinator synthesizes all results into a final answer")
-	fmt.Fprintln(os.Stdout)
-	fmt.Fprintln(os.Stdout, "Task: Compare Go vs Rust for building web APIs")
-	fmt.Fprintln(os.Stdout)
+	writeStdoutf("=== Delegation Pattern (delegate_to_agent) ===\nRun ID: %s\n\n", runID)
+
+	writeStdoutLine("How it works:")
+
+	writeStdoutLine("  1. Coordinator receives a complex multi-topic research task")
+
+	writeStdoutLine("  2. For each topic, coordinator calls delegate_to_agent to spawn")
+
+	writeStdoutLine("     an ephemeral sub-agent with specialized instructions")
+
+	writeStdoutLine("  3. Each sub-agent runs in an isolated child workflow")
+
+	writeStdoutLine("  4. Coordinator synthesizes all results into a final answer")
+
+	writeStdoutLine()
+
+	writeStdoutLine("Task: Compare Go vs Rust for building web APIs")
+
+	writeStdoutLine()
 
 	status, err := c.ExecuteOrchestration(ctx, &client.OrchestrationRequest{
 		RunID:    runID,
 		TeamSpec: delegateTeamSpec(),
 	})
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+		writeStderrf("Error: %v\n", err)
 		os.Exit(1)
 	}
 
-	fmt.Fprintf(os.Stdout, "Initial status: lifecycle_state=%s step=%d\n\n", status.LifecycleState, status.Step)
-	fmt.Fprintln(os.Stdout, "The coordinator agent is now running. It should:")
-	fmt.Fprintln(os.Stdout, "  1. Delegate Go research to a sub-agent")
-	fmt.Fprintln(os.Stdout, "  2. Delegate Rust research to a sub-agent")
-	fmt.Fprintln(os.Stdout, "  3. Synthesize the comparison")
-	fmt.Fprintln(os.Stdout)
-	fmt.Fprintln(os.Stdout, "Polling for completion...")
+	writeStdoutf("Initial status: lifecycle_state=%s step=%d\n\n", status.LifecycleState, status.Step)
+
+	writeStdoutLine("The coordinator agent is now running. It should:")
+
+	writeStdoutLine("  1. Delegate Go research to a sub-agent")
+
+	writeStdoutLine("  2. Delegate Rust research to a sub-agent")
+
+	writeStdoutLine("  3. Synthesize the comparison")
+
+	writeStdoutLine()
+
+	writeStdoutLine("Polling for completion...")
 
 	status, err = c.WaitForOrchestrationCompletion(ctx, runID, pollInterval, pollTimeout)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+		writeStderrf("Error: %v\n", err)
 		os.Exit(1)
 	}
 
-	fmt.Fprintf(os.Stdout, "\nFinal status: lifecycle_state=%s step=%d\n", status.LifecycleState, status.Step)
+	writeStdoutf("\nFinal status: lifecycle_state=%s step=%d\n", status.LifecycleState, status.Step)
+}
+
+func writeStdoutf(format string, args ...any) {
+	if _, werr := fmt.Fprintf(os.Stdout, format, args...); werr != nil {
+		log.Fatalf("write stdout: %v", werr)
+	}
+}
+
+func writeStderrf(format string, args ...any) {
+	if _, werr := fmt.Fprintf(os.Stderr, format, args...); werr != nil {
+		log.Fatalf("write stderr: %v", werr)
+	}
+}
+
+func writeStdoutLine(args ...any) {
+	if _, werr := fmt.Fprintln(os.Stdout, args...); werr != nil {
+		log.Fatalf("write stdout: %v", werr)
+	}
 }

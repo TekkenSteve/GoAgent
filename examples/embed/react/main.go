@@ -7,6 +7,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log"
 	"os"
@@ -22,7 +23,7 @@ func main() {
 	}
 }
 
-func run() error {
+func run() (err error) {
 	ctx := context.Background()
 
 	cfg := agentostemporal.RuntimeConfig{
@@ -37,7 +38,10 @@ func run() error {
 	if err != nil {
 		return fmt.Errorf("new runtime: %w", err)
 	}
-	defer rt.Close()
+
+	defer func() {
+		err = errors.Join(err, rt.Close())
+	}()
 
 	runID := fmt.Sprintf("embed-react-%d", time.Now().UnixMilli())
 
@@ -57,7 +61,9 @@ func run() error {
 		return fmt.Errorf("start run: %w", err)
 	}
 
-	fmt.Fprintf(os.Stdout, "run started: id=%s state=%s\n", status.RunID, status.LifecycleState)
+	if _, werr := fmt.Fprintf(os.Stdout, "run started: id=%s state=%s\n", status.RunID, status.LifecycleState); werr != nil {
+		return fmt.Errorf("write run status: %w", werr)
+	}
 
 	return nil
 }

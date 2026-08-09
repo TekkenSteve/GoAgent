@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log"
 	"net/http"
 	"sync"
 	"time"
@@ -321,7 +322,12 @@ func (w *WebSearch) searchTavily(ctx context.Context, query string, maxResults i
 	if err != nil {
 		return WebSearchResult{Query: query, Success: false, Error: err.Error()}
 	}
-	defer resp.Body.Close()
+
+	defer func() {
+		if err := resp.Body.Close(); err != nil {
+			log.Printf("web search: close response body: %v", err)
+		}
+	}()
 
 	var tavilyResp tavilyResponse
 	if err := json.NewDecoder(resp.Body).Decode(&tavilyResp); err != nil {

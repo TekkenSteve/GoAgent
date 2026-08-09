@@ -35,8 +35,10 @@ const (
 )
 
 var (
+	// ErrRedisConnectExhausted is returned when all Redis connection attempts are exhausted.
 	ErrRedisConnectExhausted = errors.New("redis connection exhausted")
-	ErrRedisEmptyStreamID    = errors.New("redis stream returned empty id")
+	// ErrRedisEmptyStreamID is returned when a Redis stream operation returns an empty message ID.
+	ErrRedisEmptyStreamID = errors.New("redis stream returned empty id")
 )
 
 // Config is the configuration for the Redis client.
@@ -115,9 +117,7 @@ func New(ctx context.Context, url string, opts ...Option) (*Redis, error) {
 
 	rdb.StreamClient, err = connectWithRetry(ctx, streamOpts)
 	if err != nil {
-		rdb.GeneralClient.Close()
-
-		return nil, fmt.Errorf("redis - New - stream pool: %w", err)
+		return nil, errors.Join(fmt.Errorf("redis - New - stream pool: %w", err), rdb.GeneralClient.Close())
 	}
 
 	rdb.hub = NewStreamHub(rdb.StreamClient)
@@ -190,7 +190,11 @@ func parseRedisConfig(url string, opts ...Option) (generalOpts, streamOpts *gore
 }
 
 func connectWithRetry(ctx context.Context, opts *goredis.Options) (*goredis.Client, error) {
-	var client *goredis.Client
+	var (
+		client    *goredis.Client
+		closeErrs []error
+	)
+
 	for attempt := range _defaultConnAttempts {
 		client = goredis.NewClient(opts)
 		pingCtx, cancel := context.WithTimeout(ctx, _defaultConnectTimeout)
@@ -202,14 +206,16 @@ func connectWithRetry(ctx context.Context, opts *goredis.Options) (*goredis.Clie
 			return client, nil
 		}
 
-		client.Close()
+		closeErrs = append(closeErrs, client.Close())
 
 		if attempt < _defaultConnAttempts-1 {
 			time.Sleep(_defaultConnRetryInterval)
 		}
 	}
 
-	return nil, fmt.Errorf("redis - connectWithRetry - %w: %d", ErrRedisConnectExhausted, _defaultConnAttempts)
+	errs := append([]error{fmt.Errorf("redis - connectWithRetry - %w: %d", ErrRedisConnectExhausted, _defaultConnAttempts)}, closeErrs...)
+
+	return nil, errors.Join(errs...)
 }
 
 // Close closes both connection pools and the hub. Safe to call multiple times.

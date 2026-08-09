@@ -100,7 +100,10 @@ func initInfrastructure(cfg *config.Config, l *logger.Logger) *appInfrastructure
 
 	eventIngest, err := eventing.NewService(eventStore, eventDedupeStore)
 	if err != nil {
-		rdb.Close()
+		if closeErr := rdb.Close(); closeErr != nil {
+			l.Error("app - Run - close redis after eventing.NewService failure", closeErr)
+		}
+
 		pg.Close()
 		l.Fatal(fmt.Errorf("app - Run - eventing.NewService: %w", err))
 	}
@@ -129,7 +132,13 @@ func Run(cfg *config.Config) {
 
 	infra := initInfrastructure(cfg, l)
 
-	defer func() { infra.pg.Close(); infra.rdb.Close() }()
+	defer func() {
+		infra.pg.Close()
+
+		if err := infra.rdb.Close(); err != nil {
+			l.Error("app - Run - close redis", err)
+		}
+	}()
 
 	tc := initTemporalComponents(l, cfg, &infra.fwCfg, infra.pg, infra.rdb, infra.messageRepo, infra.agentRepo, infra.runBackendIndex, infra.templateUC, infra.eventStore)
 	if tc != nil {

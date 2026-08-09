@@ -1,3 +1,4 @@
+// Package httpbackend implements an AgentOS backend over HTTP.
 package httpbackend
 
 import (
@@ -168,7 +169,7 @@ func checkHTTPResponse(resp *http.Response) error {
 	return fmt.Errorf("%w: status %d: %s", errHTTPBackendUnexpectedStatus, resp.StatusCode, string(data))
 }
 
-func (b *Backend) doJSON(ctx context.Context, method, path string, input, output any) error {
+func (b *Backend) doJSON(ctx context.Context, method, path string, input, output any) (err error) {
 	body, err := jsonBody(input)
 	if err != nil {
 		return err
@@ -185,7 +186,12 @@ func (b *Backend) doJSON(ctx context.Context, method, path string, input, output
 	if err != nil {
 		return err
 	}
-	defer resp.Body.Close()
+
+	defer func() {
+		if closeErr := resp.Body.Close(); closeErr != nil {
+			err = errors.Join(err, closeErr)
+		}
+	}()
 
 	if err := checkHTTPResponse(resp); err != nil {
 		return err

@@ -24,7 +24,11 @@ func TestRuntimePostgresConversationLifecycle(t *testing.T) {
 	defer cancel()
 
 	runtime := newTestRuntime(ctx, t, Config{PostgresURL: postgresURL, PollInterval: 10 * time.Millisecond})
-	defer runtime.Close()
+	t.Cleanup(func() {
+		if err := runtime.Close(); err != nil {
+			t.Errorf("close runtime: %v", err)
+		}
+	})
 
 	suffix := fmt.Sprintf("%d", time.Now().UnixNano())
 	threadID := "thread-" + suffix
@@ -47,7 +51,12 @@ func TestRuntimePostgresConversationLifecycle(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer subscription.Close()
+
+	t.Cleanup(func() {
+		if err := subscription.Close(); err != nil {
+			t.Errorf("close subscription: %v", err)
+		}
+	})
 
 	started := scope.ingest(ctx, t, runtime, 1, agentos.ConversationEventRunStarted, map[string]any{})
 	assertIdempotencyAndOrdering(ctx, t, runtime, &scope, &started)
@@ -196,7 +205,11 @@ func TestRuntimeRedisStreamDeliversWithoutFallbackPoll(t *testing.T) {
 		PostgresURL: postgresURL, RedisURL: redisURL,
 		PollInterval: 30 * time.Second, OutboxPollInterval: 30 * time.Second,
 	})
-	defer runtime.Close()
+	t.Cleanup(func() {
+		if err := runtime.Close(); err != nil {
+			t.Errorf("close runtime: %v", err)
+		}
+	})
 
 	suffix := fmt.Sprintf("redis-%d", time.Now().UnixNano())
 	threadID := "thread-" + suffix
@@ -212,10 +225,18 @@ func TestRuntimeRedisStreamDeliversWithoutFallbackPoll(t *testing.T) {
 	cleanupConversationStream(t, runtime, accountID, projectID, threadID)
 
 	subscription, started := startRedisStreamingRun(ctx, t, runtime, &scope, suffix)
-	defer subscription.Close()
+	t.Cleanup(func() {
+		if err := subscription.Close(); err != nil {
+			t.Errorf("close subscription: %v", err)
+		}
+	})
 
 	writer := newTestRuntime(ctx, t, Config{PostgresURL: postgresURL, PollInterval: 30 * time.Second})
-	defer writer.Close()
+	t.Cleanup(func() {
+		if err := writer.Close(); err != nil {
+			t.Errorf("close writer: %v", err)
+		}
+	})
 
 	gapEvents := writeGapEvents(ctx, t, writer, &scope, suffix)
 

@@ -1,3 +1,4 @@
+// Package main is the agentos-plan command-line tool.
 package main
 
 import (
@@ -52,9 +53,7 @@ func main() {
 
 func run(args []string, stdout, stderr io.Writer) int {
 	if len(args) == 0 {
-		printUsage(stderr)
-
-		return exitCodeUsage
+		return runUsage(stderr)
 	}
 
 	switch args[0] {
@@ -73,11 +72,28 @@ func run(args []string, stdout, stderr io.Writer) int {
 	case "import-serverless":
 		return runImportServerless(args[1:], stdout, stderr)
 	default:
-		_, _ = fmt.Fprintf(stderr, "unknown command %q\n", args[0])
-		printUsage(stderr)
-
-		return exitCodeUsage
+		return runUnknownCommand(args[0], stderr)
 	}
+}
+
+func runUsage(stderr io.Writer) int {
+	if err := printUsage(stderr); err != nil {
+		return exitCodeError
+	}
+
+	return exitCodeUsage
+}
+
+func runUnknownCommand(command string, stderr io.Writer) int {
+	if _, werr := fmt.Fprintf(stderr, "unknown command %q\n", command); werr != nil {
+		return exitCodeError
+	}
+
+	if err := printUsage(stderr); err != nil {
+		return exitCodeError
+	}
+
+	return exitCodeUsage
 }
 
 func runSchema(args []string, stdout, stderr io.Writer) int {
@@ -92,13 +108,17 @@ func runSchema(args []string, stdout, stderr io.Writer) int {
 
 	schema, err := agentos.PlanJSONSchema(agentos.PlanSchemaKind(*kind))
 	if err != nil {
-		_, _ = fmt.Fprintf(stderr, "generate schema: %v\n", err)
+		if _, werr := fmt.Fprintf(stderr, "generate schema: %v\n", err); werr != nil {
+			return exitCodeError
+		}
 
 		return exitCodeError
 	}
 
 	if err := writeOutput(*outPath, schema, stdout); err != nil {
-		_, _ = fmt.Fprintf(stderr, "write schema: %v\n", err)
+		if _, werr := fmt.Fprintf(stderr, "write schema: %v\n", err); werr != nil {
+			return exitCodeError
+		}
 
 		return exitCodeError
 	}
@@ -109,12 +129,16 @@ func runSchema(args []string, stdout, stderr io.Writer) int {
 func runValidate(args []string, stdout, stderr io.Writer) int {
 	_, err := compilePlanCommand(args, stderr)
 	if err != nil {
-		_, _ = fmt.Fprintf(stderr, "validate run plan: %v\n", err)
+		if _, werr := fmt.Fprintf(stderr, "validate run plan: %v\n", err); werr != nil {
+			return exitCodeError
+		}
 
 		return exitCodeError
 	}
 
-	_, _ = fmt.Fprintln(stdout, "valid")
+	if _, werr := fmt.Fprintln(stdout, "valid"); werr != nil {
+		return exitCodeError
+	}
 
 	return exitCodeSuccess
 }
@@ -122,12 +146,16 @@ func runValidate(args []string, stdout, stderr io.Writer) int {
 func runValidateDelta(args []string, stdout, stderr io.Writer) int {
 	_, err := compilePlanDeltaCommand(args, stderr)
 	if err != nil {
-		_, _ = fmt.Fprintf(stderr, "validate plan delta: %v\n", err)
+		if _, werr := fmt.Fprintf(stderr, "validate plan delta: %v\n", err); werr != nil {
+			return exitCodeError
+		}
 
 		return exitCodeError
 	}
 
-	_, _ = fmt.Fprintln(stdout, "valid")
+	if _, werr := fmt.Fprintln(stdout, "valid"); werr != nil {
+		return exitCodeError
+	}
 
 	return exitCodeSuccess
 }
@@ -137,14 +165,18 @@ func runCompile(args []string, stdout, stderr io.Writer) int {
 
 	opts, err := parseCompileFlags(fs, args)
 	if err != nil {
-		_, _ = fmt.Fprintf(stderr, "compile run plan: %v\n", err)
+		if _, werr := fmt.Fprintf(stderr, "compile run plan: %v\n", err); werr != nil {
+			return exitCodeError
+		}
 
 		return exitCodeUsage
 	}
 
 	plan, err := compilePlan(&opts)
 	if err != nil {
-		_, _ = fmt.Fprintf(stderr, "compile run plan: %v\n", err)
+		if _, werr := fmt.Fprintf(stderr, "compile run plan: %v\n", err); werr != nil {
+			return exitCodeError
+		}
 
 		return exitCodeError
 	}
@@ -157,14 +189,18 @@ func runCompileDelta(args []string, stdout, stderr io.Writer) int {
 
 	opts, err := parseDeltaFlags(fs, args)
 	if err != nil {
-		_, _ = fmt.Fprintf(stderr, "compile plan delta: %v\n", err)
+		if _, werr := fmt.Fprintf(stderr, "compile plan delta: %v\n", err); werr != nil {
+			return exitCodeError
+		}
 
 		return exitCodeUsage
 	}
 
 	plan, err := compilePlanDelta(&opts)
 	if err != nil {
-		_, _ = fmt.Fprintf(stderr, "compile plan delta: %v\n", err)
+		if _, werr := fmt.Fprintf(stderr, "compile plan delta: %v\n", err); werr != nil {
+			return exitCodeError
+		}
 
 		return exitCodeError
 	}
@@ -175,14 +211,18 @@ func runCompileDelta(args []string, stdout, stderr io.Writer) int {
 func emitCompiledPlan(plan *agentosplan.ExecutablePlan, outPath string, stdout, stderr io.Writer) int {
 	payload, err := json.MarshalIndent(compiledPlanOutput{Spec: plan.Spec, Order: plan.Order}, "", "  ")
 	if err != nil {
-		_, _ = fmt.Fprintf(stderr, "encode compiled plan: %v\n", err)
+		if _, werr := fmt.Fprintf(stderr, "encode compiled plan: %v\n", err); werr != nil {
+			return exitCodeError
+		}
 
 		return exitCodeError
 	}
 
 	payload = append(payload, '\n')
 	if err := writeOutput(outPath, payload, stdout); err != nil {
-		_, _ = fmt.Fprintf(stderr, "write compiled plan: %v\n", err)
+		if _, werr := fmt.Fprintf(stderr, "write compiled plan: %v\n", err); werr != nil {
+			return exitCodeError
+		}
 
 		return exitCodeError
 	}
@@ -195,27 +235,35 @@ func runExportServerless(args []string, stdout, stderr io.Writer) int {
 
 	opts, err := parseServerlessExportFlags(fs, args)
 	if err != nil {
-		_, _ = fmt.Fprintf(stderr, "export serverless workflow: %v\n", err)
+		if _, werr := fmt.Fprintf(stderr, "export serverless workflow: %v\n", err); werr != nil {
+			return exitCodeError
+		}
 
 		return exitCodeUsage
 	}
 
 	workflow, err := exportServerless(&opts)
 	if err != nil {
-		_, _ = fmt.Fprintf(stderr, "export serverless workflow: %v\n", err)
+		if _, werr := fmt.Fprintf(stderr, "export serverless workflow: %v\n", err); werr != nil {
+			return exitCodeError
+		}
 
 		return exitCodeError
 	}
 
 	payload, err := encodeServerlessWorkflow(opts.outputFormat, &workflow)
 	if err != nil {
-		_, _ = fmt.Fprintf(stderr, "encode serverless workflow: %v\n", err)
+		if _, werr := fmt.Fprintf(stderr, "encode serverless workflow: %v\n", err); werr != nil {
+			return exitCodeError
+		}
 
 		return exitCodeError
 	}
 
 	if err := writeOutput(opts.outPath, payload, stdout); err != nil {
-		_, _ = fmt.Fprintf(stderr, "write serverless workflow: %v\n", err)
+		if _, werr := fmt.Fprintf(stderr, "write serverless workflow: %v\n", err); werr != nil {
+			return exitCodeError
+		}
 
 		return exitCodeError
 	}
@@ -228,27 +276,35 @@ func runImportServerless(args []string, stdout, stderr io.Writer) int {
 
 	opts, err := parseServerlessImportFlags(fs, args)
 	if err != nil {
-		_, _ = fmt.Fprintf(stderr, "import serverless workflow: %v\n", err)
+		if _, werr := fmt.Fprintf(stderr, "import serverless workflow: %v\n", err); werr != nil {
+			return exitCodeError
+		}
 
 		return exitCodeUsage
 	}
 
 	plan, err := importServerless(&opts)
 	if err != nil {
-		_, _ = fmt.Fprintf(stderr, "import serverless workflow: %v\n", err)
+		if _, werr := fmt.Fprintf(stderr, "import serverless workflow: %v\n", err); werr != nil {
+			return exitCodeError
+		}
 
 		return exitCodeError
 	}
 
 	payload, err := encodeWire(opts.outputFormat, compiledPlanOutput{Spec: plan.Spec, Order: plan.Order})
 	if err != nil {
-		_, _ = fmt.Fprintf(stderr, "encode imported run plan: %v\n", err)
+		if _, werr := fmt.Fprintf(stderr, "encode imported run plan: %v\n", err); werr != nil {
+			return exitCodeError
+		}
 
 		return exitCodeError
 	}
 
 	if err := writeOutput(opts.outPath, payload, stdout); err != nil {
-		_, _ = fmt.Fprintf(stderr, "write imported run plan: %v\n", err)
+		if _, werr := fmt.Fprintf(stderr, "write imported run plan: %v\n", err); werr != nil {
+			return exitCodeError
+		}
 
 		return exitCodeError
 	}
@@ -870,7 +926,7 @@ func writeOutput(path string, data []byte, stdout io.Writer) error {
 	return writeRootedFile(target, data)
 }
 
-func readInputFile(path string) ([]byte, error) {
+func readInputFile(path string) (data []byte, err error) {
 	target, err := parseFileTarget(path)
 	if err != nil {
 		return nil, err
@@ -880,13 +936,23 @@ func readInputFile(path string) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer root.Close()
+
+	defer func() {
+		if closeErr := root.Close(); closeErr != nil {
+			err = errors.Join(err, closeErr)
+		}
+	}()
 
 	file, err := root.Open(target.name)
 	if err != nil {
 		return nil, err
 	}
-	defer file.Close()
+
+	defer func() {
+		if closeErr := file.Close(); closeErr != nil {
+			err = errors.Join(err, closeErr)
+		}
+	}()
 
 	return io.ReadAll(file)
 }
@@ -910,7 +976,7 @@ func parseFileTarget(path string) (fileTarget, error) {
 	}, nil
 }
 
-func writeRootedFile(target fileTarget, data []byte) error {
+func writeRootedFile(target fileTarget, data []byte) (err error) {
 	if err := os.MkdirAll(target.dir, dirPerm); err != nil {
 		return err
 	}
@@ -919,13 +985,23 @@ func writeRootedFile(target fileTarget, data []byte) error {
 	if err != nil {
 		return err
 	}
-	defer root.Close()
+
+	defer func() {
+		if closeErr := root.Close(); closeErr != nil {
+			err = errors.Join(err, closeErr)
+		}
+	}()
 
 	file, err := root.OpenFile(target.name, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, filePerm)
 	if err != nil {
 		return err
 	}
-	defer file.Close()
+
+	defer func() {
+		if closeErr := file.Close(); closeErr != nil {
+			err = errors.Join(err, closeErr)
+		}
+	}()
 
 	_, err = file.Write(data)
 
@@ -944,6 +1020,10 @@ func checkedInt32(name string, value int) (int32, error) {
 	return int32(value), nil
 }
 
-func printUsage(w io.Writer) {
-	_, _ = fmt.Fprintln(w, "usage: agentos-plan <schema|validate|compile|validate-delta|compile-delta|export-serverless|import-serverless> [flags]")
+func printUsage(w io.Writer) error {
+	if _, werr := fmt.Fprintln(w, "usage: agentos-plan <schema|validate|compile|validate-delta|compile-delta|export-serverless|import-serverless> [flags]"); werr != nil {
+		return werr
+	}
+
+	return nil
 }
