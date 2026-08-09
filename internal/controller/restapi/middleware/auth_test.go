@@ -33,7 +33,11 @@ func testAuthSkip(t *testing.T, path string) {
 	resp, err := app.Test(httptest.NewRequestWithContext(context.Background(), fiber.MethodGet, path, http.NoBody))
 	require.NoError(t, err)
 
-	resp.Body.Close()
+	t.Cleanup(func() {
+		if err := resp.Body.Close(); err != nil {
+			t.Errorf("close response body: %v", err)
+		}
+	})
 }
 
 func TestAuth_SkipRegister(t *testing.T) {
@@ -59,7 +63,11 @@ func TestAuth_MissingAuthHeader(t *testing.T) {
 	resp, err := app.Test(httptest.NewRequestWithContext(context.Background(), fiber.MethodGet, "/v1/agentos/runs", http.NoBody))
 	require.NoError(t, err)
 
-	defer resp.Body.Close()
+	t.Cleanup(func() {
+		if err := resp.Body.Close(); err != nil {
+			t.Errorf("close response body: %v", err)
+		}
+	})
 
 	assert.Equal(t, fiber.StatusUnauthorized, resp.StatusCode)
 }
@@ -79,7 +87,11 @@ func TestAuth_InvalidToken(t *testing.T) {
 	resp, err := app.Test(req)
 	require.NoError(t, err)
 
-	defer resp.Body.Close()
+	t.Cleanup(func() {
+		if err := resp.Body.Close(); err != nil {
+			t.Errorf("close response body: %v", err)
+		}
+	})
 
 	assert.Equal(t, fiber.StatusUnauthorized, resp.StatusCode)
 }
@@ -104,7 +116,11 @@ func TestAuth_ValidToken(t *testing.T) {
 	resp, err := app.Test(req)
 	require.NoError(t, err)
 
-	defer resp.Body.Close()
+	t.Cleanup(func() {
+		if err := resp.Body.Close(); err != nil {
+			t.Errorf("close response body: %v", err)
+		}
+	})
 
 	assert.Equal(t, fiber.StatusOK, resp.StatusCode)
 }

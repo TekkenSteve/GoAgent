@@ -278,7 +278,12 @@ func startAgentOSPlanSpec(t *testing.T, spec *agentos.RunPlanSpec) planStatus {
 	if err != nil {
 		t.Fatalf("startAgentOSPlan: request failed: %v", err)
 	}
-	defer resp.Body.Close()
+
+	t.Cleanup(func() {
+		if err := resp.Body.Close(); err != nil {
+			t.Errorf("close response body: %v", err)
+		}
+	})
 
 	if resp.StatusCode != http.StatusAccepted {
 		t.Fatalf("startAgentOSPlan: expected 202, got %d: %s", resp.StatusCode, readResponseBody(t, resp.Body))
@@ -412,7 +417,12 @@ func requireAgentOSPlanConsole(t *testing.T, planID string) {
 	if err != nil {
 		t.Fatalf("requireAgentOSPlanConsole: request failed: %v", err)
 	}
-	defer resp.Body.Close()
+
+	t.Cleanup(func() {
+		if err := resp.Body.Close(); err != nil {
+			t.Errorf("close response body: %v", err)
+		}
+	})
 
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("requireAgentOSPlanConsole: expected 200, got %d: %s", resp.StatusCode, readResponseBody(t, resp.Body))
@@ -441,7 +451,12 @@ func controlAgentOSPlan(t *testing.T, planID string, operation agentoscore.Contr
 	if err != nil {
 		t.Fatalf("controlAgentOSPlan: request failed: %v", err)
 	}
-	defer resp.Body.Close()
+
+	t.Cleanup(func() {
+		if err := resp.Body.Close(); err != nil {
+			t.Errorf("close response body: %v", err)
+		}
+	})
 
 	if resp.StatusCode != http.StatusAccepted {
 		t.Fatalf("controlAgentOSPlan: expected 202, got %d: %s", resp.StatusCode, readResponseBody(t, resp.Body))
@@ -458,7 +473,12 @@ func getAgentOSPlanJSON(t *testing.T, endpoint string, out any) {
 	if err != nil {
 		t.Fatalf("getAgentOSPlanJSON: request failed: %v", err)
 	}
-	defer resp.Body.Close()
+
+	t.Cleanup(func() {
+		if err := resp.Body.Close(); err != nil {
+			t.Errorf("close response body: %v", err)
+		}
+	})
 
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("getAgentOSPlanJSON: expected 200, got %d: %s", resp.StatusCode, readResponseBody(t, resp.Body))

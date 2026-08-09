@@ -199,7 +199,12 @@ func TestRuntimeSubscribeProcessReplaysDurableEvents(t *testing.T) {
 	if err != nil {
 		t.Fatalf("SubscribeProcess: %v", err)
 	}
-	defer sub.Close()
+
+	t.Cleanup(func() {
+		if err := sub.Close(); err != nil {
+			t.Errorf("close process subscription: %v", err)
+		}
+	})
 
 	event, ok := <-sub.Events()
 	if !ok {

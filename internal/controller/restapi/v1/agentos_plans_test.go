@@ -56,7 +56,11 @@ func testPlanStartRoute(t *testing.T, app *fiber.App, planRuntime *fakePlanRunti
 	}`
 
 	resp := doAgentOSRouteRequest(t, app, http.MethodPost, "/v1/agentos/plans", startBody)
-	defer resp.Body.Close()
+	t.Cleanup(func() {
+		if err := resp.Body.Close(); err != nil {
+			t.Errorf("close response body: %v", err)
+		}
+	})
 
 	if resp.StatusCode != http.StatusAccepted {
 		t.Fatalf("start status = %d", resp.StatusCode)
@@ -76,7 +80,11 @@ func testPlanSignalRoute(t *testing.T, app *fiber.App, planRuntime *fakePlanRunt
 	signalBody := `{"type": "plan.node.retry", "account_id": "acct-1", "project_id": "proj-1", "idempotency_key": "retry-1", "actor_id": "operator-1", "payload": {"node_id": "research"}}`
 
 	resp := doAgentOSRouteRequest(t, app, http.MethodPost, "/v1/agentos/plans/plan-1/signals", signalBody)
-	defer resp.Body.Close()
+	t.Cleanup(func() {
+		if err := resp.Body.Close(); err != nil {
+			t.Errorf("close response body: %v", err)
+		}
+	})
 
 	if resp.StatusCode != http.StatusAccepted {
 		t.Fatalf("signal status = %d", resp.StatusCode)
@@ -98,7 +106,11 @@ func testPlanControlRoute(t *testing.T, app *fiber.App, planRuntime *fakePlanRun
 	controlBody := `{"operation": "pause", "account_id": "acct-1", "project_id": "proj-1", "idempotency_key": "pause-1", "actor_id": "operator-1"}`
 
 	resp := doAgentOSRouteRequest(t, app, http.MethodPost, "/v1/agentos/plans/plan-1/control", controlBody)
-	defer resp.Body.Close()
+	t.Cleanup(func() {
+		if err := resp.Body.Close(); err != nil {
+			t.Errorf("close response body: %v", err)
+		}
+	})
 
 	if resp.StatusCode != http.StatusAccepted {
 		t.Fatalf("control status = %d", resp.StatusCode)
@@ -117,7 +129,11 @@ func testPlanStatusRoute(t *testing.T, app *fiber.App, _ *fakePlanRuntime) {
 	t.Helper()
 
 	resp := doAgentOSRouteRequest(t, app, http.MethodGet, "/v1/agentos/plans/plan-1/status?account_id=acct-1&project_id=proj-1", "")
-	defer resp.Body.Close()
+	t.Cleanup(func() {
+		if err := resp.Body.Close(); err != nil {
+			t.Errorf("close response body: %v", err)
+		}
+	})
 
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("status code = %d", resp.StatusCode)
@@ -137,7 +153,11 @@ func testPlanDescriptionRoute(t *testing.T, app *fiber.App, _ *fakePlanRuntime) 
 	t.Helper()
 
 	resp := doAgentOSRouteRequest(t, app, http.MethodGet, "/v1/agentos/plans/plan-1/description?account_id=acct-1&project_id=proj-1", "")
-	defer resp.Body.Close()
+	t.Cleanup(func() {
+		if err := resp.Body.Close(); err != nil {
+			t.Errorf("close response body: %v", err)
+		}
+	})
 
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("description status = %d", resp.StatusCode)
@@ -161,19 +181,11 @@ func testPlanAuditsRoute(t *testing.T, app *fiber.App, planRuntime *fakePlanRunt
 	t.Helper()
 
 	resp := doAgentOSRouteRequest(t, app, http.MethodGet, "/v1/agentos/plans/plan-1/audits?account_id=acct-1&project_id=proj-1&action=plan.control&limit=25", "")
-	defer resp.Body.Close()
-
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("audits status = %d", resp.StatusCode)
 	}
 
-	if planRuntime.auditScope.PlanID != plan1 ||
-		planRuntime.auditScope.AccountID != account1 ||
-		planRuntime.auditScope.ProjectID != project1 ||
-		planRuntime.auditScope.Action != agentos.PlanAuditActionControl ||
-		planRuntime.auditScope.Limit != 25 {
-		t.Fatalf("unexpected audit scope: %#v", planRuntime.auditScope)
-	}
+	assertPlanAuditScope(t, &planRuntime.auditScope)
 
 	var audits []agentos.PlanAuditRecord
 	if err := json.NewDecoder(resp.Body).Decode(&audits); err != nil {
@@ -183,25 +195,21 @@ func testPlanAuditsRoute(t *testing.T, app *fiber.App, planRuntime *fakePlanRunt
 	if len(audits) != 1 || audits[0].Action != agentos.PlanAuditActionControl {
 		t.Fatalf("unexpected audits: %#v", audits)
 	}
+
+	if err := resp.Body.Close(); err != nil {
+		t.Errorf("close response body: %v", err)
+	}
 }
 
 func testPlanArtifactsRoute(t *testing.T, app *fiber.App, planRuntime *fakePlanRuntime) {
 	t.Helper()
 
 	resp := doAgentOSRouteRequest(t, app, http.MethodGet, "/v1/agentos/plans/plan-1/artifacts?account_id=acct-1&project_id=proj-1&node_id=research&limit=10", "")
-	defer resp.Body.Close()
-
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("artifacts status = %d", resp.StatusCode)
 	}
 
-	if planRuntime.artifactScope.PlanID != plan1 ||
-		planRuntime.artifactScope.AccountID != account1 ||
-		planRuntime.artifactScope.ProjectID != project1 ||
-		planRuntime.artifactScope.NodeID != research ||
-		planRuntime.artifactScope.Limit != 10 {
-		t.Fatalf("unexpected artifact scope: %#v", planRuntime.artifactScope)
-	}
+	assertPlanArtifactScope(t, &planRuntime.artifactScope)
 
 	var refs []agentoscore.ArtifactRef
 	if err := json.NewDecoder(resp.Body).Decode(&refs); err != nil {
@@ -211,24 +219,21 @@ func testPlanArtifactsRoute(t *testing.T, app *fiber.App, planRuntime *fakePlanR
 	if len(refs) != 1 || refs[0].ArtifactID != artifact1 {
 		t.Fatalf("unexpected artifacts: %#v", refs)
 	}
+
+	if err := resp.Body.Close(); err != nil {
+		t.Errorf("close response body: %v", err)
+	}
 }
 
 func testPlanArtifactGetRoute(t *testing.T, app *fiber.App, planRuntime *fakePlanRuntime) {
 	t.Helper()
 
 	resp := doAgentOSRouteRequest(t, app, http.MethodGet, "/v1/agentos/plans/plan-1/artifacts/artifact-1?account_id=acct-1&project_id=proj-1", "")
-	defer resp.Body.Close()
-
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("artifact status = %d", resp.StatusCode)
 	}
 
-	if planRuntime.artifactGetScope.PlanID != plan1 ||
-		planRuntime.artifactGetScope.AccountID != account1 ||
-		planRuntime.artifactGetScope.ProjectID != project1 ||
-		planRuntime.artifactGetScope.ArtifactID != artifact1 {
-		t.Fatalf("unexpected artifact get scope: %#v", planRuntime.artifactGetScope)
-	}
+	assertPlanArtifactGetScope(t, &planRuntime.artifactGetScope)
 
 	var artifact agentoscore.Artifact
 	if err := json.NewDecoder(resp.Body).Decode(&artifact); err != nil {
@@ -242,6 +247,45 @@ func testPlanArtifactGetRoute(t *testing.T, app *fiber.App, planRuntime *fakePla
 
 	if artifact.Ref.ArtifactID != artifact1 || payload["summary"] != "ok" {
 		t.Fatalf("unexpected artifact: %#v", artifact)
+	}
+
+	if err := resp.Body.Close(); err != nil {
+		t.Errorf("close response body: %v", err)
+	}
+}
+
+func assertPlanAuditScope(t *testing.T, scope *agentos.PlanAuditScope) {
+	t.Helper()
+
+	if scope.PlanID != plan1 ||
+		scope.AccountID != account1 ||
+		scope.ProjectID != project1 ||
+		scope.Action != agentos.PlanAuditActionControl ||
+		scope.Limit != 25 {
+		t.Fatalf("unexpected audit scope: %#v", scope)
+	}
+}
+
+func assertPlanArtifactScope(t *testing.T, scope *agentos.PlanArtifactScope) {
+	t.Helper()
+
+	if scope.PlanID != plan1 ||
+		scope.AccountID != account1 ||
+		scope.ProjectID != project1 ||
+		scope.NodeID != research ||
+		scope.Limit != 10 {
+		t.Fatalf("unexpected artifact scope: %#v", scope)
+	}
+}
+
+func assertPlanArtifactGetScope(t *testing.T, scope *agentos.PlanArtifactScope) {
+	t.Helper()
+
+	if scope.PlanID != plan1 ||
+		scope.AccountID != account1 ||
+		scope.ProjectID != project1 ||
+		scope.ArtifactID != artifact1 {
+		t.Fatalf("unexpected artifact get scope: %#v", scope)
 	}
 }
 
@@ -257,7 +301,11 @@ func getPlanRouteJSON[T any](t *testing.T, app *fiber.App, target, label string)
 	t.Helper()
 
 	resp := doAgentOSRouteRequest(t, app, http.MethodGet, target, "")
-	defer resp.Body.Close()
+	t.Cleanup(func() {
+		if err := resp.Body.Close(); err != nil {
+			t.Errorf("close response body: %v", err)
+		}
+	})
 
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("%s status = %d", label, resp.StatusCode)
@@ -359,7 +407,11 @@ func runControlOrSignalConsoleCase(t *testing.T, cases []controlOrSignalCase) {
 			NewRoutes(app.Group("/v1"), nil, nil, logger.New("error"), nil, nil, nil, nil, nil, planRuntime, nil)
 
 			resp := doAgentOSRouteRequest(t, app, http.MethodPost, tc.route, tc.body)
-			defer resp.Body.Close()
+			t.Cleanup(func() {
+				if err := resp.Body.Close(); err != nil {
+					t.Errorf("close response body: %v", err)
+				}
+			})
 
 			if resp.StatusCode != http.StatusAccepted {
 				t.Fatalf("%s status = %d", tc.name, resp.StatusCode)
@@ -415,7 +467,11 @@ func TestAgentOSPlanSchemaRouteDoesNotRequirePlanRuntime(t *testing.T) {
 	NewRoutes(app.Group("/v1"), nil, nil, logger.New("error"), nil, nil, nil, nil, nil, nil, nil)
 
 	resp := doAgentOSRouteRequest(t, app, http.MethodGet, "/v1/agentos/plans/schemas/run-plan", "")
-	defer resp.Body.Close()
+	t.Cleanup(func() {
+		if err := resp.Body.Close(); err != nil {
+			t.Errorf("close response body: %v", err)
+		}
+	})
 
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("schema status = %d", resp.StatusCode)
@@ -435,7 +491,11 @@ func TestAgentOSPlanSchemaRouteDoesNotRequirePlanRuntime(t *testing.T) {
 	}
 
 	resp = doAgentOSRouteRequest(t, app, http.MethodGet, "/v1/agentos/plans/schemas/unknown", "")
-	defer resp.Body.Close()
+	t.Cleanup(func() {
+		if err := resp.Body.Close(); err != nil {
+			t.Errorf("close response body: %v", err)
+		}
+	})
 
 	if resp.StatusCode != http.StatusBadRequest {
 		t.Fatalf("unknown schema status = %d, want %d", resp.StatusCode, http.StatusBadRequest)
@@ -449,7 +509,11 @@ func TestAgentOSPlanAuthorRouteDoesNotRequirePlanRuntime(t *testing.T) {
 	NewRoutes(app.Group("/v1"), nil, nil, logger.New("error"), nil, nil, nil, nil, nil, nil, nil)
 
 	resp := doAgentOSRouteRequest(t, app, http.MethodGet, "/v1/agentos/plans/author", "")
-	defer resp.Body.Close()
+	t.Cleanup(func() {
+		if err := resp.Body.Close(); err != nil {
+			t.Errorf("close response body: %v", err)
+		}
+	})
 
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("author status = %d", resp.StatusCode)
@@ -494,7 +558,11 @@ func TestAgentOSPlanAuthorRouteEnablesStartWithPlanRuntime(t *testing.T) {
 	NewRoutes(app.Group("/v1"), nil, nil, logger.New("error"), nil, nil, nil, nil, nil, newFakePlanRuntime(), nil)
 
 	resp := doAgentOSRouteRequest(t, app, http.MethodGet, "/v1/agentos/plans/author", "")
-	defer resp.Body.Close()
+	t.Cleanup(func() {
+		if err := resp.Body.Close(); err != nil {
+			t.Errorf("close response body: %v", err)
+		}
+	})
 
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("author status = %d", resp.StatusCode)
@@ -577,7 +645,11 @@ func TestAgentOSPlanRoutesRequireProjectScope(t *testing.T) {
 			t.Parallel()
 
 			resp := doAgentOSRouteRequest(t, app, tt.method, tt.path, tt.body)
-			defer resp.Body.Close()
+			t.Cleanup(func() {
+				if err := resp.Body.Close(); err != nil {
+					t.Errorf("close response body: %v", err)
+				}
+			})
 
 			if resp.StatusCode != http.StatusBadRequest {
 				t.Fatalf("status = %d, want %d", resp.StatusCode, http.StatusBadRequest)
@@ -617,7 +689,11 @@ func TestAgentOSPlanEventRouteStreamsSSE(t *testing.T) {
 	NewRoutes(app.Group("/v1"), nil, nil, logger.New("error"), nil, nil, nil, nil, nil, planRuntime, nil)
 
 	resp := doAgentOSRouteRequest(t, app, http.MethodGet, "/v1/agentos/plans/plan-1/events?account_id=acct-1&project_id=proj-1&node_id=research&after_sequence=7", "")
-	defer resp.Body.Close()
+	t.Cleanup(func() {
+		if err := resp.Body.Close(); err != nil {
+			t.Errorf("close response body: %v", err)
+		}
+	})
 
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("events status = %d", resp.StatusCode)
@@ -689,7 +765,11 @@ func TestAgentOSPlanConsoleRendersRuntimeData(t *testing.T) {
 	NewRoutes(app.Group("/v1"), nil, nil, logger.New("error"), nil, nil, nil, nil, nil, planRuntime, nil)
 
 	resp := doAgentOSRouteRequest(t, app, http.MethodGet, "/v1/agentos/plans/plan-1/console?account_id=acct-1&project_id=proj-1", "")
-	defer resp.Body.Close()
+	t.Cleanup(func() {
+		if err := resp.Body.Close(); err != nil {
+			t.Errorf("close response body: %v", err)
+		}
+	})
 
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("console status = %d", resp.StatusCode)
@@ -755,7 +835,9 @@ func TestAgentOSPlanConsoleRequiresTenantScope(t *testing.T) {
 		"/v1/agentos/plans/plan-1/console?project_id=proj-1",
 	} {
 		resp := doAgentOSRouteRequest(t, app, http.MethodGet, path, "")
-		resp.Body.Close()
+		if err := resp.Body.Close(); err != nil {
+			t.Errorf("close response body: %v", err)
+		}
 
 		if resp.StatusCode != http.StatusBadRequest {
 			t.Fatalf("console path %q status = %d", path, resp.StatusCode)

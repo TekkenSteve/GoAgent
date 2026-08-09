@@ -66,7 +66,11 @@ func TestAgentOSQueryScopeValidationRejectsMissingProject(t *testing.T) {
 	})
 
 	resp := doAgentOSRouteRequest(t, app, http.MethodGet, "/scope?account_id=acct-1", "")
-	defer resp.Body.Close()
+	t.Cleanup(func() {
+		if err := resp.Body.Close(); err != nil {
+			t.Errorf("close response body: %v", err)
+		}
+	})
 
 	if resp.StatusCode != http.StatusBadRequest {
 		t.Fatalf("status = %d, want %d", resp.StatusCode, http.StatusBadRequest)
@@ -80,7 +84,11 @@ func TestAgentOSPlanRouteRejectsMissingProjectScope(t *testing.T) {
 	NewRoutes(app.Group("/v1"), nil, nil, logger.New("error"), nil, nil, nil, nil, nil, newFakePlanRuntime(), nil)
 
 	resp := doAgentOSRouteRequest(t, app, http.MethodGet, "/v1/agentos/plans/plan-1/status?account_id=acct-1", "")
-	defer resp.Body.Close()
+	t.Cleanup(func() {
+		if err := resp.Body.Close(); err != nil {
+			t.Errorf("close response body: %v", err)
+		}
+	})
 
 	if resp.StatusCode != http.StatusBadRequest {
 		t.Fatalf("status = %d, want %d", resp.StatusCode, http.StatusBadRequest)
@@ -341,7 +349,11 @@ func routeJSON[T any](t *testing.T, app *fiber.App, method, target, body string,
 	t.Helper()
 
 	resp := doAgentOSRouteRequest(t, app, method, target, body)
-	defer resp.Body.Close()
+	t.Cleanup(func() {
+		if err := resp.Body.Close(); err != nil {
+			t.Errorf("close response body: %v", err)
+		}
+	})
 
 	if resp.StatusCode != wantStatus {
 		t.Fatalf("%s status = %d, want %d", label, resp.StatusCode, wantStatus)

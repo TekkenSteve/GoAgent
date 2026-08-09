@@ -27,28 +27,38 @@ func TestAgentOSRunRoutesUseRuntimeControlPlane(t *testing.T) {
 	startBody := `{"run_id": "run-1", "thread_id": "thread-1", "account_id": "acct-1", "backend": {"kind": "temporal_external", "name": "langgraph-main"}, "input": {"task": "plan"}}`
 
 	resp := doAgentOSRouteRequest(t, app, http.MethodPost, "/v1/agentos/runs", startBody)
-	defer resp.Body.Close()
-
 	assertRunStartRoute(t, resp, runtime)
+
+	if err := resp.Body.Close(); err != nil {
+		t.Errorf("close response body: %v", err)
+	}
 
 	signalBody := `{"type": "user.message", "idempotency_key": "msg-1", "payload": {"content": "continue"}}`
 
-	resp.Body.Close()
+	if err := resp.Body.Close(); err != nil {
+		t.Errorf("close response body: %v", err)
+	}
 
 	resp = doAgentOSRouteRequest(t, app, http.MethodPost, "/v1/agentos/runs/run-1/signals", signalBody)
 	assertRunSignalRoute(t, resp, runtime)
 
-	resp.Body.Close()
+	if err := resp.Body.Close(); err != nil {
+		t.Errorf("close response body: %v", err)
+	}
 
 	resp = doAgentOSRouteRequest(t, app, http.MethodPost, "/v1/agentos/runs/run-1/control", `{"operation":"cancel"}`)
-	defer resp.Body.Close()
-
 	assertRunControlRoute(t, resp, runtime)
 
-	resp = doAgentOSRouteRequest(t, app, http.MethodGet, "/v1/agentos/runs/run-1/status", "")
-	defer resp.Body.Close()
+	if err := resp.Body.Close(); err != nil {
+		t.Errorf("close response body: %v", err)
+	}
 
+	resp = doAgentOSRouteRequest(t, app, http.MethodGet, "/v1/agentos/runs/run-1/status", "")
 	assertRunStatusRoute(t, resp)
+
+	if err := resp.Body.Close(); err != nil {
+		t.Errorf("close response body: %v", err)
+	}
 }
 
 func assertRunStartRoute(t *testing.T, resp *http.Response, runtime *fakeAgentOSRuntime) {

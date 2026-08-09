@@ -34,7 +34,12 @@ func executeAgentRun(t *testing.T, runID, accountID string) runStatus {
 	if err != nil {
 		t.Fatalf("executeAgentRun: request failed: %v", err)
 	}
-	defer resp.Body.Close()
+
+	t.Cleanup(func() {
+		if err := resp.Body.Close(); err != nil {
+			t.Errorf("close response body: %v", err)
+		}
+	})
 
 	if resp.StatusCode != http.StatusAccepted {
 		t.Fatalf("executeAgentRun: expected 202, got %d", resp.StatusCode)
@@ -66,11 +71,16 @@ func waitForRunCompletion(t *testing.T, runID string) runStatus {
 
 		var status runStatus
 		if err := json.NewDecoder(resp.Body).Decode(&status); err != nil {
-			resp.Body.Close()
+			if closeErr := resp.Body.Close(); closeErr != nil {
+				t.Errorf("close response body: %v", closeErr)
+			}
+
 			t.Fatalf("waitForRunCompletion: decode failed: %v", err)
 		}
 
-		resp.Body.Close()
+		if err := resp.Body.Close(); err != nil {
+			t.Errorf("close response body: %v", err)
+		}
 
 		if status.LifecycleState == waitingInput ||
 			status.LifecycleState == string(entity.LifecycleCompleted) ||
@@ -152,7 +162,12 @@ func testExecuteAgentRequest(t *testing.T, runID, accountID, message string, exp
 	if err != nil {
 		t.Fatalf("Failed to send request: %v", err)
 	}
-	defer resp.Body.Close()
+
+	t.Cleanup(func() {
+		if err := resp.Body.Close(); err != nil {
+			t.Errorf("close response body: %v", err)
+		}
+	})
 
 	if resp.StatusCode != expectedStatus {
 		t.Errorf("Expected status %d, got %d", expectedStatus, resp.StatusCode)
@@ -225,7 +240,12 @@ func signalAgentOSUserMessage(t *testing.T, runID, content string) {
 	if err != nil {
 		t.Fatalf("signalAgentOSUserMessage: request failed: %v", err)
 	}
-	defer resp.Body.Close()
+
+	t.Cleanup(func() {
+		if err := resp.Body.Close(); err != nil {
+			t.Errorf("close response body: %v", err)
+		}
+	})
 
 	if resp.StatusCode != http.StatusAccepted {
 		t.Fatalf("signalAgentOSUserMessage: expected 202, got %d", resp.StatusCode)
@@ -244,7 +264,12 @@ func controlAgentOSRun(t *testing.T, runID, operation string) {
 	if err != nil {
 		t.Fatalf("controlAgentOSRun: request failed: %v", err)
 	}
-	defer resp.Body.Close()
+
+	t.Cleanup(func() {
+		if err := resp.Body.Close(); err != nil {
+			t.Errorf("close response body: %v", err)
+		}
+	})
 
 	if resp.StatusCode != http.StatusAccepted {
 		t.Fatalf("controlAgentOSRun: expected 202, got %d", resp.StatusCode)

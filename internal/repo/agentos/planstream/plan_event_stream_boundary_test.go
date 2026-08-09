@@ -9,12 +9,11 @@ import (
 func TestPlanEventStreamPackageDoesNotDependOnNativeStreamTypes(t *testing.T) {
 	t.Parallel()
 
-	goBinary, err := exec.LookPath("go")
-	if err != nil {
+	if _, err := exec.LookPath("go"); err != nil {
 		t.Fatalf("lookup go binary: %v", err)
 	}
 
-	cmd := exec.CommandContext(t.Context(), goBinary, "list", "-json", ".")
+	cmd := exec.CommandContext(t.Context(), "go", "list", "-json", ".")
 
 	out, err := cmd.Output()
 	if err != nil {

@@ -33,7 +33,11 @@ func TestBackendConformance(t *testing.T) {
 		t.Fatalf("NewBackend: %v", err)
 	}
 
-	t.Cleanup(func() { _ = backend.Close() })
+	t.Cleanup(func() {
+		if err := backend.Close(); err != nil {
+			t.Errorf("close backend: %v", err)
+		}
+	})
 
 	agentosruntimetest.RunBackendConformance(t, &agentosruntimetest.BackendConformanceCase{
 		Name:            "grpc",

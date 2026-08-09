@@ -15,10 +15,10 @@ import (
 )
 
 const (
-	// Base settings
+	// Base settings.
 	attempts = 60
 
-	// Attempts connection
+	// Attempts connection.
 	requestTimeout = 5 * time.Second
 )
 
@@ -87,7 +87,11 @@ func getHealthCheck(url string) (int, error) {
 		return -1, err
 	}
 
-	defer resp.Body.Close()
+	defer func() {
+		if closeErr := resp.Body.Close(); closeErr != nil {
+			err = errors.Join(err, fmt.Errorf("health check: close response body: %w", closeErr))
+		}
+	}()
 
 	return resp.StatusCode, nil
 }

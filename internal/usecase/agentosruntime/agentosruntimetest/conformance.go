@@ -1,3 +1,4 @@
+// Package agentosruntimetest provides conformance helpers for AgentOS runtime implementations.
 package agentosruntimetest
 
 import (
@@ -116,7 +117,12 @@ func assertBackendSubscribe(ctx context.Context, t *testing.T, tc *BackendConfor
 	if err != nil {
 		t.Fatalf("Subscribe: %v", err)
 	}
-	defer subscription.Close()
+
+	t.Cleanup(func() {
+		if err := subscription.Close(); err != nil {
+			t.Errorf("close subscription: %v", err)
+		}
+	})
 
 	if got := tc.SubscriberProbe.LastScope(); got.RunID != tc.RunID || got.AfterSequence != conformanceAfterSequence {
 		t.Fatalf("Subscribe scope = %#v", got)
