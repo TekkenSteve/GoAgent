@@ -24,11 +24,12 @@ var (
 type Backend struct {
 	client     *http.Client
 	subscriber agentosruntime.EventSubscriber
+	lifecycle  agentosruntime.LifecyclePublisher
 	config     Config
 }
 
 // NewBackend creates an HTTP backend.
-func NewBackend(client *http.Client, subscriber agentosruntime.EventSubscriber, config Config) (*Backend, error) {
+func NewBackend(client *http.Client, subscriber agentosruntime.EventSubscriber, lifecycle agentosruntime.LifecyclePublisher, config Config) (*Backend, error) {
 	if err := config.validate(); err != nil {
 		return nil, err
 	}
@@ -40,6 +41,7 @@ func NewBackend(client *http.Client, subscriber agentosruntime.EventSubscriber, 
 	return &Backend{
 		client:     client,
 		subscriber: subscriber,
+		lifecycle:  lifecycle,
 		config:     config,
 	}, nil
 }
@@ -73,6 +75,8 @@ func (b *Backend) Start(ctx context.Context, spec *agentos.RunSpec) (agentos.Run
 	if status.RunID == "" {
 		status.RunID = spec.RunID
 	}
+
+	b.publishStarted(ctx, spec, &status)
 
 	return status, nil
 }
@@ -130,6 +134,8 @@ func (b *Backend) Status(ctx context.Context, runID string) (agentos.RunStatus, 
 		status.RunID = runID
 	}
 
+	b.publishStatus(ctx, runID, &status)
+
 	return status, nil
 }
 
@@ -152,6 +158,26 @@ func (b *Backend) Capabilities() agentosruntime.BackendCapabilities {
 		SupportsCancel:            true,
 		SupportsStreaming:         b.subscriber != nil,
 	}
+}
+
+// publishStarted mirrors a successful Start onto the data plane. A nil
+// lifecycle adapter (unwired backend) degrades to a no-op.
+func (b *Backend) publishStarted(ctx context.Context, spec *agentos.RunSpec, status *agentos.RunStatus) {
+	if b.lifecycle == nil {
+		return
+	}
+
+	b.lifecycle.PublishStarted(ctx, spec, status)
+}
+
+// publishStatus mirrors a Status observation onto the data plane, publishing
+// the run's terminal milestone once the remote reports one.
+func (b *Backend) publishStatus(ctx context.Context, runID string, status *agentos.RunStatus) {
+	if b.lifecycle == nil {
+		return
+	}
+
+	b.lifecycle.PublishStatus(ctx, runID, status)
 }
 
 const maxResponseBodySize = 4096

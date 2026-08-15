@@ -14,7 +14,6 @@ import (
 	agentoscore "github.com/TekkenSteve/GoAgent/agentos/core"
 	agentosplatform "github.com/TekkenSteve/GoAgent/agentos/platform"
 	agentosproc "github.com/TekkenSteve/GoAgent/agentos/process"
-	agentosstream "github.com/TekkenSteve/GoAgent/agentos/stream"
 	agentostemporal "github.com/TekkenSteve/GoAgent/agentos/temporal"
 	"github.com/TekkenSteve/GoAgent/config"
 	agentfwconfig "github.com/TekkenSteve/GoAgent/internal/agentfw/config"
@@ -490,7 +489,7 @@ func initTemporalComponents(l *logger.Logger, cfg *config.Config, fwCfg *agentfw
 		return runtime.Client.CancelWorkflow(ctx, workflowID, "")
 	}
 
-	agentOSRuntime := newAgentOSControlRuntime(l, cfg, fwCfg, runtime, runBackendIndex, dataPlane.Subscriber)
+	agentOSRuntime := newAgentOSControlRuntime(l, cfg, fwCfg, runtime, runBackendIndex, dataPlane)
 
 	planStore, planEventStream, artifactStore, capabilityCatalog, artifactSchemaCatalog := initPlanInfrastructure(l, cfg, pg, dataPlane)
 	registerAgentOSSchemas(l, cfg, capabilityCatalog, artifactSchemaCatalog)
@@ -514,13 +513,16 @@ func initTemporalComponents(l *logger.Logger, cfg *config.Config, fwCfg *agentfw
 	}
 }
 
-func newAgentOSControlRuntime(l logger.Interface, cfg *config.Config, fwCfg *agentfwconfig.Config, runtime *agentfwruntime.TemporalRuntime, runBackendIndex *temporalrepo.RunBackendIndexRepo, subscriber agentosstream.Subscriber) agentos.Runtime {
+func newAgentOSControlRuntime(l logger.Interface, cfg *config.Config, fwCfg *agentfwconfig.Config, runtime *agentfwruntime.TemporalRuntime, runBackendIndex *temporalrepo.RunBackendIndexRepo, dataPlane *agentostemporal.StreamingDataPlane) agentos.Runtime {
 	agentOSRuntime, err := agentostemporal.NewRuntimeWithClient(
 		context.Background(), &agentostemporal.RuntimeConfig{
 			TemporalAddress:          fwCfg.Temporal.Address,
 			TemporalNamespace:        fwCfg.Temporal.Namespace,
 			TemporalTaskQueues:       agentOSTemporalTaskQueues(&fwCfg.Temporal.TaskQueues),
-			Subscriber:               subscriber,
+			Subscriber:               dataPlane.Subscriber,
+			Publisher:                dataPlane.Publisher,
+			ProjectionController:     dataPlane.Projector,
+			Logger:                   l,
 			TemporalExternalBackends: temporalExternalBackends(l, cfg),
 			HTTPBackends:             httpBackends(l, cfg),
 			GRPCBackends:             grpcBackends(l, cfg),

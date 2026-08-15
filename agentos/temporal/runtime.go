@@ -13,6 +13,7 @@ import (
 	"github.com/TekkenSteve/GoAgent/internal/entity"
 	"github.com/TekkenSteve/GoAgent/internal/repo/agentos/grpcbackend"
 	"github.com/TekkenSteve/GoAgent/internal/repo/agentos/httpbackend"
+	"github.com/TekkenSteve/GoAgent/internal/repo/agentos/streamadapter"
 	"github.com/TekkenSteve/GoAgent/internal/repo/agentos/temporalexternal"
 	temporalrepo "github.com/TekkenSteve/GoAgent/internal/repo/persistent"
 	agentosruntime "github.com/TekkenSteve/GoAgent/internal/usecase/agentosruntime"
@@ -193,6 +194,11 @@ func (r *runtime) configureRouter(temporalClient client.Client, cfg *RuntimeConf
 	registry := agentosruntime.NewRegistry()
 	agentosSubscriber := newAgentOSSubscriber(subscriber)
 
+	lifecycle := streamadapter.NewRunLifecycle(cfg.Publisher, cfg.Logger)
+	if cfg.ProjectionController != nil {
+		lifecycle = lifecycle.WithEnsure(cfg.ProjectionController.EnsureSubscribed)
+	}
+
 	native := newTemporalNativeBackend(executor, agentosSubscriber)
 	if err := registry.Register(agentos.BackendRef{
 		Kind: agentos.BackendKindNative,
@@ -201,7 +207,7 @@ func (r *runtime) configureRouter(temporalClient client.Client, cfg *RuntimeConf
 		return err
 	}
 
-	closers, err := registerExternalBackends(registry, temporalClient, agentosSubscriber, cfg)
+	closers, err := registerExternalBackends(registry, temporalClient, agentosSubscriber, lifecycle, cfg)
 	if err != nil {
 		return err
 	}
@@ -226,13 +232,13 @@ func (r *runtime) configureRouter(temporalClient client.Client, cfg *RuntimeConf
 	return nil
 }
 
-func registerExternalBackends(registry *agentosruntime.Registry, temporalClient client.Client, agentosSubscriber *agentOSSubscriber, cfg *RuntimeConfig) ([]func() error, error) {
+func registerExternalBackends(registry *agentosruntime.Registry, temporalClient client.Client, agentosSubscriber *agentOSSubscriber, lifecycle agentosruntime.LifecyclePublisher, cfg *RuntimeConfig) ([]func() error, error) {
 	var closers []func() error
 
 	for i := range cfg.TemporalExternalBackends {
 		internalConfig := temporalExternalConfig(&cfg.TemporalExternalBackends[i])
 
-		external, err := temporalexternal.NewBackend(temporalexternal.NewTemporalClient(temporalClient), agentosSubscriber, &internalConfig)
+		external, err := temporalexternal.NewBackend(temporalexternal.NewTemporalClient(temporalClient), agentosSubscriber, lifecycle, &internalConfig)
 		if err != nil {
 			return nil, err
 		}
@@ -245,7 +251,7 @@ func registerExternalBackends(registry *agentosruntime.Registry, temporalClient 
 	for i := range cfg.HTTPBackends {
 		internalConfig := httpBackendConfig(&cfg.HTTPBackends[i])
 
-		httpBackend, err := httpbackend.NewBackend(nil, agentosSubscriber, internalConfig)
+		httpBackend, err := httpbackend.NewBackend(nil, agentosSubscriber, lifecycle, internalConfig)
 		if err != nil {
 			return nil, err
 		}
@@ -258,7 +264,7 @@ func registerExternalBackends(registry *agentosruntime.Registry, temporalClient 
 	for i := range cfg.GRPCBackends {
 		internalConfig := grpcBackendConfig(&cfg.GRPCBackends[i])
 
-		grpcBackend, err := grpcbackend.NewBackend(agentosSubscriber, &internalConfig)
+		grpcBackend, err := grpcbackend.NewBackend(agentosSubscriber, lifecycle, &internalConfig)
 		if err != nil {
 			return nil, err
 		}

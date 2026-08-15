@@ -48,12 +48,13 @@ func (c temporalSDKClient) ExecuteWorkflow(ctx context.Context, options *client.
 type Backend struct {
 	client     TemporalClient
 	subscriber agentosruntime.EventSubscriber
+	lifecycle  agentosruntime.LifecyclePublisher
 	config     Config
 	now        func() time.Time
 }
 
 // NewBackend creates a temporal_external backend.
-func NewBackend(temporalClient TemporalClient, subscriber agentosruntime.EventSubscriber, config *Config) (*Backend, error) {
+func NewBackend(temporalClient TemporalClient, subscriber agentosruntime.EventSubscriber, lifecycle agentosruntime.LifecyclePublisher, config *Config) (*Backend, error) {
 	if temporalClient == nil {
 		return nil, errTemporalExternalNilClient
 	}
@@ -65,6 +66,7 @@ func NewBackend(temporalClient TemporalClient, subscriber agentosruntime.EventSu
 	return &Backend{
 		client:     temporalClient,
 		subscriber: subscriber,
+		lifecycle:  lifecycle,
 		config:     *config,
 		now:        func() time.Time { return time.Now().UTC() },
 	}, nil
@@ -101,12 +103,16 @@ func (b *Backend) Start(ctx context.Context, spec *agentos.RunSpec) (agentos.Run
 		return agentos.RunStatus{}, fmt.Errorf("temporal external backend - start workflow: %w", err)
 	}
 
-	return agentos.RunStatus{
+	status := agentos.RunStatus{
 		RunID:          spec.RunID,
 		LifecycleState: "created",
 		Reason:         run.GetRunID(),
 		UpdatedAt:      b.now(),
-	}, nil
+	}
+
+	b.publishStarted(ctx, spec, &status)
+
+	return status, nil
 }
 
 // Signal translates an AgentOS signal into a Temporal workflow signal.
@@ -155,7 +161,14 @@ func (b *Backend) Control(ctx context.Context, runID string, control *agentoscor
 
 // Status returns external workflow status from the backend-owned AgentOS query.
 func (b *Backend) Status(ctx context.Context, runID string) (agentos.RunStatus, error) {
-	return b.queryStatus(ctx, runID)
+	status, err := b.queryStatus(ctx, runID)
+	if err != nil {
+		return agentos.RunStatus{}, err
+	}
+
+	b.publishStatus(ctx, runID, &status)
+
+	return status, nil
 }
 
 // Subscribe returns the shared AgentOS event stream for the run.
@@ -177,6 +190,26 @@ func (b *Backend) Capabilities() agentosruntime.BackendCapabilities {
 		SupportsCancel:            b.config.Signals.Cancel != "",
 		SupportsStreaming:         b.subscriber != nil,
 	}
+}
+
+// publishStarted mirrors a successful Start onto the data plane. A nil
+// lifecycle adapter (unwired backend) degrades to a no-op.
+func (b *Backend) publishStarted(ctx context.Context, spec *agentos.RunSpec, status *agentos.RunStatus) {
+	if b.lifecycle == nil {
+		return
+	}
+
+	b.lifecycle.PublishStarted(ctx, spec, status)
+}
+
+// publishStatus mirrors a Status observation onto the data plane, publishing
+// the run's terminal milestone once the remote reports one.
+func (b *Backend) publishStatus(ctx context.Context, runID string, status *agentos.RunStatus) {
+	if b.lifecycle == nil {
+		return
+	}
+
+	b.lifecycle.PublishStatus(ctx, runID, status)
 }
 
 func (b *Backend) controlBySignal(ctx context.Context, runID string, signalType agentoscore.SignalType, control *agentoscore.ControlRequest) error {

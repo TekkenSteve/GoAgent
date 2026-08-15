@@ -6,18 +6,34 @@ import (
 	agentos "github.com/TekkenSteve/GoAgent/agentos/control"
 	agentoscore "github.com/TekkenSteve/GoAgent/agentos/core"
 	agentosstream "github.com/TekkenSteve/GoAgent/agentos/stream"
+	"github.com/TekkenSteve/GoAgent/internal/repo/agentos/runprojection"
 	"github.com/TekkenSteve/GoAgent/internal/usecase/agentosplan"
 	agentosruntime "github.com/TekkenSteve/GoAgent/internal/usecase/agentosruntime"
+	"github.com/TekkenSteve/GoAgent/pkg/logger"
 )
 
 // RuntimeConfig configures the default Temporal runtime implementation.
 type RuntimeConfig struct {
-	TemporalAddress          string
-	TemporalNamespace        string
-	TemporalTaskQueues       TaskQueues
-	PostgresURL              string
-	PostgresPoolMax          int
-	Subscriber               agentosstream.Subscriber
+	TemporalAddress    string
+	TemporalNamespace  string
+	TemporalTaskQueues TaskQueues
+	PostgresURL        string
+	PostgresPoolMax    int
+	Subscriber         agentosstream.Subscriber
+	// Publisher is the data-plane write side one-shot external backends (HTTP /
+	// gRPC / temporal_external) mirror their observable lifecycle onto: Start
+	// success → RUN_STARTED, a terminal Status → RUN_FINISHED / RUN_ERROR /
+	// RUN_CANCELLED. Nil degrades external backends to no-op lifecycle
+	// publishing — the run still works, its milestones just never reach the bus.
+	Publisher agentosstream.Publisher
+	// ProjectionController optionally attaches the run milestone projector to
+	// external-backend runs' channels, so their lifecycle milestones persist to
+	// Postgres like the native path's do. Nil leaves external-run milestones on
+	// the bus live tail only.
+	ProjectionController runprojection.Controller
+	// Logger reports data-plane publish failures from the external-backend
+	// lifecycle adapters. Nil drops those diagnostics.
+	Logger                   logger.Interface
 	PlanEventPublisher       agentosplan.PlanEventPublisher
 	PlanEventSubscriber      agentosplan.PlanEventSubscriber
 	ArtifactStore            ArtifactStoreConfig

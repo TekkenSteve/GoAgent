@@ -9,6 +9,7 @@ import (
 	agentos "github.com/TekkenSteve/GoAgent/agentos/control"
 	agentoscore "github.com/TekkenSteve/GoAgent/agentos/core"
 	"github.com/TekkenSteve/GoAgent/internal/usecase/agentosruntime/agentosruntimetest"
+	"github.com/stretchr/testify/require"
 	"go.temporal.io/sdk/client"
 	"go.temporal.io/sdk/converter"
 )
@@ -44,7 +45,7 @@ func TestBackendConformance(t *testing.T) {
 		},
 	}
 
-	backend, err := NewBackend(temporalClient, probe, &config)
+	backend, err := NewBackend(temporalClient, probe, nil, &config)
 	if err != nil {
 		t.Fatalf("NewBackend: %v", err)
 	}
@@ -94,7 +95,7 @@ func TestBackendStartExecutesConfiguredWorkflow(t *testing.T) {
 func TestNewBackendRejectsNilConfig(t *testing.T) {
 	t.Parallel()
 
-	_, err := NewBackend(&fakeTemporalClient{}, nil, nil)
+	_, err := NewBackend(&fakeTemporalClient{}, nil, nil, nil)
 	if !errors.Is(err, agentoscore.ErrInvalidBackendRef) {
 		t.Fatalf("NewBackend nil config error = %v, want ErrInvalidBackendRef", err)
 	}
@@ -276,7 +277,7 @@ func TestBackendRequiresStatusQuery(t *testing.T) {
 		WorkflowType: "python.agent.v1",
 	}
 
-	_, err := NewBackend(&fakeTemporalClient{}, nil, &config)
+	_, err := NewBackend(&fakeTemporalClient{}, nil, nil, &config)
 	if !errors.Is(err, agentoscore.ErrInvalidBackendRef) {
 		t.Fatalf("NewBackend error = %v, want ErrInvalidBackendRef", err)
 	}
@@ -285,7 +286,7 @@ func TestBackendRequiresStatusQuery(t *testing.T) {
 func newTestBackend(t *testing.T, temporalClient *fakeTemporalClient, config *Config) *Backend {
 	t.Helper()
 
-	backend, err := NewBackend(temporalClient, nil, config)
+	backend, err := NewBackend(temporalClient, nil, nil, config)
 	if err != nil {
 		t.Fatalf("NewBackend: %v", err)
 	}
@@ -293,6 +294,43 @@ func newTestBackend(t *testing.T, temporalClient *fakeTemporalClient, config *Co
 	backend.now = func() time.Time { return time.Date(2026, 6, 16, 10, 0, 0, 0, time.UTC) }
 
 	return backend
+}
+
+// TestBackendPublishesLifecycleToDataPlane verifies Start and Status forward
+// their observations to the data-plane lifecycle adapter: a successful Start
+// opens the run and the Status the remote workflow reports closes it.
+func TestBackendPublishesLifecycleToDataPlane(t *testing.T) {
+	t.Parallel()
+
+	probe := &agentosruntimetest.LifecycleProbe{}
+	temporalClient := &fakeTemporalClient{
+		runID: "temporal-run-1",
+		queryValue: &encodedStatus{status: agentos.RunStatus{
+			RunID:          Run1,
+			LifecycleState: "running",
+		}},
+	}
+
+	backend, err := NewBackend(temporalClient, nil, probe, &Config{
+		Name:         "langgraph-main",
+		TaskQueue:    "langgraph-queue",
+		WorkflowType: "langgraph.agent.v1",
+		QueryType:    "agentos_status",
+	})
+	require.NoError(t, err)
+
+	spec := agentos.RunSpec{RunID: Run1, ThreadID: "thread-1", AccountID: "acme", Backend: backend.config.Ref()}
+
+	started, err := backend.Start(context.Background(), &spec)
+	require.NoError(t, err)
+	require.Equal(t, "created", started.LifecycleState)
+	require.Equal(t, spec, probe.LastStartedSpec())
+	require.Equal(t, started, probe.LastStartedStatus())
+
+	status, err := backend.Status(context.Background(), Run1)
+	require.NoError(t, err)
+	require.Equal(t, "running", status.LifecycleState)
+	require.Equal(t, []agentos.RunStatus{status}, probe.Statuses())
 }
 
 type fakeTemporalClient struct {

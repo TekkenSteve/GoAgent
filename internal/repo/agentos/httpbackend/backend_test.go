@@ -12,7 +12,11 @@ import (
 
 	agentos "github.com/TekkenSteve/GoAgent/agentos/control"
 	agentoscore "github.com/TekkenSteve/GoAgent/agentos/core"
+	"github.com/TekkenSteve/GoAgent/agentos/stream"
+	"github.com/TekkenSteve/GoAgent/internal/repo/agentos/streamadapter"
+	"github.com/TekkenSteve/GoAgent/internal/repo/stream/memstream"
 	"github.com/TekkenSteve/GoAgent/internal/usecase/agentosruntime/agentosruntimetest"
+	"github.com/stretchr/testify/require"
 )
 
 const (
@@ -30,7 +34,7 @@ func TestBackendConformance(t *testing.T) {
 	}))
 	defer server.Close()
 
-	backend, err := NewBackend(server.Client(), probe, Config{
+	backend, err := NewBackend(server.Client(), probe, nil, Config{
 		Name:     "http-conformance",
 		Endpoint: server.URL,
 	})
@@ -298,7 +302,7 @@ func TestBackendRejectsErrorStatus(t *testing.T) {
 func newTestBackend(t *testing.T, server *httptest.Server) *Backend {
 	t.Helper()
 
-	backend, err := NewBackend(server.Client(), nil, Config{
+	backend, err := NewBackend(server.Client(), nil, nil, Config{
 		Name:     "claude-code",
 		Endpoint: server.URL,
 		Headers: map[string]string{
@@ -310,4 +314,96 @@ func newTestBackend(t *testing.T, server *httptest.Server) *Backend {
 	}
 
 	return backend
+}
+
+// newRunTimelineServer serves the run lifecycle a data-plane test drives: Start
+// returns a running state, the status endpoint reports the run completed.
+func newRunTimelineServer() *httptest.Server {
+	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodPost && r.URL.Path == _RUNS:
+			writeJSONStatus(w, &agentos.RunStatus{RunID: Run1, LifecycleState: "running"})
+		case r.Method == http.MethodGet && strings.HasSuffix(r.URL.Path, "/status"):
+			writeJSONStatus(w, &agentos.RunStatus{RunID: Run1, LifecycleState: "completed"})
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+}
+
+// TestBackendPublishesLifecycleToDataPlane verifies Start and Status forward
+// their observations to the data-plane lifecycle adapter: a successful Start
+// opens the run and the terminal Status the remote reports closes it.
+func TestBackendPublishesLifecycleToDataPlane(t *testing.T) {
+	t.Parallel()
+
+	probe := &agentosruntimetest.LifecycleProbe{}
+
+	server := newRunTimelineServer()
+	defer server.Close()
+
+	backend, err := NewBackend(server.Client(), nil, probe, Config{
+		Name:     "http-lifecycle",
+		Endpoint: server.URL,
+	})
+	require.NoError(t, err)
+
+	spec := agentos.RunSpec{RunID: Run1, ThreadID: "thread-1", AccountID: "acme", Backend: backend.config.Ref()}
+
+	started, err := backend.Start(context.Background(), &spec)
+	require.NoError(t, err)
+	require.Equal(t, "running", started.LifecycleState)
+	require.Equal(t, spec, probe.LastStartedSpec())
+	require.Equal(t, started, probe.LastStartedStatus())
+
+	status, err := backend.Status(context.Background(), Run1)
+	require.NoError(t, err)
+	require.Equal(t, "completed", status.LifecycleState)
+	require.Equal(t, []agentos.RunStatus{status}, probe.Statuses())
+}
+
+// TestBackendPublishesRunTimelineToBus is the reference-implementation
+// acceptance demo: a real backend, a real RunLifecycle adapter, and a real bus.
+// Start publishes RUN_STARTED; the terminal Status the remote reports publishes
+// RUN_FINISHED — the full §7 映射→发布 contract end to end.
+func TestBackendPublishesRunTimelineToBus(t *testing.T) {
+	t.Parallel()
+
+	bus := memstream.New()
+	lifecycle := streamadapter.NewRunLifecycle(bus, nil)
+
+	server := newRunTimelineServer()
+	defer server.Close()
+
+	backend, err := NewBackend(server.Client(), nil, lifecycle, Config{
+		Name:     "http-timeline",
+		Endpoint: server.URL,
+	})
+	require.NoError(t, err)
+
+	sub, err := bus.Subscribe(t.Context(), streamadapter.HandleForRun("acme", Run1), 0)
+	require.NoError(t, err)
+
+	t.Cleanup(sub.Close)
+
+	spec := agentos.RunSpec{RunID: Run1, ThreadID: "thread-1", AccountID: "acme", Backend: backend.config.Ref()}
+
+	_, err = backend.Start(t.Context(), &spec)
+	require.NoError(t, err)
+	requireBusEvent(t, sub, stream.EventRunStarted)
+
+	_, err = backend.Status(t.Context(), Run1)
+	require.NoError(t, err)
+	requireBusEvent(t, sub, stream.EventRunFinished)
+}
+
+func requireBusEvent(t *testing.T, sub *stream.Subscription, want stream.EventType) {
+	t.Helper()
+
+	select {
+	case stored := <-sub.C:
+		require.Equal(t, want, stored.Event.Type)
+	case <-time.After(2 * time.Second):
+		t.Fatalf("timed out waiting for %s", want)
+	}
 }

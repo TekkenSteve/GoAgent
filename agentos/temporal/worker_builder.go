@@ -72,7 +72,7 @@ func newWorkerKit(ctx context.Context, cfg *WorkerConfig) (*WorkerKit, error) {
 		return nil, err
 	}
 
-	infra, err := initWorkerPlanRuntime(ctx, cfg, resources.postgres, resources.temporalClient, dataPlane)
+	infra, err := initWorkerPlanRuntime(ctx, cfg, resources.postgres, resources.temporalClient, dataPlane, resources.logger)
 	if err != nil {
 		dataPlane.Close()
 		resources.close()
@@ -100,7 +100,7 @@ func NewPlanWorkerKit(ctx context.Context, cfg *WorkerConfig) (*PlanWorkerKit, e
 		return nil, err
 	}
 
-	infra, err := initWorkerPlanRuntime(ctx, cfg, resources.postgres, resources.temporalClient, dataPlane)
+	infra, err := initWorkerPlanRuntime(ctx, cfg, resources.postgres, resources.temporalClient, dataPlane, resources.logger)
 	if err != nil {
 		dataPlane.Close()
 		resources.close()
@@ -267,7 +267,7 @@ type workerPlanRuntime struct {
 	planStore         *temporalrepo.AgentOSPlanRepo
 }
 
-func initWorkerPlanRuntime(ctx context.Context, cfg *WorkerConfig, pg *postgres.Postgres, temporalClient client.Client, dataPlane *StreamingDataPlane) (*workerPlanRuntime, error) {
+func initWorkerPlanRuntime(ctx context.Context, cfg *WorkerConfig, pg *postgres.Postgres, temporalClient client.Client, dataPlane *StreamingDataPlane, l logger.Interface) (*workerPlanRuntime, error) {
 	runBackendIndex := temporalrepo.NewRunBackendIndexRepo(pg)
 	planStore := temporalrepo.NewAgentOSPlanRepo(pg)
 	blobCfg := artifactBlobConfig(&cfg.ArtifactStore)
@@ -304,6 +304,9 @@ func initWorkerPlanRuntime(ctx context.Context, cfg *WorkerConfig, pg *postgres.
 		GRPCBackends:             cfg.GRPCBackends,
 		ArtifactStore:            cfg.ArtifactStore,
 		Subscriber:               dataPlane.Subscriber,
+		Publisher:                dataPlane.Publisher,
+		ProjectionController:     dataPlane.Projector,
+		Logger:                   l,
 		PlanEventPublisher:       planEventStream,
 		PlanEventSubscriber:      planEventStream,
 	}, temporalClient, WithRunBackendIndex(runBackendIndex))

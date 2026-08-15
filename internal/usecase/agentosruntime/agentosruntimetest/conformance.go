@@ -134,6 +134,49 @@ type SubscriberProbe struct {
 	scope agentoscore.StreamScope
 }
 
+// LifecycleProbe records LifecyclePublisher calls for backend wiring tests —
+// the write-side twin of SubscriberProbe. It captures what a backend forwards
+// to its data-plane lifecycle adapter (Start → PublishStarted, Status →
+// PublishStatus), so a test can verify the wiring without a real bus.
+type LifecycleProbe struct {
+	startedSpec   agentos.RunSpec
+	startedStatus agentos.RunStatus
+	statuses      []agentos.RunStatus
+}
+
+// PublishStarted implements LifecyclePublisher.
+func (p *LifecycleProbe) PublishStarted(_ context.Context, spec *agentos.RunSpec, status *agentos.RunStatus) {
+	if spec != nil {
+		p.startedSpec = *spec
+	}
+
+	if status != nil {
+		p.startedStatus = *status
+	}
+}
+
+// PublishStatus implements LifecyclePublisher.
+func (p *LifecycleProbe) PublishStatus(_ context.Context, _ string, status *agentos.RunStatus) {
+	if status != nil {
+		p.statuses = append(p.statuses, *status)
+	}
+}
+
+// LastStartedSpec returns the run spec of the last PublishStarted call.
+func (p *LifecycleProbe) LastStartedSpec() agentos.RunSpec {
+	return p.startedSpec
+}
+
+// LastStartedStatus returns the status of the last PublishStarted call.
+func (p *LifecycleProbe) LastStartedStatus() agentos.RunStatus {
+	return p.startedStatus
+}
+
+// Statuses returns every status forwarded by PublishStatus calls, in order.
+func (p *LifecycleProbe) Statuses() []agentos.RunStatus {
+	return p.statuses
+}
+
 // SubscribeAgentOS implements EventSubscriber.
 func (s *SubscriberProbe) SubscribeAgentOS(_ context.Context, scope agentoscore.StreamScope) (agentoscore.Subscription, error) {
 	s.scope = scope

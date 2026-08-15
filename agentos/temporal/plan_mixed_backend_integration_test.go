@@ -102,15 +102,15 @@ func newMixedBackendAdapter(t *testing.T, planID, httpNodeID, summaryArtifact st
 	nativeBackend := &mixedAdapterNativeBackend{}
 	temporalClient := &mixedAdapterTemporalClient{runID: "temporal-run-id", queryValue: &mixedAdapterEncodedStatus{status: agentos.RunStatus{RunID: "run-temporal", LifecycleState: "completed", UpdatedAt: time.Date(2026, 6, 19, 12, 0, 0, 0, time.UTC)}}}
 	temporalConfig := temporalexternal.Config{Name: temporalRef.Name, TaskQueue: "langgraph-task-queue", WorkflowType: "langgraph.agent.v1", QueryType: "agentos_status", Signals: temporalexternal.SignalNames{Cancel: "cancel", Defaults: map[agentoscore.SignalType]string{agentoscore.SignalUserMessage: "user_input"}}}
-	temporalBackend, err := temporalexternal.NewBackend(temporalClient, nil, &temporalConfig)
+	temporalBackend, err := temporalexternal.NewBackend(temporalClient, nil, nil, &temporalConfig)
 	require.NoError(t, err)
 
 	artifactStore := agentosplan.NewMemoryArtifactStore()
 	httpServer := newMixedAdapterHTTPServer(t, artifactStore, &mixedAdapterArtifactOutput{PlanID: planID, NodeID: httpNodeID, ArtifactName: summaryArtifact, ArtifactID: "artifact-http-summary", Payload: map[string]any{"body": map[string]any{"title": "mixed backend artifact"}}})
-	httpBackend, err := httpbackend.NewBackend(httpServer.Client(), nil, httpbackend.Config{Name: httpRef.Name, Endpoint: httpServer.URL})
+	httpBackend, err := httpbackend.NewBackend(httpServer.Client(), nil, nil, httpbackend.Config{Name: httpRef.Name, Endpoint: httpServer.URL})
 	require.NoError(t, err)
 	grpcServer := newMixedAdapterGRPCServer(t)
-	grpcBackend, err := grpcbackend.NewBackend(nil, &grpcbackend.Config{Name: grpcRef.Name, Target: grpcServer.target, Insecure: true})
+	grpcBackend, err := grpcbackend.NewBackend(nil, nil, &grpcbackend.Config{Name: grpcRef.Name, Target: grpcServer.target, Insecure: true})
 	require.NoError(t, err)
 	t.Cleanup(func() {
 		if err := grpcBackend.Close(); err != nil {

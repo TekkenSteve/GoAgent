@@ -102,15 +102,31 @@ type Handle struct {
 
 ## 5. 事件词汇：AG-UI（+ 最小扩展）
 
-总线上的线格式采纳 AG-UI 事件类型：
+总线上的线格式采纳 AG-UI 事件类型（`agentos/stream/event.go` 的 `EventType`，词表与 AG-UI wire 逐字对齐）：
 
 - 文本：`TEXT_MESSAGE_START / TEXT_MESSAGE_CONTENT(delta) / TEXT_MESSAGE_END`
-- 推理：`REASONING_MESSAGE_START / REASONING_MESSAGE_CONTENT / REASONING_MESSAGE_END`
+- 推理：`REASONING_START / REASONING_MESSAGE_START / REASONING_MESSAGE_CONTENT / REASONING_MESSAGE_END`
 - 工具：`TOOL_CALL_START / TOOL_CALL_ARGS(delta) / TOOL_CALL_RESULT / TOOL_CALL_END / TOOL_CALL_ERROR`
-- 生命周期：`RUN_STARTED / RUN_FINISHED / RUN_ERROR`、`STEP_STARTED / STEP_FINISHED`
-- 状态：`STATE_SNAPSHOT / STATE_DELTA(JSON Patch)`、`MESSAGES_SNAPSHOT`
+- 生命周期：`RUN_STARTED / RUN_FINISHED / RUN_ERROR / RUN_CANCELLED`、`STEP_STARTED / STEP_FINISHED`
+- 状态：`STATE_SNAPSHOT / STATE_DELTA(JSON Patch)`、`MESSAGES_SNAPSHOT`、`ACTIVITY_SNAPSHOT / ACTIVITY_DELTA`
+- 扩展：`RAW`（透传任意字节）与 `CUSTOM`（命名空间事件，见下）
 
-控制面自有事件（审批门、账本、plan 状态迁移）以 `CUSTOM`（`name: "agentos.*"`）发布到频道，让前端在**同一条时间线**看到治理事件；其权威副本仍落 Postgres。
+Payload 字段名与 AG-UI 线格式逐字对齐（`agentos/stream` 的 `Field*` 常量）：
+
+| 字段 | 承载 | 出现于 |
+|---|---|---|
+| `delta` | 文本 / 推理 / 工具参数增量 | `*_CONTENT` |
+| `result` | 工具完成的返回结果 | `TOOL_CALL_RESULT` |
+| `meta` | 工具自有的展示载荷（opaque JSON） | `TOOL_CALL_RESULT` |
+| `error` | 结构化错误 | `TOOL_CALL_ERROR` / `RUN_ERROR` |
+| `isError` | 工具结果错误标志（AG-UI） | `TOOL_CALL_RESULT` |
+| `callId` | 工具调用关联 id | `TOOL_CALL_*` |
+| `turn` / `step` | 1-based 轮次 / 步内编号 | `STEP_*` |
+| `usage` | token 用量，`RUN_FINISHED` 上报 | `RUN_FINISHED` |
+| `state` / `patch` | 全量状态 / RFC 6902 JSON Patch | `STATE_*` |
+| `name` | `CUSTOM` 事件名（命名空间，如 `agentos.plan.event`） | `CUSTOM` |
+
+控制面自有事件（审批门、账本、plan 状态迁移）以 `CUSTOM`（`name: "agentos.*"`）发布到频道，让前端在**同一条时间线**看到治理事件；其权威副本仍落 Postgres。plan 事件就是这样上线的：`planstream` 把 `PlanEvent` 序列化进 `CUSTOM agentos.plan.event` 的 `data` 载荷。
 
 相对 dsh 的 SessionEventMap，AG-UI 缺三样，按需用最小扩展补（**不撑大协议**，扩在 adapter 层或 CUSTOM）：
 
@@ -156,9 +172,17 @@ type Projector interface {
 }
 ```
 
+**游标语义**（`Subscribe` 的 `after` 参数）：
+
+- `after=0`：从历史窗口起点全量回放。
+- `after=N`：只回放 `Sequence > N` 的补集——重连游标，断线窗口由总线 history 补。
+- `LiveOnly`（`-1`）：跳过回放，只收订阅建立后新发布的事件（plan live tail 用它，耐久回放仍归 PG）。
+
+投递的是 `StoredEvent{Event, Sequence, StoredAt}`——`Sequence` 是总线为每频道分配的单调序号，即重连与去重的游标；`Subscription.Close()` 释放传输资源（从总线扇出移除）。
+
 P1 已落地：内存实现 `internal/repo/stream/memstream`（ordered replay + LiveOnly 游标 + 慢消费者丢弃）服务测试 / dev；`internal/repo/stream/streamconformance` 的 `RunStreamConformance` 锁定「发布→订阅→投影」行为，任何总线通过即视为接入完成。
 
-`agentos/temporal` 是默认 adapter（native 的 Centrifugo 接入 + 投影者）。后端家族各一个薄适配器做「内部事件 → AG-UI」映射。
+`agentos/temporal` 是默认 adapter（native 的 Centrifugo 接入 + 投影者）。后端家族各一个薄适配器做「内部事件 → AG-UI」映射：native 走 `PublishWriter + MapEvent` 逐字流；HTTP / gRPC / temporal_external 是 one-shot（字节流在远端、经 ingest 端点回流），共享 `streamadapter.RunLifecycle` 参考实现做「可观测生命周期 → AG-UI 里程碑」映射（详见 §7 与 §12 P3）。
 
 ## 7. backend 接入契约（3 步，不用调试）
 
@@ -194,16 +218,54 @@ P1 已落地：内存实现 `internal/repo/stream/memstream`（ordered replay + 
 
 **灵活性：传输可换。** 契约只依赖 `Publisher` / `Subscriber` / `Projector` 接口，Centrifugo 是默认实现，memstream 是未配置时的单机兜底；NATS JetStream / Mercure 随时可作替换实现，后端与前端无感。docker-compose 默认起 Centrifugo（app 直连）；本地 `go run` 未配 `CENTRIFUGO_BASE_URL` 时自动降级 `memstream`。
 
-## 10. 分阶段落地
+## 10. 运行装配与部署（shipped 现状）
 
-**统一契约下，接入顺序无关紧要。** 契约用一致性测试锁定——仿照现有 `agentosruntimetest/conformance.go` 的 `BackendConformanceCase`，写一套「任何 backend 通过即视为接入完成」的 conformance suite。谁先接入没有差别，先用一个假 backend 验证契约，再用任何真实 backend 验收即可。
+### 装配点
 
-- **P1 契约 + 一致性测试**：`agentos/stream` 包（`Handle` + AG-UI 事件类型 + `Publisher`/`Subscriber`/`Projector`）+ 内存实现 `memstream`（测试 / dev）+ `streamconformance` suite 锁定「发布→订阅→投影」行为。Centrifugo adapter 留待 P2。
-- **P2 任一真实 backend 接入**：native 或某个外部 backend 跑通契约（通常先 native 便于调试，但非必须）。
-- **P3 其余 backend 铺开**：HTTP / gRPC / temporal_external 各一薄适配器 + 一个参考实现。
+shipped app（`cmd/app → app.Run`）在 `initInfrastructure` 里经 [`agentos/temporal.NewStreamingDataPlane`](agentos/temporal/dataplane.go) 装配总线——返回一个 `StreamingDataPlane{Publisher, Subscriber, Projector}`：
+
+- **`StreamCentrifugo.BaseURL` 非空**（默认路径）：`centrifugo.NewPublisher` + `centrifugo.NewSubscriber`，读写真实 Centrifugo。
+- **为空**：降级到进程内 `memstream.New()`，Publisher 与 Subscriber 是**同一个 bus 实例**（单进程内必须共享，否则 run 订阅 / plan SSE 看不到 activities 的发布），装配时打一条 WARN。
+- **Projector 总是创建**：`runprojection.RunEventProjector` 消费 Subscriber → 落 PG（`agentos_run_events`）。activities 纯发布，run 订阅 / plan SSE / 里程碑投影都从总线读，PG 是权威历史。
+
+库入口 `agentos/temporal/worker_builder.go` 的 `configureStreamingProjection` 走同一装配（Temporal worker 独立进程时用它）。
+
+### 配置与部署
+
+| 项 | 值 | 说明 |
+|---|---|---|
+| env `CENTRIFUGO_BASE_URL` | `http://centrifugo:8000`（compose） | 空 = memstream 兜底 |
+| env `CENTRIFUGO_API_KEY` | `dev-api-key` | server API 发布凭据 |
+| 服务端配置 | [configs/centrifugo/config.json](configs/centrifugo/config.json) | v5，Redis broker，`agentos` 命名空间 |
+| docker-compose | [docker-compose.yml](docker-compose.yml) `centrifugo` 服务 | v5 镜像，8000：client WS + server API + admin 面板（`/`，admin 密码 `password`） |
+
+发布走 **server API**：`POST {base}/api/publish`，同时带 `X-API-Key` 与 `Authorization: apikey <key>`（v5/v6 都认），事件 JSON 直接是 AG-UI 线格式。
+
+订阅走**匿名 websocket**（`centrifuge-go`）：`ws://{base}/connection/websocket` 匿名连接（服务端 `allow_anonymous_connect_without_token`）→ 订 `agentos:run:*` 频道（`Positioned` + `Recoverable`）→ **显式 `History(since after)` 重放窗口，再桥接 live**（该客户端版本无法在订阅时播种恢复游标，重放是显式做的）。慢消费者丢弃，与 memstream 扇出同策略。
+
+### 真机验证
+
+P4 收尾时对真实 Centrifugo **v5.4.9** 做了端到端验证（非 httptest 假服务）：匿名连 → 订 `agentos:run:default:smoketest` → history 重放（seq 1, 2）→ live 投递（seq 3）全链路通过，memory 与 Redis 引擎各跑一遍。这同时暴露并修掉两处与真机语义不符的假设：**`$` 前缀频道在 v5 里是私有频道**（订阅强要令牌，匿名订直接 `PermissionDenied`），且 **`ns:rest` 频道必须配 `ns` 命名空间**否则发布返回 `102 unknown channel`——所以频道定型为 `agentos:run:*`（去 `$`）+ 服务端配 `agentos` 命名空间，详见 §3。
+
+## 11. 已知限制与后续工作
+
+- **前端订阅令牌（§4 JWT 模型）未做**：当前传输无令牌匿名，靠 `agentos` 命名空间的匿名 allow 开门。前端接入时收敛为连接令牌 + 频道级订阅令牌（`channel` claim），关掉 `allow_*_for_anonymous`——频道名不变。
+- **`agentos:thread:*` 会话线程频道未铸造**：§3 表里的可选项，thread 跨 run 的汇聚线需要时才做。
+- **plan SSE 直连前端**：`SubscribePlan` 已走总线 plan 频道（`agentos:plan:*`），HTTP SSE 端点仍在；前端直连总线的 claim-check 故事留后续。
+- **多实例部署**：docker-compose 单实例 Centrifugo + Redis broker（config 已配 `engine: redis`）；横向扩容是加实例共用 Redis，无代码改动。
+- **`agentos/conversation`（example）无 live 传输**：纯 PG 轮询；其事件非 AG-UI，不接总线契约。
+- **投影的时序保证**：总线挂则里程碑延迟（投影由总线驱动，bus 抖动不失败 run）；重连靠 history 窗口 + PG 兜底。
+
+## 12. 分阶段落地
+
+**统一契约下，接入顺序无关紧要。** 契约用一致性测试锁定——`agentosruntimetest` 的 `RunBackendConformance` 锁定 `AgentBackend` 契约，新增 `LifecycleProbe` 锁定「Start → `PublishStarted`、Status → `PublishStatus`」的生命周期接线，`RunLifecycle` 单测锁适配器行为，HTTP 端到端 bus 测试锁「backend → 适配器 → 总线」全链路（§12 P3）。谁先接入没有差别，先用一个假 backend 验证契约，再用任何真实 backend 验收即可。
+
+- **P1 契约 + 一致性测试** ✅：`agentos/stream` 包（`Handle` + AG-UI 事件类型 + `Publisher`/`Subscriber`/`Projector`）+ 内存实现 `memstream`（测试 / dev）+ `streamconformance` suite 锁定「发布→订阅→投影」行为。
+- **P2 任一真实 backend 接入** ✅（native）：native 已跑通契约；其余 backend 未铺开。
+- **P3 其余 backend 铺开** ✅：HTTP / gRPC / temporal_external 各一薄适配器 + 一个参考实现。薄适配器即共享的 [`streamadapter.RunLifecycle`](internal/repo/agentos/streamadapter/run_lifecycle.go)——外部 backend 不拥有本地字节流，控制面可观测的「自家输出」就是 run 生命周期：`Start` 成功 → `RUN_STARTED`，终态 `Status` → `RUN_FINISHED` / `RUN_ERROR` / `RUN_CANCELLED`（终态拼写归一：completed / succeeded → finished，failed → error，canceled / cancelled → cancelled）。三个 backend 经 `agentosruntime.LifecyclePublisher` 端口接入（Start / Status 各发布一次）；per-run scope 终态发布即删（重复终态去重）、nil 发布器降级 no-op、`WithEnsure` 钩子让投影者在首发布时挂载（run 里程碑落 PG 与 native 一致）。用量不上里程碑——远程 token 流走既有 ingest 端点。验收：`RunLifecycle` 单测（真实 memstream）+ 三 backend 接线测试（`LifecycleProbe`）+ HTTP 端到端 bus 验收（`Start` → `RUN_STARTED`，终态 `Status` → `RUN_FINISHED` 落到 run 频道）。
 - **P4 重连与收尾**：Centrifugo recovery + PG `after_sequence` 双通道重连；删除死代码（WebSocketHub）与旧 Redis 扇出。✅ **完成**：总线（Centrifugo 默认传输 / 未配置时 memstream 单机兜底）已是 shipped app 的默认 live 传输——activities 纯发布，run 订阅、plan SSE、run 里程碑投影都从总线读；PG 是权威历史（run 里程碑投影 + plan 事件双写）。docker-compose 已内置 Centrifugo 服务（`configs/centrifugo/config.json`，app 默认指向 `CENTRIFUGO_BASE_URL`）。旧 Redis 扇出四件套与 `WebSocketHub` 已删除，`agentos/conversation` 退化为纯 PG 轮询；Redis 本体保留（Centrifugo broker / WAL / DLQ / 事件去重）。
 
-## 11. 成熟参考
+## 13. 成熟参考
 
 - [Centrifugo for AI apps](https://centrifugal.dev/docs/getting-started/ai_apps)——总线定位与「直连流在生产中的痛点」
 - [Streaming AI responses with Centrifugo](https://centrifugal.dev/blog/2025/06/17/streaming-ai-gpt-responses-with-centrifugo)——临时频道 + server API 发布 + done 标志

@@ -10,6 +10,7 @@ import (
 	agentos "github.com/TekkenSteve/GoAgent/agentos/control"
 	agentoscore "github.com/TekkenSteve/GoAgent/agentos/core"
 	agentosruntimetest "github.com/TekkenSteve/GoAgent/internal/usecase/agentosruntime/agentosruntimetest"
+	"github.com/stretchr/testify/require"
 	"google.golang.org/grpc"
 )
 
@@ -28,7 +29,7 @@ func TestBackendConformance(t *testing.T) {
 		Insecure: true,
 	}
 
-	backend, err := NewBackend(subscriber, &config)
+	backend, err := NewBackend(subscriber, nil, &config)
 	if err != nil {
 		t.Fatalf("NewBackend: %v", err)
 	}
@@ -62,7 +63,7 @@ func TestBackendRejectsInvalidConfig(t *testing.T) {
 
 	config := Config{}
 
-	_, err := NewBackend(nil, &config)
+	_, err := NewBackend(nil, nil, &config)
 	if err == nil {
 		t.Fatal("expected error")
 	}
@@ -71,7 +72,7 @@ func TestBackendRejectsInvalidConfig(t *testing.T) {
 func TestBackendRejectsNilConfig(t *testing.T) {
 	t.Parallel()
 
-	_, err := NewBackend(nil, nil)
+	_, err := NewBackend(nil, nil, nil)
 	if !errors.Is(err, agentoscore.ErrInvalidBackendRef) {
 		t.Fatalf("NewBackend nil config error = %v, want ErrInvalidBackendRef", err)
 	}
@@ -195,4 +196,40 @@ func unaryHandler[Req, Resp any](
 
 		return interceptor(ctx, req, info, handler)
 	}
+}
+
+// TestBackendPublishesLifecycleToDataPlane verifies Start and Status forward
+// their observations to the data-plane lifecycle adapter, matching the shared
+// agentosruntime.LifecyclePublisher contract used by all one-shot backends.
+func TestBackendPublishesLifecycleToDataPlane(t *testing.T) {
+	t.Parallel()
+
+	probe := &agentosruntimetest.LifecycleProbe{}
+	server := newTestServer(t)
+
+	backend, err := NewBackend(nil, probe, &Config{
+		Name:     "grpc-lifecycle",
+		Target:   server.target,
+		Insecure: true,
+	})
+	require.NoError(t, err)
+
+	t.Cleanup(func() {
+		if err := backend.Close(); err != nil {
+			t.Errorf("close backend: %v", err)
+		}
+	})
+
+	spec := agentos.RunSpec{RunID: Run1, ThreadID: "thread-1", AccountID: "acme", Backend: backend.config.Ref()}
+
+	started, err := backend.Start(context.Background(), &spec)
+	require.NoError(t, err)
+	require.Equal(t, "created", started.LifecycleState)
+	require.Equal(t, spec, probe.LastStartedSpec())
+	require.Equal(t, started, probe.LastStartedStatus())
+
+	status, err := backend.Status(context.Background(), Run1)
+	require.NoError(t, err)
+	require.Equal(t, "running", status.LifecycleState)
+	require.Equal(t, []agentos.RunStatus{status}, probe.Statuses())
 }
