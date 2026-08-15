@@ -25,24 +25,26 @@ type Logger struct {
 
 var _ Interface = (*Logger)(nil)
 
-// New -.
-func New(level string) *Logger {
-	var l zerolog.Level
-
+// parseLevel maps a configured level string onto a zerolog level, defaulting
+// to info for unrecognized values.
+func parseLevel(level string) zerolog.Level {
 	switch strings.ToLower(level) {
 	case "error":
-		l = zerolog.ErrorLevel
+		return zerolog.ErrorLevel
 	case "warn":
-		l = zerolog.WarnLevel
+		return zerolog.WarnLevel
 	case "info":
-		l = zerolog.InfoLevel
+		return zerolog.InfoLevel
 	case "debug":
-		l = zerolog.DebugLevel
+		return zerolog.DebugLevel
 	default:
-		l = zerolog.InfoLevel
+		return zerolog.InfoLevel
 	}
+}
 
-	zerolog.SetGlobalLevel(l)
+// New -.
+func New(level string) *Logger {
+	zerolog.SetGlobalLevel(parseLevel(level))
 
 	skipFrameCount := 3
 	logger := zerolog.

@@ -8,49 +8,62 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/TekkenSteve/GoAgent/agentos/stream"
 	"github.com/TekkenSteve/GoAgent/internal/entity"
+	"github.com/TekkenSteve/GoAgent/internal/repo/agentos/streamadapter"
 )
 
-const duplicateEventSequence int64 = 0
+const (
+	duplicateEventSequence int64 = 0
+
+	// agentOSEventCustomName is the namespaced CUSTOM name carrying a normalized
+	// external AgentOS event on the run timeline. The control plane owns the
+	// agentos.* namespace; these events ride the bus so run-channel subscribers
+	// see them, and their authoritative copy remains the control plane's store.
+	agentOSEventCustomName = "agentos.event"
+)
 
 var (
 	// ErrInvalidEvent is returned when an ingested event is missing a
 	// required field or has an unsupported event type.
-	ErrInvalidEvent   = errors.New("agentos event ingest: invalid event")
-	errIngestNilStore = errors.New("agentos event ingest: nil event store")
+	ErrInvalidEvent       = errors.New("agentos event ingest: invalid event")
+	errIngestNilPublisher = errors.New("agentos event ingest: nil event publisher")
 )
 
-// EventStore appends normalized AgentOS events to the shared event log.
-type EventStore interface {
-	Append(ctx context.Context, sessionID, runID string, event entity.StreamEvent) (int64, error)
+// Publisher publishes normalized AgentOS events onto a run's data-plane
+// channel. agentos/stream.Publisher satisfies it.
+type Publisher interface {
+	Publish(ctx context.Context, handle *stream.Handle, ev *stream.Event) error
 }
 
-// DedupeStore claims backend-provided event IDs before append.
+// DedupeStore claims backend-provided event IDs before publish.
 type DedupeStore interface {
 	ClaimEvent(ctx context.Context, runID, eventID string) (bool, error)
 }
 
 // Service ingests external backend events into the normalized AgentOS stream.
 type Service struct {
-	eventStore EventStore
-	dedupe     DedupeStore
-	now        func() time.Time
+	publisher Publisher
+	dedupe    DedupeStore
+	now       func() time.Time
 }
 
 // NewService creates an event ingest service.
-func NewService(eventStore EventStore, dedupe DedupeStore) (*Service, error) {
-	if eventStore == nil {
-		return nil, errIngestNilStore
+func NewService(publisher Publisher, dedupe DedupeStore) (*Service, error) {
+	if publisher == nil {
+		return nil, errIngestNilPublisher
 	}
 
 	return &Service{
-		eventStore: eventStore,
-		dedupe:     dedupe,
-		now:        func() time.Time { return time.Now().UTC() },
+		publisher: publisher,
+		dedupe:    dedupe,
+		now:       func() time.Time { return time.Now().UTC() },
 	}, nil
 }
 
-// Ingest validates, normalizes, deduplicates, and persists one external event.
+// Ingest validates, normalizes, deduplicates, and publishes one external event
+// to the run's live channel. The durable copy of these events is owned by the
+// control plane's store; the bus carries only the live tail.
 func (s *Service) Ingest(ctx context.Context, input *IngestEvent) (IngestResult, error) {
 	event, sessionID, err := s.normalize(input)
 	if err != nil {
@@ -73,15 +86,17 @@ func (s *Service) Ingest(ctx context.Context, input *IngestEvent) (IngestResult,
 		}
 	}
 
-	seq, err := s.eventStore.Append(ctx, sessionID, event.RunID, event)
-	if err != nil {
-		return IngestResult{}, fmt.Errorf("agentos event ingest: append: %w", err)
+	wire := stream.NewCustom(sessionID, event.RunID, agentOSEventCustomName)
+	wire.Set("event", event)
+
+	if err := s.publisher.Publish(ctx, streamadapter.HandleForRun(sessionID, event.RunID), wire); err != nil {
+		return IngestResult{}, fmt.Errorf("agentos event ingest: publish: %w", err)
 	}
 
 	return IngestResult{
 		RunID:    event.RunID,
 		EventID:  event.EventID,
-		Sequence: seq,
+		Sequence: duplicateEventSequence,
 	}, nil
 }
 

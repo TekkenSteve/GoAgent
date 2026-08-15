@@ -5,17 +5,21 @@ import (
 
 	agentos "github.com/TekkenSteve/GoAgent/agentos/control"
 	agentoscore "github.com/TekkenSteve/GoAgent/agentos/core"
+	agentosstream "github.com/TekkenSteve/GoAgent/agentos/stream"
+	"github.com/TekkenSteve/GoAgent/internal/usecase/agentosplan"
 	agentosruntime "github.com/TekkenSteve/GoAgent/internal/usecase/agentosruntime"
 )
 
-// RuntimeConfig configures the default Temporal/Redis runtime implementation.
+// RuntimeConfig configures the default Temporal runtime implementation.
 type RuntimeConfig struct {
 	TemporalAddress          string
 	TemporalNamespace        string
 	TemporalTaskQueues       TaskQueues
 	PostgresURL              string
 	PostgresPoolMax          int
-	RedisURL                 string
+	Subscriber               agentosstream.Subscriber
+	PlanEventPublisher       agentosplan.PlanEventPublisher
+	PlanEventSubscriber      agentosplan.PlanEventSubscriber
 	ArtifactStore            ArtifactStoreConfig
 	TemporalExternalBackends []ExternalBackendConfig
 	HTTPBackends             []HTTPBackendConfig
@@ -152,15 +156,17 @@ type WorkerConfig struct {
 	EnsureDefaultTemplate bool
 
 	// StreamCentrifugo configures the Centrifugo data-plane bus the streaming
-	// activities mirror their AG-UI timeline onto. Leave empty to keep the
-	// runtime pure-Redis (no data-plane mirror). Requires a $agentos:run:*
-	// namespace with history_size/history_ttl on the server so publications
-	// carry replayable offsets.
+	// activities mirror their AG-UI timeline onto — the default transport. Leave
+	// empty to degrade the data plane to the in-process memstream bus (fine for
+	// a single-machine run, not a production transport). Requires an `agentos`
+	// namespace (covering agentos:run:* / agentos:plan:* channels) with
+	// history_size/history_ttl on the server so publications carry replayable
+	// offsets; the dev default also needs anonymous subscribe + history access.
 	StreamCentrifugo StreamCentrifugoConfig
 }
 
 // StreamCentrifugoConfig is the data-plane transport for the AG-UI timeline.
-// Empty BaseURL disables the publisher.
+// An empty BaseURL degrades the data plane to the in-process memstream bus.
 type StreamCentrifugoConfig struct {
 	BaseURL string
 	APIKey  string

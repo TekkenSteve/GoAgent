@@ -1,47 +1,107 @@
 package temporal
 
 import (
+	"errors"
 	"testing"
 	"time"
 
-	agentfwstream "github.com/TekkenSteve/GoAgent/internal/agentfw/stream"
-	"github.com/TekkenSteve/GoAgent/internal/entity"
+	agentoscore "github.com/TekkenSteve/GoAgent/agentos/core"
+	agentosstream "github.com/TekkenSteve/GoAgent/agentos/stream"
+	"github.com/TekkenSteve/GoAgent/internal/repo/agentos/streamadapter"
+	"github.com/TekkenSteve/GoAgent/internal/repo/stream/memstream"
 )
 
-func TestEventFromStored(t *testing.T) {
+// TestSubscribeAgentOSReducesToMilestones locks the run-subscribe reduction: a
+// milestone survives ProjectToCore and is stamped with the bus offset, while a
+// transient byte delta on the same channel is filtered before the caller sees
+// it — the subscribe API and the durable projection agree on what survives.
+func TestSubscribeAgentOSReducesToMilestones(t *testing.T) {
 	t.Parallel()
 
-	ts := time.Date(2026, 6, 14, 13, 0, 0, 0, time.UTC)
+	bus := memstream.New()
+	agentSub := newAgentOSSubscriber(bus)
+	runID := "run-1"
+	handle := streamadapter.HandleForRun("", runID)
 
-	event := &entity.TextDeltaEvent{
-		BaseEvent: entity.BaseEvent{
-			EventID:   "evt-1",
-			RunID:     "run-1",
-			SessionID: "thread-1",
-			Source:    entity.SourceLLM,
-			Timestamp: ts,
-		},
-		Content: "hello",
-		Index:   1,
+	if err := bus.Publish(t.Context(), handle, agentosstream.NewRunStarted("thread-1", runID)); err != nil {
+		t.Fatalf("publish run started: %v", err)
 	}
 
-	got := eventFromStored(agentfwstream.StoredEvent{
-		Event:    event,
-		Sequence: 42,
-		StoredAt: ts,
-	})
-
-	if got.EventID != "evt-1" ||
-		got.EventType != "llm.text.delta" ||
-		got.RunID != "run-1" ||
-		got.ThreadID != "thread-1" ||
-		got.Source != "llm" ||
-		got.Sequence != 42 ||
-		!got.Timestamp.Equal(ts) {
-		t.Fatalf("unexpected event mapping: %#v", got)
+	if err := bus.Publish(t.Context(), handle, agentosstream.NewTextMessageContent("thread-1", runID, "m-1", "hello")); err != nil {
+		t.Fatalf("publish text delta: %v", err)
 	}
 
-	if got.Payload["content"] != "hello" {
-		t.Fatalf("payload content = %#v", got.Payload["content"])
+	sub, err := agentSub.SubscribeAgentOS(t.Context(), agentoscore.StreamScope{RunID: runID})
+	if err != nil {
+		t.Fatalf("SubscribeAgentOS: %v", err)
+	}
+
+	defer sub.Close()
+
+	select {
+	case ev, ok := <-sub.Events():
+		if !ok {
+			t.Fatal("subscription closed before the run started milestone")
+		}
+
+		assertRunStartedMilestone(t, &ev, runID, handle)
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for the run started milestone")
+	}
+
+	// The transient delta was replayed on the same channel but filtered by
+	// ProjectToCore, so no further event arrives before close.
+	select {
+	case ev, ok := <-sub.Events():
+		if ok {
+			t.Fatalf("transient delta should not project: %#v", ev)
+		}
+	case <-time.After(200 * time.Millisecond):
+	}
+}
+
+func assertRunStartedMilestone(t *testing.T, ev *agentoscore.Event, runID string, handle *agentosstream.Handle) {
+	t.Helper()
+
+	if ev.EventType != agentoscore.EventRunStarted {
+		t.Fatalf("event type = %q, want %q", ev.EventType, agentoscore.EventRunStarted)
+	}
+
+	if ev.RunID != runID || ev.ThreadID != "thread-1" {
+		t.Fatalf("scope = %s/%s, want %s/thread-1", ev.RunID, ev.ThreadID, runID)
+	}
+
+	if ev.Sequence != 1 {
+		t.Fatalf("sequence = %d, want 1", ev.Sequence)
+	}
+
+	if ev.EventID != runID+":1" {
+		t.Fatalf("event id = %q, want %q", ev.EventID, runID+":1")
+	}
+
+	if ev.Source != handle.Channel {
+		t.Fatalf("source = %q, want %q", ev.Source, handle.Channel)
+	}
+}
+
+func TestSubscribeAgentOSRequiresRunID(t *testing.T) {
+	t.Parallel()
+
+	agentSub := newAgentOSSubscriber(memstream.New())
+
+	_, err := agentSub.SubscribeAgentOS(t.Context(), agentoscore.StreamScope{})
+	if !errors.Is(err, agentoscore.ErrInvalidStreamScope) {
+		t.Fatalf("SubscribeAgentOS empty run id error = %v, want %v", err, agentoscore.ErrInvalidStreamScope)
+	}
+}
+
+func TestSubscribeAgentOSNotConfigured(t *testing.T) {
+	t.Parallel()
+
+	var agentSub *agentOSSubscriber
+
+	_, err := agentSub.SubscribeAgentOS(t.Context(), agentoscore.StreamScope{RunID: "run-1"})
+	if !errors.Is(err, errAgentOSSubscriberNotConfigured) {
+		t.Fatalf("SubscribeAgentOS nil subscriber error = %v, want %v", err, errAgentOSSubscriberNotConfigured)
 	}
 }

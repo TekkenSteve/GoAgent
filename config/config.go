@@ -12,15 +12,16 @@ import (
 type (
 	// Config -.
 	Config struct {
-		App     App
-		HTTP    HTTP
-		Log     Log
-		PG      PG
-		Redis   Redis
-		AgentOS AgentOS
-		AgentFW AgentFW
-		Metrics Metrics
-		Swagger Swagger
+		App              App
+		HTTP             HTTP
+		Log              Log
+		PG               PG
+		Redis            Redis
+		AgentOS          AgentOS
+		AgentFW          AgentFW
+		StreamCentrifugo StreamCentrifugo
+		Metrics          Metrics
+		Swagger          Swagger
 	}
 
 	// App -.
@@ -111,6 +112,15 @@ type (
 
 		// LLM configuration — providers and scenarios in YAML (AGENTFW_LLM_CONFIG_PATH).
 		LLMConfigPath string `env:"AGENTFW_LLM_CONFIG_PATH" envDefault:""`
+	}
+
+	// StreamCentrifugo configures the external Centrifugo data-plane bus. When
+	// both env vars are empty the app assembles the in-process memstream bus
+	// (single-node dev default); setting CENTRIFUGO_BASE_URL switches the live
+	// transport to Centrifugo (production multi-process).
+	StreamCentrifugo struct {
+		BaseURL string `env:"CENTRIFUGO_BASE_URL" envDefault:""`
+		APIKey  string `env:"CENTRIFUGO_API_KEY" envDefault:""`
 	}
 
 	// Metrics -.

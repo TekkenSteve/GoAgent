@@ -14,13 +14,13 @@ import (
 	agentoscore "github.com/TekkenSteve/GoAgent/agentos/core"
 	agentosplatform "github.com/TekkenSteve/GoAgent/agentos/platform"
 	agentosproc "github.com/TekkenSteve/GoAgent/agentos/process"
+	agentosstream "github.com/TekkenSteve/GoAgent/agentos/stream"
 	agentostemporal "github.com/TekkenSteve/GoAgent/agentos/temporal"
 	"github.com/TekkenSteve/GoAgent/config"
 	agentfwconfig "github.com/TekkenSteve/GoAgent/internal/agentfw/config"
 	"github.com/TekkenSteve/GoAgent/internal/agentfw/eventing"
 	"github.com/TekkenSteve/GoAgent/internal/agentfw/orchestration"
 	agentfwruntime "github.com/TekkenSteve/GoAgent/internal/agentfw/runtime"
-	"github.com/TekkenSteve/GoAgent/internal/agentfw/stream"
 	"github.com/TekkenSteve/GoAgent/internal/agentfw/tool"
 	"github.com/TekkenSteve/GoAgent/internal/controller/restapi"
 	restapiv1 "github.com/TekkenSteve/GoAgent/internal/controller/restapi/v1"
@@ -63,7 +63,7 @@ type appInfrastructure struct {
 	pg              *postgres.Postgres
 	rdb             *goredis.Redis
 	eventIngest     *eventing.Service
-	eventStore      stream.EventStore
+	dataPlane       *agentostemporal.StreamingDataPlane
 	messageRepo     *temporalrepo.MessageRepo
 	agentRepo       *cached.AgentRepo
 	templateRepo    *temporalrepo.WorkflowTemplateRepo
@@ -94,12 +94,29 @@ func initInfrastructure(cfg *config.Config, l *logger.Logger) *appInfrastructure
 		l.Fatal(fmt.Errorf("app - Run - redis.New: %w", err))
 	}
 
-	eventSequencer := repostream.NewRedisSequencer(rdb)
-	eventStore := repostream.NewRedisEventStore(rdb, eventSequencer)
 	eventDedupeStore := repostream.NewEventDedupeStore(rdb)
 
-	eventIngest, err := eventing.NewService(eventStore, eventDedupeStore)
+	// The data plane is the single live transport: Centrifugo by default,
+	// degrading to the in-process memstream bus when no base URL is configured
+	// (a warning is logged). It feeds the run activities' publisher, the
+	// run/plan subscriptions, and the durable projection.
+	dataPlane, err := agentostemporal.NewStreamingDataPlane(context.Background(), agentostemporal.StreamCentrifugoConfig{
+		BaseURL: cfg.StreamCentrifugo.BaseURL,
+		APIKey:  cfg.StreamCentrifugo.APIKey,
+	}, pg, l)
 	if err != nil {
+		if closeErr := rdb.Close(); closeErr != nil {
+			l.Error("app - Run - close redis after data plane failure", closeErr)
+		}
+
+		pg.Close()
+		l.Fatal(fmt.Errorf("app - Run - agentos data plane: %w", err))
+	}
+
+	eventIngest, err := eventing.NewService(dataPlane.Publisher, eventDedupeStore)
+	if err != nil {
+		dataPlane.Close()
+
 		if closeErr := rdb.Close(); closeErr != nil {
 			l.Error("app - Run - close redis after eventing.NewService failure", closeErr)
 		}
@@ -109,7 +126,7 @@ func initInfrastructure(cfg *config.Config, l *logger.Logger) *appInfrastructure
 	}
 
 	return &appInfrastructure{
-		pg: pg, rdb: rdb, eventIngest: eventIngest, eventStore: eventStore,
+		pg: pg, rdb: rdb, eventIngest: eventIngest, dataPlane: dataPlane,
 		messageRepo: messageRepo, agentRepo: agentRepo, templateRepo: templateRepo,
 		runBackendIndex: runBackendIndex, templateUC: templateUC,
 		fwCfg: fwCfg,
@@ -133,6 +150,8 @@ func Run(cfg *config.Config) {
 	infra := initInfrastructure(cfg, l)
 
 	defer func() {
+		// Stop the projection consumer before the Postgres pool it writes to.
+		infra.dataPlane.Close()
 		infra.pg.Close()
 
 		if err := infra.rdb.Close(); err != nil {
@@ -140,7 +159,7 @@ func Run(cfg *config.Config) {
 		}
 	}()
 
-	tc := initTemporalComponents(l, cfg, &infra.fwCfg, infra.pg, infra.rdb, infra.messageRepo, infra.agentRepo, infra.runBackendIndex, infra.templateUC, infra.eventStore)
+	tc := initTemporalComponents(l, cfg, &infra.fwCfg, infra.pg, infra.rdb, infra.messageRepo, infra.agentRepo, infra.runBackendIndex, infra.templateUC, infra.dataPlane)
 	if tc != nil {
 		defer tc.Stop(l)
 
@@ -278,9 +297,9 @@ func (c *temporalComponents) Stop(l logger.Interface) {
 	}
 }
 
-func initPlanInfrastructure(l *logger.Logger, cfg *config.Config, pg *postgres.Postgres, rdb *goredis.Redis) (*temporalrepo.AgentOSPlanRepo, *planstream.RedisPlanEventStream, *temporalrepo.AgentOSArtifactRepo, *temporalrepo.AgentOSCapabilityCatalogRepo, *temporalrepo.AgentOSArtifactSchemaCatalogRepo) {
+func initPlanInfrastructure(l *logger.Logger, cfg *config.Config, pg *postgres.Postgres, dataPlane *agentostemporal.StreamingDataPlane) (*temporalrepo.AgentOSPlanRepo, *planstream.PlanEventStream, *temporalrepo.AgentOSArtifactRepo, *temporalrepo.AgentOSCapabilityCatalogRepo, *temporalrepo.AgentOSArtifactSchemaCatalogRepo) {
 	planStore := temporalrepo.NewAgentOSPlanRepo(pg)
-	planEventStream := planstream.NewRedisPlanEventStream(rdb)
+	planEventStream := planstream.New(dataPlane.Publisher, dataPlane.Subscriber)
 	artifactStoreCfg := cfg.AgentOS.ArtifactStoreConfig()
 	blobCfg := appArtifactBlobConfig(&artifactStoreCfg)
 
@@ -332,7 +351,7 @@ type agentOSProcessPlatformStores struct {
 	worksetStore *temporalrepo.AgentOSWorksetRepo
 }
 
-func setupPlanRuntime(agentOSRuntime agentos.Runtime, planStore *temporalrepo.AgentOSPlanRepo, planEventStream *planstream.RedisPlanEventStream, artifactStore *temporalrepo.AgentOSArtifactRepo, capabilityCatalog *temporalrepo.AgentOSCapabilityCatalogRepo, artifactSchemaCatalog *temporalrepo.AgentOSArtifactSchemaCatalogRepo, fwCfg *agentfwconfig.Config, cfg *config.Config, runtime *agentfwruntime.TemporalRuntime, comp *initAgentComponentsResult, l *logger.Logger) (*agentostemporal.PlanActivities, agentos.PlanRuntime, *agentOSProcessPlatformRuntimes, *agentostemporal.PlanCommandRecoveryLoop, *agentosplan.PlanMetricsExporterLoop) {
+func setupPlanRuntime(agentOSRuntime agentos.Runtime, planStore *temporalrepo.AgentOSPlanRepo, planEventStream *planstream.PlanEventStream, artifactStore *temporalrepo.AgentOSArtifactRepo, capabilityCatalog *temporalrepo.AgentOSCapabilityCatalogRepo, artifactSchemaCatalog *temporalrepo.AgentOSArtifactSchemaCatalogRepo, fwCfg *agentfwconfig.Config, cfg *config.Config, runtime *agentfwruntime.TemporalRuntime, comp *initAgentComponentsResult, l *logger.Logger) (*agentostemporal.PlanActivities, agentos.PlanRuntime, *agentOSProcessPlatformRuntimes, *agentostemporal.PlanCommandRecoveryLoop, *agentosplan.PlanMetricsExporterLoop) {
 	planActivities, err := agentostemporal.NewPlanActivitiesWithCatalogAndSchemas(
 		agentOSRuntime,
 		capabilityCatalog,
@@ -354,13 +373,14 @@ func setupPlanRuntime(agentOSRuntime agentos.Runtime, planStore *temporalrepo.Ag
 
 	planRuntimeCfg := cfg.AgentOS.ArtifactStoreConfig()
 	planRuntimeConfig := agentostemporal.RuntimeConfig{
-		TemporalAddress:    fwCfg.Temporal.Address,
-		TemporalNamespace:  fwCfg.Temporal.Namespace,
-		TemporalTaskQueues: agentOSTemporalTaskQueues(&fwCfg.Temporal.TaskQueues),
-		PostgresURL:        cfg.PG.URL,
-		PostgresPoolMax:    cfg.PG.PoolMax,
-		RedisURL:           cfg.Redis.URL,
-		ArtifactStore:      appAgentOSArtifactStoreConfig(&planRuntimeCfg),
+		TemporalAddress:     fwCfg.Temporal.Address,
+		TemporalNamespace:   fwCfg.Temporal.Namespace,
+		TemporalTaskQueues:  agentOSTemporalTaskQueues(&fwCfg.Temporal.TaskQueues),
+		PostgresURL:         cfg.PG.URL,
+		PostgresPoolMax:     cfg.PG.PoolMax,
+		PlanEventPublisher:  planEventStream,
+		PlanEventSubscriber: planEventStream,
+		ArtifactStore:       appAgentOSArtifactStoreConfig(&planRuntimeCfg),
 	}
 
 	planRuntime, err := agentostemporal.NewPlanRuntimeWithClient(context.Background(), &planRuntimeConfig, runtime.Client)
@@ -444,7 +464,7 @@ func newAgentOSProjectionRuntime(l *logger.Logger, stores agentOSProcessPlatform
 
 func initTemporalComponents(l *logger.Logger, cfg *config.Config, fwCfg *agentfwconfig.Config, pg *postgres.Postgres, rdb *goredis.Redis,
 	messageRepo *temporalrepo.MessageRepo, agentRepo *cached.AgentRepo,
-	runBackendIndex *temporalrepo.RunBackendIndexRepo, templateUC *templatepkg.UseCase, eventStore stream.EventStore,
+	runBackendIndex *temporalrepo.RunBackendIndexRepo, templateUC *templatepkg.UseCase, dataPlane *agentostemporal.StreamingDataPlane,
 ) *temporalComponents {
 	runtime, err := agentfwruntime.NewTemporalRuntime(&fwCfg.Temporal)
 	if err != nil {
@@ -456,7 +476,7 @@ func initTemporalComponents(l *logger.Logger, cfg *config.Config, fwCfg *agentfw
 		l.Fatal(fmt.Errorf("app - Run - LoadLLMProviders: %w", err))
 	}
 
-	comp := initAgentComponents(l, cfg, pg, rdb, llmResult, messageRepo, agentRepo, eventStore)
+	comp := initAgentComponents(l, cfg, pg, rdb, llmResult, messageRepo, agentRepo, dataPlane)
 	registerToolsOnRegistry(l, comp.toolRegistry)
 
 	if err := templateUC.EnsureDefault(context.Background()); err != nil {
@@ -470,9 +490,9 @@ func initTemporalComponents(l *logger.Logger, cfg *config.Config, fwCfg *agentfw
 		return runtime.Client.CancelWorkflow(ctx, workflowID, "")
 	}
 
-	agentOSRuntime := newAgentOSControlRuntime(l, cfg, fwCfg, runtime, runBackendIndex)
+	agentOSRuntime := newAgentOSControlRuntime(l, cfg, fwCfg, runtime, runBackendIndex, dataPlane.Subscriber)
 
-	planStore, planEventStream, artifactStore, capabilityCatalog, artifactSchemaCatalog := initPlanInfrastructure(l, cfg, pg, rdb)
+	planStore, planEventStream, artifactStore, capabilityCatalog, artifactSchemaCatalog := initPlanInfrastructure(l, cfg, pg, dataPlane)
 	registerAgentOSSchemas(l, cfg, capabilityCatalog, artifactSchemaCatalog)
 	_, planRuntime, processPlatform, planRecovery, planMetrics := setupPlanRuntime(agentOSRuntime, planStore, planEventStream, artifactStore, capabilityCatalog, artifactSchemaCatalog, fwCfg, cfg, runtime, comp, l)
 
@@ -494,13 +514,13 @@ func initTemporalComponents(l *logger.Logger, cfg *config.Config, fwCfg *agentfw
 	}
 }
 
-func newAgentOSControlRuntime(l logger.Interface, cfg *config.Config, fwCfg *agentfwconfig.Config, runtime *agentfwruntime.TemporalRuntime, runBackendIndex *temporalrepo.RunBackendIndexRepo) agentos.Runtime {
+func newAgentOSControlRuntime(l logger.Interface, cfg *config.Config, fwCfg *agentfwconfig.Config, runtime *agentfwruntime.TemporalRuntime, runBackendIndex *temporalrepo.RunBackendIndexRepo, subscriber agentosstream.Subscriber) agentos.Runtime {
 	agentOSRuntime, err := agentostemporal.NewRuntimeWithClient(
 		context.Background(), &agentostemporal.RuntimeConfig{
 			TemporalAddress:          fwCfg.Temporal.Address,
 			TemporalNamespace:        fwCfg.Temporal.Namespace,
 			TemporalTaskQueues:       agentOSTemporalTaskQueues(&fwCfg.Temporal.TaskQueues),
-			RedisURL:                 cfg.Redis.URL,
+			Subscriber:               subscriber,
 			TemporalExternalBackends: temporalExternalBackends(l, cfg),
 			HTTPBackends:             httpBackends(l, cfg),
 			GRPCBackends:             grpcBackends(l, cfg),
@@ -846,6 +866,18 @@ func temporalExternalBackends(l logger.Interface, cfg *config.Config) []agentost
 	return result
 }
 
+// configureStreamingActivities wires the shared data plane onto the run
+// activities: the publisher mirrors the AG-UI timeline and the projector
+// controller attaches the durable milestone projection.
+func configureStreamingActivities(activities *orchestration.AgentActivities, dataPlane *agentostemporal.StreamingDataPlane) {
+	if dataPlane == nil {
+		return
+	}
+
+	activities.WithStreamPublisher(dataPlane.Publisher)
+	activities.WithRunProjectionController(dataPlane.Projector)
+}
+
 // initAgentComponentsResult holds the results of initAgentComponents.
 type initAgentComponentsResult struct {
 	llmProvider  *webapi.BifrostProvider
@@ -863,7 +895,7 @@ func initAgentComponents(
 	llmResult *webapi.LLMProvidersResult,
 	messageRepo *temporalrepo.MessageRepo,
 	agentRepo *cached.AgentRepo,
-	eventStore stream.EventStore,
+	dataPlane *agentostemporal.StreamingDataPlane,
 ) *initAgentComponentsResult {
 	llmProvider, err := initBifrostProvider(cfg, llmResult, l)
 	if err != nil {
@@ -896,9 +928,10 @@ func initAgentComponents(
 		l.Info("app - Run - mcp manager created for per-agent JIT tool registration")
 	}
 
-	activities := orchestration.NewAgentActivities(agentUC, eventStore, l).
+	activities := orchestration.NewAgentActivities(agentUC, l).
 		WithMCPManager(mcpManager).
 		WithBilling(billingUC)
+	configureStreamingActivities(activities, dataPlane)
 	l.Info("app - Run - agent components initialized")
 
 	return &initAgentComponentsResult{llmProvider, toolRegistry, batchWriter, agentUC, activities}

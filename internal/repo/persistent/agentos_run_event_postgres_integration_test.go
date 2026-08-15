@@ -43,7 +43,7 @@ func TestAgentOSRunEventPostgresDurablePersistence(t *testing.T) {
 		ThreadID:  "sess-1",
 		Sequence:  1,
 		Timestamp: time.Date(2026, 8, 15, 12, 0, 0, 0, time.UTC),
-		Source:    "$agentos:run:acme:" + runID,
+		Source:    "agentos:run:acme:" + runID,
 		Payload:   map[string]any{"thread_id": "sess-1"},
 	}
 	if err := repo.AppendRunEvent(ctx, first); err != nil {
@@ -153,7 +153,7 @@ func TestAgentOSRunEventPostgresListRunEvents(t *testing.T) {
 
 	base := time.Date(2026, 8, 15, 12, 0, 0, 0, time.UTC)
 	for i, ev := range []*agentoscore.Event{
-		{EventType: agentoscore.EventRunStarted, RunID: runID, ThreadID: "sess-1", Sequence: 1, Timestamp: base, Source: "$agentos:run:acme:" + runID, Payload: map[string]any{"agentName": "coder"}},
+		{EventType: agentoscore.EventRunStarted, RunID: runID, ThreadID: "sess-1", Sequence: 1, Timestamp: base, Source: "agentos:run:acme:" + runID, Payload: map[string]any{"agentName": "coder"}},
 		{EventType: agentoscore.EventToolCallStarted, RunID: runID, Sequence: 2, Timestamp: base.Add(time.Second), Payload: map[string]any{}},
 		{EventType: agentoscore.EventRunCompleted, RunID: runID, Sequence: 3, Timestamp: base.Add(2 * time.Second), Payload: map[string]any{"usage": map[string]any{"total_tokens": 30}}},
 	} {
@@ -172,7 +172,7 @@ func TestAgentOSRunEventPostgresListRunEvents(t *testing.T) {
 	}
 
 	want := []agentoscore.Event{
-		{EventID: runID + ":1", EventType: agentoscore.EventRunStarted, RunID: runID, ThreadID: "sess-1", Sequence: 1, Timestamp: base, Source: "$agentos:run:acme:" + runID, Payload: map[string]any{"agentName": "coder"}},
+		{EventID: runID + ":1", EventType: agentoscore.EventRunStarted, RunID: runID, ThreadID: "sess-1", Sequence: 1, Timestamp: base, Source: "agentos:run:acme:" + runID, Payload: map[string]any{"agentName": "coder"}},
 		{EventID: runID + ":2", EventType: agentoscore.EventToolCallStarted, RunID: runID, Sequence: 2, Timestamp: base.Add(time.Second), Payload: map[string]any{}},
 		{EventID: runID + ":3", EventType: agentoscore.EventRunCompleted, RunID: runID, Sequence: 3, Timestamp: base.Add(2 * time.Second), Payload: map[string]any{"usage": map[string]any{"total_tokens": float64(30)}}},
 	}

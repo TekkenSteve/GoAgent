@@ -15,11 +15,14 @@ import (
 // Config describes one Centrifugo data-plane endpoint.
 //
 // History retention is NOT part of the client config: it is a server-side
-// namespace concern. The operator must configure the $agentos:run:* namespace
-// with history_size / history_ttl (and force_positioning / force_recovery) so
-// that every publish to a run channel retains the replay window the
-// Subscriber reads. The embedded test harness is the exception — it passes
-// history flags per-publish because the in-memory broker has no namespace.
+// namespace concern. The operator must configure an `agentos` namespace
+// (covering the agentos:run:* / agentos:plan:* channels) with history_size /
+// history_ttl so that every publish retains the replay window the Subscriber
+// reads. The tokenless dev transport additionally needs
+// allow_subscribe_for_anonymous / allow_history_for_anonymous on that
+// namespace; production tightens with subscribe tokens or a subscribe proxy.
+// The embedded test harness is the exception — it passes history flags
+// per-publish because the in-memory broker has no namespace.
 type Config struct {
 	// BaseURL is the Centrifugo server root, e.g. "http://127.0.0.1:8000".
 	BaseURL string

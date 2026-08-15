@@ -86,6 +86,10 @@ linters:
       min-complexity: 10
     misspell:
       locale: US
+      # "cancelled" is an intentional wire value (AG-UI run.cancelled and the
+      # conversation schema), not a typo of the US "canceled".
+      ignore-rules:
+        - cancelled
     nestif:
       min-complexity: 4
     nolintlint:

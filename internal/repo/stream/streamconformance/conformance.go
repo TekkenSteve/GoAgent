@@ -43,7 +43,7 @@ func RunStreamConformance(t *testing.T, tc *ConformanceCase) {
 	}
 
 	if tc.Handle == nil {
-		tc.Handle = stream.NewHandle("$agentos:run:acme:conformance-run")
+		tc.Handle = stream.NewHandle("agentos:run:acme:conformance-run")
 	}
 
 	if err := tc.Handle.Validate(); err != nil {

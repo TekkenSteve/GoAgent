@@ -104,7 +104,7 @@ func newProjector(t *testing.T, bus *memstream.Bus, store RunEventStore) *RunEve
 }
 
 func runHandle(runID string) *stream.Handle {
-	return stream.NewHandle("$agentos:run:acme:" + runID)
+	return stream.NewHandle("agentos:run:acme:" + runID)
 }
 
 // TestRunEventProjectorProjectsMilestones drives one run's full timeline
@@ -146,7 +146,7 @@ func TestRunEventProjectorProjectsMilestones(t *testing.T) {
 
 	require.Equal(t, "run-1:1", first.EventID, "event id mirrors the plan event shape")
 	require.Equal(t, "sess-1", first.ThreadID, "thread scope projected")
-	require.Equal(t, "$agentos:run:acme:run-1", first.Source, "source channel projected for audit linkage")
+	require.Equal(t, "agentos:run:acme:run-1", first.Source, "source channel projected for audit linkage")
 
 	// The terminal milestone self-closes: no subscription lingers after the run.
 	require.Eventually(t, func() bool {

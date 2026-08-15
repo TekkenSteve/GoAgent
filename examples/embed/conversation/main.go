@@ -22,7 +22,6 @@ func run() error {
 
 	runtime, err := agentosconversation.NewRuntime(ctx, agentosconversation.Config{
 		PostgresURL: os.Getenv("AGENTOS_PG_URL"),
-		RedisURL:    os.Getenv("AGENTOS_REDIS_URL"),
 	})
 	if err != nil {
 		return err

@@ -28,7 +28,7 @@ const (
 	ConversationRunRunning     = "running"
 	ConversationRunCompleted   = "completed"
 	ConversationRunInterrupted = "interrupted"
-	ConversationRunCancelled   = "cancelled" //nolint:misspell // agentos.conversation.v1 uses this wire value.
+	ConversationRunCancelled   = "cancelled"
 	ConversationRunError       = "error"
 )
 
@@ -36,7 +36,7 @@ const (
 const (
 	ConversationOutcomeNormal    = "normal"
 	ConversationOutcomeInterrupt = "interrupt"
-	ConversationOutcomeCancelled = "cancelled" //nolint:misspell // agentos.conversation.v1 uses this wire value.
+	ConversationOutcomeCancelled = "cancelled"
 )
 
 // ConversationRuntime manages durable conversation runs, events, and threads.

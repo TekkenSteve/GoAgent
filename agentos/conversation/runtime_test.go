@@ -87,7 +87,7 @@ func TestConversationLifecycleEventNamesMatchWireContract(t *testing.T) {
 func TestConversationCancellationValuesMatchWireContract(t *testing.T) {
 	t.Parallel()
 
-	const cancelledWireValue = "cancelled" //nolint:misspell // agentos.conversation.v1 uses this wire value.
+	const cancelledWireValue = "cancelled"
 
 	if agentos.ConversationRunCancelled != cancelledWireValue {
 		t.Fatalf("cancellation run status = %q", agentos.ConversationRunCancelled)

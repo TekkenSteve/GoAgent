@@ -11,7 +11,6 @@ import (
 	"github.com/TekkenSteve/GoAgent/internal/pkg/postgres"
 	goredis "github.com/TekkenSteve/GoAgent/internal/pkg/redis"
 	"github.com/TekkenSteve/GoAgent/internal/repo/agentos/planstream"
-	"github.com/TekkenSteve/GoAgent/internal/repo/agentos/runprojection"
 	artifactrepo "github.com/TekkenSteve/GoAgent/internal/repo/artifact"
 	"github.com/TekkenSteve/GoAgent/internal/repo/cached"
 	"github.com/TekkenSteve/GoAgent/internal/repo/compressor"
@@ -19,8 +18,6 @@ import (
 	mcpRepo "github.com/TekkenSteve/GoAgent/internal/repo/mcp"
 	temporalrepo "github.com/TekkenSteve/GoAgent/internal/repo/persistent"
 	pipelinepkg "github.com/TekkenSteve/GoAgent/internal/repo/pipeline"
-	repostream "github.com/TekkenSteve/GoAgent/internal/repo/stream"
-	"github.com/TekkenSteve/GoAgent/internal/repo/stream/centrifugo"
 	"github.com/TekkenSteve/GoAgent/internal/repo/toolkit"
 	"github.com/TekkenSteve/GoAgent/internal/repo/webapi"
 	"github.com/TekkenSteve/GoAgent/internal/usecase/agent"
@@ -60,19 +57,24 @@ func newWorkerKit(ctx context.Context, cfg *WorkerConfig) (*WorkerKit, error) {
 		return nil, err
 	}
 
-	kit, batchWriter, err := buildWorkerKit(ctx, resources.dependencies())
+	dataPlane, err := newWorkerDataPlane(ctx, cfg, resources)
 	if err != nil {
 		resources.close()
 
 		return nil, err
 	}
 
-	infra, err := initWorkerPlanRuntime(ctx, cfg, resources.postgres, resources.redis, resources.temporalClient)
+	kit, batchWriter, err := buildWorkerKit(ctx, resources.dependencies(), dataPlane)
 	if err != nil {
-		if kit.runProjection != nil {
-			kit.runProjection.Close()
-		}
+		dataPlane.Close()
+		resources.close()
 
+		return nil, err
+	}
+
+	infra, err := initWorkerPlanRuntime(ctx, cfg, resources.postgres, resources.temporalClient, dataPlane)
+	if err != nil {
+		dataPlane.Close()
 		resources.close()
 
 		return nil, err
@@ -91,8 +93,16 @@ func NewPlanWorkerKit(ctx context.Context, cfg *WorkerConfig) (*PlanWorkerKit, e
 		return nil, err
 	}
 
-	infra, err := initWorkerPlanRuntime(ctx, cfg, resources.postgres, resources.redis, resources.temporalClient)
+	dataPlane, err := newWorkerDataPlane(ctx, cfg, resources)
 	if err != nil {
+		resources.close()
+
+		return nil, err
+	}
+
+	infra, err := initWorkerPlanRuntime(ctx, cfg, resources.postgres, resources.temporalClient, dataPlane)
+	if err != nil {
+		dataPlane.Close()
 		resources.close()
 
 		return nil, err
@@ -103,6 +113,7 @@ func NewPlanWorkerKit(ctx context.Context, cfg *WorkerConfig) (*PlanWorkerKit, e
 		planCommandReconciler: newPlanCommandReconciler(newPlanTemporalClient(resources.temporalClient), &cfg.TemporalTaskQueues, infra.planStore, infra.planStore, infra.planStore),
 		closeFns: []func() error{
 			infra.planClose,
+			dataPlane.Close,
 			func() error {
 				resources.close()
 
@@ -180,6 +191,18 @@ func openWorkerResources(ctx context.Context, cfg *WorkerConfig) (*workerResourc
 	}, nil
 }
 
+// newWorkerDataPlane assembles the shared data-plane bus (Centrifugo by
+// default, degrading to the in-process memstream bus when no base URL is
+// configured) plus the run-event projector. The single instance feeds both the
+// run activities' publisher and the plan runtime's subscriber/plan bus, so
+// in-process subscribers see the activities' publishes.
+func newWorkerDataPlane(ctx context.Context, cfg *WorkerConfig, resources *workerResources) (*StreamingDataPlane, error) {
+	return NewStreamingDataPlane(ctx, StreamCentrifugoConfig{
+		BaseURL: cfg.StreamCentrifugo.BaseURL,
+		APIKey:  cfg.StreamCentrifugo.APIKey,
+	}, resources.postgres, resources.logger)
+}
+
 func (r *workerResources) dependencies() *workerDependencies {
 	return &workerDependencies{
 		cfg:            r.cfg,
@@ -244,7 +267,7 @@ type workerPlanRuntime struct {
 	planStore         *temporalrepo.AgentOSPlanRepo
 }
 
-func initWorkerPlanRuntime(ctx context.Context, cfg *WorkerConfig, pg *postgres.Postgres, rdb *goredis.Redis, temporalClient client.Client) (*workerPlanRuntime, error) {
+func initWorkerPlanRuntime(ctx context.Context, cfg *WorkerConfig, pg *postgres.Postgres, temporalClient client.Client, dataPlane *StreamingDataPlane) (*workerPlanRuntime, error) {
 	runBackendIndex := temporalrepo.NewRunBackendIndexRepo(pg)
 	planStore := temporalrepo.NewAgentOSPlanRepo(pg)
 	blobCfg := artifactBlobConfig(&cfg.ArtifactStore)
@@ -266,7 +289,10 @@ func initWorkerPlanRuntime(ctx context.Context, cfg *WorkerConfig, pg *postgres.
 		return nil, fmt.Errorf("agentos temporal worker - register artifact schemas: %w", err)
 	}
 
-	planEventStream := planstream.NewRedisPlanEventStream(rdb)
+	// The live plan event tail rides the shared data plane (planbus): the
+	// publisher carries plan activities' fan-out and the subscriber feeds the
+	// runtime's SubscribePlan live tail.
+	planEventStream := planstream.New(dataPlane.Publisher, dataPlane.Subscriber)
 	processStore := temporalrepo.NewAgentOSProcessRepo(pg)
 
 	planRuntime, err := NewRuntimeWithClient(ctx, &RuntimeConfig{
@@ -277,6 +303,9 @@ func initWorkerPlanRuntime(ctx context.Context, cfg *WorkerConfig, pg *postgres.
 		HTTPBackends:             cfg.HTTPBackends,
 		GRPCBackends:             cfg.GRPCBackends,
 		ArtifactStore:            cfg.ArtifactStore,
+		Subscriber:               dataPlane.Subscriber,
+		PlanEventPublisher:       planEventStream,
+		PlanEventSubscriber:      planEventStream,
 	}, temporalClient, WithRunBackendIndex(runBackendIndex))
 	if err != nil {
 		return nil, fmt.Errorf("agentos temporal worker - plan runtime: %w", err)
@@ -346,7 +375,7 @@ type workerDependencies struct {
 	temporalClient client.Client
 }
 
-func buildWorkerKit(ctx context.Context, deps *workerDependencies) (*WorkerKit, *pipelinepkg.BatchWriter, error) {
+func buildWorkerKit(ctx context.Context, deps *workerDependencies, dataPlane *StreamingDataPlane) (*WorkerKit, *pipelinepkg.BatchWriter, error) {
 	messageRepo := temporalrepo.NewMessageRepo(deps.postgres)
 	persistentAgentRepo := temporalrepo.NewAgentRepo(deps.postgres)
 	agentRepo := cached.NewAgentRepo(persistentAgentRepo)
@@ -385,17 +414,13 @@ func buildWorkerKit(ctx context.Context, deps *workerDependencies) (*WorkerKit, 
 	mcpManager := mcpRepo.NewManager()
 	mcpManager.SetRegistry(toolRegistry)
 
-	eventSequencer := repostream.NewRedisSequencer(deps.redis)
-	eventStore := repostream.NewRedisEventStore(deps.redis, eventSequencer)
-	activities := orchestration.NewAgentActivities(agentUC, eventStore, deps.logger).
+	activities := orchestration.NewAgentActivities(agentUC, deps.logger).
 		WithMCPManager(mcpManager).
 		WithBilling(billingUC)
 
 	kit := &WorkerKit{activities: activities}
 
-	if err := configureStreamingProjection(ctx, deps, activities, kit); err != nil {
-		return nil, nil, err
-	}
+	configureStreamingProjection(activities, kit, dataPlane)
 
 	registerToolsOnRegistry(deps.logger, toolRegistry)
 
@@ -408,45 +433,20 @@ func buildWorkerKit(ctx context.Context, deps *workerDependencies) (*WorkerKit, 
 	return kit, batchWriter, nil
 }
 
-// configureStreamingProjection wires the data-plane publisher/subscriber pair
-// and the run-event projector when the Centrifugo bus is configured. Without a
-// bus there is nothing to project, so the worker runs unchanged.
-func configureStreamingProjection(ctx context.Context, deps *workerDependencies, activities *orchestration.AgentActivities, kit *WorkerKit) error {
-	if deps.cfg.StreamCentrifugo.BaseURL == "" {
-		return nil
+// configureStreamingProjection wires the shared data plane onto the run
+// activities: the publisher mirrors the AG-UI timeline and the projector
+// controller attaches the durable milestone projection. The data plane is
+// assembled once by the kit entry points (Centrifugo by default, degrading to
+// the in-process memstream bus when no base URL is configured), so a worker
+// always has a live transport.
+func configureStreamingProjection(activities *orchestration.AgentActivities, kit *WorkerKit, dataPlane *StreamingDataPlane) {
+	if dataPlane == nil {
+		return
 	}
 
-	streamPub, err := centrifugo.NewPublisher(centrifugo.Config{
-		BaseURL: deps.cfg.StreamCentrifugo.BaseURL,
-		APIKey:  deps.cfg.StreamCentrifugo.APIKey,
-	})
-	if err != nil {
-		return fmt.Errorf("agentos temporal worker - stream publisher: %w", err)
-	}
-
-	activities.WithStreamPublisher(streamPub)
-
-	streamSub, err := centrifugo.NewSubscriber(centrifugo.Config{
-		BaseURL: deps.cfg.StreamCentrifugo.BaseURL,
-		APIKey:  deps.cfg.StreamCentrifugo.APIKey,
-	})
-	if err != nil {
-		return fmt.Errorf("agentos temporal worker - stream subscriber: %w", err)
-	}
-
-	projector, err := runprojection.New(ctx, runprojection.Config{
-		Subscriber: streamSub,
-		Store:      temporalrepo.NewAgentOSRunEventRepo(deps.postgres),
-		Logger:     deps.logger,
-	})
-	if err != nil {
-		return fmt.Errorf("agentos temporal worker - run projection: %w", err)
-	}
-
-	activities.WithRunProjectionController(projector)
-	kit.runProjection = projector
-
-	return nil
+	activities.WithStreamPublisher(dataPlane.Publisher)
+	activities.WithRunProjectionController(dataPlane.Projector)
+	kit.runProjection = dataPlane.Projector
 }
 
 func registerToolsOnRegistry(l *logger.Logger, toolRegistry *toolkit.ToolRegistry) {

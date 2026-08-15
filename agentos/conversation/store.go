@@ -495,7 +495,7 @@ func prepareInterrupt(ctx context.Context, tx pgx.Tx, runID string, payload map[
 	return encoded, nil
 }
 
-func appendEvent(ctx context.Context, tx pgx.Tx, threadID, runID, processID, sourceEventID string, sourceSequence int64, eventType core.EventType, occurredAt time.Time, payload map[string]any, enqueueForStream bool) (agentos.ConversationEvent, error) {
+func appendEvent(ctx context.Context, tx pgx.Tx, threadID, runID, processID, sourceEventID string, sourceSequence int64, eventType core.EventType, occurredAt time.Time, payload map[string]any) (agentos.ConversationEvent, error) {
 	var sequence int64
 
 	err := tx.QueryRow(ctx, `
@@ -521,15 +521,6 @@ func appendEvent(ctx context.Context, tx pgx.Tx, threadID, runID, processID, sou
 		sourceSequence, eventType, occurredAt, encoded)
 	if err != nil {
 		return agentos.ConversationEvent{}, fmt.Errorf("agentos conversation: insert event: %w", err)
-	}
-
-	if enqueueForStream {
-		_, err = tx.Exec(ctx, `
-			INSERT INTO agentos_conversation_event_outbox (thread_id, sequence, available_at)
-			VALUES ($1, $2, NOW()) ON CONFLICT (thread_id, sequence) DO NOTHING`, threadID, sequence)
-		if err != nil {
-			return agentos.ConversationEvent{}, fmt.Errorf("agentos conversation: enqueue event: %w", err)
-		}
 	}
 
 	return agentos.ConversationEvent{

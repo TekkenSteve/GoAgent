@@ -16,7 +16,7 @@ import (
 func TestCentrifugoConformance(t *testing.T) {
 	t.Parallel()
 
-	handle := stream.NewHandle("$agentos:run:acme:conformance-run")
+	handle := stream.NewHandle("agentos:run:acme:conformance-run")
 
 	streamconformance.RunStreamConformance(t, &streamconformance.ConformanceCase{
 		Name:   "centrifugo",

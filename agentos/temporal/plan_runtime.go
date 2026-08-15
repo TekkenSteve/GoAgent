@@ -11,8 +11,6 @@ import (
 	agentoscore "github.com/TekkenSteve/GoAgent/agentos/core"
 	"github.com/TekkenSteve/GoAgent/internal/agentfw/orchestration"
 	"github.com/TekkenSteve/GoAgent/internal/pkg/postgres"
-	goredis "github.com/TekkenSteve/GoAgent/internal/pkg/redis"
-	"github.com/TekkenSteve/GoAgent/internal/repo/agentos/planstream"
 	artifactrepo "github.com/TekkenSteve/GoAgent/internal/repo/artifact"
 	temporalrepo "github.com/TekkenSteve/GoAgent/internal/repo/persistent"
 	"github.com/TekkenSteve/GoAgent/internal/usecase/agentosplan"
@@ -23,7 +21,6 @@ import (
 type planRuntime struct {
 	temporalClient planTemporalClient
 	closeTemporal  bool
-	redis          *goredis.Redis
 	postgres       *postgres.Postgres
 	planEvents     agentosplan.PlanEventStore
 	planLiveEvents agentosplan.PlanEventSubscriber
@@ -153,17 +150,10 @@ func newPlanRuntimeWithClient(ctx context.Context, cfg *RuntimeConfig, c planTem
 		taskQueues:     &cfg.TemporalTaskQueues,
 	}
 
-	if cfg.RedisURL != "" {
-		rdb, err := goredis.New(ctx, cfg.RedisURL)
-		if err != nil {
-			return nil, fmt.Errorf("agentos temporal plan runtime redis: %w", err)
-		}
-
-		rt.redis = rdb
-		stream := planstream.NewRedisPlanEventStream(rdb)
-		rt.planLiveEvents = stream
-		rt.planPublisher = stream
-	}
+	// The live plan event tail rides the assembled data-plane bus (planbus).
+	// nil subscriber degrades SubscribePlan to pure Postgres replay below.
+	rt.planLiveEvents = cfg.PlanEventSubscriber
+	rt.planPublisher = cfg.PlanEventPublisher
 
 	pg, err := newRuntimePostgres(cfg)
 	if err != nil {
@@ -761,10 +751,6 @@ func (r *planRuntime) Close() error {
 
 	if r.closeTemporal && r.temporalClient != nil {
 		r.temporalClient.Close()
-	}
-
-	if r.redis != nil {
-		errs = append(errs, r.redis.Close())
 	}
 
 	if r.postgres != nil {

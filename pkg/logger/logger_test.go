@@ -28,7 +28,12 @@ func newBufferedLogger(level string) (*Logger, *bytes.Buffer) {
 	return l, buf
 }
 
-func TestNewSetsGlobalLevel(t *testing.T) {
+// TestParseLevel covers the level-string mapping. It asserts the pure
+// parseLevel function rather than zerolog.GlobalLevel: New sets that
+// process-wide global, and asserting it from a parallel test races with every
+// other test that calls New (the race is logical, not a data race, so the
+// race detector stays quiet while the assertion still flakes).
+func TestParseLevel(t *testing.T) {
 	t.Parallel()
 
 	cases := []struct {
@@ -43,14 +48,8 @@ func TestNewSetsGlobalLevel(t *testing.T) {
 	}
 
 	for _, tc := range cases {
-		l := New(tc.in)
-
-		if l == nil || l.logger == nil {
-			t.Fatalf("New(%q) returned nil logger", tc.in)
-		}
-
-		if got := zerolog.GlobalLevel(); got != tc.want {
-			t.Fatalf("New(%q) global level = %v, want %v", tc.in, got, tc.want)
+		if got := parseLevel(tc.in); got != tc.want {
+			t.Fatalf("parseLevel(%q) = %v, want %v", tc.in, got, tc.want)
 		}
 	}
 }

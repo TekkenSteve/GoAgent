@@ -24,7 +24,6 @@ func main() {
 		TemporalNamespace:  env("AGENTFW_TEMPORAL_NAMESPACE", "default"),
 		TemporalTaskQueues: agentostemporal.DefaultTaskQueues(),
 		PostgresURL:        os.Getenv("PG_URL"),
-		RedisURL:           os.Getenv("REDIS_URL"),
 	}
 
 	rt, err := agentostemporal.NewRuntime(ctx, &cfg)

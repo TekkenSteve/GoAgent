@@ -20,7 +20,7 @@ import (
 
 const (
 	apiKey     = "spike-key"
-	channel    = "$agentos:run:acme:spike-run"
+	channel    = "agentos:run:acme:spike-run"
 	historySz  = 1000
 	historyTTL = time.Hour
 )

@@ -15,20 +15,42 @@ import (
 	"github.com/TekkenSteve/GoAgent/agentos/stream"
 )
 
+const (
+	// defaultTenant is the channel namespace used when a run or plan carries
+	// no account: single-tenant deployments still get a deterministic channel.
+	defaultTenant = "default"
+)
+
 // ChannelForRun derives the data-plane channel for a run. The channel encodes
-// the exact frontend session: `$agentos:run:{tenant}:{run_id}`. A missing
-// tenant (account) falls back to "default" so single-tenant runs still get a
-// deterministic channel.
+// the exact frontend session: `agentos:run:{tenant}:{run_id}`. A missing
+// tenant (account) falls back to defaultTenant so single-tenant runs still get
+// a deterministic channel.
 func ChannelForRun(tenant, runID string) string {
 	if tenant == "" {
-		tenant = "default"
+		tenant = defaultTenant
 	}
 
-	return fmt.Sprintf("$agentos:run:%s:%s", tenant, runID)
+	return fmt.Sprintf("agentos:run:%s:%s", tenant, runID)
 }
 
 // HandleForRun builds the data-plane Handle a backend needs to publish a
 // run's timeline.
 func HandleForRun(tenant, runID string) *stream.Handle {
 	return stream.NewHandle(ChannelForRun(tenant, runID))
+}
+
+// ChannelForPlan derives the data-plane channel for a plan's live event tail:
+// `agentos:plan:{tenant}:{plan_id}`. A missing tenant (account) falls back to
+// defaultTenant, mirroring ChannelForRun.
+func ChannelForPlan(tenant, planID string) string {
+	if tenant == "" {
+		tenant = defaultTenant
+	}
+
+	return fmt.Sprintf("agentos:plan:%s:%s", tenant, planID)
+}
+
+// HandleForPlan builds the data-plane Handle for a plan's live event tail.
+func HandleForPlan(tenant, planID string) *stream.Handle {
+	return stream.NewHandle(ChannelForPlan(tenant, planID))
 }

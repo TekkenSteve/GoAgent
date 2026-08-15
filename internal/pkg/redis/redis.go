@@ -62,7 +62,6 @@ type Redis struct {
 	GeneralClient *goredis.Client
 	StreamClient  *goredis.Client
 
-	hub        *StreamHub
 	initTime   time.Time
 	opCount    atomic.Int64
 	timeoutCnt atomic.Int64
@@ -81,17 +80,16 @@ type PoolStats struct {
 
 // HealthReport contains the full health check result.
 type HealthReport struct {
-	Status         string         `json:"status"` // "healthy", "degraded", "unhealthy"
-	GeneralPing    bool           `json:"general_ping"`
-	StreamPing     bool           `json:"stream_ping"`
-	GeneralLatency int64          `json:"general_latency_ms"`
-	GeneralPool    PoolStats      `json:"general_pool"`
-	StreamPool     PoolStats      `json:"stream_pool"`
-	Hub            map[string]any `json:"hub,omitempty"`
-	OpCount        int64          `json:"op_count"`
-	TimeoutCount   int64          `json:"timeout_count"`
-	ErrorCount     int64          `json:"error_count"`
-	UptimeSeconds  int            `json:"uptime_seconds"`
+	Status         string    `json:"status"` // "healthy", "degraded", "unhealthy"
+	GeneralPing    bool      `json:"general_ping"`
+	StreamPing     bool      `json:"stream_ping"`
+	GeneralLatency int64     `json:"general_latency_ms"`
+	GeneralPool    PoolStats `json:"general_pool"`
+	StreamPool     PoolStats `json:"stream_pool"`
+	OpCount        int64     `json:"op_count"`
+	TimeoutCount   int64     `json:"timeout_count"`
+	ErrorCount     int64     `json:"error_count"`
+	UptimeSeconds  int       `json:"uptime_seconds"`
 }
 
 // ClientStats contains current client metrics.
@@ -120,7 +118,6 @@ func New(ctx context.Context, url string, opts ...Option) (*Redis, error) {
 		return nil, errors.Join(fmt.Errorf("redis - New - stream pool: %w", err), rdb.GeneralClient.Close())
 	}
 
-	rdb.hub = NewStreamHub(rdb.StreamClient)
 	rdb.initTime = time.Now()
 
 	return rdb, nil
@@ -218,13 +215,9 @@ func connectWithRetry(ctx context.Context, opts *goredis.Options) (*goredis.Clie
 	return nil, errors.Join(errs...)
 }
 
-// Close closes both connection pools and the hub. Safe to call multiple times.
+// Close closes both connection pools. Safe to call multiple times.
 func (r *Redis) Close() error {
 	var errs []error
-
-	if r.hub != nil {
-		r.hub.Close()
-	}
 
 	if r.GeneralClient != nil {
 		if err := r.GeneralClient.Close(); err != nil {
@@ -239,11 +232,6 @@ func (r *Redis) Close() error {
 	}
 
 	return errors.Join(errs...)
-}
-
-// Hub returns the StreamHub for SSE fan-out.
-func (r *Redis) Hub() *StreamHub {
-	return r.hub
 }
 
 // =============================================================================
@@ -681,11 +669,6 @@ func (r *Redis) HealthCheck(ctx context.Context) HealthReport {
 		status = "degraded"
 	}
 
-	var hubStats map[string]any
-	if r.hub != nil {
-		hubStats = r.hub.Stats()
-	}
-
 	return HealthReport{
 		Status:         status,
 		GeneralPing:    generalErr == nil,
@@ -693,7 +676,6 @@ func (r *Redis) HealthCheck(ctx context.Context) HealthReport {
 		GeneralLatency: generalLatency,
 		GeneralPool:    poolStats(r.GeneralClient),
 		StreamPool:     poolStats(r.StreamClient),
-		Hub:            hubStats,
 		OpCount:        r.opCount.Load(),
 		TimeoutCount:   r.timeoutCnt.Load(),
 		ErrorCount:     r.errorCnt.Load(),

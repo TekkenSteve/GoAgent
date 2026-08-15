@@ -8,14 +8,13 @@ import (
 
 	agentos "github.com/TekkenSteve/GoAgent/agentos/control"
 	agentoscore "github.com/TekkenSteve/GoAgent/agentos/core"
+	agentosstream "github.com/TekkenSteve/GoAgent/agentos/stream"
 	"github.com/TekkenSteve/GoAgent/internal/agentfw/orchestration"
 	"github.com/TekkenSteve/GoAgent/internal/entity"
-	goredis "github.com/TekkenSteve/GoAgent/internal/pkg/redis"
 	"github.com/TekkenSteve/GoAgent/internal/repo/agentos/grpcbackend"
 	"github.com/TekkenSteve/GoAgent/internal/repo/agentos/httpbackend"
 	"github.com/TekkenSteve/GoAgent/internal/repo/agentos/temporalexternal"
 	temporalrepo "github.com/TekkenSteve/GoAgent/internal/repo/persistent"
-	repostream "github.com/TekkenSteve/GoAgent/internal/repo/stream"
 	agentosruntime "github.com/TekkenSteve/GoAgent/internal/usecase/agentosruntime"
 	"go.temporal.io/sdk/client"
 )
@@ -24,7 +23,6 @@ type runtime struct {
 	temporalClient client.Client
 	closeTemporal  bool
 	router         *agentosruntime.Router
-	redis          *goredis.Redis
 	closers        []func() error
 }
 
@@ -34,11 +32,11 @@ var (
 	// ErrRuntimePostgresURLRequired reports a missing Postgres URL in the runtime config.
 	ErrRuntimePostgresURLRequired = errors.New("agentos temporal runtime: postgres url is required")
 
-	errRuntimeConfigRequired                 = errors.New("agentos temporal runtime: config is required")
-	errRuntimeNilTemporalClient              = errors.New("agentos temporal runtime: nil temporal client")
-	errRuntimeNotConfigured                  = errors.New("agentos temporal runtime: runtime is not configured")
-	errRuntimeRunBackendIndexRequired        = errors.New("agentos temporal runtime: run backend index is required")
-	errRuntimeNativeBackendNoRedisSubscriber = errors.New("agentos temporal native backend: redis subscriber is not configured")
+	errRuntimeConfigRequired            = errors.New("agentos temporal runtime: config is required")
+	errRuntimeNilTemporalClient         = errors.New("agentos temporal runtime: nil temporal client")
+	errRuntimeNotConfigured             = errors.New("agentos temporal runtime: runtime is not configured")
+	errRuntimeRunBackendIndexRequired   = errors.New("agentos temporal runtime: run backend index is required")
+	errRuntimeNativeBackendNoSubscriber = errors.New("agentos temporal native backend: stream subscriber is not configured")
 )
 
 func runtimeRunBackendIndexFromPostgres(cfg *RuntimeConfig) (backend RunBackendIndex, cleanup func() error, err error) {
@@ -58,8 +56,10 @@ func runtimeRunBackendIndexFromPostgres(cfg *RuntimeConfig) (backend RunBackendI
 	}, nil
 }
 
-// NewRuntime creates the default Temporal/Redis implementation of agentos.Runtime.
-func NewRuntime(ctx context.Context, cfg *RuntimeConfig, options ...RuntimeOption) (agentos.Runtime, error) {
+// NewRuntime creates the default Temporal implementation of agentos.Runtime.
+// The ctx argument is retained for API compatibility; runtime setup dials
+// Temporal without a caller context.
+func NewRuntime(_ context.Context, cfg *RuntimeConfig, options ...RuntimeOption) (agentos.Runtime, error) {
 	if cfg == nil {
 		return nil, errRuntimeConfigRequired
 	}
@@ -82,19 +82,7 @@ func NewRuntime(ctx context.Context, cfg *RuntimeConfig, options ...RuntimeOptio
 		closeTemporal:  true,
 	}
 
-	var subscriber *repostream.RedisSubscriber
-
-	if cfg.RedisURL != "" {
-		rdb, err := goredis.New(ctx, cfg.RedisURL)
-		if err != nil {
-			c.Close()
-
-			return nil, fmt.Errorf("agentos temporal runtime redis: %w", err)
-		}
-
-		r.redis = rdb
-		subscriber = repostream.NewRedisSubscriber(rdb.Hub())
-	}
+	subscriber := cfg.Subscriber
 
 	runtimeOpts, err := r.runtimeOptionsWithDefaultRunBackendIndex(cfg, buildRuntimeOptions(options))
 	if err != nil {
@@ -116,7 +104,7 @@ func NewRuntime(ctx context.Context, cfg *RuntimeConfig, options ...RuntimeOptio
 // NewRuntimeWithClient adapts an existing Temporal client to agentos.Runtime.
 // Hosts that already own worker/client lifecycle can use this without opening
 // another Temporal connection.
-func NewRuntimeWithClient(ctx context.Context, cfg *RuntimeConfig, c client.Client, options ...RuntimeOption) (agentos.Runtime, error) {
+func NewRuntimeWithClient(_ context.Context, cfg *RuntimeConfig, c client.Client, options ...RuntimeOption) (agentos.Runtime, error) {
 	if cfg == nil {
 		return nil, errRuntimeConfigRequired
 	}
@@ -134,17 +122,7 @@ func NewRuntimeWithClient(ctx context.Context, cfg *RuntimeConfig, c client.Clie
 		temporalClient: c,
 	}
 
-	var subscriber *repostream.RedisSubscriber
-
-	if cfg.RedisURL != "" {
-		rdb, err := goredis.New(ctx, cfg.RedisURL)
-		if err != nil {
-			return nil, fmt.Errorf("agentos temporal runtime redis: %w", err)
-		}
-
-		r.redis = rdb
-		subscriber = repostream.NewRedisSubscriber(rdb.Hub())
-	}
+	subscriber := cfg.Subscriber
 
 	runtimeOpts, err := r.runtimeOptionsWithDefaultRunBackendIndex(cfg, buildRuntimeOptions(options))
 	if err != nil {
@@ -211,7 +189,7 @@ func (r *runtime) Subscribe(ctx context.Context, scope agentoscore.StreamScope) 
 	return r.router.Subscribe(ctx, scope)
 }
 
-func (r *runtime) configureRouter(temporalClient client.Client, cfg *RuntimeConfig, opts runtimeOptions, executor *temporalrepo.ExecutorTemporal, subscriber *repostream.RedisSubscriber) error {
+func (r *runtime) configureRouter(temporalClient client.Client, cfg *RuntimeConfig, opts runtimeOptions, executor *temporalrepo.ExecutorTemporal, subscriber agentosstream.Subscriber) error {
 	registry := agentosruntime.NewRegistry()
 	agentosSubscriber := newAgentOSSubscriber(subscriber)
 
@@ -378,10 +356,6 @@ func (r *runtime) Close() error {
 		r.temporalClient.Close()
 	}
 
-	if r.redis != nil {
-		errs = append(errs, r.redis.Close())
-	}
-
 	for _, closeFn := range r.closers {
 		errs = append(errs, closeFn())
 	}
@@ -492,7 +466,7 @@ func (b *temporalNativeBackend) Status(ctx context.Context, runID string) (agent
 
 func (b *temporalNativeBackend) Subscribe(ctx context.Context, scope agentoscore.StreamScope) (agentoscore.Subscription, error) {
 	if b.subscriber == nil {
-		return nil, errRuntimeNativeBackendNoRedisSubscriber
+		return nil, errRuntimeNativeBackendNoSubscriber
 	}
 
 	return b.subscriber.SubscribeAgentOS(ctx, scope)

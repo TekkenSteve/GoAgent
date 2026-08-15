@@ -21,7 +21,7 @@ const (
 	EventRunStarted   EventType = "RUN_STARTED"
 	EventRunFinished  EventType = "RUN_FINISHED"
 	EventRunError     EventType = "RUN_ERROR"
-	EventRunCancelled EventType = "RUN_CANCELLED" //nolint:misspell // wire value mirrors core's run.cancelled spelling
+	EventRunCancelled EventType = "RUN_CANCELLED"
 
 	// Step lifecycle. STEP_* events may carry turn/step numbers in payload
 	// (see FieldTurn / FieldStep) — the minimal extension that gives AG-UI

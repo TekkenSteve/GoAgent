@@ -43,6 +43,9 @@ x-backend-app-environment: &x-backend-app-environment
   AGENTOS_ARTIFACT_STORE_S3_SESSION_TOKEN: ""
   AGENTOS_ARTIFACT_STORE_S3_FORCE_PATH_STYLE: "false"
   AGENTOS_CAPABILITIES_JSON: "[]"
+  # Streaming data plane (Centrifugo is the default transport)
+  CENTRIFUGO_BASE_URL: "http://centrifugo:8000"
+  CENTRIFUGO_API_KEY: "dev-api-key"
   # Metrics
   METRICS_ENABLED: "true"
   # Swagger
@@ -79,6 +82,23 @@ services:
       app_network:
         aliases:
           - redis.lvh.me
+
+  centrifugo:
+    container_name: centrifugo
+    image: centrifugo/centrifugo:v5
+    restart: on-failure:5
+    command: ["centrifugo", "-c", "/centrifugo/config.json"]
+    volumes:
+      - ./configs/centrifugo/config.json:/centrifugo/config.json:ro
+    ports:
+      - "8000:8000"
+      - "8001:8001"
+    depends_on:
+      - redis
+    networks:
+      app_network:
+        aliases:
+          - centrifugo.lvh.me
 
   rabbitmq:
     container_name: rabbitmq
@@ -207,6 +227,7 @@ services:
     depends_on:
       - db
       - rabbitmq
+      - centrifugo
     deploy:
       resources:
         limits:

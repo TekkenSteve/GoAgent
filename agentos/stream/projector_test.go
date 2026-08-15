@@ -10,7 +10,7 @@ import (
 func TestProjectToCore(t *testing.T) {
 	t.Parallel()
 
-	handle := NewHandle("$agentos:run:acme:run-1")
+	handle := NewHandle("agentos:run:acme:run-1")
 	storedAt := time.Date(2026, 8, 15, 12, 0, 0, 0, time.UTC)
 
 	tests := []struct {
@@ -82,7 +82,7 @@ func assertProjectedEvent(t *testing.T, handle *Handle, stored *StoredEvent, wan
 func TestProjectToCoreCarriesPayload(t *testing.T) {
 	t.Parallel()
 
-	handle := NewHandle("$agentos:run:acme:run-1")
+	handle := NewHandle("agentos:run:acme:run-1")
 	ev := NewToolCallResult("t-1", "run-1", "c-1", "ok")
 	stored := &StoredEvent{Event: *ev, Sequence: 3}
 

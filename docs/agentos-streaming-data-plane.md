@@ -26,7 +26,7 @@
 ```
 ┌─────────────┐          ┌─────────────────────────────────────────────┐
 │  Frontend     │  WS/SSE │  Centrifugo（数据面总线）                      │
-│  (浏览器/IDE) │◄────────►│  · $agentos:run:{tenant}:{run} 会话频道        │
+│  (浏览器/IDE) │◄────────►│  · agentos:run:{tenant}:{run} 会话频道        │
 │  订 sub JWT  │   sub   │  · history+recovery（offset 重放断线窗口）       │
 └──────┬───────┘          │  · Redis broker（横向扩容）                    │
        │                  └──────▲───────────────────┬───────────────────┘
@@ -52,28 +52,29 @@
 
 ## 3. 频道模型
 
-遵循 Centrifugo 最佳实践：命名空间 + `<resource>:<id>` 层级，私有频道用 `$` 前缀。
+遵循 Centrifugo 最佳实践：命名空间 + `<resource>:<id>` 层级。频道不带 `$` 私有前缀——服务端签发的频道由 `agentos` 命名空间承载 history 与访问控制（v5 里 `$` 频道强制要求订阅令牌，与本仓无令牌的单机默认传输不兼容）；生产收紧仍走 §4 的订阅令牌 / subscribe proxy，不改频道名。
 
 | 频道 | 语义 |
 |---|---|
-| `$agentos:run:{tenant}:{run_id}` | 一次 run 的完整时间线（token / 工具 / 里程碑） |
-| `$agentos:plan:{tenant}:{plan_id}` | 一个 plan 跨多个 child run 的汇聚时间线 |
-| `$agentos:thread:{tenant}:{thread_id}` | 会话线程级（可选，thread 跨 run） |
+| `agentos:run:{tenant}:{run_id}` | 一次 run 的完整时间线（token / 工具 / 里程碑） |
+| `agentos:plan:{tenant}:{plan_id}` | 一个 plan 跨多个 child run 的汇聚时间线 |
+| `agentos:thread:{tenant}:{thread_id}` | 会话线程级（可选，thread 跨 run） |
 
-命名空间配置（history 是总线上 token 级回放的窗口，瞬态、有界）：
+命名空间配置（history 是总线上 token 级回放的窗口，瞬态、有界）。v5 的 `namespaces` 是**数组**；dev 默认就是仓库里的 `configs/centrifugo/config.json`——匿名连 + 匿名订 + 匿名读 history，单机即用。生产调大 history 窗口、去掉匿名 allow、加订阅令牌：
 
 ```json
 {
-  "namespaces": {
-    "agentos": {
-      "history_size": 5000,
-      "history_ttl": "24h",
-      "force_recovery": true,
-      "force_positioning": true,
-      "presence": false,
-      "join_leave": false
+  "namespaces": [
+    {
+      "name": "agentos",
+      "history_size": 100,
+      "history_ttl": "300s",
+      "allow_subscribe_for_client": true,
+      "allow_subscribe_for_anonymous": true,
+      "allow_history_for_client": true,
+      "allow_history_for_anonymous": true
     }
-  }
+  ]
 }
 ```
 
@@ -81,7 +82,7 @@
 
 ## 4. 令牌模型
 
-遵循 Centrifugo 双 JWT + 服务端发布的最佳实践：
+遵循 Centrifugo 双 JWT + 服务端发布的最佳实践。**当前 shipped 传输是无令牌匿名（服务端签发频道，§3 的 dev 命名空间允许匿名订 + 读 history）**；本节的 JWT 模型是前端接入时的生产收紧路径，频道名不变：
 
 - **连接令牌**（前端连 Centrifugo）：`sub`=用户、`exp`。GoAgent 在 run 启动 / 登录时签发。
 - **订阅令牌**（前端订私有频道）：`channel`=具体频道、`sub` 与连接令牌一致、`exp` 短命。**scope 到具体频道**——这就是「精准找到前端指定会话 + 谁都不能越权」的实现。
@@ -91,7 +92,7 @@
 
 ```go
 type Handle struct {
-    Channel    string // "$agentos:run:{tenant}:{run_id}"
+    Channel    string // "agentos:run:{tenant}:{run_id}"
     Vocabulary string // "ag-ui/v1"
     BatchMs    int    // 分批提示；0 = DefaultBatchMs
 }
@@ -133,7 +134,7 @@ type Handle struct {
 ```go
 // Handle 由控制面在 run 启动时签发
 type Handle struct {
-    Channel    string // "$agentos:run:{tenant}:{run_id}"
+    Channel    string // "agentos:run:{tenant}:{run_id}"
     Vocabulary string // "ag-ui/v1"
     BatchMs    int    // 分批提示；0 = DefaultBatchMs
 }
@@ -178,18 +179,20 @@ P1 已落地：内存实现 `internal/repo/stream/memstream`（ordered replay + 
 
 ## 9. 与现有代码的关系
 
-现状澄清：**当前运行时传输就是 Redis Streams**——`RedisSubscriber` / `redis.StreamHub` / `RedisPlanEventStream` 经 XREAD 扇出，`LLMStreamActivity` 把逐字事件 `EventStore.Append` 进 `agent:events:{sessionID}`。`WebSocketHub` 全仓无引用，是死代码。换句话说：**本项目已经在手搓一个"数据面总线"。** Centrifugo 就是这条线的成熟版——同样以 Redis 为 broker，但补上连接层（WS/SSE）、JWT 授权、recovery / 历史、横向扩容。「不重复造轮子」在这里的意思是：别再造一个 Centrifugo。
+现状澄清：**运行时传输就是统一总线。** `agentos/stream` 契约（`Publisher` / `Subscriber` / `Projector`）由 Centrifugo（默认传输，以 Redis 为 broker）实现；未配置 Centrifugo 时降级为进程内 `memstream`（单机兜底，装配时打 WARN）。activities 把逐字事件**纯发布**到 AG-UI 频道；run 订阅、plan SSE、run 里程碑投影全部从总线读取，PG 是权威历史。旧 Redis 扇出（`RedisEventStore` / `RedisSequencer` / `RedisSubscriber` / `RedisPlanEventStream` / `redis.StreamHub`）与死代码 `WebSocketHub` 已删除。「不重复造轮子」的含义没变：别再造一个 Centrifugo。
 
-| 现状 | 去向 |
+| 组件 | 现状 |
 |---|---|
-| `internal/agentfw/stream/interfaces.go` EventStore / Subscriber | 保留接口，作为投影 / 权威历史的抽象；不再承载逐字 |
-| `internal/repo/stream/redis` RedisSubscriber / RedisPlanEventStream（手搓 Redis Stream 扇出） | **由 Centrifugo（Redis broker）取代**——成熟版数据面总线 |
-| `internal/repo/stream/websocket.go` WebSocketHub | 死代码，删除（不在运行时路径上） |
-| `StreamAgentWorkflow.LLMStreamActivity` 逐字 Append EventStore（[activity.go:373](internal/agentfw/orchestration/activity.go#L373)） | 改为分批 Publish AG-UI 到频道；workflow history 只留里程碑 + 引用 |
-| plan 事件入 Postgres（[roadmap:20](docs/architecture-task-roadmap.md#L20)） | 保持；run 级里程碑同样投影入 PG |
-| `agentos/core` StreamScope / Subscription | 保持引擎中立契约 |
+| `internal/agentfw/stream` EventStore / Subscriber / Sequencer / StatelessGateway | **已删除**；`agentos/stream` 契约 + `agentos/core` + PG repo 是唯一抽象 |
+| 手搓 Redis Stream 扇出（RedisEventStore / RedisSequencer / RedisSubscriber / RedisPlanEventStream / `redis.StreamHub`） | **已删除**，由总线取代 |
+| `WebSocketHub` | 已删除（死代码，不在运行时路径上） |
+| `LLMStreamActivity` 逐字事件（[activity.go](internal/agentfw/orchestration/activity.go)） | 纯 Publish AG-UI 到频道；workflow history 只留里程碑 + 引用 |
+| run 里程碑投影 | `runprojection` 消费总线 → 持久化 PG（shipped app 接线） |
+| plan 事件 | 双写 PG + 总线 plan 频道（`planstream`）推 SSE |
+| `agentos/conversation` | example-only，退化为**纯 PG 轮询**订阅（无 live 传输） |
+| Redis 本体 | 保留：Centrifugo 以 Redis 为 broker；WAL / DLQ（pipeline）+ `EventDedupeStore` 仍用 Redis |
 
-**灵活性：传输可换。** 契约只依赖 `Publisher` / `Subscriber` / `Projector` 接口，Centrifugo 是默认实现；NATS JetStream / Mercure 随时可作替换实现，后端与前端无感。测试 / dev 用接口后的内存实现（`memstream`），生产用 Centrifugo。
+**灵活性：传输可换。** 契约只依赖 `Publisher` / `Subscriber` / `Projector` 接口，Centrifugo 是默认实现，memstream 是未配置时的单机兜底；NATS JetStream / Mercure 随时可作替换实现，后端与前端无感。docker-compose 默认起 Centrifugo（app 直连）；本地 `go run` 未配 `CENTRIFUGO_BASE_URL` 时自动降级 `memstream`。
 
 ## 10. 分阶段落地
 
@@ -198,7 +201,7 @@ P1 已落地：内存实现 `internal/repo/stream/memstream`（ordered replay + 
 - **P1 契约 + 一致性测试**：`agentos/stream` 包（`Handle` + AG-UI 事件类型 + `Publisher`/`Subscriber`/`Projector`）+ 内存实现 `memstream`（测试 / dev）+ `streamconformance` suite 锁定「发布→订阅→投影」行为。Centrifugo adapter 留待 P2。
 - **P2 任一真实 backend 接入**：native 或某个外部 backend 跑通契约（通常先 native 便于调试，但非必须）。
 - **P3 其余 backend 铺开**：HTTP / gRPC / temporal_external 各一薄适配器 + 一个参考实现。
-- **P4 重连与收尾**：Centrifugo recovery + PG `after_sequence` 双通道重连；删除死代码（WebSocketHub）与旧 Redis 扇出。
+- **P4 重连与收尾**：Centrifugo recovery + PG `after_sequence` 双通道重连；删除死代码（WebSocketHub）与旧 Redis 扇出。✅ **完成**：总线（Centrifugo 默认传输 / 未配置时 memstream 单机兜底）已是 shipped app 的默认 live 传输——activities 纯发布，run 订阅、plan SSE、run 里程碑投影都从总线读；PG 是权威历史（run 里程碑投影 + plan 事件双写）。docker-compose 已内置 Centrifugo 服务（`configs/centrifugo/config.json`，app 默认指向 `CENTRIFUGO_BASE_URL`）。旧 Redis 扇出四件套与 `WebSocketHub` 已删除，`agentos/conversation` 退化为纯 PG 轮询；Redis 本体保留（Centrifugo broker / WAL / DLQ / 事件去重）。
 
 ## 11. 成熟参考
 

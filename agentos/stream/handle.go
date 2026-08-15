@@ -18,7 +18,7 @@ const (
 // the bus (Centrifugo in production) delivers precisely to the frontends that
 // hold a subscription for that channel.
 type Handle struct {
-	// Channel is the session channel, e.g. "$agentos:run:{tenant}:{run_id}".
+	// Channel is the session channel, e.g. "agentos:run:{tenant}:{run_id}".
 	Channel string
 	// Vocabulary is the wire event vocabulary ("ag-ui/v1").
 	Vocabulary string

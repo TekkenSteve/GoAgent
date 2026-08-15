@@ -35,7 +35,6 @@ func run() error {
 		TemporalNamespace:  env("AGENTFW_TEMPORAL_NAMESPACE", "default"),
 		TemporalTaskQueues: agentostemporal.DefaultTaskQueues(),
 		PostgresURL:        os.Getenv("PG_URL"),
-		RedisURL:           os.Getenv("REDIS_URL"),
 		ArtifactStore:      agentostemporal.ArtifactStoreConfig{Backend: agentostemporal.ArtifactStoreBackend(env("AGENTOS_ARTIFACT_STORE_BACKEND", "local")), Local: agentostemporal.LocalArtifactStoreConfig{Root: env("AGENTOS_ARTIFACT_STORE_LOCAL_ROOT", ".data/agentos-artifacts")}},
 	}
 

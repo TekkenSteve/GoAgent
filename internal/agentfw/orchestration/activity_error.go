@@ -2,8 +2,9 @@ package orchestration
 
 import (
 	"context"
+	"crypto/rand"
 	"errors"
-	"math/rand/v2"
+	"math/big"
 	"time"
 
 	"github.com/TekkenSteve/GoAgent/internal/entity"
@@ -60,7 +61,7 @@ func retryRateLimited[T any](ctx context.Context, fn func() (T, error)) (T, erro
 		// Exponential backoff with up to 100% jitter, so agents retrying the
 		// same provider limit spread out instead of hitting it in sync.
 		delay := time.Duration(1<<attempt) * time.Second
-		delay += time.Duration(rand.Int64N(int64(delay))) //nolint:gosec // jitter spreads retries; unpredictability, not security
+		delay += jitterUpto(delay)
 
 		select {
 		case <-ctx.Done():
@@ -68,4 +69,21 @@ func retryRateLimited[T any](ctx context.Context, fn func() (T, error)) (T, erro
 		case <-time.After(delay):
 		}
 	}
+}
+
+// jitterUpto returns a uniformly random duration in [0, bound). Rate-limit
+// retry jitter does not need cryptographic strength — its job is to spread a
+// fleet's retries — but drawing from crypto/rand keeps gosec G404 (weak
+// random) satisfied repo-wide instead of suppressing it for one call site.
+func jitterUpto(bound time.Duration) time.Duration {
+	if bound <= 0 {
+		return 0
+	}
+
+	n, err := rand.Int(rand.Reader, big.NewInt(int64(bound)))
+	if err != nil {
+		return 0
+	}
+
+	return time.Duration(n.Int64())
 }

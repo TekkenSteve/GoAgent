@@ -1,3 +1,6 @@
+// Package conversation implements a durable Postgres-backed conversation
+// runtime for AgentOS agents. Live delivery to subscribers is pure Postgres
+// polling; there is no separate streaming transport.
 package conversation
 
 import (
@@ -35,28 +38,22 @@ var (
 	ErrInvalidTransition = errors.New("agentos conversation: invalid lifecycle transition")
 )
 
-// Config holds Postgres and Redis connection settings plus the polling cadence for the durable conversation runtime.
+// Config holds Postgres connection settings plus the polling cadence for the durable conversation runtime.
 type Config struct {
-	PostgresURL           string
-	RedisURL              string
-	MaxConns              int32
-	PollInterval          time.Duration
-	OutboxPollInterval    time.Duration
-	RedisStreamMaxLength  int
-	RedisStreamExpiration time.Duration
+	PostgresURL  string
+	MaxConns     int32
+	PollInterval time.Duration
 }
 
-// Runtime is the durable Postgres-backed conversation runtime, streaming live events over Redis when configured.
+// Runtime is the durable Postgres-backed conversation runtime. Subscribers
+// catch up by polling the durable event stream; there is no live transport.
 type Runtime struct {
-	pool               *pgxpool.Pool
-	stream             *redisConversationStream
-	pollInterval       time.Duration
-	outboxPollInterval time.Duration
-	closeCtx           context.Context
-	closeCancel        context.CancelFunc
-	outboxWake         chan struct{}
-	workers            sync.WaitGroup
-	closeOnce          sync.Once
+	pool         *pgxpool.Pool
+	pollInterval time.Duration
+	closeCtx     context.Context
+	closeCancel  context.CancelFunc
+	workers      sync.WaitGroup
+	closeOnce    sync.Once
 }
 
 const (
@@ -66,8 +63,16 @@ const (
 	conversationSubscriberBuf = 64
 )
 
-// NewRuntime connects Postgres (and Redis when configured) and returns a conversation Runtime.
+// NewRuntime connects Postgres and returns a conversation Runtime.
 func NewRuntime(ctx context.Context, config Config) (agentos.ConversationRuntime, error) {
+	return newRuntime(ctx, config)
+}
+
+// newRuntime builds the concrete runtime. It is kept separate from
+// NewRuntime's interface return because gosec G118 cannot trace the cancel
+// call in Close through an interface return; returning *Runtime directly lets
+// the cancel-propagation analysis see it.
+func newRuntime(ctx context.Context, config Config) (*Runtime, error) {
 	if strings.TrimSpace(config.PostgresURL) == "" {
 		return nil, fmt.Errorf("%w: postgres URL is required", ErrInvalidConversation)
 	}
@@ -97,57 +102,38 @@ func NewRuntime(ctx context.Context, config Config) (agentos.ConversationRuntime
 		pollInterval = defaultPollInterval
 	}
 
-	outboxPollInterval := config.OutboxPollInterval
-	if outboxPollInterval <= 0 {
-		outboxPollInterval = time.Second
-	}
+	r := &Runtime{pool: pool, pollInterval: pollInterval}
+	r.closeCtx, r.closeCancel = context.WithCancel(context.Background())
 
-	stream, err := newRedisConversationStream(ctx, config)
-	if err != nil {
-		pool.Close()
-
-		return nil, err
-	}
-
-	closeCtx, closeCancel := context.WithCancel(context.Background()) //nolint:gosec // Close retains and invokes closeCancel exactly once.
-
-	runtime := &Runtime{
-		pool: pool, stream: stream, pollInterval: pollInterval,
-		outboxPollInterval: outboxPollInterval, closeCtx: closeCtx, closeCancel: closeCancel,
-		outboxWake: make(chan struct{}, 1),
-	}
-	if stream != nil {
-		runtime.workers.Go(func() { runtime.runConversationOutbox(closeCtx) })
-	}
-
-	return runtime, nil
+	return r, nil
 }
 
-// Close cancels background workers and closes the Redis stream and Postgres pool.
+// Close cancels background workers and closes the Postgres pool. Close is
+// idempotent: the once-guard drains workers and pool exactly once. The drain
+// lives in a separate method so the receiver is not captured by a closure —
+// gosec G118 can then trace the cancel call and see the context is not leaked.
 func (r *Runtime) Close() error {
 	if r == nil {
 		return nil
 	}
 
-	var closeErr error
+	r.closeOnce.Do(r.shutdown)
 
-	r.closeOnce.Do(func() {
-		if r.closeCancel != nil {
-			r.closeCancel()
-		}
+	return nil
+}
 
-		r.workers.Wait()
+// shutdown is the once-guarded body of Close: it cancels background workers,
+// waits for them to finish, then closes the Postgres pool.
+func (r *Runtime) shutdown() {
+	if r.closeCancel != nil {
+		r.closeCancel()
+	}
 
-		if r.stream != nil {
-			closeErr = errors.Join(closeErr, r.stream.Close())
-		}
+	r.workers.Wait()
 
-		if r.pool != nil {
-			r.pool.Close()
-		}
-	})
-
-	return closeErr
+	if r.pool != nil {
+		r.pool.Close()
+	}
 }
 
 // StartRun atomically persists a new conversation run with its initial user message and stream events.
@@ -176,7 +162,7 @@ func (r *Runtime) persistStartRun(ctx context.Context, tx pgx.Tx, prepared *agen
 		return agentos.ConversationRun{}, err
 	}
 
-	if err := appendUserMessageEvents(ctx, tx, prepared, r.stream != nil); err != nil {
+	if err := appendUserMessageEvents(ctx, tx, prepared); err != nil {
 		return agentos.ConversationRun{}, err
 	}
 
@@ -258,7 +244,7 @@ func insertUserMessage(ctx context.Context, tx pgx.Tx, spec *agentos.StartConver
 	return nil
 }
 
-func appendUserMessageEvents(ctx context.Context, tx pgx.Tx, spec *agentos.StartConversationRunSpec, enqueue bool) error {
+func appendUserMessageEvents(ctx context.Context, tx pgx.Tx, spec *agentos.StartConversationRunSpec) error {
 	events := []struct {
 		typeName core.EventType
 		payload  map[string]any
@@ -268,7 +254,7 @@ func appendUserMessageEvents(ctx context.Context, tx pgx.Tx, spec *agentos.Start
 		{agentos.ConversationEventTextMessageEnd, map[string]any{"message_id": spec.MessageID, "role": "user", "content": spec.UserMessage}},
 	}
 	for _, event := range events {
-		if _, err := appendEvent(ctx, tx, spec.ThreadID, spec.RunID, spec.ProcessID, "", 0, event.typeName, spec.RequestedAt, event.payload, enqueue); err != nil {
+		if _, err := appendEvent(ctx, tx, spec.ThreadID, spec.RunID, spec.ProcessID, "", 0, event.typeName, spec.RequestedAt, event.payload); err != nil {
 			return err
 		}
 	}
@@ -291,12 +277,7 @@ func (r *Runtime) IngestEvent(ctx context.Context, incoming *agentos.ExternalCon
 func persistConversationChange[T any](ctx context.Context, runtime *Runtime, operation func(pgx.Tx) (T, error)) (T, error) {
 	options := pgx.TxOptions{IsoLevel: pgx.Serializable}
 
-	result, err := withConversationTx(ctx, runtime.pool, &options, operation)
-	if err == nil {
-		runtime.wakeConversationOutbox()
-	}
-
-	return result, err
+	return withConversationTx(ctx, runtime.pool, &options, operation)
 }
 
 func (r *Runtime) persistEvent(ctx context.Context, tx pgx.Tx, event *agentos.ExternalConversationEvent) (agentos.ConversationEvent, error) {
@@ -323,7 +304,7 @@ func (r *Runtime) persistEvent(ctx context.Context, tx pgx.Tx, event *agentos.Ex
 		return agentos.ConversationEvent{}, err
 	}
 
-	stored, err := appendEvent(ctx, tx, event.ThreadID, event.RunID, run.ProcessID, event.SourceEventID, event.SourceSequence, event.EventType, event.OccurredAt, event.Payload, r.stream != nil)
+	stored, err := appendEvent(ctx, tx, event.ThreadID, event.RunID, run.ProcessID, event.SourceEventID, event.SourceSequence, event.EventType, event.OccurredAt, event.Payload)
 	if err != nil {
 		return agentos.ConversationEvent{}, err
 	}
@@ -432,7 +413,8 @@ func withConversationTx[T any](ctx context.Context, pool *pgxpool.Pool, options 
 	return result, nil
 }
 
-// SubscribeThread streams a thread's events, replaying persisted history before switching to live Redis delivery.
+// SubscribeThread streams a thread's events by replaying persisted history and
+// polling the durable event stream for new ones.
 func (r *Runtime) SubscribeThread(ctx context.Context, scope agentos.ThreadStreamScope) (core.Subscription, error) {
 	if err := validateScope(scope.ThreadID, scope.AccountID, scope.ProjectID); err != nil {
 		return nil, err
@@ -459,30 +441,17 @@ func (r *Runtime) SubscribeThread(ctx context.Context, scope agentos.ThreadStrea
 		cancel()
 	}}
 
-	var live *conversationLiveSubscription
-	if r.stream != nil {
-		live, err = r.stream.Subscribe(subCtx, scope)
-		if err != nil {
-			live = nil
-		}
-	}
-
 	go func() {
 		defer stopRuntimeCancel()
 
-		r.streamSubscription(subCtx, sub, scope, live)
+		r.streamSubscription(subCtx, sub, scope)
 	}()
 
 	return sub, nil
 }
 
-func (r *Runtime) streamSubscription(ctx context.Context, sub *subscription, scope agentos.ThreadStreamScope, live *conversationLiveSubscription) {
+func (r *Runtime) streamSubscription(ctx context.Context, sub *subscription, scope agentos.ThreadStreamScope) {
 	defer close(sub.events)
-	defer func() {
-		if live != nil {
-			live.Close()
-		}
-	}()
 
 	cursor := scope.AfterSequence
 
@@ -497,60 +466,12 @@ func (r *Runtime) streamSubscription(ctx context.Context, sub *subscription, sco
 		select {
 		case <-ctx.Done():
 			return
-		case event, open := <-conversationLiveEvents(live):
-			if !open {
-				live.Close()
-				live = nil
-
-				continue
-			}
-
-			if !r.deliverLiveConversationEvent(ctx, sub, scope.ThreadID, &cursor, &event) {
-				return
-			}
 		case <-ticker.C:
 			if !r.catchUpConversationEvents(ctx, sub, scope.ThreadID, &cursor) {
 				return
 			}
-
-			live = r.recoverLiveSubscription(ctx, scope, cursor, live)
 		}
 	}
-}
-
-func conversationLiveEvents(live *conversationLiveSubscription) <-chan agentos.ConversationEvent {
-	if live == nil {
-		return nil
-	}
-
-	return live.Events()
-}
-
-func (r *Runtime) deliverLiveConversationEvent(ctx context.Context, sub *subscription, threadID string, cursor *int64, event *agentos.ConversationEvent) bool {
-	if event.ThreadID != threadID || event.Sequence <= *cursor {
-		return true
-	}
-
-	if event.Sequence != *cursor+1 {
-		return r.catchUpConversationEvents(ctx, sub, threadID, cursor)
-	}
-
-	return sendConversationEvent(ctx, sub, cursor, event)
-}
-
-func (r *Runtime) recoverLiveSubscription(ctx context.Context, scope agentos.ThreadStreamScope, cursor int64, live *conversationLiveSubscription) *conversationLiveSubscription {
-	if live != nil || r.stream == nil {
-		return live
-	}
-
-	scope.AfterSequence = cursor
-
-	recovered, err := r.stream.Subscribe(ctx, scope)
-	if err != nil {
-		return nil
-	}
-
-	return recovered
 }
 
 func (r *Runtime) catchUpConversationEvents(ctx context.Context, sub *subscription, threadID string, cursor *int64) bool {

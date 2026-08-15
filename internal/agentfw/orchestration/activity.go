@@ -11,7 +11,6 @@ import (
 	"time"
 
 	agentosstream "github.com/TekkenSteve/GoAgent/agentos/stream"
-	"github.com/TekkenSteve/GoAgent/internal/agentfw/stream"
 	"github.com/TekkenSteve/GoAgent/internal/entity"
 	"github.com/TekkenSteve/GoAgent/internal/repo/agentos/runprojection"
 	"github.com/TekkenSteve/GoAgent/internal/repo/agentos/streamadapter"
@@ -35,21 +34,21 @@ var errHistoryBlobStoreRequired = errors.New("blob store is required to restore 
 type AgentActivities struct {
 	agentUC    *agentuc.UseCase
 	billingUC  *billinguc.UseCase
-	eventStore stream.EventStore
 	mcpManager MCPManagerProvider
 	// blobStore backs the claim-check history snapshot (see
 	// SnapshotHistoryActivity). Optional: without it, long conversations stay
 	// in workflow state and continue-as-new carries no snapshot.
 	blobStore artifactBlobStore
 	logger    logger.Interface
-	// streamPub is the optional data-plane publisher. When set, every
-	// streaming activity mirrors its events onto the AG-UI bus (fail-open);
-	// nil keeps the runtime pure-Redis with zero behavior change.
+	// streamPub is the data-plane publisher every streaming activity writes
+	// its AG-UI timeline through (fail-open). The app assembles it via the
+	// streaming data plane (memstream default / Centrifugo); nil keeps the
+	// activities running without a live mirror.
 	streamPub agentosstream.Publisher
-	// runProjection is the optional data-plane projection controller. When
-	// set (with streamPub), the first publish of each streaming activity
-	// attaches the control plane to the run channel as a projection consumer
-	// (idempotent, fail-open); nil keeps the runtime unchanged.
+	// runProjection is the data-plane projection controller. When set (with
+	// streamPub), the first publish of each streaming activity attaches the
+	// control plane to the run channel as a projection consumer (idempotent,
+	// fail-open); nil keeps the runtime unchanged.
 	runProjection runprojection.Controller
 }
 
@@ -71,9 +70,11 @@ type MCPManagerProvider interface {
 	EnsureConnected(ctx context.Context, configs []entity.MCPServerConfig) ([]entity.ToolDef, []string)
 }
 
-// NewAgentActivities creates activities wired to the agent usecase.
-func NewAgentActivities(uc *agentuc.UseCase, eventStore stream.EventStore, l logger.Interface) *AgentActivities {
-	return &AgentActivities{agentUC: uc, eventStore: eventStore, logger: l}
+// NewAgentActivities creates activities wired to the agent usecase. The
+// streaming activities publish onto the data plane only when a publisher is
+// attached via WithStreamPublisher.
+func NewAgentActivities(uc *agentuc.UseCase, l logger.Interface) *AgentActivities {
+	return &AgentActivities{agentUC: uc, logger: l}
 }
 
 // WithMCPManager sets the MCP manager for tool discovery in PrepareActivity.
@@ -99,10 +100,10 @@ func (a *AgentActivities) WithBlobStore(store artifactBlobStore) *AgentActivitie
 	return a
 }
 
-// WithStreamPublisher enables the data-plane mirror: streaming activities
-// publish their AG-UI timeline onto the bus in addition to writing the Redis
-// event store. Optional — without it the runtime is unchanged. Publishing is
-// fail-open, so a dead bus never breaks a run.
+// WithStreamPublisher attaches the data-plane publisher the streaming
+// activities write their AG-UI timeline through. The app wires it via the
+// streaming data plane; without it the runtime runs without a live mirror.
+// Publishing is fail-open, so a dead bus never breaks a run.
 func (a *AgentActivities) WithStreamPublisher(pub agentosstream.Publisher) *AgentActivities {
 	a.streamPub = pub
 
@@ -363,26 +364,15 @@ func (a *AgentActivities) ToolExecActivity(ctx context.Context, input ToolInput)
 	}, nil
 }
 
-// InitStreamActivity writes stream init events to the EventStore and runs Prep.
-// Combines AgentRunStart + PrepStage → Prep → PrepStage ready in one activity.
+// InitStreamActivity publishes stream init events onto the data plane and runs
+// Prep. Combines AgentRunStart + PrepStage → Prep → PrepStage ready in one
+// activity.
 func (a *AgentActivities) InitStreamActivity(ctx context.Context, input *InitStreamInput) (*InitStreamOutput, error) {
 	publish := a.newPublishWriter(input.AccountID, input.SessionID, input.RunID)
 
-	// Write start and prep-stage events to EventStore, mirrored on the data
-	// plane (fail-open).
-	startEvent := entity.NewAgentRunStartEvent(input.Message)
-	a.publishStreamEvent(ctx, publish, startEvent)
-
-	if _, err := a.eventStore.Append(ctx, input.SessionID, input.RunID, startEvent); err != nil {
-		a.logger.Warn("InitStreamActivity - append start event: %v", err)
-	}
-
-	prepInitEvent := entity.NewPrepStageEvent("initializing", 0)
-	a.publishStreamEvent(ctx, publish, prepInitEvent)
-
-	if _, err := a.eventStore.Append(ctx, input.SessionID, input.RunID, prepInitEvent); err != nil {
-		a.logger.Warn("InitStreamActivity - append prep event: %v", err)
-	}
+	// Publish the start and prep-stage events onto the data plane (fail-open).
+	a.publishStreamEvent(ctx, publish, entity.NewAgentRunStartEvent(input.Message))
+	a.publishStreamEvent(ctx, publish, entity.NewPrepStageEvent("initializing", 0))
 
 	prepResult, err := a.agentUC.Prep(ctx, &agentuc.PrepRequest{
 		SystemPrompt: input.SystemPrompt,
@@ -401,12 +391,7 @@ func (a *AgentActivities) InitStreamActivity(ctx context.Context, input *InitStr
 	allTools := prepResult.Tools
 	allTools = append(allTools, mcpOut.Tools...)
 
-	prepReadyEvent := entity.NewPrepStageEvent("ready", prepCompletePercent)
-	a.publishStreamEvent(ctx, publish, prepReadyEvent)
-
-	if _, err := a.eventStore.Append(ctx, input.SessionID, input.RunID, prepReadyEvent); err != nil {
-		a.logger.Warn("InitStreamActivity - append ready event: %v", err)
-	}
+	a.publishStreamEvent(ctx, publish, entity.NewPrepStageEvent("ready", prepCompletePercent))
 
 	return &InitStreamOutput{
 		Messages: prepResult.Messages,
@@ -420,11 +405,8 @@ func (a *AgentActivities) InitStreamActivity(ctx context.Context, input *InitStr
 // (a dead worker is retried quickly; a live stream is never killed mid-call).
 // Deducts usage cost from account balance after a successful LLM call.
 func (a *AgentActivities) LLMStreamActivity(ctx context.Context, input *LLMStreamInput) (*LLMStreamOutput, error) {
-	writer := &eventStoreWriter{
-		store:     a.eventStore,
-		sessionID: input.SessionID,
-		runID:     input.RunID,
-		publish:   a.newPublishWriter(input.AccountID, input.SessionID, input.RunID),
+	writer := &streamEventWriter{
+		publish: a.newPublishWriter(input.AccountID, input.SessionID, input.RunID),
 	}
 
 	stopHeartbeat := startHeartbeatLoop(ctx, func() any {
@@ -457,9 +439,10 @@ func (a *AgentActivities) LLMStreamActivity(ctx context.Context, input *LLMStrea
 	}, nil
 }
 
-// ToolExecStreamActivity executes a tool and writes start/finish events to the EventStore.
+// ToolExecStreamActivity executes a tool and publishes start/finish events onto
+// the data plane.
 func (a *AgentActivities) ToolExecStreamActivity(ctx context.Context, input ToolInput) (*ToolOutput, error) {
-	sessionID, runID := input.RunID, input.RunID
+	runID := input.RunID
 	publish := a.newPublishWriter(input.AccountID, input.RunID, input.RunID)
 
 	stopHeartbeat := startHeartbeatLoop(ctx, func() any {
@@ -467,13 +450,8 @@ func (a *AgentActivities) ToolExecStreamActivity(ctx context.Context, input Tool
 	})
 	defer stopHeartbeat()
 
-	// Write ToolExecStart, mirrored on the data plane (fail-open).
-	startEvent := entity.NewToolExecStartEvent(input.ToolCallID, input.ToolName)
-	a.publishStreamEvent(ctx, publish, startEvent)
-
-	if _, err := a.eventStore.Append(ctx, sessionID, runID, startEvent); err != nil {
-		a.logger.Warn("ToolExecStreamActivity - append start event: %v", err)
-	}
+	// Publish ToolExecStart onto the data plane (fail-open).
+	a.publishStreamEvent(ctx, publish, entity.NewToolExecStartEvent(input.ToolCallID, input.ToolName))
 
 	execStart := time.Now()
 	result, err := a.agentUC.ExecTool(ctx, runID, entity.ToolCall{
@@ -496,13 +474,8 @@ func (a *AgentActivities) ToolExecStreamActivity(ctx context.Context, input Tool
 		isError = true
 	}
 
-	// Write ToolExecFinish, mirrored on the data plane (fail-open).
-	finishEvent := entity.NewToolExecFinishEvent(input.ToolCallID, input.ToolName, output, exitCode, isError, durationMs)
-	a.publishStreamEvent(ctx, publish, finishEvent)
-
-	if _, err := a.eventStore.Append(ctx, sessionID, runID, finishEvent); err != nil {
-		a.logger.Warn("ToolExecStreamActivity - append finish event: %v", err)
-	}
+	// Publish ToolExecFinish onto the data plane (fail-open).
+	a.publishStreamEvent(ctx, publish, entity.NewToolExecFinishEvent(input.ToolCallID, input.ToolName, output, exitCode, isError, durationMs))
 
 	return &ToolOutput{
 		Output:     output,
@@ -512,48 +485,43 @@ func (a *AgentActivities) ToolExecStreamActivity(ctx context.Context, input Tool
 	}, nil
 }
 
-// FinishStreamActivity writes the AgentRunFinish event to the EventStore,
-// mirrored on the data plane (fail-open).
+// FinishStreamActivity publishes the AgentRunFinish event onto the data plane
+// (fail-open) and returns the projection outcome as the milestone persists
+// through the bus → projector path.
 func (a *AgentActivities) FinishStreamActivity(ctx context.Context, input FinishStreamInput) error {
 	a.publishStreamEvent(ctx, a.newPublishWriter(input.AccountID, input.SessionID, input.RunID), input.Event)
 
-	_, err := a.eventStore.Append(ctx, input.SessionID, input.RunID, input.Event)
-
-	return err
+	return nil
 }
 
 // ——— Internal helpers ———
 
-// eventStoreWriter implements usecase.StreamEventWriter by appending to EventStore.
-// When a data-plane publisher is configured it mirrors each event onto the AG-UI
-// bus first (fail-open: a bus hiccup never fails the append).
+// streamEventWriter implements usecase.StreamEventWriter by publishing each
+// event onto the data plane (fail-open: a bus hiccup never fails the stream).
 // written tracks the number of deltas delivered so the enclosing activity can
 // report stream progress in its heartbeats.
-type eventStoreWriter struct {
-	store     stream.EventStore
-	sessionID string
-	runID     string
-	publish   *streamadapter.PublishWriter
-	written   atomic.Int64
+type streamEventWriter struct {
+	publish *streamadapter.PublishWriter
+	written atomic.Int64
 }
 
-func (w *eventStoreWriter) WriteEvent(ctx context.Context, event entity.StreamEvent) error {
+func (w *streamEventWriter) WriteEvent(ctx context.Context, event entity.StreamEvent) error {
 	if w.publish != nil {
-		//nolint:errcheck // fail-open: the writer always returns nil by contract.
-		_ = w.publish.WriteEvent(ctx, event)
+		// fail-open: PublishWriter.WriteEvent always returns nil after logging
+		// transport errors internally; a bus hiccup never fails the run.
+		if err := w.publish.WriteEvent(ctx, event); err != nil {
+			return nil
+		}
 	}
 
-	_, err := w.store.Append(ctx, w.sessionID, w.runID, event)
-	if err == nil {
-		w.written.Add(1)
-	}
+	w.written.Add(1)
 
-	return err
+	return nil
 }
 
 // flush closes any open AG-UI message so a stream that ends without a
 // following non-content event still terminates its message on the timeline.
-func (w *eventStoreWriter) flush(ctx context.Context) {
+func (w *streamEventWriter) flush(ctx context.Context) {
 	if w.publish != nil {
 		w.publish.Flush(ctx)
 	}
@@ -584,9 +552,14 @@ func (a *AgentActivities) newPublishWriter(accountID, sessionID, runID string) *
 // publishStreamEvent mirrors one runtime event onto the data plane, fail-open.
 // A nil writer (no publisher configured) is a no-op.
 func (a *AgentActivities) publishStreamEvent(ctx context.Context, w *streamadapter.PublishWriter, ev entity.StreamEvent) {
-	if w != nil {
-		//nolint:errcheck // fail-open: the writer always returns nil by contract.
-		_ = w.WriteEvent(ctx, ev)
+	if w == nil {
+		return
+	}
+
+	// fail-open: PublishWriter.WriteEvent always returns nil after logging
+	// transport errors internally; a bus hiccup never fails the run.
+	if err := w.WriteEvent(ctx, ev); err != nil {
+		return
 	}
 }
 

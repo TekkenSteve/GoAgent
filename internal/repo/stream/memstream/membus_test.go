@@ -12,7 +12,7 @@ import (
 func TestBusConformance(t *testing.T) {
 	t.Parallel()
 
-	handle := stream.NewHandle("$agentos:run:acme:conformance-run")
+	handle := stream.NewHandle("agentos:run:acme:conformance-run")
 
 	streamconformance.RunStreamConformance(t, &streamconformance.ConformanceCase{
 		Name:   "memstream",
@@ -33,8 +33,8 @@ func TestBusChannelsAreIsolated(t *testing.T) {
 	bus := New()
 	ctx := context.Background()
 
-	runA := stream.NewHandle("$agentos:run:acme:run-a")
-	runB := stream.NewHandle("$agentos:run:acme:run-b")
+	runA := stream.NewHandle("agentos:run:acme:run-a")
+	runB := stream.NewHandle("agentos:run:acme:run-b")
 
 	if err := bus.Publish(ctx, runA, stream.NewRunStarted("t", "run-a")); err != nil {
 		t.Fatalf("publish run-a: %v", err)
@@ -77,7 +77,7 @@ func TestBusHistoryIsBounded(t *testing.T) {
 
 	bus := New(WithHistory(3))
 	ctx := context.Background()
-	handle := stream.NewHandle("$agentos:run:acme:bounded")
+	handle := stream.NewHandle("agentos:run:acme:bounded")
 
 	for i := range 5 {
 		if err := bus.Publish(ctx, handle, stream.NewTextMessageContent("t", "r", "m", "x")); err != nil {
@@ -106,7 +106,7 @@ func TestBusSlowConsumerDrops(t *testing.T) {
 
 	bus := New(WithBuffer(1))
 	ctx := context.Background()
-	handle := stream.NewHandle("$agentos:run:acme:slow")
+	handle := stream.NewHandle("agentos:run:acme:slow")
 
 	sub, err := bus.Subscribe(ctx, handle, stream.LiveOnly)
 	if err != nil {
@@ -128,7 +128,7 @@ func TestBusLiveOnlyReplaysNothing(t *testing.T) {
 
 	bus := New()
 	ctx := context.Background()
-	handle := stream.NewHandle("$agentos:run:acme:liveonly")
+	handle := stream.NewHandle("agentos:run:acme:liveonly")
 
 	// History exists, but a LiveOnly subscription must not replay it.
 	publishN(t, bus, handle, 3)

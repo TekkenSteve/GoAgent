@@ -4,21 +4,23 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net/url"
 	"os"
+	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
 	agentos "github.com/TekkenSteve/GoAgent/agentos/control"
 	"github.com/TekkenSteve/GoAgent/agentos/core"
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 func TestRuntimePostgresConversationLifecycle(t *testing.T) {
 	t.Parallel()
 
-	postgresURL := os.Getenv("AGENTOS_TEST_PG_URL")
-	if postgresURL == "" {
-		t.Skip("AGENTOS_TEST_PG_URL is not set")
-	}
+	postgresURL := newConversationTestDB(t)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	defer cancel()
@@ -40,8 +42,6 @@ func TestRuntimePostgresConversationLifecycle(t *testing.T) {
 		threadID: threadID, runID: runID, processID: processID,
 		accountID: accountID, projectID: projectID,
 	}
-
-	cleanupConversationThread(t, runtime, threadID)
 
 	snapshot := startConversationTestRun(ctx, t, runtime, &scope, suffix)
 
@@ -188,30 +188,25 @@ func assertInterruptAndResume(ctx context.Context, t *testing.T, runtime *Runtim
 	}
 }
 
-func TestRuntimeRedisStreamDeliversWithoutFallbackPoll(t *testing.T) {
+// TestRuntimePollingDeliversAcrossRuntimes verifies that a subscription on one
+// runtime picks up events appended by a separate writer runtime purely through
+// Postgres polling: there is no live transport after the Redis migration.
+func TestRuntimePollingDeliversAcrossRuntimes(t *testing.T) {
 	t.Parallel()
 
-	postgresURL := os.Getenv("AGENTOS_TEST_PG_URL")
+	postgresURL := newConversationTestDB(t)
 
-	redisURL := os.Getenv("AGENTOS_TEST_REDIS_URL")
-	if postgresURL == "" || redisURL == "" {
-		t.Skip("AGENTOS_TEST_PG_URL and AGENTOS_TEST_REDIS_URL are required")
-	}
-
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
 
-	runtime := newTestRuntime(ctx, t, Config{
-		PostgresURL: postgresURL, RedisURL: redisURL,
-		PollInterval: 30 * time.Second, OutboxPollInterval: 30 * time.Second,
-	})
+	reader := newTestRuntime(ctx, t, Config{PostgresURL: postgresURL, PollInterval: 10 * time.Millisecond})
 	t.Cleanup(func() {
-		if err := runtime.Close(); err != nil {
-			t.Errorf("close runtime: %v", err)
+		if err := reader.Close(); err != nil {
+			t.Errorf("close reader runtime: %v", err)
 		}
 	})
 
-	suffix := fmt.Sprintf("redis-%d", time.Now().UnixNano())
+	suffix := fmt.Sprintf("poll-%d", time.Now().UnixNano())
 	threadID := "thread-" + suffix
 	runID := "run-" + suffix
 	accountID := "account-" + suffix
@@ -221,79 +216,31 @@ func TestRuntimeRedisStreamDeliversWithoutFallbackPoll(t *testing.T) {
 		accountID: accountID, projectID: projectID,
 	}
 
-	cleanupConversationThread(t, runtime, threadID)
-	cleanupConversationStream(t, runtime, accountID, projectID, threadID)
+	snapshot := startConversationTestRun(ctx, t, reader, &scope, suffix)
 
-	subscription, started := startRedisStreamingRun(ctx, t, runtime, &scope, suffix)
+	subscription, err := reader.SubscribeThread(ctx, agentos.ThreadStreamScope{
+		ThreadID: threadID, AccountID: accountID, ProjectID: projectID, AfterSequence: snapshot.Cursor,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
 	t.Cleanup(func() {
 		if err := subscription.Close(); err != nil {
 			t.Errorf("close subscription: %v", err)
 		}
 	})
 
-	writer := newTestRuntime(ctx, t, Config{PostgresURL: postgresURL, PollInterval: 30 * time.Second})
+	writer := newTestRuntime(ctx, t, Config{PostgresURL: postgresURL, PollInterval: 10 * time.Millisecond})
 	t.Cleanup(func() {
 		if err := writer.Close(); err != nil {
-			t.Errorf("close writer: %v", err)
+			t.Errorf("close writer runtime: %v", err)
 		}
 	})
 
 	gapEvents := writeGapEvents(ctx, t, writer, &scope, suffix)
 
-	if err := runtime.stream.Publish(ctx, &gapEvents[1], accountID, projectID); err != nil {
-		t.Fatal(err)
-	}
-
-	assertSubscriptionSequenceBefore(t, subscription, 5, 6, 2*time.Second)
-
-	if err := runtime.stream.Publish(ctx, &started, accountID, projectID); err != nil {
-		t.Fatal(err)
-	}
-
-	assertNoConversationEvent(t, subscription, 150*time.Millisecond)
-}
-
-func startRedisStreamingRun(ctx context.Context, t *testing.T, runtime *Runtime, scope *conversationTestScope, suffix string) (core.Subscription, agentos.ConversationEvent) {
-	t.Helper()
-
-	_, err := runtime.StartRun(ctx, &agentos.StartConversationRunSpec{
-		RunID: scope.runID, ThreadID: scope.threadID, ProcessID: scope.processID,
-		AccountID: scope.accountID, ProjectID: scope.projectID, MessageID: "message-" + suffix,
-		UserMessage: "Question", IdempotencyKey: "request-" + suffix, RequestedAt: time.Now().UTC(),
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	subscription, err := runtime.SubscribeThread(ctx, agentos.ThreadStreamScope{
-		ThreadID: scope.threadID, AccountID: scope.accountID, ProjectID: scope.projectID, AfterSequence: 3,
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	startedAt := time.Now()
-	started := scope.ingest(ctx, t, runtime, 1, agentos.ConversationEventRunStarted, map[string]any{})
-	assertRedisLiveEvent(t, subscription, startedAt)
-
-	return subscription, started
-}
-
-func assertRedisLiveEvent(t *testing.T, subscription core.Subscription, startedAt time.Time) {
-	t.Helper()
-
-	select {
-	case event := <-subscription.Events():
-		if event.Sequence != 4 || event.EventType != agentos.ConversationEventRunStarted {
-			t.Fatalf("live event = %#v", event)
-		}
-
-		if elapsed := time.Since(startedAt); elapsed >= 2*time.Second {
-			t.Fatalf("redis live delivery took %s; fallback poll is 30s", elapsed)
-		}
-	case <-time.After(2 * time.Second):
-		t.Fatal("redis live event did not arrive before the fallback poll")
-	}
+	assertSubscriptionSequenceBefore(t, subscription, snapshot.Cursor+1, snapshot.Cursor+int64(len(gapEvents)), 5*time.Second)
 }
 
 func writeGapEvents(ctx context.Context, t *testing.T, writer *Runtime, scope *conversationTestScope, suffix string) []agentos.ConversationEvent {
@@ -334,16 +281,6 @@ func assertSubscriptionSequenceBefore(t *testing.T, subscription core.Subscripti
 	}
 }
 
-func assertNoConversationEvent(t *testing.T, subscription core.Subscription, timeout time.Duration) {
-	t.Helper()
-
-	select {
-	case duplicate := <-subscription.Events():
-		t.Fatalf("duplicate redis event was delivered: %#v", duplicate)
-	case <-time.After(timeout):
-	}
-}
-
 func requireRuntime(t *testing.T, runtimeAPI agentos.ConversationRuntime) *Runtime {
 	t.Helper()
 
@@ -366,20 +303,159 @@ func newTestRuntime(ctx context.Context, t *testing.T, config Config) *Runtime {
 	return requireRuntime(t, runtimeAPI)
 }
 
-func cleanupConversationThread(t *testing.T, runtime *Runtime, threadID string) {
+const (
+	// conversationTestDBNameBytes is Postgres's identifier length limit
+	// (NAMEDATALEN-1); names longer than this are truncated by the server, so
+	// the test database name is budgeted to fit.
+	conversationTestDBNameBytes = 63
+
+	// conversationTestDBTokenHexLen is the hex length of time.Now().UnixNano(),
+	// used to keep database names unique across runs without an extra
+	// dependency.
+	conversationTestDBTokenHexLen = 16
+
+	// postgresAdminPingAttempts bounds how long newConversationTestDB waits for
+	// the Postgres server to answer before failing the test.
+	postgresAdminPingAttempts = 30
+)
+
+// newConversationTestDB creates a fresh, isolated Postgres database for one
+// test, applies the conversation migrations to it, and returns a URL pointing
+// at the new database. The database is dropped when the test finishes.
+//
+// Each Postgres test gets its own database so that serializable IngestEvent
+// transactions from different tests cannot trip one another's SSI
+// rw-antidependencies (SQLSTATE 40001): tests that are safe in isolation
+// deadlock-then-abort when they run in parallel against the same database.
+func newConversationTestDB(t *testing.T) string {
 	t.Helper()
+
+	adminURL := os.Getenv("AGENTOS_TEST_PG_URL")
+	if adminURL == "" {
+		t.Skip("AGENTOS_TEST_PG_URL is not set")
+	}
+
+	admin, err := pgxpool.New(context.Background(), adminURL)
+	if err != nil {
+		t.Fatalf("connect postgres admin: %v", err)
+	}
+
+	t.Cleanup(admin.Close)
+
+	waitForPostgresAdmin(t, admin)
+
+	dbName := conversationTestDatabaseName(t)
+
+	ctx, cancel := context.WithTimeout(t.Context(), 15*time.Second)
+	defer cancel()
+
+	if _, err := admin.Exec(ctx, "CREATE DATABASE "+pgx.Identifier{dbName}.Sanitize()); err != nil {
+		t.Fatalf("create conversation test database %q: %v", dbName, err)
+	}
+
+	isolated, err := url.Parse(adminURL)
+	if err != nil {
+		t.Fatalf("parse postgres test URL: %v", err)
+	}
+
+	isolated.Path = "/" + dbName
+	isolatedURL := isolated.String()
+
+	applyConversationMigrations(t, isolatedURL)
+
 	t.Cleanup(func() {
-		if _, err := runtime.pool.Exec(context.Background(), `DELETE FROM agentos_threads WHERE thread_id = $1`, threadID); err != nil {
-			t.Errorf("delete conversation thread: %v", err)
-		}
+		dropConversationTestDatabase(t, admin, dbName)
 	})
+
+	return isolatedURL
 }
 
-func cleanupConversationStream(t *testing.T, runtime *Runtime, accountID, projectID, threadID string) {
+// waitForPostgresAdmin pings the admin pool until the Postgres server answers
+// queries or the wait budget runs out. pgxpool connects lazily, so CREATE
+// DATABASE must wait for the server to be reachable first.
+func waitForPostgresAdmin(t *testing.T, admin *pgxpool.Pool) {
 	t.Helper()
-	t.Cleanup(func() {
-		if _, err := runtime.stream.rdb.Del(context.Background(), conversationStreamKey(accountID, projectID, threadID)); err != nil {
-			t.Errorf("delete conversation stream: %v", err)
+
+	ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
+	defer cancel()
+
+	for range postgresAdminPingAttempts {
+		if err := admin.Ping(ctx); err == nil {
+			return
 		}
-	})
+
+		time.Sleep(250 * time.Millisecond)
+	}
+
+	t.Fatal("postgres did not become ready")
+}
+
+// applyConversationMigrations runs the conversation schema migrations against
+// a fresh test database, in dependency order (the event-outbox table
+// references the conversation-events table).
+func applyConversationMigrations(t *testing.T, isolatedURL string) {
+	t.Helper()
+
+	pool, err := pgxpool.New(context.Background(), isolatedURL)
+	if err != nil {
+		t.Fatalf("connect conversation test database: %v", err)
+	}
+
+	t.Cleanup(pool.Close)
+
+	ctx, cancel := context.WithTimeout(t.Context(), 15*time.Second)
+	defer cancel()
+
+	for _, migration := range []string{
+		"20260507000001_create_messages.up.sql",
+		"20260725000001_create_agentos_conversations.up.sql",
+		"20260726000001_create_agentos_conversation_event_outbox.up.sql",
+	} {
+		data, err := os.ReadFile(filepath.Join("..", "..", "migrations", migration))
+		if err != nil {
+			t.Fatalf("read migration %s: %v", migration, err)
+		}
+
+		if _, err := pool.Exec(ctx, string(data)); err != nil {
+			t.Fatalf("apply migration %s: %v", migration, err)
+		}
+	}
+}
+
+// dropConversationTestDatabase terminates any connections the runtimes of a
+// test may still hold to its database, then drops the database. Best-effort:
+// a leftover database is logged rather than failing the test, so a cleanup
+// error does not mask the test's own result.
+func dropConversationTestDatabase(t *testing.T, admin *pgxpool.Pool, dbName string) {
+	t.Helper()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	if _, err := admin.Exec(ctx, `
+SELECT pg_terminate_backend(pid)
+FROM pg_stat_activity
+WHERE datname = $1 AND pid <> pg_backend_pid()`, dbName); err != nil {
+		t.Logf("terminate conversation test backends: %v", err)
+	}
+
+	if _, err := admin.Exec(ctx, "DROP DATABASE IF EXISTS "+pgx.Identifier{dbName}.Sanitize()); err != nil {
+		t.Logf("drop conversation test database %q: %v", dbName, err)
+	}
+}
+
+// conversationTestDatabaseName derives a unique, Postgres-safe database name
+// for a test, e.g. conv_testruntimepostgresconversationlifecycle_1a2b3c.
+func conversationTestDatabaseName(t *testing.T) string {
+	t.Helper()
+
+	name := strings.ToLower(strings.NewReplacer("/", "_", "-", "_", ".", "_").Replace(t.Name()))
+	token := fmt.Sprintf("%x", time.Now().UnixNano())
+
+	budget := conversationTestDBNameBytes - len("conv_") - len("_") - conversationTestDBTokenHexLen
+	if len(name) > budget {
+		name = name[:budget]
+	}
+
+	return "conv_" + name + "_" + token
 }
