@@ -19,6 +19,7 @@ import (
 	temporalrepo "github.com/TekkenSteve/GoAgent/internal/repo/persistent"
 	pipelinepkg "github.com/TekkenSteve/GoAgent/internal/repo/pipeline"
 	repostream "github.com/TekkenSteve/GoAgent/internal/repo/stream"
+	"github.com/TekkenSteve/GoAgent/internal/repo/stream/centrifugo"
 	"github.com/TekkenSteve/GoAgent/internal/repo/toolkit"
 	"github.com/TekkenSteve/GoAgent/internal/repo/webapi"
 	"github.com/TekkenSteve/GoAgent/internal/usecase/agent"
@@ -377,6 +378,19 @@ func buildWorkerKit(ctx context.Context, deps *workerDependencies) (*WorkerKit, 
 	activities := orchestration.NewAgentActivities(agentUC, eventStore, deps.logger).
 		WithMCPManager(mcpManager).
 		WithBilling(billingUC)
+
+	if deps.cfg.StreamCentrifugo.BaseURL != "" {
+		streamPub, err := centrifugo.NewPublisher(centrifugo.Config{
+			BaseURL: deps.cfg.StreamCentrifugo.BaseURL,
+			APIKey:  deps.cfg.StreamCentrifugo.APIKey,
+		})
+		if err != nil {
+			return nil, nil, fmt.Errorf("agentos temporal worker - stream publisher: %w", err)
+		}
+
+		activities.WithStreamPublisher(streamPub)
+	}
+
 	registerToolsOnRegistry(deps.logger, toolRegistry)
 
 	if deps.cfg.EnsureDefaultTemplate {

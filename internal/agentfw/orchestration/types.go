@@ -154,6 +154,7 @@ type LLMStepOutput struct {
 
 // ToolInput is the input for a single tool execution activity.
 type ToolInput struct {
+	AccountID  string
 	RunID      string
 	ToolCallID string
 	ToolName   string

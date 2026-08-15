@@ -10,8 +10,10 @@ import (
 	"sync/atomic"
 	"time"
 
+	agentosstream "github.com/TekkenSteve/GoAgent/agentos/stream"
 	"github.com/TekkenSteve/GoAgent/internal/agentfw/stream"
 	"github.com/TekkenSteve/GoAgent/internal/entity"
+	"github.com/TekkenSteve/GoAgent/internal/repo/agentos/streamadapter"
 	"github.com/TekkenSteve/GoAgent/internal/repo/artifact"
 	agentuc "github.com/TekkenSteve/GoAgent/internal/usecase/agent"
 	billinguc "github.com/TekkenSteve/GoAgent/internal/usecase/billing"
@@ -39,6 +41,10 @@ type AgentActivities struct {
 	// in workflow state and continue-as-new carries no snapshot.
 	blobStore artifactBlobStore
 	logger    logger.Interface
+	// streamPub is the optional data-plane publisher. When set, every
+	// streaming activity mirrors its events onto the AG-UI bus (fail-open);
+	// nil keeps the runtime pure-Redis with zero behavior change.
+	streamPub agentosstream.Publisher
 }
 
 // artifactBlobStore is the subset of artifact.BlobStore needed for history
@@ -83,6 +89,16 @@ func (a *AgentActivities) WithBilling(uc *billinguc.UseCase) *AgentActivities {
 // full conversation in their own state.
 func (a *AgentActivities) WithBlobStore(store artifactBlobStore) *AgentActivities {
 	a.blobStore = store
+
+	return a
+}
+
+// WithStreamPublisher enables the data-plane mirror: streaming activities
+// publish their AG-UI timeline onto the bus in addition to writing the Redis
+// event store. Optional — without it the runtime is unchanged. Publishing is
+// fail-open, so a dead bus never breaks a run.
+func (a *AgentActivities) WithStreamPublisher(pub agentosstream.Publisher) *AgentActivities {
+	a.streamPub = pub
 
 	return a
 }
@@ -334,12 +350,21 @@ func (a *AgentActivities) ToolExecActivity(ctx context.Context, input ToolInput)
 // InitStreamActivity writes stream init events to the EventStore and runs Prep.
 // Combines AgentRunStart + PrepStage → Prep → PrepStage ready in one activity.
 func (a *AgentActivities) InitStreamActivity(ctx context.Context, input *InitStreamInput) (*InitStreamOutput, error) {
-	// Write start and prep-stage events to EventStore
-	if _, err := a.eventStore.Append(ctx, input.SessionID, input.RunID, entity.NewAgentRunStartEvent(input.Message)); err != nil {
+	publish := a.newPublishWriter(input.AccountID, input.SessionID, input.RunID)
+
+	// Write start and prep-stage events to EventStore, mirrored on the data
+	// plane (fail-open).
+	startEvent := entity.NewAgentRunStartEvent(input.Message)
+	a.publishStreamEvent(ctx, publish, startEvent)
+
+	if _, err := a.eventStore.Append(ctx, input.SessionID, input.RunID, startEvent); err != nil {
 		a.logger.Warn("InitStreamActivity - append start event: %v", err)
 	}
 
-	if _, err := a.eventStore.Append(ctx, input.SessionID, input.RunID, entity.NewPrepStageEvent("initializing", 0)); err != nil {
+	prepInitEvent := entity.NewPrepStageEvent("initializing", 0)
+	a.publishStreamEvent(ctx, publish, prepInitEvent)
+
+	if _, err := a.eventStore.Append(ctx, input.SessionID, input.RunID, prepInitEvent); err != nil {
 		a.logger.Warn("InitStreamActivity - append prep event: %v", err)
 	}
 
@@ -360,7 +385,10 @@ func (a *AgentActivities) InitStreamActivity(ctx context.Context, input *InitStr
 	allTools := prepResult.Tools
 	allTools = append(allTools, mcpOut.Tools...)
 
-	if _, err := a.eventStore.Append(ctx, input.SessionID, input.RunID, entity.NewPrepStageEvent("ready", prepCompletePercent)); err != nil {
+	prepReadyEvent := entity.NewPrepStageEvent("ready", prepCompletePercent)
+	a.publishStreamEvent(ctx, publish, prepReadyEvent)
+
+	if _, err := a.eventStore.Append(ctx, input.SessionID, input.RunID, prepReadyEvent); err != nil {
 		a.logger.Warn("InitStreamActivity - append ready event: %v", err)
 	}
 
@@ -380,6 +408,7 @@ func (a *AgentActivities) LLMStreamActivity(ctx context.Context, input *LLMStrea
 		store:     a.eventStore,
 		sessionID: input.SessionID,
 		runID:     input.RunID,
+		publish:   a.newPublishWriter(input.AccountID, input.SessionID, input.RunID),
 	}
 
 	stopHeartbeat := startHeartbeatLoop(ctx, func() any {
@@ -390,6 +419,10 @@ func (a *AgentActivities) LLMStreamActivity(ctx context.Context, input *LLMStrea
 	result, err := retryRateLimited(ctx, func() (*agentuc.LLMStepResult, error) {
 		return a.agentUC.LLMStreamCall(ctx, input.RunID, input.Messages, input.Tools, input.Config, writer)
 	})
+	// Close any open message even if the stream was interrupted, so a
+	// text-only round still terminates its message on the timeline.
+	writer.flush(ctx)
+
 	if err != nil {
 		return nil, toActivityError(fmt.Errorf("LLMStreamActivity - LLMStreamCall: %w", err))
 	}
@@ -411,14 +444,18 @@ func (a *AgentActivities) LLMStreamActivity(ctx context.Context, input *LLMStrea
 // ToolExecStreamActivity executes a tool and writes start/finish events to the EventStore.
 func (a *AgentActivities) ToolExecStreamActivity(ctx context.Context, input ToolInput) (*ToolOutput, error) {
 	sessionID, runID := input.RunID, input.RunID
+	publish := a.newPublishWriter(input.AccountID, input.RunID, input.RunID)
 
 	stopHeartbeat := startHeartbeatLoop(ctx, func() any {
 		return heartbeatProgress{Phase: "tool-exec-stream", ToolName: input.ToolName}
 	})
 	defer stopHeartbeat()
 
-	// Write ToolExecStart
-	if _, err := a.eventStore.Append(ctx, sessionID, runID, entity.NewToolExecStartEvent(input.ToolCallID, input.ToolName)); err != nil {
+	// Write ToolExecStart, mirrored on the data plane (fail-open).
+	startEvent := entity.NewToolExecStartEvent(input.ToolCallID, input.ToolName)
+	a.publishStreamEvent(ctx, publish, startEvent)
+
+	if _, err := a.eventStore.Append(ctx, sessionID, runID, startEvent); err != nil {
 		a.logger.Warn("ToolExecStreamActivity - append start event: %v", err)
 	}
 
@@ -443,10 +480,11 @@ func (a *AgentActivities) ToolExecStreamActivity(ctx context.Context, input Tool
 		isError = true
 	}
 
-	// Write ToolExecFinish
-	if _, err := a.eventStore.Append(ctx, sessionID, runID, entity.NewToolExecFinishEvent(
-		input.ToolCallID, input.ToolName, output, exitCode, isError, durationMs,
-	)); err != nil {
+	// Write ToolExecFinish, mirrored on the data plane (fail-open).
+	finishEvent := entity.NewToolExecFinishEvent(input.ToolCallID, input.ToolName, output, exitCode, isError, durationMs)
+	a.publishStreamEvent(ctx, publish, finishEvent)
+
+	if _, err := a.eventStore.Append(ctx, sessionID, runID, finishEvent); err != nil {
 		a.logger.Warn("ToolExecStreamActivity - append finish event: %v", err)
 	}
 
@@ -458,8 +496,11 @@ func (a *AgentActivities) ToolExecStreamActivity(ctx context.Context, input Tool
 	}, nil
 }
 
-// FinishStreamActivity writes the AgentRunFinish event to the EventStore.
+// FinishStreamActivity writes the AgentRunFinish event to the EventStore,
+// mirrored on the data plane (fail-open).
 func (a *AgentActivities) FinishStreamActivity(ctx context.Context, input FinishStreamInput) error {
+	a.publishStreamEvent(ctx, a.newPublishWriter(input.AccountID, input.SessionID, input.RunID), input.Event)
+
 	_, err := a.eventStore.Append(ctx, input.SessionID, input.RunID, input.Event)
 
 	return err
@@ -468,16 +509,24 @@ func (a *AgentActivities) FinishStreamActivity(ctx context.Context, input Finish
 // ——— Internal helpers ———
 
 // eventStoreWriter implements usecase.StreamEventWriter by appending to EventStore.
+// When a data-plane publisher is configured it mirrors each event onto the AG-UI
+// bus first (fail-open: a bus hiccup never fails the append).
 // written tracks the number of deltas delivered so the enclosing activity can
 // report stream progress in its heartbeats.
 type eventStoreWriter struct {
 	store     stream.EventStore
 	sessionID string
 	runID     string
+	publish   *streamadapter.PublishWriter
 	written   atomic.Int64
 }
 
 func (w *eventStoreWriter) WriteEvent(ctx context.Context, event entity.StreamEvent) error {
+	if w.publish != nil {
+		//nolint:errcheck // fail-open: the writer always returns nil by contract.
+		_ = w.publish.WriteEvent(ctx, event)
+	}
+
 	_, err := w.store.Append(ctx, w.sessionID, w.runID, event)
 	if err == nil {
 		w.written.Add(1)
@@ -486,8 +535,38 @@ func (w *eventStoreWriter) WriteEvent(ctx context.Context, event entity.StreamEv
 	return err
 }
 
+// flush closes any open AG-UI message so a stream that ends without a
+// following non-content event still terminates its message on the timeline.
+func (w *eventStoreWriter) flush(ctx context.Context) {
+	if w.publish != nil {
+		w.publish.Flush(ctx)
+	}
+}
+
+// newPublishWriter builds the per-run data-plane writer for the streaming
+// activities. It returns nil when no publisher is configured — callers must
+// guard with publishStreamEvent. The channel tenant falls back to "default"
+// when the account is blank (single-tenant runs get a deterministic channel).
+func (a *AgentActivities) newPublishWriter(accountID, sessionID, runID string) *streamadapter.PublishWriter {
+	if a.streamPub == nil {
+		return nil
+	}
+
+	return streamadapter.NewPublishWriter(a.streamPub, streamadapter.HandleForRun(accountID, runID), sessionID, runID, a.logger)
+}
+
+// publishStreamEvent mirrors one runtime event onto the data plane, fail-open.
+// A nil writer (no publisher configured) is a no-op.
+func (a *AgentActivities) publishStreamEvent(ctx context.Context, w *streamadapter.PublishWriter, ev entity.StreamEvent) {
+	if w != nil {
+		//nolint:errcheck // fail-open: the writer always returns nil by contract.
+		_ = w.WriteEvent(ctx, ev)
+	}
+}
+
 // FinishStreamInput is the input for the streaming finish activity.
 type FinishStreamInput struct {
+	AccountID string
 	SessionID string
 	RunID     string
 	Event     entity.StreamEvent

@@ -173,6 +173,7 @@ func executeStreamToolCalls(
 
 		var toolResult ToolOutput
 		if err := workflow.ExecuteActivity(ctx, ToolExecStreamActivityName, ToolInput{
+			AccountID:  input.AccountID,
 			RunID:      input.RunID,
 			ToolCallID: tc.ID,
 			ToolName:   tc.Function.Name,
@@ -199,6 +200,7 @@ func finishStreamRound(ctx workflow.Context, input *InitStreamInput, llmResult L
 	}
 
 	if err := workflow.ExecuteActivity(ctx, FinishStreamActivityName, FinishStreamInput{
+		AccountID: input.AccountID,
 		SessionID: input.SessionID,
 		RunID:     input.RunID,
 		Event:     entity.NewAgentRunFinishEvent(llmResult.FinishReason, usage),
@@ -212,6 +214,7 @@ func finishStreamRound(ctx workflow.Context, input *InitStreamInput, llmResult L
 // finishStreamMaxRounds records the finish event when the max round limit is reached.
 func finishStreamMaxRounds(ctx workflow.Context, input *InitStreamInput) error {
 	return workflow.ExecuteActivity(ctx, FinishStreamActivityName, FinishStreamInput{
+		AccountID: input.AccountID,
 		SessionID: input.SessionID,
 		RunID:     input.RunID,
 		Event:     entity.NewAgentRunFinishEvent("max_rounds", nil),

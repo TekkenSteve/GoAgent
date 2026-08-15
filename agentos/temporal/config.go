@@ -150,4 +150,18 @@ type WorkerConfig struct {
 
 	RegisterEnvTools      bool
 	EnsureDefaultTemplate bool
+
+	// StreamCentrifugo configures the Centrifugo data-plane bus the streaming
+	// activities mirror their AG-UI timeline onto. Leave empty to keep the
+	// runtime pure-Redis (no data-plane mirror). Requires a $agentos:run:*
+	// namespace with history_size/history_ttl on the server so publications
+	// carry replayable offsets.
+	StreamCentrifugo StreamCentrifugoConfig
+}
+
+// StreamCentrifugoConfig is the data-plane transport for the AG-UI timeline.
+// Empty BaseURL disables the publisher.
+type StreamCentrifugoConfig struct {
+	BaseURL string
+	APIKey  string
 }
