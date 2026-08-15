@@ -69,6 +69,7 @@ func TestEventHelpers(t *testing.T) {
 	}{
 		{"run started", func() *Event { return NewRunStarted("t", "r") }, EventRunStarted},
 		{"run finished", func() *Event { return NewRunFinished("t", "r") }, EventRunFinished},
+		{"run canceled", func() *Event { return NewRunCancelled("t", "r") }, EventRunCancelled},
 		{"step started", func() *Event { return NewStepStarted("t", "r", 2, 1) }, EventStepStarted},
 		{"tool call args", func() *Event { return NewToolCallArgs("t", "r", "c1", `{"q":"`) }, EventToolCallArgs},
 		{"tool call error", func() *Event { return NewToolCallError("t", "r", "c1", errTestToolFailure) }, EventToolCallError},
@@ -113,7 +114,7 @@ func TestIsMilestone(t *testing.T) {
 	t.Parallel()
 
 	milestones := []EventType{
-		EventRunStarted, EventRunFinished, EventRunError,
+		EventRunStarted, EventRunFinished, EventRunError, EventRunCancelled,
 		EventStepStarted, EventStepFinished,
 		EventTextMessageEnd,
 		EventToolCallStart, EventToolCallResult, EventToolCallError,

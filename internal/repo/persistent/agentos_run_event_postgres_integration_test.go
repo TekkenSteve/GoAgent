@@ -7,6 +7,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"reflect"
 	"testing"
 	"time"
 
@@ -137,6 +138,100 @@ VALUES ($1, 3, $2, 'run.started', NOW())`, "other-"+runID, runID+":1"); err == n
 	if _, err := pg.Pool.Exec(ctx, `DELETE FROM agentos_run_events WHERE run_id = $1 AND sequence = 1`, runID); err == nil {
 		t.Fatal("direct delete succeeded, want append-only trigger rejection")
 	}
+}
+
+// TestAgentOSRunEventPostgresListRunEvents locks the run history read API: the
+// sequence-ordered replay, the after cursor, the default/max limit bounds, and
+// the full field backfill (including payload JSON).
+func TestAgentOSRunEventPostgresListRunEvents(t *testing.T) {
+	t.Parallel()
+
+	ctx, pg, suffix := newAgentOSRunEventPostgresIntegrationDB(t)
+
+	repo := NewAgentOSRunEventRepo(pg)
+	runID := "run-history-" + suffix
+
+	base := time.Date(2026, 8, 15, 12, 0, 0, 0, time.UTC)
+	for i, ev := range []*agentoscore.Event{
+		{EventType: agentoscore.EventRunStarted, RunID: runID, ThreadID: "sess-1", Sequence: 1, Timestamp: base, Source: "$agentos:run:acme:" + runID, Payload: map[string]any{"agentName": "coder"}},
+		{EventType: agentoscore.EventToolCallStarted, RunID: runID, Sequence: 2, Timestamp: base.Add(time.Second), Payload: map[string]any{}},
+		{EventType: agentoscore.EventRunCompleted, RunID: runID, Sequence: 3, Timestamp: base.Add(2 * time.Second), Payload: map[string]any{"usage": map[string]any{"total_tokens": 30}}},
+	} {
+		if err := repo.AppendRunEvent(ctx, ev); err != nil {
+			t.Fatalf("AppendRunEvent %d: %v", i, err)
+		}
+	}
+
+	// Full read: all three milestones in sequence order, fields backfilled.
+	events, err := repo.ListRunEvents(ctx, runID, 0, 0)
+	if err != nil {
+		t.Fatalf("ListRunEvents: %v", err)
+	}
+	if len(events) != 3 {
+		t.Fatalf("len = %d, want 3", len(events))
+	}
+
+	want := []agentoscore.Event{
+		{EventID: runID + ":1", EventType: agentoscore.EventRunStarted, RunID: runID, ThreadID: "sess-1", Sequence: 1, Timestamp: base, Source: "$agentos:run:acme:" + runID, Payload: map[string]any{"agentName": "coder"}},
+		{EventID: runID + ":2", EventType: agentoscore.EventToolCallStarted, RunID: runID, Sequence: 2, Timestamp: base.Add(time.Second), Payload: map[string]any{}},
+		{EventID: runID + ":3", EventType: agentoscore.EventRunCompleted, RunID: runID, Sequence: 3, Timestamp: base.Add(2 * time.Second), Payload: map[string]any{"usage": map[string]any{"total_tokens": float64(30)}}},
+	}
+	for i := range want {
+		got := events[i]
+		if got.EventID != want[i].EventID || got.EventType != want[i].EventType || got.RunID != want[i].RunID ||
+			got.ThreadID != want[i].ThreadID || got.Sequence != want[i].Sequence || !got.Timestamp.Equal(want[i].Timestamp) ||
+			got.Source != want[i].Source {
+			t.Fatalf("events[%d] = %#v, want %#v", i, got, want[i])
+		}
+		if !reflect.DeepEqual(got.Payload, want[i].Payload) {
+			t.Fatalf("events[%d] payload = %#v, want %#v", i, got.Payload, want[i].Payload)
+		}
+	}
+
+	// The after cursor resumes mid-timeline.
+	events, err = repo.ListRunEvents(ctx, runID, 1, 0)
+	if err != nil {
+		t.Fatalf("ListRunEvents after=1: %v", err)
+	}
+	if len(events) != 2 || events[0].Sequence != 2 || events[1].Sequence != 3 {
+		t.Fatalf("after=1 returned sequences %v, want [2 3]", sequencesOf(events))
+	}
+
+	// A positive limit bounds the page.
+	events, err = repo.ListRunEvents(ctx, runID, 0, 1)
+	if err != nil {
+		t.Fatalf("ListRunEvents limit=1: %v", err)
+	}
+	if len(events) != 1 || events[0].Sequence != 1 {
+		t.Fatalf("limit=1 returned %d events (first seq %d), want 1 event at seq 1", len(events), events[0].Sequence)
+	}
+
+	// A limit beyond the max is clamped, not an error.
+	events, err = repo.ListRunEvents(ctx, runID, 0, maxRunEventsLimit+100)
+	if err != nil {
+		t.Fatalf("ListRunEvents clamped limit: %v", err)
+	}
+	if len(events) != 3 {
+		t.Fatalf("clamped limit returned %d events, want 3", len(events))
+	}
+
+	// Unknown runs are an empty page, not an error.
+	events, err = repo.ListRunEvents(ctx, "no-such-"+runID, 0, 0)
+	if err != nil {
+		t.Fatalf("ListRunEvents unknown run: %v", err)
+	}
+	if len(events) != 0 {
+		t.Fatalf("unknown run returned %d events, want 0", len(events))
+	}
+}
+
+func sequencesOf(events []agentoscore.Event) []int64 {
+	seqs := make([]int64, len(events))
+	for i := range events {
+		seqs[i] = events[i].Sequence
+	}
+
+	return seqs
 }
 
 func newAgentOSRunEventPostgresIntegrationDB(t *testing.T) (context.Context, *postgres.Postgres, string) {

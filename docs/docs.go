@@ -2126,6 +2126,72 @@ const docTemplate = `{
                 }
             }
         },
+        "/agentos/runs/{run_id}/events/history": {
+            "get": {
+                "description": "Query the durable projected milestone timeline of an AgentOS run.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "agentos"
+                ],
+                "summary": "List AgentOS run event history",
+                "operationId": "agentos-list-run-events",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Run ID",
+                        "name": "run_id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "integer",
+                        "description": "Only return events after this sequence",
+                        "name": "after_sequence",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "description": "Maximum events",
+                        "name": "limit",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "array",
+                            "items": {
+                                "$ref": "#/definitions/github_com_TekkenSteve_GoAgent_agentos_core.Event"
+                            }
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/response.Error"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/response.Error"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/response.Error"
+                        }
+                    }
+                }
+            }
+        },
         "/agentos/runs/{run_id}/signals": {
             "post": {
                 "description": "Send business input such as user.message to an AgentOS run.",
@@ -3785,6 +3851,39 @@ const docTemplate = `{
                 "ControlResume",
                 "ControlCancel"
             ]
+        },
+        "github_com_TekkenSteve_GoAgent_agentos_core.Event": {
+            "type": "object",
+            "properties": {
+                "event_id": {
+                    "type": "string"
+                },
+                "event_type": {
+                    "$ref": "#/definitions/core.EventType"
+                },
+                "payload": {
+                    "type": "object",
+                    "additionalProperties": {}
+                },
+                "process_id": {
+                    "type": "string"
+                },
+                "run_id": {
+                    "type": "string"
+                },
+                "sequence": {
+                    "type": "integer"
+                },
+                "source": {
+                    "type": "string"
+                },
+                "thread_id": {
+                    "type": "string"
+                },
+                "timestamp": {
+                    "type": "string"
+                }
+            }
         },
         "github_com_TekkenSteve_GoAgent_agentos_core.EventType": {
             "type": "string",

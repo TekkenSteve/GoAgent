@@ -33,7 +33,7 @@ func TestAgentOSProcessPlatformRoutesUseRuntime(t *testing.T) {
 
 	runtime := newFakePlatformRuntime()
 	app := fiber.New()
-	NewRoutes(app.Group("/v1"), nil, nil, logger.New("error"), nil, nil, nil, nil, runtime, runtime, runtime)
+	NewRoutes(app.Group("/v1"), nil, nil, logger.New("error"), nil, nil, nil, nil, runtime, runtime, runtime, nil)
 
 	testProcessStartRoute(t, app, runtime)
 	testProcessListRoute(t, app, runtime)
@@ -81,7 +81,7 @@ func TestAgentOSPlanRouteRejectsMissingProjectScope(t *testing.T) {
 	t.Parallel()
 
 	app := fiber.New()
-	NewRoutes(app.Group("/v1"), nil, nil, logger.New("error"), nil, nil, nil, nil, nil, newFakePlanRuntime(), nil)
+	NewRoutes(app.Group("/v1"), nil, nil, logger.New("error"), nil, nil, nil, nil, nil, newFakePlanRuntime(), nil, nil)
 
 	resp := doAgentOSRouteRequest(t, app, http.MethodGet, "/v1/agentos/plans/plan-1/status?account_id=acct-1", "")
 	t.Cleanup(func() {

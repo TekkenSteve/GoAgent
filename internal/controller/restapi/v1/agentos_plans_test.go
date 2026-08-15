@@ -32,7 +32,7 @@ func TestAgentOSPlanRoutesUsePlanRuntime(t *testing.T) {
 
 	planRuntime := newFakePlanRuntime()
 	app := fiber.New()
-	NewRoutes(app.Group("/v1"), nil, nil, logger.New("error"), nil, nil, nil, nil, nil, planRuntime, nil)
+	NewRoutes(app.Group("/v1"), nil, nil, logger.New("error"), nil, nil, nil, nil, nil, planRuntime, nil, nil)
 
 	testPlanStartRoute(t, app, planRuntime)
 	testPlanSignalRoute(t, app, planRuntime)
@@ -404,7 +404,7 @@ func runControlOrSignalConsoleCase(t *testing.T, cases []controlOrSignalCase) {
 
 			planRuntime := newFakePlanRuntime()
 			app := fiber.New()
-			NewRoutes(app.Group("/v1"), nil, nil, logger.New("error"), nil, nil, nil, nil, nil, planRuntime, nil)
+			NewRoutes(app.Group("/v1"), nil, nil, logger.New("error"), nil, nil, nil, nil, nil, planRuntime, nil, nil)
 
 			resp := doAgentOSRouteRequest(t, app, http.MethodPost, tc.route, tc.body)
 			t.Cleanup(func() {
@@ -464,7 +464,7 @@ func TestAgentOSPlanSchemaRouteDoesNotRequirePlanRuntime(t *testing.T) {
 	t.Parallel()
 
 	app := fiber.New()
-	NewRoutes(app.Group("/v1"), nil, nil, logger.New("error"), nil, nil, nil, nil, nil, nil, nil)
+	NewRoutes(app.Group("/v1"), nil, nil, logger.New("error"), nil, nil, nil, nil, nil, nil, nil, nil)
 
 	resp := doAgentOSRouteRequest(t, app, http.MethodGet, "/v1/agentos/plans/schemas/run-plan", "")
 	t.Cleanup(func() {
@@ -506,7 +506,7 @@ func TestAgentOSPlanAuthorRouteDoesNotRequirePlanRuntime(t *testing.T) {
 	t.Parallel()
 
 	app := fiber.New()
-	NewRoutes(app.Group("/v1"), nil, nil, logger.New("error"), nil, nil, nil, nil, nil, nil, nil)
+	NewRoutes(app.Group("/v1"), nil, nil, logger.New("error"), nil, nil, nil, nil, nil, nil, nil, nil)
 
 	resp := doAgentOSRouteRequest(t, app, http.MethodGet, "/v1/agentos/plans/author", "")
 	t.Cleanup(func() {
@@ -555,7 +555,7 @@ func TestAgentOSPlanAuthorRouteEnablesStartWithPlanRuntime(t *testing.T) {
 	t.Parallel()
 
 	app := fiber.New()
-	NewRoutes(app.Group("/v1"), nil, nil, logger.New("error"), nil, nil, nil, nil, nil, newFakePlanRuntime(), nil)
+	NewRoutes(app.Group("/v1"), nil, nil, logger.New("error"), nil, nil, nil, nil, nil, newFakePlanRuntime(), nil, nil)
 
 	resp := doAgentOSRouteRequest(t, app, http.MethodGet, "/v1/agentos/plans/author", "")
 	t.Cleanup(func() {
@@ -589,7 +589,7 @@ func TestAgentOSPlanRoutesDoNotMutateRunningTopology(t *testing.T) {
 	t.Parallel()
 
 	app := fiber.New()
-	NewRoutes(app.Group("/v1"), nil, nil, logger.New("error"), nil, nil, nil, nil, nil, newFakePlanRuntime(), nil)
+	NewRoutes(app.Group("/v1"), nil, nil, logger.New("error"), nil, nil, nil, nil, nil, newFakePlanRuntime(), nil, nil)
 
 	planRoutes := 0
 
@@ -621,7 +621,7 @@ func TestAgentOSPlanRoutesRequireProjectScope(t *testing.T) {
 
 	app := fiber.New()
 	planRuntime := newFakePlanRuntime()
-	NewRoutes(app.Group("/v1"), nil, nil, logger.New("error"), nil, nil, nil, nil, nil, planRuntime, nil)
+	NewRoutes(app.Group("/v1"), nil, nil, logger.New("error"), nil, nil, nil, nil, nil, planRuntime, nil, nil)
 
 	for _, tt := range []struct {
 		name   string
@@ -686,7 +686,7 @@ func TestAgentOSPlanEventRouteStreamsSSE(t *testing.T) {
 
 	planRuntime := newFakePlanRuntime()
 	app := fiber.New()
-	NewRoutes(app.Group("/v1"), nil, nil, logger.New("error"), nil, nil, nil, nil, nil, planRuntime, nil)
+	NewRoutes(app.Group("/v1"), nil, nil, logger.New("error"), nil, nil, nil, nil, nil, planRuntime, nil, nil)
 
 	resp := doAgentOSRouteRequest(t, app, http.MethodGet, "/v1/agentos/plans/plan-1/events?account_id=acct-1&project_id=proj-1&node_id=research&after_sequence=7", "")
 	t.Cleanup(func() {
@@ -762,7 +762,7 @@ func TestAgentOSPlanConsoleRendersRuntimeData(t *testing.T) {
 
 	planRuntime := newFakePlanRuntime()
 	app := fiber.New()
-	NewRoutes(app.Group("/v1"), nil, nil, logger.New("error"), nil, nil, nil, nil, nil, planRuntime, nil)
+	NewRoutes(app.Group("/v1"), nil, nil, logger.New("error"), nil, nil, nil, nil, nil, planRuntime, nil, nil)
 
 	resp := doAgentOSRouteRequest(t, app, http.MethodGet, "/v1/agentos/plans/plan-1/console?account_id=acct-1&project_id=proj-1", "")
 	t.Cleanup(func() {
@@ -827,7 +827,7 @@ func TestAgentOSPlanConsoleRequiresTenantScope(t *testing.T) {
 
 	planRuntime := newFakePlanRuntime()
 	app := fiber.New()
-	NewRoutes(app.Group("/v1"), nil, nil, logger.New("error"), nil, nil, nil, nil, nil, planRuntime, nil)
+	NewRoutes(app.Group("/v1"), nil, nil, logger.New("error"), nil, nil, nil, nil, nil, planRuntime, nil, nil)
 
 	for _, path := range []string{
 		"/v1/agentos/plans/plan-1/console",

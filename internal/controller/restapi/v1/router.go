@@ -20,11 +20,12 @@ func NewRoutes(apiV1Group fiber.Router, t usecase.AgentExecutor, o usecase.Orche
 	agentOSRuntime agentos.Runtime,
 	planRuntime agentos.PlanRuntime,
 	platformRuntime agentosplatform.Runtime,
+	runEventReader RunEventReader,
 ) {
-	r := newV1(t, o, l, cancelWorkflow, signalWorkflow, eventIngest, agentOSRuntime, planRuntime, platformRuntime)
+	r := newV1(t, o, l, cancelWorkflow, signalWorkflow, eventIngest, agentOSRuntime, planRuntime, platformRuntime, runEventReader)
 	registerTemplateRoutes(apiV1Group, m, l)
 	registerOrchestrationRoutes(apiV1Group, r, o)
-	registerAgentOSRoutes(apiV1Group, r, eventIngest, agentOSRuntime, planRuntime, platformRuntime)
+	registerAgentOSRoutes(apiV1Group, r, eventIngest, agentOSRuntime, planRuntime, platformRuntime, runEventReader)
 }
 
 func newV1(
@@ -37,6 +38,7 @@ func newV1(
 	agentOSRuntime agentos.Runtime,
 	planRuntime agentos.PlanRuntime,
 	platformRuntime agentosplatform.Runtime,
+	runEventReader RunEventReader,
 ) *V1 {
 	return &V1{
 		t:              t,
@@ -48,6 +50,7 @@ func newV1(
 		agentOSRuntime:  agentOSRuntime,
 		planRuntime:     planRuntime,
 		platformRuntime: platformRuntime,
+		runEventReader:  runEventReader,
 	}
 }
 
@@ -76,13 +79,14 @@ func registerAgentOSRoutes(
 	agentOSRuntime agentos.Runtime,
 	planRuntime agentos.PlanRuntime,
 	platformRuntime agentosplatform.Runtime,
+	runEventReader RunEventReader,
 ) {
-	registerAgentOSRunRoutes(apiV1Group, r, eventIngest, agentOSRuntime)
+	registerAgentOSRunRoutes(apiV1Group, r, eventIngest, agentOSRuntime, runEventReader)
 	registerAgentOSPlanRoutes(apiV1Group, r, planRuntime)
 	registerAgentOSProcessPlatformRoutes(apiV1Group, r, platformRuntime)
 }
 
-func registerAgentOSRunRoutes(apiV1Group fiber.Router, r *V1, eventIngest *eventing.Service, agentOSRuntime agentos.Runtime) {
+func registerAgentOSRunRoutes(apiV1Group fiber.Router, r *V1, eventIngest *eventing.Service, agentOSRuntime agentos.Runtime, runEventReader RunEventReader) {
 	if eventIngest != nil {
 		apiV1Group.Post("/agentos/runs/:run_id/events", r.ingestAgentOSEvent)
 	}
@@ -92,6 +96,10 @@ func registerAgentOSRunRoutes(apiV1Group fiber.Router, r *V1, eventIngest *event
 		apiV1Group.Get("/agentos/runs/:run_id/status", r.statusAgentOSRun)
 		apiV1Group.Post("/agentos/runs/:run_id/signals", r.signalAgentOSRun)
 		apiV1Group.Post("/agentos/runs/:run_id/control", r.controlAgentOSRun)
+	}
+
+	if runEventReader != nil {
+		apiV1Group.Get("/agentos/runs/:run_id/events/history", r.listAgentOSRunEvents)
 	}
 }
 

@@ -30,7 +30,7 @@ func usage() entity.Usage {
 	return entity.Usage{PromptTokens: 10, CompletionTokens: 20, TotalTokens: 30, Cost: entity.Money(0.05)}
 }
 
-// TestMapEvent is the 21-case table: every runtime event kind maps to the
+// TestMapEvent is the 22-case table: every runtime event kind maps to the
 // expected AG-UI wire type, carries the right milestone/transient
 // classification (so ProjectToCore reduces exactly the durable set), fills the
 // thread/run scope, and always produces a wire-valid event. Each row pins the
@@ -58,6 +58,7 @@ func TestMapEvent(t *testing.T) {
 		{name: "tool exec finish error", event: &entity.ToolExecFinishEvent{BaseEvent: base(), ToolCallID: "call-1", Output: "boom", ExitCode: 1, IsError: true}, wantType: stream.EventToolCallError, milestone: true, want: map[string]any{stream.FieldCallID: "call-1", stream.FieldError: map[string]any{"message": "boom"}, stream.FieldMeta: map[string]any{"exit_code": 1, "duration_ms": int64(0)}}},
 		{name: "agent run start", event: &entity.AgentRunStartEvent{BaseEvent: base(), AgentName: "coder"}, wantType: stream.EventRunStarted, milestone: true, want: map[string]any{"agentName": "coder"}},
 		{name: "agent run finish", event: &entity.AgentRunFinishEvent{BaseEvent: base(), FinishReason: "stop", Usage: new(usage())}, wantType: stream.EventRunFinished, milestone: true, want: map[string]any{"finishReason": "stop", stream.FieldUsage: map[string]any{"prompt_tokens": 10, "completion_tokens": 20, "total_tokens": 30, "cost": entity.Money(0.05)}}},
+		{name: "agent run canceled", event: &entity.AgentRunCancelledEvent{BaseEvent: base()}, wantType: stream.EventRunCancelled, milestone: true, want: map[string]any{}},
 		{name: "prep stage", event: &entity.PrepStageEvent{BaseEvent: base(), Stage: "ready", Progress: 100}, wantType: stream.EventCustom, want: map[string]any{stream.FieldName: customSystemPrefix + "prep_stage", "stage": "ready", "progress": 100}},
 		{name: "context usage", event: &entity.ContextUsageEvent{BaseEvent: base(), MessageCount: 3, Compressed: new(true)}, wantType: stream.EventCustom, want: map[string]any{stream.FieldName: customSystemPrefix + "context_usage", "messageCount": 3, "compressed": true}},
 		{name: "state delta", event: &entity.StateDeltaEvent{BaseEvent: base(), Key: "mode", Value: "fast"}, wantType: stream.EventCustom, want: map[string]any{stream.FieldName: customSystemPrefix + "state_delta", "key": "mode", "value": "fast"}},

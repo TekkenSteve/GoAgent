@@ -294,3 +294,83 @@ func TestRunEventProjectorNewRequiresSubscriberAndStore(t *testing.T) {
 	_, err = New(t.Context(), Config{Subscriber: memstream.New(), Store: nil})
 	require.ErrorIs(t, err, errRunProjectionStoreRequired)
 }
+
+// TestRunEventProjectorCancelledMilestoneSelfCloses locks the cancel exit path:
+// a run that publishes a canceled milestone closes its projection exactly like
+// a completed or failed one, so a canceled run never lingers as a live drain.
+func TestRunEventProjectorCancelledMilestoneSelfCloses(t *testing.T) {
+	t.Parallel()
+
+	bus := memstream.New()
+	handle := runHandle("run-8")
+	store := &fakeRunEventStore{}
+	p := newProjector(t, bus, store)
+
+	require.NoError(t, p.EnsureSubscribed(t.Context(), "run-8", handle))
+	require.NoError(t, bus.Publish(t.Context(), handle, stream.NewRunStarted("sess-1", "run-8")))
+	require.NoError(t, bus.Publish(t.Context(), handle, stream.NewRunCancelled("sess-1", "run-8")))
+
+	require.Eventually(t, func() bool { return store.len() == 2 }, 2*time.Second, 10*time.Millisecond)
+	require.Equal(t, []agentoscore.EventType{
+		agentoscore.EventRunStarted,
+		agentoscore.EventRunCancelled,
+	}, store.eventTypes())
+
+	require.Eventually(t, func() bool {
+		p.mu.Lock()
+		defer p.mu.Unlock()
+
+		return len(p.subs) == 0
+	}, 2*time.Second, 10*time.Millisecond)
+}
+
+// TestRunEventProjectorReapsStaleProjection locks the stale reaper fallback for
+// runs that exit without a terminal milestone: a projection idle past the
+// timeout is closed (its drain unwinds) even though no terminal event ever
+// arrives, and the next publish re-attaches from the persisted cursor.
+func TestRunEventProjectorReapsStaleProjection(t *testing.T) {
+	t.Parallel()
+
+	bus := memstream.New()
+	handle := runHandle("run-9")
+	store := &fakeRunEventStore{}
+
+	p, err := New(t.Context(), Config{
+		Subscriber:            bus,
+		Store:                 store,
+		ReapInterval:          20 * time.Millisecond,
+		ProjectionIdleTimeout: 50 * time.Millisecond,
+	})
+	require.NoError(t, err)
+	t.Cleanup(p.Close)
+
+	require.NoError(t, p.EnsureSubscribed(t.Context(), "run-9", handle))
+
+	require.Eventually(t, func() bool {
+		p.mu.Lock()
+		defer p.mu.Unlock()
+
+		return len(p.subs) == 1
+	}, 2*time.Second, 10*time.Millisecond)
+
+	// Age the projection past the idle timeout so the next reap closes it.
+	p.mu.Lock()
+	p.subs["run-9"].lastActivity.Store(0)
+	p.mu.Unlock()
+
+	require.Eventually(t, func() bool {
+		p.mu.Lock()
+		defer p.mu.Unlock()
+
+		return len(p.subs) == 0
+	}, 2*time.Second, 10*time.Millisecond)
+
+	// Re-attach is fail-open: the next publish resumes from the persisted
+	// cursor (nothing had been projected before the reap, so both milestones
+	// land once).
+	require.NoError(t, p.EnsureSubscribed(t.Context(), "run-9", handle))
+	require.NoError(t, bus.Publish(t.Context(), handle, stream.NewRunStarted("sess-1", "run-9")))
+	require.NoError(t, bus.Publish(t.Context(), handle, stream.NewRunCancelled("sess-1", "run-9")))
+
+	require.Eventually(t, func() bool { return store.len() == 2 }, 2*time.Second, 10*time.Millisecond)
+}

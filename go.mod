@@ -22,7 +22,8 @@ require (
 	github.com/aws/aws-sdk-go-v2/service/s3 v1.97.3
 	github.com/aws/smithy-go v1.25.1
 	github.com/caarlos0/env/v11 v11.4.0
-	github.com/fasthttp/websocket v1.5.12
+	github.com/centrifugal/centrifuge v0.35.0
+	github.com/centrifugal/centrifuge-go v0.10.12
 	github.com/go-playground/validator/v10 v10.30.2
 	github.com/goccy/go-json v0.10.6
 	github.com/gofiber/fiber/v2 v2.52.12
@@ -154,8 +155,6 @@ require (
 	github.com/catenacyber/perfsprint v0.10.1 // indirect
 	github.com/ccojocar/zxcvbn-go v1.0.4 // indirect
 	github.com/cenkalti/backoff/v4 v4.3.0 // indirect
-	github.com/centrifugal/centrifuge v0.35.0 // indirect
-	github.com/centrifugal/centrifuge-go v0.10.12 // indirect
 	github.com/centrifugal/protocol v0.16.0 // indirect
 	github.com/cespare/xxhash/v2 v2.3.0 // indirect
 	github.com/charithe/durationcheck v0.0.11 // indirect
@@ -379,7 +378,6 @@ require (
 	github.com/santhosh-tekuri/jsonschema/v6 v6.0.2 // indirect
 	github.com/sashamelentyev/interfacebloat v1.1.0 // indirect
 	github.com/sashamelentyev/usestdlibvars v1.29.0 // indirect
-	github.com/savsgio/gotils v0.0.0-20250408102913-196191ec6287 // indirect
 	github.com/securego/gosec/v2 v2.24.8-0.20260309165252-619ce2117e08 // indirect
 	github.com/segmentio/asm v1.2.0 // indirect
 	github.com/segmentio/encoding v0.4.1 // indirect

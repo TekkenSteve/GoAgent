@@ -18,9 +18,10 @@ type EventType string
 
 const (
 	// Run lifecycle.
-	EventRunStarted  EventType = "RUN_STARTED"
-	EventRunFinished EventType = "RUN_FINISHED"
-	EventRunError    EventType = "RUN_ERROR"
+	EventRunStarted   EventType = "RUN_STARTED"
+	EventRunFinished  EventType = "RUN_FINISHED"
+	EventRunError     EventType = "RUN_ERROR"
+	EventRunCancelled EventType = "RUN_CANCELLED" //nolint:misspell // wire value mirrors core's run.cancelled spelling
 
 	// Step lifecycle. STEP_* events may carry turn/step numbers in payload
 	// (see FieldTurn / FieldStep) — the minimal extension that gives AG-UI
@@ -139,7 +140,7 @@ func (e *Event) Validate() error {
 // and their authoritative copy is already its durable store.
 func IsMilestone(typ EventType) bool {
 	switch typ {
-	case EventRunStarted, EventRunFinished, EventRunError,
+	case EventRunStarted, EventRunFinished, EventRunError, EventRunCancelled,
 		EventStepStarted, EventStepFinished,
 		EventTextMessageEnd,
 		EventToolCallStart, EventToolCallResult, EventToolCallError:
@@ -165,7 +166,7 @@ func IsTransient(typ EventType) bool {
 // in a stable order for docs and SDK generation.
 func KnownEventTypes() []EventType {
 	return []EventType{
-		EventRunStarted, EventRunFinished, EventRunError,
+		EventRunStarted, EventRunFinished, EventRunError, EventRunCancelled,
 		EventStepStarted, EventStepFinished,
 		EventTextMessageStart, EventTextMessageContent, EventTextMessageEnd,
 		EventReasoningStart, EventReasoningMessageStart, EventReasoningMessageContent, EventReasoningMessageEnd,
@@ -194,6 +195,13 @@ func NewRunFinished(threadID, runID string) *Event {
 // NewRunError closes a run's timeline with a failure.
 func NewRunError(threadID, runID string, err error) *Event {
 	return NewEvent(EventRunError).SetThread(runID, threadID).Set(FieldError, errorValue(err))
+}
+
+// NewRunCancelled closes a run's timeline as canceled. The projector treats it
+// as a terminal milestone, so a canceled run never lingers as a live
+// projection.
+func NewRunCancelled(threadID, runID string) *Event {
+	return NewEvent(EventRunCancelled).SetThread(runID, threadID)
 }
 
 // NewStepStarted opens one model call (turn/step numbering is the minimal

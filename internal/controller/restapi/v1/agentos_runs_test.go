@@ -22,7 +22,7 @@ func TestAgentOSRunRoutesUseRuntimeControlPlane(t *testing.T) {
 
 	runtime := &fakeAgentOSRuntime{}
 	app := fiber.New()
-	NewRoutes(app.Group("/v1"), nil, nil, logger.New("error"), nil, nil, nil, nil, runtime, nil, nil)
+	NewRoutes(app.Group("/v1"), nil, nil, logger.New("error"), nil, nil, nil, nil, runtime, nil, nil, nil)
 
 	startBody := `{"run_id": "run-1", "thread_id": "thread-1", "account_id": "acct-1", "backend": {"kind": "temporal_external", "name": "langgraph-main"}, "input": {"task": "plan"}}`
 

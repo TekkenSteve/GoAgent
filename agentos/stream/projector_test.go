@@ -22,6 +22,7 @@ func TestProjectToCore(t *testing.T) {
 		{"run started", NewRunStarted("t-1", "run-1"), agentoscore.EventRunStarted, true},
 		{"run finished", NewRunFinished("t-1", "run-1"), agentoscore.EventRunCompleted, true},
 		{"run error", NewRunError("t-1", "run-1", nil), agentoscore.EventRunFailed, true},
+		{"run canceled", NewRunCancelled("t-1", "run-1"), agentoscore.EventRunCancelled, true},
 		{"step started", NewStepStarted("t-1", "run-1", 1, 1), agentoscore.EventAgentStepStarted, true},
 		{"step finished", NewStepFinished("t-1", "run-1", 1, 1), agentoscore.EventAgentStepCompleted, true},
 		{"message end", NewTextMessageEnd("t-1", "run-1", "m-1"), agentoscore.EventAgentMessageCompleted, true},

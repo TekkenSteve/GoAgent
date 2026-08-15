@@ -32,4 +32,5 @@ type V1 struct {
 	agentOSRuntime  agentos.Runtime
 	planRuntime     agentos.PlanRuntime
 	platformRuntime agentosplatform.Runtime
+	runEventReader  RunEventReader
 }

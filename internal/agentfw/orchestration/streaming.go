@@ -38,6 +38,16 @@ func StreamAgentWorkflow(ctx workflow.Context, input *InitStreamInput) error {
 	signalCh := workflow.GetSignalChannel(ctx, AgentCommandSignal)
 	ctx = setupStreamActivityOptions(ctx, &input.TaskQueues)
 
+	// A cancel exit publishes the terminal canceled milestone via a deferred
+	// emit; the normal finish and error paths leave canceled false.
+	canceled := false
+
+	defer func() {
+		if canceled {
+			emitStreamCancelled(ctx, input)
+		}
+	}()
+
 	// Init phase: write start events + Prep
 	var initResult InitStreamOutput
 	if err := workflow.ExecuteActivity(ctx, InitStreamActivityName, input).Get(ctx, &initResult); err != nil {
@@ -56,9 +66,11 @@ func StreamAgentWorkflow(ctx workflow.Context, input *InitStreamInput) error {
 
 	// Agent loop
 	for round := range maxToolRounds {
-		if canceled, err := checkStreamSignal(signalCh, ctx); err != nil {
+		if c, err := checkStreamSignal(signalCh, ctx); err != nil {
 			_ = err
-		} else if canceled {
+		} else if c {
+			canceled = true
+
 			return nil
 		}
 
@@ -66,7 +78,7 @@ func StreamAgentWorkflow(ctx workflow.Context, input *InitStreamInput) error {
 		// message lifecycle for the streaming path as well.
 		messages = entity.RepairToolCallPairing(messages)
 
-		done, err := processStreamRound(ctx, signalCh, input, &messages, allTools, domainTools, round)
+		done, err := processStreamRound(ctx, signalCh, input, &messages, allTools, domainTools, round, &canceled)
 		if err != nil {
 			return err
 		}
@@ -110,6 +122,7 @@ func processStreamRound(
 	allTools []entity.ToolDef,
 	domainTools []entity.ToolDef,
 	round int,
+	canceled *bool,
 ) (bool, error) {
 	// Streaming LLM call — writes delta events to EventStore
 	var llmResult LLMStreamOutput
@@ -136,7 +149,7 @@ func processStreamRound(
 		return finishStreamRound(ctx, input, llmResult), nil
 	}
 
-	return executeStreamToolCalls(ctx, signalCh, input, messages, llmResult.ToolCalls, domainTools)
+	return executeStreamToolCalls(ctx, signalCh, input, messages, llmResult.ToolCalls, domainTools, canceled)
 }
 
 // executeStreamToolCalls runs tool calls for the streaming path, intercepting
@@ -148,11 +161,14 @@ func executeStreamToolCalls(
 	messages *[]entity.Message,
 	toolCalls []entity.ToolCall,
 	domainTools []entity.ToolDef,
+	canceled *bool,
 ) (bool, error) {
 	for _, tc := range toolCalls {
-		if canceled, err := checkStreamSignal(signalCh, ctx); err != nil {
+		if c, err := checkStreamSignal(signalCh, ctx); err != nil {
 			_ = err
-		} else if canceled {
+		} else if c {
+			*canceled = true
+
 			return true, nil
 		}
 
@@ -219,6 +235,24 @@ func finishStreamMaxRounds(ctx workflow.Context, input *InitStreamInput) error {
 		RunID:     input.RunID,
 		Event:     entity.NewAgentRunFinishEvent("max_rounds", nil),
 	}).Get(ctx, nil)
+}
+
+// emitStreamCancelled publishes and persists the terminal canceled milestone
+// when a run exits via the agent-command cancel signal. It reuses
+// FinishStreamActivity so a canceled run lands in the EventStore exactly like
+// a finished or failed one, and its first publish attaches the run-event
+// projector, which self-closes once the canceled milestone is projected.
+func emitStreamCancelled(ctx workflow.Context, input *InitStreamInput) {
+	var out struct{}
+
+	if err := workflow.ExecuteActivity(ctx, FinishStreamActivityName, FinishStreamInput{
+		AccountID: input.AccountID,
+		SessionID: input.SessionID,
+		RunID:     input.RunID,
+		Event:     entity.NewAgentRunCancelledEvent(),
+	}).Get(ctx, &out); err != nil {
+		_ = err
+	}
 }
 
 // checkStreamSignal does a non-blocking read on the signal channel.

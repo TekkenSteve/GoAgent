@@ -38,7 +38,8 @@ func ProjectToCore(handle *Handle, stored *StoredEvent) (*agentoscore.Event, boo
 // frontend saw, minus the bytes. It is an if-chain rather than a switch so
 // the exhaustive guard on IsMilestone stays the single classification point
 // for new event types; anything unlisted here is transparently transient.
-func milestoneCoreType(typ EventType) (agentoscore.EventType, bool) {
+// The run-lifecycle arm is delegated to runLifecycleCoreType (gocyclo).
+func runLifecycleCoreType(typ EventType) (agentoscore.EventType, bool) {
 	if typ == EventRunStarted {
 		return agentoscore.EventRunStarted, true
 	}
@@ -49,6 +50,18 @@ func milestoneCoreType(typ EventType) (agentoscore.EventType, bool) {
 
 	if typ == EventRunError {
 		return agentoscore.EventRunFailed, true
+	}
+
+	if typ == EventRunCancelled {
+		return agentoscore.EventRunCancelled, true
+	}
+
+	return "", false
+}
+
+func milestoneCoreType(typ EventType) (agentoscore.EventType, bool) {
+	if coreType, ok := runLifecycleCoreType(typ); ok {
+		return coreType, true
 	}
 
 	if typ == EventStepStarted {

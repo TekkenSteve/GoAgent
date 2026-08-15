@@ -37,6 +37,22 @@ INSERT INTO agentos_run_events (
     payload
 ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)
 ON CONFLICT (run_id, sequence) DO NOTHING`
+
+	// agentosRunEventListSQL reads a run's projected milestones in sequence
+	// order, resuming after a cursor. This is the run's authoritative history:
+	// the same durable timeline the projector wrote, minus the transient byte
+	// deltas that only ever live in the bus history window.
+	agentosRunEventListSQL = `
+SELECT event_id, event_type, thread_id, process_id, source, occurred_at, payload, sequence
+FROM agentos_run_events
+WHERE run_id = $1 AND sequence > $2
+ORDER BY sequence
+LIMIT $3`
+
+	// defaultRunEventsLimit and maxRunEventsLimit bound history reads so one
+	// request can never page an entire timeline at once.
+	defaultRunEventsLimit = 100
+	maxRunEventsLimit     = 500
 )
 
 // AgentOSRunEventRepo persists the projected AgentOS run milestone timeline —
@@ -115,4 +131,60 @@ func (r *AgentOSRunEventRepo) AppendRunEvent(ctx context.Context, ev *agentoscor
 	}
 
 	return nil
+}
+
+// ListRunEvents returns a run's projected milestones in sequence order,
+// resuming after the given cursor. A limit of 0 applies the default; a limit
+// beyond the maximum is clamped. Unknown runs return an empty slice.
+func (r *AgentOSRunEventRepo) ListRunEvents(ctx context.Context, runID string, after int64, limit int) ([]agentoscore.Event, error) {
+	if limit <= 0 {
+		limit = defaultRunEventsLimit
+	} else if limit > maxRunEventsLimit {
+		limit = maxRunEventsLimit
+	}
+
+	rows, err := r.Pool.Query(ctx, agentosRunEventListSQL, runID, after, limit)
+	if err != nil {
+		return nil, fmt.Errorf("AgentOSRunEventRepo - ListRunEvents - query: %w", err)
+	}
+	defer rows.Close()
+
+	events := make([]agentoscore.Event, 0, limit)
+
+	for rows.Next() {
+		var (
+			ev          agentoscore.Event
+			eventType   string
+			payloadJSON []byte
+		)
+
+		if err := rows.Scan(
+			&ev.EventID,
+			&eventType,
+			&ev.ThreadID,
+			&ev.ProcessID,
+			&ev.Source,
+			&ev.Timestamp,
+			&payloadJSON,
+			&ev.Sequence,
+		); err != nil {
+			return nil, fmt.Errorf("AgentOSRunEventRepo - ListRunEvents - scan: %w", err)
+		}
+
+		ev.EventType = agentoscore.EventType(eventType)
+		if len(payloadJSON) > 0 {
+			if err := json.Unmarshal(payloadJSON, &ev.Payload); err != nil {
+				return nil, fmt.Errorf("AgentOSRunEventRepo - ListRunEvents - unmarshal payload: %w", err)
+			}
+		}
+
+		ev.RunID = runID
+		events = append(events, ev)
+	}
+
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("AgentOSRunEventRepo - ListRunEvents - rows: %w", err)
+	}
+
+	return events, nil
 }

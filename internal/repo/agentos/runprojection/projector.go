@@ -10,6 +10,7 @@ import (
 	"errors"
 	"fmt"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	agentoscore "github.com/TekkenSteve/GoAgent/agentos/core"
@@ -35,6 +36,13 @@ const (
 	// appendTimeout bounds one durable append so a hung database stalls the
 	// drain instead of silently dropping the rest of the run's timeline.
 	appendTimeout = 5 * time.Second
+
+	// defaultReapInterval is how often the watcher scans for stale projections.
+	defaultReapInterval = time.Minute
+
+	// defaultProjectionIdleTimeout is how long a projection may sit without a
+	// drain event before the reaper closes it as stale.
+	defaultProjectionIdleTimeout = 10 * time.Minute
 )
 
 // Controller is what the streaming activities hold: an idempotent attach to a
@@ -59,21 +67,33 @@ type Config struct {
 	Store RunEventStore
 	// Logger is optional; nil drops projection diagnostics.
 	Logger logger.Interface
+	// ReapInterval controls how often the watcher scans for stale projections.
+	// Zero applies defaultReapInterval.
+	ReapInterval time.Duration
+	// ProjectionIdleTimeout is how long a projection may sit without a drain
+	// event before it is reaped. Zero applies defaultProjectionIdleTimeout.
+	ProjectionIdleTimeout time.Duration
 }
 
 // runProjection is one run's live subscription and the handle it reads.
 type runProjection struct {
 	handle *stream.Handle
 	sub    *stream.Subscription
+
+	// lastActivity is the UnixNano timestamp of the projection's last drain
+	// event, written lock-free from register and drain, read by reap.
+	lastActivity atomic.Int64
 }
 
 // RunEventProjector attaches to run channels on demand and drains their
 // milestones into the durable store. Shutdown mirrors the plan metrics loop:
 // cancel, then wait for every drain to release its subscription.
 type RunEventProjector struct {
-	sub    stream.Subscriber
-	store  RunEventStore
-	logger logger.Interface
+	sub          stream.Subscriber
+	store        RunEventStore
+	logger       logger.Interface
+	reapInterval time.Duration
+	idleTimeout  time.Duration
 
 	ctx    context.Context
 	cancel context.CancelFunc
@@ -98,15 +118,27 @@ func New(parent context.Context, cfg Config) (*RunEventProjector, error) {
 		return nil, errRunProjectionStoreRequired
 	}
 
+	reapInterval := cfg.ReapInterval
+	if reapInterval <= 0 {
+		reapInterval = defaultReapInterval
+	}
+
+	idleTimeout := cfg.ProjectionIdleTimeout
+	if idleTimeout <= 0 {
+		idleTimeout = defaultProjectionIdleTimeout
+	}
+
 	ctx, cancel := context.WithCancel(parent)
 	p := &RunEventProjector{
-		sub:    cfg.Subscriber,
-		store:  cfg.Store,
-		logger: cfg.Logger,
-		ctx:    ctx,
-		cancel: cancel,
-		done:   make(chan struct{}),
-		subs:   make(map[string]*runProjection),
+		sub:          cfg.Subscriber,
+		store:        cfg.Store,
+		logger:       cfg.Logger,
+		reapInterval: reapInterval,
+		idleTimeout:  idleTimeout,
+		ctx:          ctx,
+		cancel:       cancel,
+		done:         make(chan struct{}),
+		subs:         make(map[string]*runProjection),
 	}
 
 	go p.run(ctx)
@@ -177,6 +209,7 @@ func (p *RunEventProjector) register(runID string, handle *stream.Handle, sub *s
 	}
 
 	rp := &runProjection{handle: handle, sub: sub}
+	rp.lastActivity.Store(time.Now().UnixNano())
 	p.subs[runID] = rp
 	p.wg.Add(1)
 
@@ -190,6 +223,8 @@ func (p *RunEventProjector) drain(runID string, rp *runProjection) {
 	defer p.wg.Done()
 
 	for stored := range rp.sub.C {
+		rp.lastActivity.Store(time.Now().UnixNano())
+
 		core, ok := stream.ProjectToCore(rp.handle, &stored)
 		if !ok {
 			continue
@@ -247,13 +282,30 @@ func (p *RunEventProjector) unregister(runID string, rp *runProjection) {
 	}
 }
 
-// run watches for shutdown, closes every live subscription, and waits for all
-// drains to exit.
+// run watches for shutdown, periodically reaps stale projections, and on
+// shutdown closes every live subscription and waits for all drains to exit.
 func (p *RunEventProjector) run(ctx context.Context) {
 	defer close(p.done)
 
-	<-ctx.Done()
+	ticker := time.NewTicker(p.reapInterval)
+	defer ticker.Stop()
 
+	for {
+		select {
+		case <-ctx.Done():
+			p.closeAllSubs()
+
+			return
+		case <-ticker.C:
+			p.reap()
+		}
+	}
+}
+
+// closeAllSubs closes every live projection subscription so their drains
+// unwind, then waits for the drains to exit. Called once from the watcher on
+// shutdown, after closed is set so no new subscription can register.
+func (p *RunEventProjector) closeAllSubs() {
 	p.mu.Lock()
 	p.closed = true
 
@@ -269,6 +321,32 @@ func (p *RunEventProjector) run(ctx context.Context) {
 	}
 
 	p.wg.Wait()
+}
+
+// reap closes projections idle past the configured timeout. A run that exits
+// without a terminal milestone (an activity error, a hard workflow
+// termination) would otherwise pin its drain goroutine forever; the next
+// publish re-attaches it via EnsureSubscribed, resuming from the persisted
+// cursor, so reaping is fail-open.
+func (p *RunEventProjector) reap() {
+	cutoff := time.Now().Add(-p.idleTimeout).UnixNano()
+
+	p.mu.Lock()
+	stale := make(map[string]*runProjection)
+
+	for runID, rp := range p.subs {
+		if rp.lastActivity.Load() < cutoff {
+			delete(p.subs, runID)
+			stale[runID] = rp
+		}
+	}
+
+	p.mu.Unlock()
+
+	for runID, rp := range stale {
+		p.logf("runprojection: reap stale projection %s", runID)
+		rp.sub.Close()
+	}
 }
 
 // Close stops the projector and waits for every drain to release its
@@ -301,6 +379,8 @@ func runEventID(runID string, sequence int64) string {
 }
 
 // isRunTerminal reports whether a projected milestone ends the run's timeline.
+// Canceled is terminal too: a run that exits via the agent-command cancel
+// signal publishes a canceled milestone, so its projection self-closes.
 func isRunTerminal(typ agentoscore.EventType) bool {
-	return typ == agentoscore.EventRunCompleted || typ == agentoscore.EventRunFailed
+	return typ == agentoscore.EventRunCompleted || typ == agentoscore.EventRunFailed || typ == agentoscore.EventRunCancelled
 }

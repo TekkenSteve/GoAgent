@@ -172,7 +172,8 @@ func Run(cfg *config.Config) {
 		l.Warn("app - Run - stream executor unavailable (agent usecase not initialized)")
 	}
 
-	runHTTPServer(cfg, l, agentExecutor, orchExecutor, cancelWorkflow, signalWorkflow, infra.templateUC, infra.eventIngest, agentOSRuntime, planRuntime, platformRuntime, temporalRuntime)
+	runEventReader := temporalrepo.NewAgentOSRunEventRepo(infra.pg)
+	runHTTPServer(cfg, l, agentExecutor, orchExecutor, cancelWorkflow, signalWorkflow, infra.templateUC, infra.eventIngest, agentOSRuntime, planRuntime, platformRuntime, temporalRuntime, runEventReader)
 }
 
 func initAgentExecutor(temporalRuntime *agentfwruntime.TemporalRuntime, agentOSRuntime agentos.Runtime, fwCfg *agentfwconfig.Config) (usecase.AgentExecutor, usecase.OrchestrationExecutor, error) {
@@ -197,10 +198,10 @@ func initAgentExecutor(temporalRuntime *agentfwruntime.TemporalRuntime, agentOSR
 	return agentExecutor, orchExecutor, nil
 }
 
-func runHTTPServer(cfg *config.Config, l *logger.Logger, agentExecutor usecase.AgentExecutor, orchExecutor usecase.OrchestrationExecutor, cancelWorkflow restapiv1.CancelWorkflowFn, signalWorkflow restapiv1.SignalWorkflowFn, templateUC *templatepkg.UseCase, eventIngest *eventing.Service, agentOSRuntime agentos.Runtime, planRuntime agentos.PlanRuntime, platformRuntime agentosplatform.Runtime, temporalRuntime *agentfwruntime.TemporalRuntime) {
+func runHTTPServer(cfg *config.Config, l *logger.Logger, agentExecutor usecase.AgentExecutor, orchExecutor usecase.OrchestrationExecutor, cancelWorkflow restapiv1.CancelWorkflowFn, signalWorkflow restapiv1.SignalWorkflowFn, templateUC *templatepkg.UseCase, eventIngest *eventing.Service, agentOSRuntime agentos.Runtime, planRuntime agentos.PlanRuntime, platformRuntime agentosplatform.Runtime, temporalRuntime *agentfwruntime.TemporalRuntime, runEventReader restapiv1.RunEventReader) {
 	httpServer := httpserver.New(l, httpserver.Port(cfg.HTTP.Port), httpserver.Prefork(cfg.HTTP.UsePreforkMode))
 	restapi.NewRouter(httpServer.App, cfg, agentExecutor, orchExecutor, l,
-		cancelWorkflow, signalWorkflow, templateUC, eventIngest, agentOSRuntime, planRuntime, platformRuntime)
+		cancelWorkflow, signalWorkflow, templateUC, eventIngest, agentOSRuntime, planRuntime, platformRuntime, runEventReader)
 	httpServer.Start()
 
 	interrupt := make(chan os.Signal, 1)

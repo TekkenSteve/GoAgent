@@ -187,6 +187,12 @@ func (r *AgentOSPlanConsoleScope) Validate() error {
 	return validateAgentOSTenantScope(r.AccountID, r.ProjectID)
 }
 
+// AgentOSRunEventScope selects a run's durable event history for REST queries.
+type AgentOSRunEventScope struct {
+	AfterSequence int64 `query:"after_sequence"`
+	Limit         int   `query:"limit"`
+}
+
 // AgentOSEvent is the public REST envelope for external backend event ingest.
 type AgentOSEvent struct {
 	EventID   string                `json:"event_id" validate:"required"`

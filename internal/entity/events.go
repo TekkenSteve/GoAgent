@@ -244,6 +244,18 @@ func (e *AgentRunFinishEvent) Base() BaseEvent { return e.BaseEvent }
 // EventType returns the event type discriminator for this event.
 func (e *AgentRunFinishEvent) EventType() string { return "agent.run.finish" }
 
+// AgentRunCancelledEvent is emitted when an agent run is canceled. It closes
+// the run's timeline as a terminal milestone on the data plane.
+type AgentRunCancelledEvent struct {
+	BaseEvent
+}
+
+// Base returns the metadata embedded in this event.
+func (e *AgentRunCancelledEvent) Base() BaseEvent { return e.BaseEvent }
+
+// EventType returns the event type discriminator for this event.
+func (e *AgentRunCancelledEvent) EventType() string { return "agent.run.cancelled" }
+
 // ——— System event ———
 
 // PrepStageEvent reports the progress of the run preparation pipeline.

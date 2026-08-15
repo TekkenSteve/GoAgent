@@ -908,6 +908,28 @@ definitions:
     - ControlPause
     - ControlResume
     - ControlCancel
+  github_com_TekkenSteve_GoAgent_agentos_core.Event:
+    properties:
+      event_id:
+        type: string
+      event_type:
+        $ref: '#/definitions/core.EventType'
+      payload:
+        additionalProperties: {}
+        type: object
+      process_id:
+        type: string
+      run_id:
+        type: string
+      sequence:
+        type: integer
+      source:
+        type: string
+      thread_id:
+        type: string
+      timestamp:
+        type: string
+    type: object
   github_com_TekkenSteve_GoAgent_agentos_core.EventType:
     enum:
     - run.started
@@ -3337,6 +3359,50 @@ paths:
           schema:
             $ref: '#/definitions/response.Error'
       summary: Ingest AgentOS event
+      tags:
+      - agentos
+  /agentos/runs/{run_id}/events/history:
+    get:
+      consumes:
+      - application/json
+      description: Query the durable projected milestone timeline of an AgentOS run.
+      operationId: agentos-list-run-events
+      parameters:
+      - description: Run ID
+        in: path
+        name: run_id
+        required: true
+        type: string
+      - description: Only return events after this sequence
+        in: query
+        name: after_sequence
+        type: integer
+      - description: Maximum events
+        in: query
+        name: limit
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            items:
+              $ref: '#/definitions/github_com_TekkenSteve_GoAgent_agentos_core.Event'
+            type: array
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/response.Error'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/response.Error'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/response.Error'
+      summary: List AgentOS run event history
       tags:
       - agentos
   /agentos/runs/{run_id}/signals:

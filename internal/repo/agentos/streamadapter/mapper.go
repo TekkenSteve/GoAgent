@@ -24,25 +24,26 @@ const (
 	// Runtime event kind names (entity.EventType() values) as named constants:
 	// the dispatch switches reference each kind twice (domain gate + concrete
 	// mapper), so string literals would trip goconst.
-	evTextDelta      = "llm.text.delta"
-	evReasoningDelta = "llm.reasoning.delta"
-	evToolCallStart  = "llm.tool_call.start"
-	evToolCallDelta  = "llm.tool_call.delta"
-	evToolCallFinish = "llm.tool_call.finish"
-	evUsageFinish    = "llm.usage.finish"
-	evToolExecStart  = "tool.execution.start"
-	evToolExecStdout = "tool.execution.stdout"
-	evToolExecStderr = "tool.execution.stderr"
-	evToolExecFinish = "tool.execution.finish"
-	evAgentRunStart  = "agent.run.start"
-	evAgentRunFinish = "agent.run.finish"
-	evPrepStage      = "system.prep_stage.delta"
-	evContextUsage   = "system.context_usage.delta"
-	evStateDelta     = "system.state.delta"
-	evInterrupt      = "system.interrupt"
-	evAgentError     = "system.error"
-	evUserCommand    = "user.command"
-	evUserFeedback   = "user.feedback"
+	evTextDelta         = "llm.text.delta"
+	evReasoningDelta    = "llm.reasoning.delta"
+	evToolCallStart     = "llm.tool_call.start"
+	evToolCallDelta     = "llm.tool_call.delta"
+	evToolCallFinish    = "llm.tool_call.finish"
+	evUsageFinish       = "llm.usage.finish"
+	evToolExecStart     = "tool.execution.start"
+	evToolExecStdout    = "tool.execution.stdout"
+	evToolExecStderr    = "tool.execution.stderr"
+	evToolExecFinish    = "tool.execution.finish"
+	evAgentRunStart     = "agent.run.start"
+	evAgentRunFinish    = "agent.run.finish"
+	evAgentRunCancelled = "agent.run.cancelled"
+	evPrepStage         = "system.prep_stage.delta"
+	evContextUsage      = "system.context_usage.delta"
+	evStateDelta        = "system.state.delta"
+	evInterrupt         = "system.interrupt"
+	evAgentError        = "system.error"
+	evUserCommand       = "user.command"
+	evUserFeedback      = "user.feedback"
 )
 
 // MapEvent translates one runtime stream event into the AG-UI wire event the
@@ -51,7 +52,7 @@ const (
 // align with agentos/stream.ProjectToCore: anything transient here is excluded
 // from the durable projection by construction.
 //
-// Dispatch is two-level: this switch groups the 19 runtime kinds into five
+// Dispatch is two-level: this switch groups the 20 runtime kinds into five
 // domains, and each domain dispatcher picks the concrete mapper. Splitting the
 // one big switch this way keeps cyclomatic complexity bounded (gocyclo) without
 // a package-level table (gochecknoglobals).
@@ -61,7 +62,7 @@ func MapEvent(ev entity.StreamEvent) (*stream.Event, error) {
 		return mapAssistantEvent(ev)
 	case evToolExecStart, evToolExecStdout, evToolExecStderr, evToolExecFinish:
 		return mapExecutionEvent(ev)
-	case evAgentRunStart, evAgentRunFinish:
+	case evAgentRunStart, evAgentRunFinish, evAgentRunCancelled:
 		return mapLifecycleEvent(ev)
 	case evPrepStage, evContextUsage, evStateDelta, evInterrupt, evAgentError:
 		return mapSystemEvent(ev)
@@ -112,6 +113,8 @@ func mapLifecycleEvent(ev entity.StreamEvent) (*stream.Event, error) {
 		return mapAgentRunStart(ev)
 	case evAgentRunFinish:
 		return mapAgentRunFinish(ev)
+	case evAgentRunCancelled:
+		return mapAgentRunCancelled(ev)
 	default:
 		return nil, fmt.Errorf("%w: %s", ErrUnsupportedStreamEvent, ev.EventType())
 	}
@@ -315,6 +318,17 @@ func mapAgentRunFinish(ev entity.StreamEvent) (*stream.Event, error) {
 	return agg, nil
 }
 
+func mapAgentRunCancelled(ev entity.StreamEvent) (*stream.Event, error) {
+	e, ok := ev.(*entity.AgentRunCancelledEvent)
+	if !ok {
+		return nil, unsupportedType(ev)
+	}
+
+	threadID, runID := scope(e)
+
+	return stream.NewRunCancelled(threadID, runID), nil
+}
+
 func mapPrepStage(ev entity.StreamEvent) (*stream.Event, error) {
 	e, ok := ev.(*entity.PrepStageEvent)
 	if !ok {
@@ -376,8 +390,10 @@ func mapInterrupt(ev entity.StreamEvent) (*stream.Event, error) {
 
 	threadID, runID := scope(e)
 
-	// Cancellation is not a failure: it stays a transient custom event rather
-	// than closing the timeline as RUN_ERROR.
+	// A runtime interrupt is not a terminal cancellation: it stays a transient
+	// custom event rather than closing the timeline. A deliberate cancel is
+	// expressed separately via the agent.run.cancelled milestone, which the
+	// projector treats as a terminal one.
 	return stream.NewCustom(threadID, runID, customSystemPrefix+"interrupt").
 		Set("reason", e.Reason), nil
 }
