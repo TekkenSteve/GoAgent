@@ -119,6 +119,16 @@ func TestAgentOSPublicPackagesRespectLayering(t *testing.T) {
 			},
 		},
 		{
+			dir: "agentos/stream",
+			forbiddenPrefixes: []string{
+				modulePath + "/agentos/control",
+				modulePath + "/agentos/process",
+				modulePath + "/agentos/platform",
+				modulePath + "/agentos/temporal",
+				modulePath + "/internal/",
+			},
+		},
+		{
 			dir: "agentos/control",
 			forbiddenPrefixes: []string{
 				modulePath + "/agentos/process",
