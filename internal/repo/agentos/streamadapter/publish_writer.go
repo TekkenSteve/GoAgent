@@ -3,6 +3,7 @@ package streamadapter
 import (
 	"context"
 	"strconv"
+	"sync"
 
 	"github.com/TekkenSteve/GoAgent/agentos/stream"
 	"github.com/TekkenSteve/GoAgent/internal/entity"
@@ -42,6 +43,13 @@ type PublishWriter struct {
 	openText   string
 	openReason string
 	msgSeq     int
+
+	// ensure is an optional projection-attach hook fired once per writer before
+	// the first publish (the run's first event triggers the control plane to
+	// subscribe as a projection consumer). Fail-open: a subscribe failure is
+	// logged and the next activity's writer retries.
+	ensure     func(context.Context, *stream.Handle) error
+	ensureOnce sync.Once
 }
 
 // NewPublishWriter creates a writer for one run's timeline. The logger may be
@@ -54,6 +62,15 @@ func NewPublishWriter(pub stream.Publisher, handle *stream.Handle, threadID, run
 		threadID: threadID,
 		runID:    runID,
 	}
+}
+
+// WithEnsure installs an optional projection-attach hook fired once before the
+// writer's first publish. The writer never blocks the run on projection: a
+// failing hook is logged and the next activity's writer retries.
+func (w *PublishWriter) WithEnsure(fn func(context.Context, *stream.Handle) error) *PublishWriter {
+	w.ensure = fn
+
+	return w
 }
 
 // WriteEvent maps one runtime event to AG-UI and publishes it. Content deltas
@@ -132,8 +149,18 @@ func (w *PublishWriter) nextMessageID() string {
 	return "m-" + strconv.Itoa(w.msgSeq)
 }
 
-// publish sends one event to the bus, fail-open on transport errors.
+// publish sends one event to the bus, fail-open on transport errors. Before
+// the first publish it fires the optional projection-attach hook so the control
+// plane subscribes to the run channel as a projection consumer.
 func (w *PublishWriter) publish(ctx context.Context, ev *stream.Event) {
+	if w.ensure != nil {
+		w.ensureOnce.Do(func() {
+			if err := w.ensure(ctx, w.handle); err != nil {
+				w.warnf("streamadapter: ensure projection subscribe: %v (fail-open)", err)
+			}
+		})
+	}
+
 	if err := w.pub.Publish(ctx, w.handle, ev); err != nil {
 		w.warnf("streamadapter: publish %s: %v (fail-open)", ev.Type, err)
 	}

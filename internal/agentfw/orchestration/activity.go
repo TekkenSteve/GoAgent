@@ -13,6 +13,7 @@ import (
 	agentosstream "github.com/TekkenSteve/GoAgent/agentos/stream"
 	"github.com/TekkenSteve/GoAgent/internal/agentfw/stream"
 	"github.com/TekkenSteve/GoAgent/internal/entity"
+	"github.com/TekkenSteve/GoAgent/internal/repo/agentos/runprojection"
 	"github.com/TekkenSteve/GoAgent/internal/repo/agentos/streamadapter"
 	"github.com/TekkenSteve/GoAgent/internal/repo/artifact"
 	agentuc "github.com/TekkenSteve/GoAgent/internal/usecase/agent"
@@ -45,6 +46,11 @@ type AgentActivities struct {
 	// streaming activity mirrors its events onto the AG-UI bus (fail-open);
 	// nil keeps the runtime pure-Redis with zero behavior change.
 	streamPub agentosstream.Publisher
+	// runProjection is the optional data-plane projection controller. When
+	// set (with streamPub), the first publish of each streaming activity
+	// attaches the control plane to the run channel as a projection consumer
+	// (idempotent, fail-open); nil keeps the runtime unchanged.
+	runProjection runprojection.Controller
 }
 
 // artifactBlobStore is the subset of artifact.BlobStore needed for history
@@ -99,6 +105,16 @@ func (a *AgentActivities) WithBlobStore(store artifactBlobStore) *AgentActivitie
 // fail-open, so a dead bus never breaks a run.
 func (a *AgentActivities) WithStreamPublisher(pub agentosstream.Publisher) *AgentActivities {
 	a.streamPub = pub
+
+	return a
+}
+
+// WithRunProjectionController enables the durable run-event projection: the
+// first publish of each streaming activity attaches the projector to the run
+// channel (idempotent, fail-open). Optional — without it the runtime is
+// unchanged.
+func (a *AgentActivities) WithRunProjectionController(controller runprojection.Controller) *AgentActivities {
+	a.runProjection = controller
 
 	return a
 }
@@ -552,7 +568,17 @@ func (a *AgentActivities) newPublishWriter(accountID, sessionID, runID string) *
 		return nil
 	}
 
-	return streamadapter.NewPublishWriter(a.streamPub, streamadapter.HandleForRun(accountID, runID), sessionID, runID, a.logger)
+	writer := streamadapter.NewPublishWriter(a.streamPub, streamadapter.HandleForRun(accountID, runID), sessionID, runID, a.logger)
+
+	if a.runProjection != nil {
+		controller := a.runProjection
+
+		writer.WithEnsure(func(ctx context.Context, handle *agentosstream.Handle) error {
+			return controller.EnsureSubscribed(ctx, runID, handle)
+		})
+	}
+
+	return writer
 }
 
 // publishStreamEvent mirrors one runtime event onto the data plane, fail-open.

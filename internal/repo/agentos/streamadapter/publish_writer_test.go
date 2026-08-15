@@ -137,6 +137,46 @@ func TestPublishWriterFlushClosesOpenMessages(t *testing.T) {
 	require.Equal(t, 3, pub.calls, "second flush is a no-op")
 }
 
+// TestPublishWriterEnsureFiresOnce locks the once-per-writer projection attach:
+// a writer publishing several events triggers the ensure hook exactly once,
+// even though every publish passes through the same guard.
+func TestPublishWriterEnsureFiresOnce(t *testing.T) {
+	t.Parallel()
+
+	pub := &failingPublisher{err: nil}
+	handle := HandleForRun("acme", "run-1")
+	ensures := 0
+	w := NewPublishWriter(pub, handle, "sess-1", "run-1", nil).
+		WithEnsure(func(context.Context, *stream.Handle) error {
+			ensures++
+
+			return nil
+		})
+
+	require.NoError(t, w.WriteEvent(t.Context(), &entity.TextDeltaEvent{BaseEvent: base(), Content: "a"}))
+	require.NoError(t, w.WriteEvent(t.Context(), &entity.ToolCallFinishEvent{BaseEvent: base(), ToolCallID: "call-1", Arguments: `{}`}))
+	require.Equal(t, 1, ensures, "ensure fires once per writer instance")
+}
+
+// TestPublishWriterEnsureFailOpen locks the fail-open contract of the attach
+// hook: a failing ensure (projector subscribe unavailable) is logged and the
+// publish still proceeds — the run never depends on the projection being up.
+func TestPublishWriterEnsureFailOpen(t *testing.T) {
+	t.Parallel()
+
+	pub := &failingPublisher{err: nil}
+	handle := HandleForRun("acme", "run-1")
+	w := NewPublishWriter(pub, handle, "sess-1", "run-1", nil).
+		WithEnsure(func(context.Context, *stream.Handle) error {
+			return errBusDown
+		})
+
+	require.NoError(t, w.WriteEvent(t.Context(), &entity.TextDeltaEvent{BaseEvent: base(), Content: "a"}))
+	require.Equal(t, 2, pub.calls, "START + CONTENT published despite failing ensure")
+	require.NoError(t, w.WriteEvent(t.Context(), &entity.ToolCallFinishEvent{BaseEvent: base(), ToolCallID: "call-1", Arguments: `{}`}))
+	require.Equal(t, 4, pub.calls, "later publishes unaffected by failing ensure")
+}
+
 // subscribeAll replays the bus history for the run channel, since the run is
 // done by the time the test subscribes. It returns exactly want events,
 // failing the test on a stall.

@@ -11,6 +11,7 @@ import (
 	"github.com/TekkenSteve/GoAgent/internal/pkg/postgres"
 	goredis "github.com/TekkenSteve/GoAgent/internal/pkg/redis"
 	"github.com/TekkenSteve/GoAgent/internal/repo/agentos/planstream"
+	"github.com/TekkenSteve/GoAgent/internal/repo/agentos/runprojection"
 	artifactrepo "github.com/TekkenSteve/GoAgent/internal/repo/artifact"
 	"github.com/TekkenSteve/GoAgent/internal/repo/cached"
 	"github.com/TekkenSteve/GoAgent/internal/repo/compressor"
@@ -68,6 +69,10 @@ func newWorkerKit(ctx context.Context, cfg *WorkerConfig) (*WorkerKit, error) {
 
 	infra, err := initWorkerPlanRuntime(ctx, cfg, resources.postgres, resources.redis, resources.temporalClient)
 	if err != nil {
+		if kit.runProjection != nil {
+			kit.runProjection.Close()
+		}
+
 		resources.close()
 
 		return nil, err
@@ -216,6 +221,13 @@ func configureWorkerPlanRuntime(kit *WorkerKit, cfg *WorkerConfig, resources *wo
 		infra.planClose,
 		func() error {
 			return resources.redis.Close()
+		},
+		func() error {
+			if kit.runProjection != nil {
+				kit.runProjection.Close()
+			}
+
+			return nil
 		},
 		func() error {
 			resources.postgres.Close()
@@ -379,16 +391,10 @@ func buildWorkerKit(ctx context.Context, deps *workerDependencies) (*WorkerKit, 
 		WithMCPManager(mcpManager).
 		WithBilling(billingUC)
 
-	if deps.cfg.StreamCentrifugo.BaseURL != "" {
-		streamPub, err := centrifugo.NewPublisher(centrifugo.Config{
-			BaseURL: deps.cfg.StreamCentrifugo.BaseURL,
-			APIKey:  deps.cfg.StreamCentrifugo.APIKey,
-		})
-		if err != nil {
-			return nil, nil, fmt.Errorf("agentos temporal worker - stream publisher: %w", err)
-		}
+	kit := &WorkerKit{activities: activities}
 
-		activities.WithStreamPublisher(streamPub)
+	if err := configureStreamingProjection(ctx, deps, activities, kit); err != nil {
+		return nil, nil, err
 	}
 
 	registerToolsOnRegistry(deps.logger, toolRegistry)
@@ -399,7 +405,48 @@ func buildWorkerKit(ctx context.Context, deps *workerDependencies) (*WorkerKit, 
 		}
 	}
 
-	return &WorkerKit{activities: activities}, batchWriter, nil
+	return kit, batchWriter, nil
+}
+
+// configureStreamingProjection wires the data-plane publisher/subscriber pair
+// and the run-event projector when the Centrifugo bus is configured. Without a
+// bus there is nothing to project, so the worker runs unchanged.
+func configureStreamingProjection(ctx context.Context, deps *workerDependencies, activities *orchestration.AgentActivities, kit *WorkerKit) error {
+	if deps.cfg.StreamCentrifugo.BaseURL == "" {
+		return nil
+	}
+
+	streamPub, err := centrifugo.NewPublisher(centrifugo.Config{
+		BaseURL: deps.cfg.StreamCentrifugo.BaseURL,
+		APIKey:  deps.cfg.StreamCentrifugo.APIKey,
+	})
+	if err != nil {
+		return fmt.Errorf("agentos temporal worker - stream publisher: %w", err)
+	}
+
+	activities.WithStreamPublisher(streamPub)
+
+	streamSub, err := centrifugo.NewSubscriber(centrifugo.Config{
+		BaseURL: deps.cfg.StreamCentrifugo.BaseURL,
+		APIKey:  deps.cfg.StreamCentrifugo.APIKey,
+	})
+	if err != nil {
+		return fmt.Errorf("agentos temporal worker - stream subscriber: %w", err)
+	}
+
+	projector, err := runprojection.New(ctx, runprojection.Config{
+		Subscriber: streamSub,
+		Store:      temporalrepo.NewAgentOSRunEventRepo(deps.postgres),
+		Logger:     deps.logger,
+	})
+	if err != nil {
+		return fmt.Errorf("agentos temporal worker - run projection: %w", err)
+	}
+
+	activities.WithRunProjectionController(projector)
+	kit.runProjection = projector
+
+	return nil
 }
 
 func registerToolsOnRegistry(l *logger.Logger, toolRegistry *toolkit.ToolRegistry) {

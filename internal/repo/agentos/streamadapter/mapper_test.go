@@ -57,9 +57,9 @@ func TestMapEvent(t *testing.T) {
 		{name: "tool exec finish success", event: &entity.ToolExecFinishEvent{BaseEvent: base(), ToolCallID: "call-1", Output: "done", ExitCode: 0, DurationMs: 5}, wantType: stream.EventToolCallResult, milestone: true, want: map[string]any{stream.FieldCallID: "call-1", stream.FieldResult: "done", stream.FieldMeta: map[string]any{"exit_code": 0, "duration_ms": int64(5)}}},
 		{name: "tool exec finish error", event: &entity.ToolExecFinishEvent{BaseEvent: base(), ToolCallID: "call-1", Output: "boom", ExitCode: 1, IsError: true}, wantType: stream.EventToolCallError, milestone: true, want: map[string]any{stream.FieldCallID: "call-1", stream.FieldError: map[string]any{"message": "boom"}, stream.FieldMeta: map[string]any{"exit_code": 1, "duration_ms": int64(0)}}},
 		{name: "agent run start", event: &entity.AgentRunStartEvent{BaseEvent: base(), AgentName: "coder"}, wantType: stream.EventRunStarted, milestone: true, want: map[string]any{"agentName": "coder"}},
-		{name: "agent run finish", event: &entity.AgentRunFinishEvent{BaseEvent: base(), FinishReason: "stop", Usage: ptr(usage())}, wantType: stream.EventRunFinished, milestone: true, want: map[string]any{"finishReason": "stop", stream.FieldUsage: map[string]any{"prompt_tokens": 10, "completion_tokens": 20, "total_tokens": 30, "cost": entity.Money(0.05)}}},
+		{name: "agent run finish", event: &entity.AgentRunFinishEvent{BaseEvent: base(), FinishReason: "stop", Usage: new(usage())}, wantType: stream.EventRunFinished, milestone: true, want: map[string]any{"finishReason": "stop", stream.FieldUsage: map[string]any{"prompt_tokens": 10, "completion_tokens": 20, "total_tokens": 30, "cost": entity.Money(0.05)}}},
 		{name: "prep stage", event: &entity.PrepStageEvent{BaseEvent: base(), Stage: "ready", Progress: 100}, wantType: stream.EventCustom, want: map[string]any{stream.FieldName: customSystemPrefix + "prep_stage", "stage": "ready", "progress": 100}},
-		{name: "context usage", event: &entity.ContextUsageEvent{BaseEvent: base(), MessageCount: 3, Compressed: ptr(true)}, wantType: stream.EventCustom, want: map[string]any{stream.FieldName: customSystemPrefix + "context_usage", "messageCount": 3, "compressed": true}},
+		{name: "context usage", event: &entity.ContextUsageEvent{BaseEvent: base(), MessageCount: 3, Compressed: new(true)}, wantType: stream.EventCustom, want: map[string]any{stream.FieldName: customSystemPrefix + "context_usage", "messageCount": 3, "compressed": true}},
 		{name: "state delta", event: &entity.StateDeltaEvent{BaseEvent: base(), Key: "mode", Value: "fast"}, wantType: stream.EventCustom, want: map[string]any{stream.FieldName: customSystemPrefix + "state_delta", "key": "mode", "value": "fast"}},
 		{name: "interrupt", event: &entity.InterruptEvent{BaseEvent: base(), Reason: "user_canceled"}, wantType: stream.EventCustom, want: map[string]any{stream.FieldName: customSystemPrefix + "interrupt", "reason": "user_canceled"}},
 		{name: "fatal error", event: &entity.AgentErrorEvent{BaseEvent: base(), ErrorMessage: "kaboom", ErrorCode: "E1", Recoverable: false}, wantType: stream.EventRunError, milestone: true, want: map[string]any{stream.FieldError: map[string]any{"message": "fatal agent error: E1: kaboom"}}},
@@ -105,5 +105,3 @@ func TestMapEventUnsupported(t *testing.T) {
 	require.ErrorIs(t, err, ErrUnsupportedStreamEvent)
 	require.True(t, errors.Is(err, ErrUnsupportedStreamEvent))
 }
-
-func ptr[T any](v T) *T { return &v }

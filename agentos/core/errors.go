@@ -41,6 +41,8 @@ var (
 	ErrInvalidExpression = errors.New("agentos: invalid expression")
 	// ErrInvalidPlanEvent reports a malformed plan event.
 	ErrInvalidPlanEvent = errors.New("agentos: invalid plan event")
+	// ErrInvalidRunEvent reports a malformed run event.
+	ErrInvalidRunEvent = errors.New("agentos: invalid run event")
 	// ErrInvalidLedgerEntry reports a malformed ledger entry.
 	ErrInvalidLedgerEntry = errors.New("agentos: invalid ledger entry")
 	// ErrInvalidLedgerScope reports an invalid ledger scope.

@@ -5,6 +5,7 @@ import (
 	"errors"
 
 	"github.com/TekkenSteve/GoAgent/internal/agentfw/orchestration"
+	"github.com/TekkenSteve/GoAgent/internal/repo/agentos/runprojection"
 	"go.temporal.io/sdk/activity"
 	"go.temporal.io/sdk/workflow"
 )
@@ -15,7 +16,10 @@ type WorkerKit struct {
 	planActivities        *PlanActivities
 	processActivities     *ProcessActivities
 	planCommandReconciler *planCommandReconciler
-	closeFns              []func() error
+	// runProjection is the optional data-plane projection consumer (nil when
+	// the Centrifugo bus is not configured). Closed before the Postgres pool.
+	runProjection *runprojection.RunEventProjector
+	closeFns      []func() error
 }
 
 // PlanWorkerKit owns only the durable RunPlan workload. Applications that use
