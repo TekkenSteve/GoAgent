@@ -14,6 +14,7 @@ import (
 	"github.com/TekkenSteve/GoAgent/internal/usecase"
 	"github.com/TekkenSteve/GoAgent/pkg/logger"
 	"github.com/ansrivas/fiberprometheus/v2"
+	"github.com/gofiber/contrib/otelfiber/v2"
 	"github.com/gofiber/fiber/v2"
 	"github.com/gofiber/swagger"
 )
@@ -57,6 +58,10 @@ func NewRouter(app *fiber.App, cfg *config.Config, t usecase.AgentExecutor, o us
 	// Routers
 	apiV1Group := app.Group("/v1")
 	{
+		if cfg.Tracing.Enabled {
+			apiV1Group.Use(otelfiber.Middleware())
+		}
+
 		v1.NewRoutes(apiV1Group, t, o, l, cancelWorkflow, signalWorkflow, m, eventIngest, agentOSRuntime, agentOSPlanRuntime, agentOSPlatformRuntime, runEventReader)
 	}
 }

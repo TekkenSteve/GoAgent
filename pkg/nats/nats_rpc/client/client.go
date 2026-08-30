@@ -1,4 +1,3 @@
-// Package client implements the NATS RPC client.
 package client
 
 import (
@@ -10,6 +9,10 @@ import (
 	natsrpc "github.com/TekkenSteve/GoAgent/pkg/nats/nats_rpc"
 	"github.com/goccy/go-json"
 	"github.com/nats-io/nats.go"
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/codes"
+	"go.opentelemetry.io/otel/trace"
 )
 
 const (
@@ -17,6 +20,8 @@ const (
 	_defaultAttempts = 10
 	_defaultTimeout  = 2 * time.Second
 )
+
+const _tracerName = "nats-rp.client"
 
 // Client -.
 type Client struct {
@@ -67,6 +72,23 @@ func (c *Client) Shutdown() error {
 
 // RemoteCall -.
 func (c *Client) RemoteCall(handler string, request, response any) error {
+	ctx, span := otel.Tracer(_tracerName).Start(
+		context.Background(), "nats_rpc.publish "+handler,
+		trace.WithSpanKind(trace.SpanKindClient),
+		trace.WithAttributes(attribute.String("rpc.method", handler)),
+	)
+	defer span.End()
+
+	err := c.remoteCall(ctx, handler, request, response)
+	if err != nil {
+		span.RecordError(err)
+		span.SetStatus(codes.Error, err.Error())
+	}
+
+	return err
+}
+
+func (c *Client) remoteCall(ctx context.Context, handler string, request, response any) error {
 	var (
 		requestBody []byte
 		err         error
@@ -79,12 +101,15 @@ func (c *Client) RemoteCall(handler string, request, response any) error {
 		}
 	}
 
+	header := nats.Header{
+		"Handler": []string{handler},
+	}
+	otel.GetTextMapPropagator().Inject(ctx, natsrpc.HeaderCarrier(header))
+
 	requestMessage := nats.Msg{
 		Subject: c.subject,
-		Header: nats.Header{
-			"Handler": []string{handler},
-		},
-		Data: requestBody,
+		Header:  header,
+		Data:    requestBody,
 	}
 
 	message, err := c.connection.RequestMsg(&requestMessage, c.timeout)

@@ -167,6 +167,10 @@ Internal application
 Файл конфигурации: [config/config.go](config/config.go)  
 Пример конфигурации: [.env.example](.env.example)
 
+### Наблюдаемость
+
+OpenTelemetry tracing экспортирует спаны в OTLP gRPC коллектор. Включается переменной `TRACING_ENABLED` (по умолчанию `false`); дополнительно управляется через `TRACING_OTLP_ENDPOINT`, `TRACING_OTLP_INSECURE` и `TRACING_SAMPLE_RATE`. См. [pkg/tracing](pkg/tracing).
+
 ## Agent Control Plane
 
 The Agent Control Plane coordinates backend-owned agent runs. A backend may be the native GoAgent backend, a LangGraph service, an OpenCode-style runtime, an HTTP service, a gRPC service, or an external Temporal workflow.

@@ -49,6 +49,7 @@ import (
 	templatepkg "github.com/TekkenSteve/GoAgent/internal/usecase/template"
 	"github.com/TekkenSteve/GoAgent/pkg/httpserver"
 	"github.com/TekkenSteve/GoAgent/pkg/logger"
+	"github.com/TekkenSteve/GoAgent/pkg/tracing"
 )
 
 var (
@@ -132,9 +133,37 @@ func initInfrastructure(cfg *config.Config, l *logger.Logger) *appInfrastructure
 	}
 }
 
+// initTracing creates the OpenTelemetry tracer provider and returns its shutdown function.
+func initTracing(ctx context.Context, cfg *config.Config) (func(context.Context) error, error) {
+	return tracing.New(ctx, tracing.Config{
+		Enabled:     cfg.Tracing.Enabled,
+		ServiceName: cfg.App.Name,
+		Version:     cfg.App.Version,
+		Endpoint:    cfg.Tracing.OTLPEndpoint,
+		Insecure:    cfg.Tracing.OTLPInsecure,
+		SampleRate:  cfg.Tracing.SampleRate,
+	})
+}
+
+// shutdownWithLog runs a deferred shutdown function and logs a wrapped error on failure.
+func shutdownWithLog(ctx context.Context, l *logger.Logger, shutdown func(context.Context) error) {
+	if err := shutdown(ctx); err != nil {
+		l.Error(fmt.Errorf("app - Run - shutdownTracing: %w", err))
+	}
+}
+
 // Run creates objects via constructors.
 func Run(cfg *config.Config) {
 	l := logger.New(cfg.Log.Level)
+
+	ctx := context.Background()
+
+	shutdownTracing, err := initTracing(ctx, cfg)
+	if err != nil {
+		l.Fatal(fmt.Errorf("app - Run - tracing.New: %w", err))
+	}
+
+	defer shutdownWithLog(ctx, l, shutdownTracing)
 
 	var (
 		temporalRuntime *agentfwruntime.TemporalRuntime

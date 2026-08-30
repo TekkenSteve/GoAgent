@@ -20,9 +20,10 @@ type Server struct {
 	ctx context.Context
 	eg  *errgroup.Group
 
-	App     *pbgrpc.Server
-	notify  chan error
-	address string
+	App        *pbgrpc.Server
+	serverOpts []pbgrpc.ServerOption
+	notify     chan error
+	address    string
 
 	logger logger.Interface
 }
@@ -35,7 +36,6 @@ func New(l logger.Interface, opts ...Option) *Server {
 	s := &Server{
 		ctx:     ctx,
 		eg:      group,
-		App:     pbgrpc.NewServer(),
 		notify:  make(chan error, 1),
 		address: _defaultAddr,
 		logger:  l,
@@ -45,6 +45,8 @@ func New(l logger.Interface, opts ...Option) *Server {
 	for _, opt := range opts {
 		opt(s)
 	}
+
+	s.App = pbgrpc.NewServer(s.serverOpts...)
 
 	return s
 }

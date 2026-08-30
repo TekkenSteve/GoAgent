@@ -167,6 +167,10 @@ Follows the [12-Factor App](https://12factor.net/) principles. All configuration
 Configuration file: [config/config.go](config/config.go)  
 Example configuration: [.env.example](.env.example)
 
+### Observability
+
+OpenTelemetry tracing exports spans to an OTLP gRPC collector. Toggled by `TRACING_ENABLED` (default `false`); also manages `TRACING_OTLP_ENDPOINT`, `TRACING_OTLP_INSECURE`, and `TRACING_SAMPLE_RATE`. See [pkg/tracing](pkg/tracing).
+
 ## Agent Control Plane
 
 The Agent Control Plane coordinates backend-owned agent runs. A backend may be the native GoAgent backend, a LangGraph service, an OpenCode-style runtime, an HTTP service, a gRPC service, or an external Temporal workflow.

@@ -167,6 +167,10 @@ Internal application
 配置文件：[config/config.go](config/config.go)  
 示例配置：[.env.example](.env.example)
 
+### 可观测性
+
+OpenTelemetry 追踪通过 OTLP gRPC 采集器导出 span。由 `TRACING_ENABLED` 控制（默认 `false`），还可通过 `TRACING_OTLP_ENDPOINT`、`TRACING_OTLP_INSECURE` 和 `TRACING_SAMPLE_RATE` 调整。参见 [pkg/tracing](pkg/tracing)。
+
 ## Agent Control Plane
 
 Agent Control Plane 协调 backend-owned agent runs。backend 可以是 native GoAgent backend、LangGraph 服务、OpenCode 风格 runtime、HTTP 服务、gRPC 服务，或外部 Temporal workflow。
