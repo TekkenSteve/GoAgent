@@ -67,12 +67,12 @@ func (r *AgentOSLedgerRepo) ListLedgerEntries(ctx context.Context, scope *agento
 	builder := r.Builder.
 		Select("entry_json").
 		From("ledger_entries").
-		Where(sq.Eq{"account_id": scope.AccountID, "project_id": scope.ProjectID}).
+		Where(sq.Eq{_colAccountID: scope.AccountID, _colProjectID: scope.ProjectID}).
 		Where(sq.Gt{"sequence": scope.AfterSequence}).
 		OrderBy("sequence ASC")
 
 	if scope.ProcessID != "" {
-		builder = builder.Where(sq.Eq{"process_id": scope.ProcessID})
+		builder = builder.Where(sq.Eq{_colProcessID: scope.ProcessID})
 	}
 
 	if scope.Resource.Kind != "" {
@@ -184,7 +184,7 @@ func (r *AgentOSLedgerRepo) ledgerEntryByIdempotencyKey(ctx context.Context, acc
 	query, args, err := r.Builder.
 		Select("entry_json").
 		From("ledger_entries").
-		Where(sq.Eq{"account_id": accountID, "project_id": projectID, "idempotency_key": idempotencyKey}).
+		Where(sq.Eq{_colAccountID: accountID, _colProjectID: projectID, _colIDempotencyKey: idempotencyKey}).
 		ToSql()
 	if err != nil {
 		return agentos.LedgerEntry{}, false, fmt.Errorf("AgentOSLedgerRepo - ledgerEntryByIdempotencyKey - builder: %w", err)

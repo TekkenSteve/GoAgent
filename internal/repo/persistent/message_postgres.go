@@ -76,7 +76,7 @@ func getRecordByRef[T any](ctx context.Context, r *MessageRepo, ref, table strin
 func (r *MessageRepo) PersistMessage(ctx context.Context, record entity.MessageRecord) (string, error) {
 	return r.insertRecord(
 		ctx, "messages",
-		[]string{"run_id", "role", "content", "tool_call_id"},
+		[]string{_colRunID, "role", _colContent, _colToolCallID},
 		record.RunID, record.Role, record.Content, record.ToolCallID,
 	)
 }
@@ -85,7 +85,7 @@ func (r *MessageRepo) PersistMessage(ctx context.Context, record entity.MessageR
 func (r *MessageRepo) GetMessage(ctx context.Context, ref string) (entity.MessageRecord, bool, error) {
 	return getRecordByRef(
 		ctx, r, ref, "messages",
-		[]string{"run_id", "role", "content", "tool_call_id"},
+		[]string{_colRunID, "role", _colContent, _colToolCallID},
 		func(m *entity.MessageRecord) []any {
 			return []any{&m.RunID, &m.Role, &m.Content, &m.ToolCallID}
 		},
@@ -96,7 +96,7 @@ func (r *MessageRepo) GetMessage(ctx context.Context, ref string) (entity.Messag
 func (r *MessageRepo) PersistToolResult(ctx context.Context, record entity.ToolResultRecord) (string, error) {
 	return r.insertRecord(
 		ctx, "tool_results",
-		[]string{"run_id", "tool_call_id", "tool_name", "result_json"},
+		[]string{_colRunID, _colToolCallID, "tool_name", "result_json"},
 		record.RunID, record.ToolCallID, record.ToolName, record.ResultJSON,
 	)
 }
@@ -105,7 +105,7 @@ func (r *MessageRepo) PersistToolResult(ctx context.Context, record entity.ToolR
 func (r *MessageRepo) GetToolResult(ctx context.Context, ref string) (entity.ToolResultRecord, bool, error) {
 	return getRecordByRef(
 		ctx, r, ref, "tool_results",
-		[]string{"run_id", "tool_call_id", "tool_name", "result_json"},
+		[]string{_colRunID, _colToolCallID, "tool_name", "result_json"},
 		func(t *entity.ToolResultRecord) []any {
 			return []any{&t.RunID, &t.ToolCallID, &t.ToolName, &t.ResultJSON}
 		},
@@ -116,7 +116,7 @@ func (r *MessageRepo) GetToolResult(ctx context.Context, ref string) (entity.Too
 func (r *MessageRepo) PersistArchive(ctx context.Context, record entity.ArchiveRecord) (string, error) {
 	return r.insertRecord(
 		ctx, "archives",
-		[]string{"run_id", "payload_type", "content"},
+		[]string{_colRunID, "payload_type", _colContent},
 		record.RunID, record.PayloadType, record.Content,
 	)
 }
@@ -159,7 +159,7 @@ func buildQuery(builder sq.StatementBuilderType, columns []string, table, runID 
 	sql, args, err = builder.
 		Select(columns...).
 		From(table).
-		Where(sq.Eq{"run_id": runID}).
+		Where(sq.Eq{_colRunID: runID}).
 		OrderBy("id ASC").
 		Limit(limit).
 		Offset(offset).
@@ -191,19 +191,19 @@ func queryAndScan[T any](ctx context.Context, r *MessageRepo, table string, colu
 
 // ListMessagesByRun retrieves paginated message records for a run.
 func (r *MessageRepo) ListMessagesByRun(ctx context.Context, runID string, limit, offset uint64) ([]entity.MessageRecord, error) {
-	return queryAndScan(ctx, r, "messages", []string{"run_id", "role", "content", "tool_call_id"}, runID, limit, offset, scanMessageRows, "ListMessagesByRun")
+	return queryAndScan(ctx, r, "messages", []string{_colRunID, "role", _colContent, _colToolCallID}, runID, limit, offset, scanMessageRows, "ListMessagesByRun")
 }
 
 // ListToolResultsByRun retrieves paginated tool result records for a run.
 func (r *MessageRepo) ListToolResultsByRun(ctx context.Context, runID string, limit, offset uint64) ([]entity.ToolResultRecord, error) {
-	return queryAndScan(ctx, r, "tool_results", []string{"run_id", "tool_call_id", "tool_name", "result_json"}, runID, limit, offset, scanToolResultRecords, "ListToolResultsByRun")
+	return queryAndScan(ctx, r, "tool_results", []string{_colRunID, _colToolCallID, "tool_name", "result_json"}, runID, limit, offset, scanToolResultRecords, "ListToolResultsByRun")
 }
 
 // GetArchive retrieves an archive record by its ref ID.
 func (r *MessageRepo) GetArchive(ctx context.Context, ref string) (entity.ArchiveRecord, bool, error) {
 	return getRecordByRef(
 		ctx, r, ref, "archives",
-		[]string{"run_id", "payload_type", "content"},
+		[]string{_colRunID, "payload_type", _colContent},
 		func(a *entity.ArchiveRecord) []any {
 			return []any{&a.RunID, &a.PayloadType, &a.Content}
 		},

@@ -194,7 +194,7 @@ func (p *metricProjection) apply(event *agentos.PlanEvent, emit bool) error {
 	case agentoscore.EventPlanNodeRetryScheduled:
 		p.recordNodeRetryScheduled(event, emit)
 	case agentoscore.EventRunStarted, agentoscore.EventRunCompleted, agentoscore.EventRunFailed,
-		agentoscore.EventRunCancelled, agentoscore.EventRunPaused, agentoscore.EventRunResumed,
+		agentoscore.EventRunCanceled, agentoscore.EventRunPaused, agentoscore.EventRunResumed,
 		agentoscore.EventAgentStepStarted, agentoscore.EventAgentStepCompleted, agentoscore.EventAgentStepFailed,
 		agentoscore.EventAgentMessageDelta, agentoscore.EventAgentMessageCompleted,
 		agentoscore.EventToolCallStarted, agentoscore.EventToolCallDelta, agentoscore.EventToolCallCompleted,
@@ -525,7 +525,7 @@ func planLifecycleForEvent(eventType agentoscore.EventType) string {
 		agentoscore.EventProcessSignalReceived, agentoscore.EventProcessControlReceived:
 		return ""
 	case agentoscore.EventRunStarted, agentoscore.EventRunCompleted, agentoscore.EventRunFailed,
-		agentoscore.EventRunCancelled, agentoscore.EventRunPaused, agentoscore.EventRunResumed,
+		agentoscore.EventRunCanceled, agentoscore.EventRunPaused, agentoscore.EventRunResumed,
 		agentoscore.EventAgentStepStarted, agentoscore.EventAgentStepCompleted, agentoscore.EventAgentStepFailed,
 		agentoscore.EventAgentMessageDelta, agentoscore.EventAgentMessageCompleted,
 		agentoscore.EventToolCallStarted, agentoscore.EventToolCallDelta, agentoscore.EventToolCallCompleted,
@@ -561,7 +561,7 @@ func nodeLifecycleForEvent(eventType agentoscore.EventType) string {
 		agentoscore.EventProcessSignalReceived, agentoscore.EventProcessControlReceived:
 		return ""
 	case agentoscore.EventRunStarted, agentoscore.EventRunCompleted, agentoscore.EventRunFailed,
-		agentoscore.EventRunCancelled, agentoscore.EventRunPaused, agentoscore.EventRunResumed,
+		agentoscore.EventRunCanceled, agentoscore.EventRunPaused, agentoscore.EventRunResumed,
 		agentoscore.EventAgentStepStarted, agentoscore.EventAgentStepCompleted, agentoscore.EventAgentStepFailed,
 		agentoscore.EventAgentMessageDelta, agentoscore.EventAgentMessageCompleted,
 		agentoscore.EventToolCallStarted, agentoscore.EventToolCallDelta, agentoscore.EventToolCallCompleted,

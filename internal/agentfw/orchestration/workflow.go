@@ -222,7 +222,7 @@ func executeAgentToolCalls(
 		if canceled, err := checkStreamSignal(signalCh, ctx); err != nil {
 			_ = err
 		} else if canceled {
-			status.LifecycleState = string(entity.LifecycleCancelled)
+			status.LifecycleState = string(entity.LifecycleCanceled)
 
 			return true, nil
 		}
@@ -363,7 +363,7 @@ func agentWorkflowRound(
 	if canceled, err := checkStreamSignal(signalCh, ctx); err != nil {
 		return false, messages, nil
 	} else if canceled {
-		status.LifecycleState = string(entity.LifecycleCancelled)
+		status.LifecycleState = string(entity.LifecycleCanceled)
 
 		return true, messages, nil
 	}
@@ -452,8 +452,8 @@ func finalizeRoundWithoutToolCalls(
 	switch outcome {
 	case waitOutcomeReceived:
 		return false, nextMessages
-	case waitOutcomeCancelled:
-		status.LifecycleState = string(entity.LifecycleCancelled)
+	case waitOutcomeCanceled:
+		status.LifecycleState = string(entity.LifecycleCanceled)
 
 		return true, nextMessages
 	case waitOutcomeTimedOut:
@@ -494,8 +494,8 @@ type waitOutcome int
 const (
 	// waitOutcomeReceived means a user message arrived and the agent loop continues.
 	waitOutcomeReceived waitOutcome = iota
-	// waitOutcomeCancelled means the run was canceled while waiting.
-	waitOutcomeCancelled
+	// waitOutcomeCanceled means the run was canceled while waiting.
+	waitOutcomeCanceled
 	// waitOutcomeTimedOut means the wait expired without user input; the run
 	// completes with status reason awaitingInputTimeoutReason.
 	waitOutcomeTimedOut
@@ -549,7 +549,7 @@ func waitForUserMessage(
 		if handleNativeWaitControlSignal(c, ctx, status) {
 			cancelTimer()
 
-			outcome = waitOutcomeCancelled
+			outcome = waitOutcomeCanceled
 			received = true
 		}
 	})

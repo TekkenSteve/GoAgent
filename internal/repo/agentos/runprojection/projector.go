@@ -382,5 +382,5 @@ func runEventID(runID string, sequence int64) string {
 // Canceled is terminal too: a run that exits via the agent-command cancel
 // signal publishes a canceled milestone, so its projection self-closes.
 func isRunTerminal(typ agentoscore.EventType) bool {
-	return typ == agentoscore.EventRunCompleted || typ == agentoscore.EventRunFailed || typ == agentoscore.EventRunCancelled
+	return typ == agentoscore.EventRunCompleted || typ == agentoscore.EventRunFailed || typ == agentoscore.EventRunCanceled
 }

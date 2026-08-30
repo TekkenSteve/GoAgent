@@ -441,8 +441,8 @@ func finishRun(ctx context.Context, tx pgx.Tx, run *agentos.ConversationRun, eve
 	switch outcome {
 	case agentos.ConversationOutcomeNormal:
 		status = agentos.ConversationRunCompleted
-	case agentos.ConversationOutcomeCancelled:
-		status = agentos.ConversationRunCancelled
+	case agentos.ConversationOutcomeCanceled:
+		status = agentos.ConversationRunCanceled
 	case agentos.ConversationOutcomeInterrupt:
 		status = agentos.ConversationRunInterrupted
 

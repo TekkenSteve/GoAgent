@@ -28,7 +28,7 @@ const (
 	ConversationRunRunning     = "running"
 	ConversationRunCompleted   = "completed"
 	ConversationRunInterrupted = "interrupted"
-	ConversationRunCancelled   = "cancelled"
+	ConversationRunCanceled    = "canceled"
 	ConversationRunError       = "error"
 )
 
@@ -36,7 +36,7 @@ const (
 const (
 	ConversationOutcomeNormal    = "normal"
 	ConversationOutcomeInterrupt = "interrupt"
-	ConversationOutcomeCancelled = "cancelled"
+	ConversationOutcomeCanceled  = "canceled"
 )
 
 // ConversationRuntime manages durable conversation runs, events, and threads.

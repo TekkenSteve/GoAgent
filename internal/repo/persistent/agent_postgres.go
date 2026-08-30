@@ -32,7 +32,7 @@ func (r *AgentRepo) Create(ctx context.Context, req *entity.CreateAgentRequest) 
 
 	sql, args, err := r.Builder.
 		Insert("agents").
-		Columns("account_id", "name", "description", "system_prompt", "model_ref", "config", "is_default").
+		Columns(_colAccountID, "name", "description", "system_prompt", "model_ref", "config", "is_default").
 		Values(req.AccountID, req.Name, req.Description, req.SystemPrompt, req.ModelRef, string(configJSON), false).
 		Suffix("RETURNING agent_id, account_id, name, description, system_prompt, model_ref, config, current_version, is_default, created_at, updated_at").
 		ToSql()
@@ -64,7 +64,7 @@ func (r *AgentRepo) Create(ctx context.Context, req *entity.CreateAgentRequest) 
 // Get retrieves an agent record by ID.
 func (r *AgentRepo) Get(ctx context.Context, agentID string) (entity.AgentRecord, bool, error) {
 	sql, args, err := r.Builder.
-		Select("agent_id", "account_id", "name", "description", "system_prompt", "model_ref", "config", "current_version", "is_default", "created_at", "updated_at").
+		Select("agent_id", _colAccountID, "name", "description", "system_prompt", "model_ref", "config", "current_version", "is_default", "created_at", "updated_at").
 		From("agents").
 		Where(sq.Eq{"agent_id": agentID}).
 		ToSql()
@@ -195,9 +195,9 @@ func (r *AgentRepo) Delete(ctx context.Context, agentID string) error {
 // ListByAccount retrieves all agent records for an account.
 func (r *AgentRepo) ListByAccount(ctx context.Context, accountID string) ([]entity.AgentRecord, error) {
 	sql, args, err := r.Builder.
-		Select("agent_id", "account_id", "name", "description", "system_prompt", "model_ref", "config", "current_version", "is_default", "created_at", "updated_at").
+		Select("agent_id", _colAccountID, "name", "description", "system_prompt", "model_ref", "config", "current_version", "is_default", "created_at", "updated_at").
 		From("agents").
-		Where(sq.Eq{"account_id": accountID}).
+		Where(sq.Eq{_colAccountID: accountID}).
 		OrderBy("created_at DESC").
 		ToSql()
 	if err != nil {

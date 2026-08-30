@@ -29,6 +29,7 @@ func (r *V1) agentOSPlanAuthor(ctx *fiber.Ctx) error {
 			agentos.BackendKindTemporalExternal,
 			agentos.BackendKindHTTP,
 			agentos.BackendKindGRPC,
+			agentos.BackendKindDSH,
 		},
 		EdgeTriggers: []agentos.EdgeTrigger{
 			agentos.EdgeOnSuccess,

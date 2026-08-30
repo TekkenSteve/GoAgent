@@ -32,6 +32,7 @@ const (
 	BackendKindTemporalExternal BackendKind = "temporal_external"
 	BackendKindHTTP             BackendKind = "http"
 	BackendKindGRPC             BackendKind = "grpc"
+	BackendKindDSH              BackendKind = "dsh"
 )
 
 const (

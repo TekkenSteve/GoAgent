@@ -52,8 +52,8 @@ func runLifecycleCoreType(typ EventType) (agentoscore.EventType, bool) {
 		return agentoscore.EventRunFailed, true
 	}
 
-	if typ == EventRunCancelled {
-		return agentoscore.EventRunCancelled, true
+	if typ == EventRunCanceled {
+		return agentoscore.EventRunCanceled, true
 	}
 
 	return "", false

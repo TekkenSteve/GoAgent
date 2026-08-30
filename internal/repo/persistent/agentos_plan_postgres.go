@@ -162,9 +162,9 @@ func (r *AgentOSPlanRepo) GetPlanByRef(ctx context.Context, ref agentos.PlanRef)
 	}
 
 	snapshot, exists, err := r.loadPlanStateByWhere(ctx, sq.Eq{
-		"plan_id":    ref.PlanID,
-		"account_id": ref.AccountID,
-		"project_id": ref.ProjectID,
+		_colPlanID:    ref.PlanID,
+		_colAccountID: ref.AccountID,
+		_colProjectID: ref.ProjectID,
 	}, "GetPlanByRef")
 	if err != nil || !exists {
 		return agentos.RunPlanSpec{}, agentos.RunPlanStatus{}, exists, err
@@ -223,12 +223,12 @@ func (r *AgentOSPlanRepo) planRefsBuilder(scope *agentosplan.PlanRefScope) (sq.S
 	}
 
 	builder := r.Builder.
-		Select("plan_id", "account_id", "project_id").
+		Select(_colPlanID, _colAccountID, _colProjectID).
 		From("plans").
 		OrderBy("updated_at ASC", "plan_id ASC")
 
-	builder = applyOptionalEq(builder, "account_id", scope.AccountID)
-	builder = applyOptionalEq(builder, "project_id", scope.ProjectID)
+	builder = applyOptionalEq(builder, _colAccountID, scope.AccountID)
+	builder = applyOptionalEq(builder, _colProjectID, scope.ProjectID)
 
 	if len(scope.LifecycleStates) > 0 {
 		builder = builder.Where(sq.Eq{"lifecycle_state": scope.LifecycleStates})
@@ -375,11 +375,11 @@ func (r *AgentOSPlanRepo) buildPlanUpsertQuery(snapshot *agentosplan.PlanStateSn
 	query, args, err = r.Builder.
 		Insert("plans").
 		Columns(
-			"plan_id",
+			_colPlanID,
 			"thread_id",
-			"account_id",
-			"project_id",
-			"idempotency_key",
+			_colAccountID,
+			_colProjectID,
+			_colIDempotencyKey,
 			"lifecycle_state",
 			"reason",
 			"spec_json",
@@ -460,9 +460,9 @@ func (r *AgentOSPlanRepo) upsertPlanNode(ctx context.Context, tx pgx.Tx, planID,
 	query, args, err := r.Builder.
 		Insert("plan_nodes").
 		Columns(
-			"plan_id",
+			_colPlanID,
 			"node_id",
-			"run_id",
+			_colRunID,
 			"backend_kind",
 			"backend_name",
 			"capability",
@@ -534,7 +534,7 @@ func (r *AgentOSPlanRepo) LoadPlanState(ctx context.Context, planID string) (age
 		return agentosplan.PlanStateSnapshot{}, false, fmt.Errorf("%w: plan id is required", agentoscore.ErrInvalidRunPlan)
 	}
 
-	return r.loadPlanStateByWhere(ctx, sq.Eq{"plan_id": planID}, "LoadPlanState")
+	return r.loadPlanStateByWhere(ctx, sq.Eq{_colPlanID: planID}, "LoadPlanState")
 }
 
 func (r *AgentOSPlanRepo) loadPlanStateByWhere(ctx context.Context, where sq.Eq, op string) (agentosplan.PlanStateSnapshot, bool, error) {
@@ -595,7 +595,7 @@ func (r *AgentOSPlanRepo) loadPlanNodeStatuses(ctx context.Context, planID strin
 	query, args, err := r.Builder.
 		Select("status_json").
 		From("plan_nodes").
-		Where(sq.Eq{"plan_id": planID}).
+		Where(sq.Eq{_colPlanID: planID}).
 		OrderBy("node_id ASC").
 		ToSql()
 	if err != nil {
@@ -639,7 +639,7 @@ func (r *AgentOSPlanRepo) planByIdempotencyKey(ctx context.Context, accountID, p
 	query, args, err := r.Builder.
 		Select("spec_json", "status_json").
 		From("plans").
-		Where(sq.Eq{"account_id": accountID, "project_id": projectID, "idempotency_key": idempotencyKey}).
+		Where(sq.Eq{_colAccountID: accountID, _colProjectID: projectID, _colIDempotencyKey: idempotencyKey}).
 		ToSql()
 	if err != nil {
 		return agentos.RunPlanSpec{}, agentos.RunPlanStatus{}, false, fmt.Errorf("AgentOSPlanRepo - planByIdempotencyKey - builder: %w", err)
@@ -1034,10 +1034,10 @@ func (r *AgentOSPlanRepo) planEventByIdempotencyKeyWith(ctx context.Context, que
 		Select("event_json", "transition_snapshot_digest").
 		From("plan_events").
 		Where(sq.Eq{
-			"account_id":      scope.AccountID,
-			"project_id":      scope.ProjectID,
-			"plan_id":         planID,
-			"idempotency_key": idempotencyKey,
+			_colAccountID:      scope.AccountID,
+			_colProjectID:      scope.ProjectID,
+			_colPlanID:         planID,
+			_colIDempotencyKey: idempotencyKey,
 		}).
 		ToSql()
 	if err != nil {
@@ -1130,14 +1130,14 @@ func (r *AgentOSPlanRepo) planEventsBuilder(scope *agentos.PlanStreamScope, limi
 	builder := r.Builder.
 		Select("event_json").
 		From("plan_events").
-		Where(sq.Eq{"plan_id": scope.PlanID}).
-		Where(sq.Eq{"account_id": scope.AccountID}).
-		Where(sq.Eq{"project_id": scope.ProjectID}).
+		Where(sq.Eq{_colPlanID: scope.PlanID}).
+		Where(sq.Eq{_colAccountID: scope.AccountID}).
+		Where(sq.Eq{_colProjectID: scope.ProjectID}).
 		Where(sq.Gt{"sequence": scope.AfterSequence}).
 		OrderBy("sequence ASC")
 
 	builder = applyOptionalEq(builder, "node_id", scope.NodeID)
-	builder = applyOptionalEq(builder, "run_id", scope.RunID)
+	builder = applyOptionalEq(builder, _colRunID, scope.RunID)
 
 	return applyOptionalLimit(builder, limit)
 }
@@ -1153,13 +1153,13 @@ func (r *AgentOSPlanRepo) GetPlanMetricCheckpoint(ctx context.Context, exporterI
 	}
 
 	query, args, err := r.Builder.
-		Select("exporter_id", "plan_id", "account_id", "project_id", "sequence", "projection_json", "updated_at").
+		Select("exporter_id", _colPlanID, _colAccountID, _colProjectID, "sequence", "projection_json", "updated_at").
 		From("plan_metric_checkpoints").
 		Where(sq.Eq{
 			"exporter_id": exporterID,
-			"plan_id":     ref.PlanID,
-			"account_id":  ref.AccountID,
-			"project_id":  ref.ProjectID,
+			_colPlanID:    ref.PlanID,
+			_colAccountID: ref.AccountID,
+			_colProjectID: ref.ProjectID,
 		}).
 		ToSql()
 	if err != nil {
@@ -1541,13 +1541,13 @@ func (r *AgentOSPlanRepo) GetAuditRecord(ctx context.Context, ref agentosplan.Au
 	}
 
 	query, args, err := r.Builder.
-		Select("audit_id", "plan_id", "account_id", "project_id", "COALESCE(run_id, '') AS run_id", "COALESCE(node_id, '') AS node_id", "actor_id", "action", "idempotency_key", "payload_json", "created_at").
+		Select("audit_id", _colPlanID, _colAccountID, _colProjectID, "COALESCE(run_id, '') AS run_id", "COALESCE(node_id, '') AS node_id", "actor_id", "action", _colIDempotencyKey, "payload_json", "created_at").
 		From("audit_logs").
 		Where(sq.Eq{
-			"plan_id":         ref.PlanID,
-			"account_id":      ref.AccountID,
-			"project_id":      ref.ProjectID,
-			"idempotency_key": ref.IdempotencyKey,
+			_colPlanID:         ref.PlanID,
+			_colAccountID:      ref.AccountID,
+			_colProjectID:      ref.ProjectID,
+			_colIDempotencyKey: ref.IdempotencyKey,
 		}).
 		ToSql()
 	if err != nil {
@@ -1642,15 +1642,15 @@ func (r *AgentOSPlanRepo) ListAuditRecords(ctx context.Context, scope *agentos.P
 
 func (r *AgentOSPlanRepo) auditRecordsBuilder(scope *agentos.PlanAuditScope) sq.SelectBuilder {
 	builder := r.Builder.
-		Select("audit_id", "plan_id", "account_id", "project_id", "COALESCE(run_id, '') AS run_id", "COALESCE(node_id, '') AS node_id", "actor_id", "action", "idempotency_key", "payload_json", "created_at").
+		Select("audit_id", _colPlanID, _colAccountID, _colProjectID, "COALESCE(run_id, '') AS run_id", "COALESCE(node_id, '') AS node_id", "actor_id", "action", _colIDempotencyKey, "payload_json", "created_at").
 		From("audit_logs").
-		Where(sq.Eq{"plan_id": scope.PlanID}).
-		Where(sq.Eq{"account_id": scope.AccountID}).
-		Where(sq.Eq{"project_id": scope.ProjectID}).
+		Where(sq.Eq{_colPlanID: scope.PlanID}).
+		Where(sq.Eq{_colAccountID: scope.AccountID}).
+		Where(sq.Eq{_colProjectID: scope.ProjectID}).
 		OrderBy("created_at ASC", "audit_id ASC")
 
 	builder = applyOptionalEq(builder, "node_id", scope.NodeID)
-	builder = applyOptionalEq(builder, "run_id", scope.RunID)
+	builder = applyOptionalEq(builder, _colRunID, scope.RunID)
 
 	if scope.Action != "" {
 		builder = builder.Where(sq.Eq{"action": string(scope.Action)})
@@ -1884,13 +1884,13 @@ func (r *AgentOSPlanRepo) GetPlanCommand(ctx context.Context, ref agentosplan.Pl
 	}
 
 	query, args, err := r.Builder.
-		Select("command_id", "plan_id", "account_id", "project_id", "actor_id", "action", "idempotency_key", "payload_json", "status", "failure_reason", "created_at", "updated_at").
+		Select("command_id", _colPlanID, _colAccountID, _colProjectID, "actor_id", "action", _colIDempotencyKey, "payload_json", "status", "failure_reason", "created_at", "updated_at").
 		From("plan_commands").
 		Where(sq.Eq{
-			"plan_id":         ref.PlanID,
-			"account_id":      ref.AccountID,
-			"project_id":      ref.ProjectID,
-			"idempotency_key": ref.IdempotencyKey,
+			_colPlanID:         ref.PlanID,
+			_colAccountID:      ref.AccountID,
+			_colProjectID:      ref.ProjectID,
+			_colIDempotencyKey: ref.IdempotencyKey,
 		}).
 		ToSql()
 	if err != nil {
@@ -1952,14 +1952,14 @@ func (r *AgentOSPlanRepo) recoverablePlanCommandsBuilder(scope *agentosplan.Plan
 	}
 
 	builder := r.Builder.
-		Select("command_id", "plan_id", "account_id", "project_id", "actor_id", "action", "idempotency_key", "payload_json", "status", "failure_reason", "created_at", "updated_at").
+		Select("command_id", _colPlanID, _colAccountID, _colProjectID, "actor_id", "action", _colIDempotencyKey, "payload_json", "status", "failure_reason", "created_at", "updated_at").
 		From("plan_commands").
 		Where(sq.Eq{"status": statusValues}).
 		OrderBy("updated_at ASC", "command_id ASC")
 
-	builder = applyOptionalEq(builder, "plan_id", scope.PlanID)
-	builder = applyOptionalEq(builder, "account_id", scope.AccountID)
-	builder = applyOptionalEq(builder, "project_id", scope.ProjectID)
+	builder = applyOptionalEq(builder, _colPlanID, scope.PlanID)
+	builder = applyOptionalEq(builder, _colAccountID, scope.AccountID)
+	builder = applyOptionalEq(builder, _colProjectID, scope.ProjectID)
 
 	if scope.Action != "" {
 		builder = builder.Where(sq.Eq{"action": string(scope.Action)})

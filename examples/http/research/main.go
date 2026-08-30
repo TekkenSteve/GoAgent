@@ -35,6 +35,13 @@ const (
 	childSearchResult  = 3
 )
 
+const (
+	_kID    = "id"
+	_kType  = "type"
+	_kInput = "input"
+	_kTool  = "tool"
+)
+
 func main() {
 	baseURL := os.Getenv("BASE_URL")
 	if baseURL == "" {
@@ -84,38 +91,38 @@ func main() {
 func researchSteps() []map[string]any {
 	return []map[string]any{
 		{
-			"id": "discover", "type": "tool", "tool": "web_search",
-			"input": map[string]any{"query": "climate change latest research 2026", "max_results": maxSearchResult},
+			_kID: "discover", _kType: _kTool, _kTool: "web_search",
+			_kInput: map[string]any{"query": "climate change latest research 2026", "max_results": maxSearchResult},
 		},
 		{
-			"id": "explore", "type": "split",
-			"input": map[string]any{
+			_kID: "explore", _kType: "split",
+			_kInput: map[string]any{
 				"children": []map[string]any{
 					{
-						"id": "explore-impacts", "type": "tool", "tool": "web_search",
-						"input": map[string]any{"query": "climate change impacts 2026", "max_results": childSearchResult},
+						_kID: "explore-impacts", _kType: _kTool, _kTool: "web_search",
+						_kInput: map[string]any{"query": "climate change impacts 2026", "max_results": childSearchResult},
 					},
 					{
-						"id": "explore-solutions", "type": "tool", "tool": "web_search",
-						"input": map[string]any{"query": "climate change solutions 2026", "max_results": childSearchResult},
+						_kID: "explore-solutions", _kType: _kTool, _kTool: "web_search",
+						_kInput: map[string]any{"query": "climate change solutions 2026", "max_results": childSearchResult},
 					},
 					{
-						"id": "explore-policy", "type": "tool", "tool": "web_search",
-						"input": map[string]any{"query": "climate policy 2026", "max_results": childSearchResult},
+						_kID: "explore-policy", _kType: _kTool, _kTool: "web_search",
+						_kInput: map[string]any{"query": "climate policy 2026", "max_results": childSearchResult},
 					},
 				},
 			},
 		},
 		{
-			"id": "gather", "type": "join",
-			"input": map[string]any{"_join_group": "explore"},
+			_kID: "gather", _kType: "join",
+			_kInput: map[string]any{"_join_group": "explore"},
 		},
 		{
-			"id": "synthesize", "type": "agent", "agent_id": "analyst",
-			"input": map[string]any{"message": "Synthesize all research findings into a summary report"},
+			_kID: "synthesize", _kType: "agent", "agent_id": "analyst",
+			_kInput: map[string]any{"message": "Synthesize all research findings into a summary report"},
 		},
 		{
-			"id": "review", "type": "wait",
+			_kID: "review", _kType: "wait",
 			"wait_for": map[string]any{
 				"signal_name": "review-approved",
 				"timeout":     reviewTimeoutNanos, // 10 seconds in nanoseconds

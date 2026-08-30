@@ -818,9 +818,9 @@ func executePlanWorkflow(ctx context.Context, temporalClient planTemporalClient,
 	}
 
 	options := client.StartWorkflowOptions{
-		ID:               planWorkflowID(spec.PlanID),
-		TaskQueue:        taskQueue,
-		SearchAttributes: orchestration.SearchAttributesForRun(spec.PlanID, "running"),
+		ID:                    planWorkflowID(spec.PlanID),
+		TaskQueue:             taskQueue,
+		TypedSearchAttributes: orchestration.SearchAttributesForRun(spec.PlanID, "running"),
 	}
 
 	_, err := temporalClient.ExecuteWorkflow(ctx, &options, PlanWorkflowName, &planWorkflowInput{

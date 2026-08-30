@@ -2618,13 +2618,15 @@ const docTemplate = `{
                 "native",
                 "temporal_external",
                 "http",
-                "grpc"
+                "grpc",
+                "dsh"
             ],
             "x-enum-varnames": [
                 "BackendKindNative",
                 "BackendKindTemporalExternal",
                 "BackendKindHTTP",
-                "BackendKindGRPC"
+                "BackendKindGRPC",
+                "BackendKindDSH"
             ]
         },
         "control.BackendRef": {
@@ -3327,7 +3329,7 @@ const docTemplate = `{
                 "run.started",
                 "run.completed",
                 "run.failed",
-                "run.cancelled",
+                "run.canceled",
                 "run.paused",
                 "run.resumed",
                 "agent.step.started",
@@ -3378,7 +3380,7 @@ const docTemplate = `{
                 "EventRunStarted",
                 "EventRunCompleted",
                 "EventRunFailed",
-                "EventRunCancelled",
+                "EventRunCanceled",
                 "EventRunPaused",
                 "EventRunResumed",
                 "EventAgentStepStarted",
@@ -3891,7 +3893,7 @@ const docTemplate = `{
                 "run.started",
                 "run.completed",
                 "run.failed",
-                "run.cancelled",
+                "run.canceled",
                 "run.paused",
                 "run.resumed",
                 "agent.step.started",
@@ -3942,7 +3944,7 @@ const docTemplate = `{
                 "EventRunStarted",
                 "EventRunCompleted",
                 "EventRunFailed",
-                "EventRunCancelled",
+                "EventRunCanceled",
                 "EventRunPaused",
                 "EventRunResumed",
                 "EventAgentStepStarted",

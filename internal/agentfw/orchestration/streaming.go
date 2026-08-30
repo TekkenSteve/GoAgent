@@ -44,7 +44,7 @@ func StreamAgentWorkflow(ctx workflow.Context, input *InitStreamInput) error {
 
 	defer func() {
 		if canceled {
-			emitStreamCancelled(ctx, input)
+			emitStreamCanceled(ctx, input)
 		}
 	}()
 
@@ -237,19 +237,19 @@ func finishStreamMaxRounds(ctx workflow.Context, input *InitStreamInput) error {
 	}).Get(ctx, nil)
 }
 
-// emitStreamCancelled publishes and persists the terminal canceled milestone
+// emitStreamCanceled publishes and persists the terminal canceled milestone
 // when a run exits via the agent-command cancel signal. It reuses
 // FinishStreamActivity so a canceled run lands in the EventStore exactly like
 // a finished or failed one, and its first publish attaches the run-event
 // projector, which self-closes once the canceled milestone is projected.
-func emitStreamCancelled(ctx workflow.Context, input *InitStreamInput) {
+func emitStreamCanceled(ctx workflow.Context, input *InitStreamInput) {
 	var out struct{}
 
 	if err := workflow.ExecuteActivity(ctx, FinishStreamActivityName, FinishStreamInput{
 		AccountID: input.AccountID,
 		SessionID: input.SessionID,
 		RunID:     input.RunID,
-		Event:     entity.NewAgentRunCancelledEvent(),
+		Event:     entity.NewAgentRunCanceledEvent(),
 	}).Get(ctx, &out); err != nil {
 		_ = err
 	}

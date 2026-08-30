@@ -27,7 +27,7 @@ type EventSubscriber interface {
 // (HTTP / gRPC / temporal_external) own no local byte stream, so the only
 // AG-UI events they can produce are the lifecycle milestones they observe:
 // Start success → RUN_STARTED, a terminal Status → RUN_FINISHED / RUN_ERROR /
-// RUN_CANCELLED. Publishing is fail-open: a bus hiccup never fails the run.
+// RUN_CANCELED. Publishing is fail-open: a bus hiccup never fails the run.
 // Statuses pass by pointer because RunStatus is heavy (~112 bytes); a nil
 // status is a no-op.
 type LifecyclePublisher interface {

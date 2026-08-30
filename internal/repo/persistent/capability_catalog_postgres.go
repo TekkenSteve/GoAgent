@@ -180,7 +180,7 @@ func (r *AgentOSCapabilityCatalogRepo) capabilityByIdempotencyKey(ctx context.Co
 	sql, args, err := r.Builder.
 		Select("capability_json").
 		From("agentos_capabilities").
-		Where(sq.Eq{"idempotency_key": idempotencyKey}).
+		Where(sq.Eq{_colIDempotencyKey: idempotencyKey}).
 		ToSql()
 	if err != nil {
 		return agentos.Capability{}, false, fmt.Errorf("AgentOSCapabilityCatalogRepo - capabilityByIdempotencyKey - builder: %w", err)

@@ -229,9 +229,9 @@ func (r *processRuntime) executeProcessWorkflow(ctx context.Context, spec *agent
 	}
 
 	options := client.StartWorkflowOptions{
-		ID:               processWorkflowID(spec.ProcessID),
-		TaskQueue:        r.taskQueue,
-		SearchAttributes: orchestration.SearchAttributesForRun(spec.ProcessID, "running"),
+		ID:                    processWorkflowID(spec.ProcessID),
+		TaskQueue:             r.taskQueue,
+		TypedSearchAttributes: orchestration.SearchAttributesForRun(spec.ProcessID, "running"),
 	}
 
 	_, err := r.temporalClient.ExecuteWorkflow(ctx, &options, ProcessWorkflowName, &processWorkflowInput{

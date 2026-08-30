@@ -295,10 +295,10 @@ func TestRunEventProjectorNewRequiresSubscriberAndStore(t *testing.T) {
 	require.ErrorIs(t, err, errRunProjectionStoreRequired)
 }
 
-// TestRunEventProjectorCancelledMilestoneSelfCloses locks the cancel exit path:
+// TestRunEventProjectorCanceledMilestoneSelfCloses locks the cancel exit path:
 // a run that publishes a canceled milestone closes its projection exactly like
 // a completed or failed one, so a canceled run never lingers as a live drain.
-func TestRunEventProjectorCancelledMilestoneSelfCloses(t *testing.T) {
+func TestRunEventProjectorCanceledMilestoneSelfCloses(t *testing.T) {
 	t.Parallel()
 
 	bus := memstream.New()
@@ -308,12 +308,12 @@ func TestRunEventProjectorCancelledMilestoneSelfCloses(t *testing.T) {
 
 	require.NoError(t, p.EnsureSubscribed(t.Context(), "run-8", handle))
 	require.NoError(t, bus.Publish(t.Context(), handle, stream.NewRunStarted("sess-1", "run-8")))
-	require.NoError(t, bus.Publish(t.Context(), handle, stream.NewRunCancelled("sess-1", "run-8")))
+	require.NoError(t, bus.Publish(t.Context(), handle, stream.NewRunCanceled("sess-1", "run-8")))
 
 	require.Eventually(t, func() bool { return store.len() == 2 }, 2*time.Second, 10*time.Millisecond)
 	require.Equal(t, []agentoscore.EventType{
 		agentoscore.EventRunStarted,
-		agentoscore.EventRunCancelled,
+		agentoscore.EventRunCanceled,
 	}, store.eventTypes())
 
 	require.Eventually(t, func() bool {
@@ -370,7 +370,7 @@ func TestRunEventProjectorReapsStaleProjection(t *testing.T) {
 	// land once).
 	require.NoError(t, p.EnsureSubscribed(t.Context(), "run-9", handle))
 	require.NoError(t, bus.Publish(t.Context(), handle, stream.NewRunStarted("sess-1", "run-9")))
-	require.NoError(t, bus.Publish(t.Context(), handle, stream.NewRunCancelled("sess-1", "run-9")))
+	require.NoError(t, bus.Publish(t.Context(), handle, stream.NewRunCanceled("sess-1", "run-9")))
 
 	require.Eventually(t, func() bool { return store.len() == 2 }, 2*time.Second, 10*time.Millisecond)
 }

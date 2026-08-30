@@ -23,7 +23,7 @@ type RuntimeConfig struct {
 	// Publisher is the data-plane write side one-shot external backends (HTTP /
 	// gRPC / temporal_external) mirror their observable lifecycle onto: Start
 	// success → RUN_STARTED, a terminal Status → RUN_FINISHED / RUN_ERROR /
-	// RUN_CANCELLED. Nil degrades external backends to no-op lifecycle
+	// RUN_CANCELED. Nil degrades external backends to no-op lifecycle
 	// publishing — the run still works, its milestones just never reach the bus.
 	Publisher agentosstream.Publisher
 	// ProjectionController optionally attaches the run milestone projector to

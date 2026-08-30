@@ -77,11 +77,11 @@ func (s *ScrapeWebpage) Meta() ToolMeta {
 ### Best Practice
 Always collect multiple relevant URLs from web-search results and scrape them all in a single call rather than making separate calls.`,
 		Parameters: map[string]any{
-			"type": "object",
+			_schemaKeyType: "object",
 			"properties": map[string]any{
 				"urls": map[string]any{
-					"type":        "string",
-					"description": "**REQUIRED** - URLs to scrape, separated by commas. Example: 'https://example.com/page1,https://example.com/page2'",
+					_schemaKeyType:        _schemaTypeString,
+					_schemaKeyDescription: "**REQUIRED** - URLs to scrape, separated by commas. Example: 'https://example.com/page1,https://example.com/page2'",
 				},
 			},
 			"required": []any{"urls"},

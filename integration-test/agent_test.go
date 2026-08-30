@@ -85,7 +85,7 @@ func waitForRunCompletion(t *testing.T, runID string) runStatus {
 		if status.LifecycleState == waitingInput ||
 			status.LifecycleState == string(entity.LifecycleCompleted) ||
 			status.LifecycleState == string(entity.LifecycleFailed) ||
-			status.LifecycleState == string(entity.LifecycleCancelled) {
+			status.LifecycleState == string(entity.LifecycleCanceled) {
 			return status
 		}
 

@@ -198,7 +198,7 @@ func (r *AgentOSArtifactSchemaCatalogRepo) schemaByIdempotencyKey(ctx context.Co
 	sql, args, err := r.Builder.
 		Select("schema_decl_json").
 		From("agentos_artifact_schemas").
-		Where(sq.Eq{"idempotency_key": idempotencyKey}).
+		Where(sq.Eq{_colIDempotencyKey: idempotencyKey}).
 		ToSql()
 	if err != nil {
 		return agentos.ArtifactSchema{}, false, fmt.Errorf("AgentOSArtifactSchemaCatalogRepo - schemaByIdempotencyKey - builder: %w", err)

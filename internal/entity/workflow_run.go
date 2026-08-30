@@ -38,8 +38,8 @@ const (
 	LifecycleCompleted LifecycleState = "completed"
 	// LifecycleFailed marks a run that failed.
 	LifecycleFailed LifecycleState = "failed"
-	// LifecycleCancelled marks a run that was canceled.
-	LifecycleCancelled LifecycleState = "canceled"
+	// LifecycleCanceled marks a run that was canceled.
+	LifecycleCanceled LifecycleState = "canceled"
 )
 
 // ToolCallRef stores deterministic metadata about pending tool execution.

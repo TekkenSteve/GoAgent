@@ -25,28 +25,28 @@ func NewAgentCreationTool(creator AgentCreatorFn) *AgentCreationTool {
 			Name:        "create_agent",
 			Description: "Create a new specialized sub-agent for a specific task. Use this when you need a dedicated agent with custom instructions and tools.",
 			Parameters: map[string]any{
-				"type": "object",
+				_schemaKeyType: "object",
 				"properties": map[string]any{
 					"agent_id": map[string]any{
-						"type":        "string",
-						"description": "Unique identifier for the new agent",
+						_schemaKeyType:        _schemaTypeString,
+						_schemaKeyDescription: "Unique identifier for the new agent",
 					},
 					"name": map[string]any{
-						"type":        "string",
-						"description": "Human-readable name for the new agent",
+						_schemaKeyType:        _schemaTypeString,
+						_schemaKeyDescription: "Human-readable name for the new agent",
 					},
 					"system_prompt": map[string]any{
-						"type":        "string",
-						"description": "System prompt defining the agent's role and behavior",
+						_schemaKeyType:        _schemaTypeString,
+						_schemaKeyDescription: "System prompt defining the agent's role and behavior",
 					},
 					"model_ref": map[string]any{
-						"type":        "string",
-						"description": "Model reference (e.g., gpt-4, claude-3)",
+						_schemaKeyType:        _schemaTypeString,
+						_schemaKeyDescription: "Model reference (e.g., gpt-4, claude-3)",
 					},
 					"tools": map[string]any{
-						"type":        "array",
-						"items":       map[string]any{"type": "string"},
-						"description": "List of tool names the agent can use",
+						_schemaKeyType:        "array",
+						"items":               map[string]any{_schemaKeyType: _schemaTypeString},
+						_schemaKeyDescription: "List of tool names the agent can use",
 					},
 				},
 				"required": []string{"agent_id", "name", "system_prompt", "model_ref"},

@@ -309,7 +309,7 @@ func (r *AgentOSWorksetRepo) worksetByIdempotencyKey(ctx context.Context, accoun
 	query, args, err := r.Builder.
 		Select("spec_json", "status_json").
 		From("worksets").
-		Where(sq.Eq{"account_id": accountID, "project_id": projectID, "idempotency_key": idempotencyKey}).
+		Where(sq.Eq{_colAccountID: accountID, _colProjectID: projectID, _colIDempotencyKey: idempotencyKey}).
 		ToSql()
 	if err != nil {
 		return agentos.WorksetSpec{}, agentos.WorksetStatus{}, false, fmt.Errorf("AgentOSWorksetRepo - worksetByIdempotencyKey - builder: %w", err)
@@ -331,7 +331,7 @@ func (r *AgentOSWorksetRepo) worksetStatusByIdempotencyKey(ctx context.Context, 
 	query, args, err := r.Builder.
 		Select("status_json").
 		From("workset_status_updates").
-		Where(sq.Eq{"workset_id": worksetID, "account_id": accountID, "project_id": projectID, "idempotency_key": idempotencyKey}).
+		Where(sq.Eq{"workset_id": worksetID, _colAccountID: accountID, _colProjectID: projectID, _colIDempotencyKey: idempotencyKey}).
 		ToSql()
 	if err != nil {
 		return agentos.WorksetStatus{}, false, fmt.Errorf("AgentOSWorksetRepo - worksetStatusByIdempotencyKey - builder: %w", err)
@@ -345,11 +345,11 @@ func (r *AgentOSWorksetRepo) worksetChunkStatusByKey(ctx context.Context, ref ag
 		Select("status_json").
 		From("workset_chunk_results").
 		Where(sq.Eq{
-			"workset_id":      ref.WorksetID,
-			"account_id":      ref.AccountID,
-			"project_id":      ref.ProjectID,
-			"chunk_id":        chunkID,
-			"idempotency_key": idempotencyKey,
+			"workset_id":       ref.WorksetID,
+			_colAccountID:      ref.AccountID,
+			_colProjectID:      ref.ProjectID,
+			"chunk_id":         chunkID,
+			_colIDempotencyKey: idempotencyKey,
 		}).
 		ToSql()
 	if err != nil {

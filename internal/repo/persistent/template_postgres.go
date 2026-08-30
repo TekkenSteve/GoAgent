@@ -36,7 +36,7 @@ func (r *WorkflowTemplateRepo) Create(ctx context.Context, req *entity.CreateWor
 
 	sql, args, err := r.Builder.
 		Insert("workflow_templates").
-		Columns("account_id", "name", "description", "team_spec", "system_prompt", "default_model", "tags", "is_enabled").
+		Columns(_colAccountID, "name", "description", "team_spec", "system_prompt", "default_model", "tags", "is_enabled").
 		Values(req.AccountID, req.Name, req.Description, string(teamSpecJSON), req.SystemPrompt, req.DefaultModel, tags, req.IsEnabled).
 		Suffix("RETURNING id, account_id, name, description, team_spec, system_prompt, default_model, tags, is_enabled, created_at, updated_at").
 		ToSql()
@@ -71,7 +71,7 @@ func (r *WorkflowTemplateRepo) Create(ctx context.Context, req *entity.CreateWor
 // Get retrieves a workflow template by ID.
 func (r *WorkflowTemplateRepo) Get(ctx context.Context, templateID string) (entity.WorkflowTemplate, bool, error) {
 	sql, args, err := r.Builder.
-		Select("id", "account_id", "name", "description", "team_spec", "system_prompt", "default_model", "tags", "is_enabled", "created_at", "updated_at").
+		Select("id", _colAccountID, "name", "description", "team_spec", "system_prompt", "default_model", "tags", "is_enabled", "created_at", "updated_at").
 		From("workflow_templates").
 		Where(sq.Eq{"id": templateID}).
 		ToSql()
@@ -208,9 +208,9 @@ func (r *WorkflowTemplateRepo) Delete(ctx context.Context, templateID string) er
 // ListByAccount retrieves all templates for a given account.
 func (r *WorkflowTemplateRepo) ListByAccount(ctx context.Context, accountID string) ([]entity.WorkflowTemplate, error) {
 	sql, args, err := r.Builder.
-		Select("id", "account_id", "name", "description", "team_spec", "system_prompt", "default_model", "tags", "is_enabled", "created_at", "updated_at").
+		Select("id", _colAccountID, "name", "description", "team_spec", "system_prompt", "default_model", "tags", "is_enabled", "created_at", "updated_at").
 		From("workflow_templates").
-		Where(sq.Eq{"account_id": accountID}).
+		Where(sq.Eq{_colAccountID: accountID}).
 		OrderBy("created_at DESC").
 		ToSql()
 	if err != nil {

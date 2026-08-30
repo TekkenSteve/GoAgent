@@ -195,7 +195,7 @@ func (r *AgentOSActionRepo) actionByIdempotencyKey(ctx context.Context, accountI
 	query, args, err := r.Builder.
 		Select("spec_json", "status_json").
 		From("governed_actions").
-		Where(sq.Eq{"account_id": accountID, "project_id": projectID, "idempotency_key": idempotencyKey}).
+		Where(sq.Eq{_colAccountID: accountID, _colProjectID: projectID, _colIDempotencyKey: idempotencyKey}).
 		ToSql()
 	if err != nil {
 		return agentos.GovernedActionSpec{}, agentos.GovernedActionStatus{}, false, fmt.Errorf("AgentOSActionRepo - actionByIdempotencyKey - builder: %w", err)
@@ -217,7 +217,7 @@ func (r *AgentOSActionRepo) actionStatusByIdempotencyKey(ctx context.Context, ac
 	query, args, err := r.Builder.
 		Select("status_json").
 		From("governed_action_status_updates").
-		Where(sq.Eq{"action_id": actionID, "account_id": accountID, "project_id": projectID, "idempotency_key": idempotencyKey}).
+		Where(sq.Eq{"action_id": actionID, _colAccountID: accountID, _colProjectID: projectID, _colIDempotencyKey: idempotencyKey}).
 		ToSql()
 	if err != nil {
 		return agentos.GovernedActionStatus{}, false, fmt.Errorf("AgentOSActionRepo - actionStatusByIdempotencyKey - builder: %w", err)

@@ -70,9 +70,9 @@ func (r *ExecutorTemporal) StartExecution(ctx context.Context, req *entity.Execu
 	}
 
 	opts := client.StartWorkflowOptions{
-		ID:               workflowID,
-		TaskQueue:        r.opts.workflowTaskQueues.NativeControl,
-		SearchAttributes: orchestration.SearchAttributesForRun(req.RunID, "running"),
+		ID:                    workflowID,
+		TaskQueue:             r.opts.workflowTaskQueues.NativeControl,
+		TypedSearchAttributes: orchestration.SearchAttributesForRun(req.RunID, "running"),
 	}
 
 	_, err := r.client.ExecuteWorkflow(ctx, opts, r.opts.workflowName, &input)
@@ -118,9 +118,9 @@ func (r *ExecutorTemporal) StartOrchestration(ctx context.Context, input *entity
 	workflowID := "orch-" + r.opts.workflowIDPrefix + input.RunID
 
 	opts := client.StartWorkflowOptions{
-		ID:               workflowID,
-		TaskQueue:        r.opts.workflowTaskQueues.NativeControl,
-		SearchAttributes: orchestration.SearchAttributesForRun(input.RunID, "running"),
+		ID:                    workflowID,
+		TaskQueue:             r.opts.workflowTaskQueues.NativeControl,
+		TypedSearchAttributes: orchestration.SearchAttributesForRun(input.RunID, "running"),
 	}
 
 	_, err := r.client.ExecuteWorkflow(ctx, opts, orchestration.OrchestrationWorkflowName, &orchestration.WorkflowInput{

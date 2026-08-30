@@ -156,11 +156,11 @@ func listProcessPlatformStatuses[T any](ctx context.Context, pg *postgres.Postgr
 	builder := pg.Builder.
 		Select("status_json").
 		From(query.Table).
-		Where(sq.Eq{"account_id": query.AccountID, "project_id": query.ProjectID}).
+		Where(sq.Eq{_colAccountID: query.AccountID, _colProjectID: query.ProjectID}).
 		OrderBy("updated_at DESC", query.OrderColumn+" ASC")
 
 	if query.ProcessID != "" {
-		builder = builder.Where(sq.Eq{"process_id": query.ProcessID})
+		builder = builder.Where(sq.Eq{_colProcessID: query.ProcessID})
 	}
 
 	if query.ResourceKind != "" {
@@ -260,14 +260,14 @@ func insertProcessPlatformProjection[T any](ctx context.Context, pg *postgres.Po
 		Insert(row.Table).
 		Columns(
 			row.IDColumn,
-			"account_id",
-			"project_id",
-			"process_id",
+			_colAccountID,
+			_colProjectID,
+			_colProcessID,
 			"resource_kind",
 			"resource_id",
 			"kind",
 			"lifecycle_state",
-			"idempotency_key",
+			_colIDempotencyKey,
 			"spec_json",
 			"status_json",
 			"requested_at",

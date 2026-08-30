@@ -49,16 +49,16 @@ func (c *CodeInterpreter) Meta() ToolMeta {
 		Name:        "code_interpreter",
 		Description: "Execute Python code in a sandboxed environment. Use this tool for data analysis, visualization, computation, and file processing tasks.",
 		Parameters: map[string]any{
-			"type": "object",
+			_schemaKeyType: "object",
 			"properties": map[string]any{
 				"code": map[string]any{
-					"type":        "string",
-					"description": "The Python code to execute",
+					_schemaKeyType:        _schemaTypeString,
+					_schemaKeyDescription: "The Python code to execute",
 				},
 				"timeout": map[string]any{
-					"type":        "integer",
-					"description": "Execution timeout in seconds (max 120)",
-					"default":     defaultCodeInterpreterTimeoutSec,
+					_schemaKeyType:        "integer",
+					_schemaKeyDescription: "Execution timeout in seconds (max 120)",
+					"default":             defaultCodeInterpreterTimeoutSec,
 				},
 			},
 			"required": []any{"code"},

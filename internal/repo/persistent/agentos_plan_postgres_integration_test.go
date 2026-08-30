@@ -873,13 +873,13 @@ func TestAgentOSPlanPostgresPlanEventIdempotencyDoesNotAdvanceSequence(t *testin
 	assertPostgresPlanEventInsertRejected(t, pg, spec, "plan-event-json-payload-"+suffix, 101, map[string]any{"state": "wrong"}, mismatchedPayload)
 
 	missingIdentityJSON, err := json.Marshal(map[string]any{
-		"event_type": string(first.EventType),
-		"plan_id":    spec.PlanID,
-		"account_id": spec.AccountID,
-		"project_id": spec.ProjectID,
-		"sequence":   102,
-		"timestamp":  first.Timestamp,
-		"payload":    first.Payload,
+		"event_type":  string(first.EventType),
+		_colPlanID:    spec.PlanID,
+		_colAccountID: spec.AccountID,
+		_colProjectID: spec.ProjectID,
+		"sequence":    102,
+		"timestamp":   first.Timestamp,
+		"payload":     first.Payload,
 	})
 	if err != nil {
 		t.Fatalf("marshal missing identity event json: %v", err)
@@ -1078,7 +1078,7 @@ func TestAgentOSPlanPostgresPlanEventIdempotencyIndexIsTenantScoped(t *testing.T
 	_, pg, _ := newAgentOSPlanPostgresIntegrationDB(t)
 
 	columns := postgresIndexColumns(t, pg, "idx_plan_events_idempotency_key")
-	want := []string{"account_id", "project_id", "plan_id", "idempotency_key"}
+	want := []string{_colAccountID, _colProjectID, _colPlanID, _colIDempotencyKey}
 	if !slices.Equal(columns, want) {
 		t.Fatalf("idx_plan_events_idempotency_key columns = %#v, want %#v", columns, want)
 	}

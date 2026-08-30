@@ -65,9 +65,9 @@ func (r *AgentOSProcessRepo) GetProcessByRef(ctx context.Context, ref agentos.Re
 	}
 
 	return r.loadProcess(ctx, sq.Eq{
-		"process_id": ref.ProcessID,
-		"account_id": ref.AccountID,
-		"project_id": ref.ProjectID,
+		_colProcessID: ref.ProcessID,
+		_colAccountID: ref.AccountID,
+		_colProjectID: ref.ProjectID,
 	}, "GetProcessByRef")
 }
 
@@ -103,8 +103,8 @@ func (r *AgentOSProcessRepo) processListBuilder(scope *agentos.Scope) sq.SelectB
 		Select("status_json").
 		From("processes").
 		Where(sq.Eq{
-			"account_id": scope.AccountID,
-			"project_id": scope.ProjectID,
+			_colAccountID: scope.AccountID,
+			_colProjectID: scope.ProjectID,
 		}).
 		OrderBy("updated_at DESC", "process_id ASC")
 
@@ -219,9 +219,9 @@ func (r *AgentOSProcessRepo) applyProcessStatusUpdate(
 		Set("status_json", statusJSON).
 		Set("updated_at", status.UpdatedAt).
 		Where(sq.Eq{
-			"process_id": spec.ProcessID,
-			"account_id": spec.AccountID,
-			"project_id": spec.ProjectID,
+			_colProcessID: spec.ProcessID,
+			_colAccountID: spec.AccountID,
+			_colProjectID: spec.ProjectID,
 		}).
 		ToSql()
 	if err != nil {
@@ -317,9 +317,9 @@ func (r *AgentOSProcessRepo) ListProcessEvents(ctx context.Context, scope *agent
 		Select(processEventColumns()...).
 		From("process_events").
 		Where(sq.Eq{
-			"process_id": scope.ProcessID,
-			"account_id": scope.AccountID,
-			"project_id": scope.ProjectID,
+			_colProcessID: scope.ProcessID,
+			_colAccountID: scope.AccountID,
+			_colProjectID: scope.ProjectID,
 		}).
 		Where(sq.Gt{"sequence": scope.AfterSequence}).
 		OrderBy("sequence ASC")
@@ -358,18 +358,18 @@ func (r *AgentOSProcessRepo) ListProcessEvents(ctx context.Context, scope *agent
 
 func (r *AgentOSProcessRepo) processForCreate(ctx context.Context, spec *agentos.Spec) (agentos.Spec, agentos.Status, bool, error) {
 	existingSpec, existingStatus, exists, err := r.loadProcess(ctx, sq.Eq{
-		"account_id":      spec.AccountID,
-		"project_id":      spec.ProjectID,
-		"idempotency_key": spec.IdempotencyKey,
+		_colAccountID:      spec.AccountID,
+		_colProjectID:      spec.ProjectID,
+		_colIDempotencyKey: spec.IdempotencyKey,
 	}, "processForCreateByKey")
 	if err != nil || exists {
 		return existingSpec, existingStatus, exists, err
 	}
 
 	return r.loadProcess(ctx, sq.Eq{
-		"process_id": spec.ProcessID,
-		"account_id": spec.AccountID,
-		"project_id": spec.ProjectID,
+		_colProcessID: spec.ProcessID,
+		_colAccountID: spec.AccountID,
+		_colProjectID: spec.ProjectID,
 	}, "processForCreateByRef")
 }
 
@@ -387,13 +387,13 @@ func (r *AgentOSProcessRepo) insertProcess(ctx context.Context, spec *agentos.Sp
 	query, args, err := r.Builder.
 		Insert("processes").
 		Columns(
-			"process_id",
+			_colProcessID,
 			"kind",
-			"account_id",
-			"project_id",
+			_colAccountID,
+			_colProjectID,
 			"resource_kind",
 			"resource_id",
-			"idempotency_key",
+			_colIDempotencyKey,
 			"lifecycle_state",
 			"reason",
 			"spec_json",
@@ -492,12 +492,12 @@ type processEventScope struct {
 
 func (r *AgentOSProcessRepo) lockProcessEventScope(ctx context.Context, tx pgx.Tx, event *agentos.Event) (processEventScope, error) {
 	query, args, err := r.Builder.
-		Select("process_id", "account_id", "project_id", "resource_kind", "resource_id", "event_sequence").
+		Select(_colProcessID, _colAccountID, _colProjectID, "resource_kind", "resource_id", "event_sequence").
 		From("processes").
 		Where(sq.Eq{
-			"process_id": event.ProcessID,
-			"account_id": event.AccountID,
-			"project_id": event.ProjectID,
+			_colProcessID: event.ProcessID,
+			_colAccountID: event.AccountID,
+			_colProjectID: event.ProjectID,
 		}).
 		Suffix("FOR UPDATE").
 		ToSql()
@@ -527,9 +527,9 @@ func (r *AgentOSProcessRepo) lockProcessEventScope(ctx context.Context, tx pgx.T
 		Update("processes").
 		Set("event_sequence", nextSequence).
 		Where(sq.Eq{
-			"process_id": scope.ProcessID,
-			"account_id": scope.AccountID,
-			"project_id": scope.ProjectID,
+			_colProcessID: scope.ProcessID,
+			_colAccountID: scope.AccountID,
+			_colProjectID: scope.ProjectID,
 		}).
 		ToSql()
 	if err != nil {
@@ -560,14 +560,14 @@ func (r *AgentOSProcessRepo) insertProcessEvent(ctx context.Context, tx pgx.Tx, 
 		Insert("process_events").
 		Columns(
 			"event_id",
-			"process_id",
-			"account_id",
-			"project_id",
+			_colProcessID,
+			_colAccountID,
+			_colProjectID,
 			"resource_kind",
 			"resource_id",
 			"event_type",
 			"sequence",
-			"idempotency_key",
+			_colIDempotencyKey,
 			"payload_json",
 			"event_json",
 			"timestamp",
@@ -603,10 +603,10 @@ func (r *AgentOSProcessRepo) processEventByIdempotencyKey(ctx context.Context, p
 		Select(processEventColumns()...).
 		From("process_events").
 		Where(sq.Eq{
-			"process_id":      processID,
-			"account_id":      accountID,
-			"project_id":      projectID,
-			"idempotency_key": idempotencyKey,
+			_colProcessID:      processID,
+			_colAccountID:      accountID,
+			_colProjectID:      projectID,
+			_colIDempotencyKey: idempotencyKey,
 		}).
 		ToSql()
 	if err != nil {
@@ -630,10 +630,10 @@ func (r *AgentOSProcessRepo) processStatusByIdempotencyKey(ctx context.Context, 
 		Select("status_json").
 		From("process_status_updates").
 		Where(sq.Eq{
-			"process_id":      processID,
-			"account_id":      accountID,
-			"project_id":      projectID,
-			"idempotency_key": idempotencyKey,
+			_colProcessID:      processID,
+			_colAccountID:      accountID,
+			_colProjectID:      projectID,
+			_colIDempotencyKey: idempotencyKey,
 		}).
 		ToSql()
 	if err != nil {
@@ -661,10 +661,10 @@ func (r *AgentOSProcessRepo) insertProcessStatusUpdate(ctx context.Context, tx p
 	query, args, err := r.Builder.
 		Insert("process_status_updates").
 		Columns(
-			"process_id",
-			"account_id",
-			"project_id",
-			"idempotency_key",
+			_colProcessID,
+			_colAccountID,
+			_colProjectID,
+			_colIDempotencyKey,
 			"status_json",
 		).
 		Values(

@@ -14,14 +14,12 @@ import (
 // Terminal lifecycle state spellings a one-shot backend may report in
 // RunStatus.LifecycleState. The AG-UI terminal vocabulary is three events, so
 // the adapter normalizes the backend's strings onto them: "completed" is the
-// entity spelling, "succeeded" the plan spelling, "canceled" the entity
-// spelling and "cancelled" the common variant.
+// entity spelling, "succeeded" the plan spelling, "canceled" the common variant.
 const (
 	lifecycleSucceeded = "succeeded"
 	lifecycleCompleted = "completed"
 	lifecycleFailed    = "failed"
 	lifecycleCanceled  = "canceled"
-	lifecycleCancelled = "cancelled"
 )
 
 // RunLifecycle mirrors a backend-owned run's observable lifecycle onto the
@@ -182,8 +180,8 @@ func terminalEvent(scope *runScope, status *agentos.RunStatus) *stream.Event {
 		return stream.NewRunFinished(scope.threadID, scope.runID)
 	case lifecycleFailed:
 		return stream.NewRunError(scope.threadID, scope.runID, runFailure(status))
-	case lifecycleCanceled, lifecycleCancelled:
-		return stream.NewRunCancelled(scope.threadID, scope.runID)
+	case lifecycleCanceled:
+		return stream.NewRunCanceled(scope.threadID, scope.runID)
 	default:
 		return nil
 	}

@@ -36,8 +36,8 @@ const (
 	EventRunCompleted EventType = "run.completed"
 	// EventRunFailed is emitted when a run fails.
 	EventRunFailed EventType = "run.failed"
-	// EventRunCancelled is emitted when a run is canceled.
-	EventRunCancelled EventType = "run.cancelled"
+	// EventRunCanceled is emitted when a run is canceled.
+	EventRunCanceled EventType = "run.canceled"
 	// EventRunPaused is emitted when a run pauses.
 	EventRunPaused EventType = "run.paused"
 	// EventRunResumed is emitted when a run resumes.

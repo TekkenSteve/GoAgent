@@ -15,6 +15,9 @@ const (
 	// delegateChildWorkflowTimeout limits how long a single delegated
 	// sub-agent is allowed to run before the parent gets a timeout error.
 	delegateChildWorkflowTimeout = 10 * time.Minute
+
+	// _delegateKeyType is the JSON-Schema "type" key in the tool's parameters.
+	_delegateKeyType = "type"
 )
 
 // DelegateToolDef returns the ToolDef for the delegate_to_agent tool.
@@ -26,24 +29,24 @@ func DelegateToolDef() entity.ToolDef {
 			Name:        delegateToolName,
 			Description: "Delegate a sub-task to a temporary sub-agent with custom instructions. The sub-agent runs in an isolated context and returns its result. Use this when a task requires a different focus, specialized expertise, or a separate context to avoid polluting the current conversation.",
 			Parameters: map[string]any{
-				"type": "object",
+				_delegateKeyType: "object",
 				"properties": map[string]any{
 					"system_prompt": map[string]any{
-						"type":        "string",
-						"description": "System prompt defining the sub-agent's role, expertise, and behavioral guidelines",
+						_delegateKeyType: "string",
+						"description":    "System prompt defining the sub-agent's role, expertise, and behavioral guidelines",
 					},
 					"task": map[string]any{
-						"type":        "string",
-						"description": "The specific task for the sub-agent to accomplish. Be detailed and include all necessary context.",
+						_delegateKeyType: "string",
+						"description":    "The specific task for the sub-agent to accomplish. Be detailed and include all necessary context.",
 					},
 					"model": map[string]any{
-						"type":        "string",
-						"description": "Optional: model to use for the sub-agent (e.g., gpt-4o-mini, claude-3-haiku). Defaults to the parent agent's model. Use a cheaper/faster model for simple sub-tasks.",
+						_delegateKeyType: "string",
+						"description":    "Optional: model to use for the sub-agent (e.g., gpt-4o-mini, claude-3-haiku). Defaults to the parent agent's model. Use a cheaper/faster model for simple sub-tasks.",
 					},
 					"tools": map[string]any{
-						"type":        "array",
-						"items":       map[string]any{"type": "string"},
-						"description": "Optional: list of tool names the sub-agent can use (e.g., web_search, code_executor). When omitted the sub-agent runs as a pure LLM call with no tool access.",
+						_delegateKeyType: "array",
+						"items":          map[string]any{_delegateKeyType: "string"},
+						"description":    "Optional: list of tool names the sub-agent can use (e.g., web_search, code_executor). When omitted the sub-agent runs as a pure LLM call with no tool access.",
 					},
 				},
 				"required": []string{"system_prompt", "task"},

@@ -87,13 +87,13 @@ func TestConversationLifecycleEventNamesMatchWireContract(t *testing.T) {
 func TestConversationCancellationValuesMatchWireContract(t *testing.T) {
 	t.Parallel()
 
-	const cancelledWireValue = "cancelled"
+	const canceledWireValue = "canceled"
 
-	if agentos.ConversationRunCancelled != cancelledWireValue {
-		t.Fatalf("cancellation run status = %q", agentos.ConversationRunCancelled)
+	if agentos.ConversationRunCanceled != canceledWireValue {
+		t.Fatalf("cancellation run status = %q", agentos.ConversationRunCanceled)
 	}
 
-	if agentos.ConversationOutcomeCancelled != cancelledWireValue {
-		t.Fatalf("cancellation run outcome = %q", agentos.ConversationOutcomeCancelled)
+	if agentos.ConversationOutcomeCanceled != canceledWireValue {
+		t.Fatalf("cancellation run outcome = %q", agentos.ConversationOutcomeCanceled)
 	}
 }

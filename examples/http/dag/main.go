@@ -31,8 +31,22 @@ import (
 )
 
 const (
-	pollInterval = 2 * time.Second
-	pollTimeout  = 4 * time.Minute
+	pollInterval   = 2 * time.Second
+	pollTimeout    = 4 * time.Minute
+	_kModelRef     = "model_ref"
+	_kAgentRef     = "agent_ref"
+	_kMessage      = "message"
+	_kSystemPrompt = "system_prompt"
+)
+
+const (
+	_kID        = "id"
+	_kName      = "name"
+	_kType      = "type"
+	_kInput     = "input"
+	_kDependsOn = "depends_on"
+	_kAgent     = "agent"
+	_kModelMini = "gpt-4.1-mini"
 )
 
 func main() {
@@ -89,47 +103,47 @@ func main() {
 
 func dagTeamSpec() map[string]any {
 	return map[string]any{
-		"id":   "dag-demo",
-		"name": "DAG Pipeline",
+		_kID:   "dag-demo",
+		_kName: "DAG Pipeline",
 		"agents": []map[string]any{
 			{
-				"id": "researcher", "name": "Researcher",
-				"model_ref": "gpt-4.1-mini", "system_prompt": "You are a research assistant.",
-				"tools": []map[string]any{{"name": "web_search", "required": true}},
+				_kID: "researcher", _kName: "Researcher",
+				_kModelRef: _kModelMini, _kSystemPrompt: "You are a research assistant.",
+				"tools": []map[string]any{{_kName: "web_search", "required": true}},
 			},
 			{
-				"id": "translator", "name": "Translator",
-				"model_ref": "gpt-4.1-mini", "system_prompt": "You translate text to Japanese.",
+				_kID: "translator", _kName: "Translator",
+				_kModelRef: _kModelMini, _kSystemPrompt: "You translate text to Japanese.",
 			},
 			{
-				"id": "summarizer", "name": "Summarizer",
-				"model_ref": "gpt-4.1-mini", "system_prompt": "You summarize findings.",
+				_kID: "summarizer", _kName: "Summarizer",
+				_kModelRef: _kModelMini, _kSystemPrompt: "You summarize findings.",
 			},
 		},
 		"steps": []map[string]any{
 			{
-				"id": "research", "type": "agent", "agent_ref": "researcher",
-				"input": map[string]any{"message": "Research the latest developments in AI"},
+				_kID: "research", _kType: _kAgent, _kAgentRef: "researcher",
+				_kInput: map[string]any{_kMessage: "Research the latest developments in AI"},
 			},
 			{
-				"id": "calculate", "type": "tool", "tool": "calculator",
-				"input":      map[string]any{"expression": "150 * 3 + 42"},
-				"depends_on": []string{"research"},
+				_kID: "calculate", _kType: "tool", "tool": "calculator",
+				_kInput:     map[string]any{"expression": "150 * 3 + 42"},
+				_kDependsOn: []string{"research"},
 			},
 			{
-				"id": "translate", "type": "agent", "agent_ref": "translator",
-				"input":      map[string]any{"message": "Translate 'Hello world' to Japanese"},
-				"depends_on": []string{"research"},
+				_kID: "translate", _kType: _kAgent, _kAgentRef: "translator",
+				_kInput:     map[string]any{_kMessage: "Translate 'Hello world' to Japanese"},
+				_kDependsOn: []string{"research"},
 			},
 			{
-				"id": "summarize", "type": "agent", "agent_ref": "summarizer",
-				"input":      map[string]any{"message": "Summarize the research findings"},
-				"depends_on": []string{"calculate", "translate"},
+				_kID: "summarize", _kType: _kAgent, _kAgentRef: "summarizer",
+				_kInput:     map[string]any{_kMessage: "Summarize the research findings"},
+				_kDependsOn: []string{"calculate", "translate"},
 			},
 			{
-				"id": "validate", "type": "eval",
-				"input":      map[string]any{"condition": "results_complete"},
-				"depends_on": []string{"summarize"},
+				_kID: "validate", _kType: "eval",
+				_kInput:     map[string]any{"condition": "results_complete"},
+				_kDependsOn: []string{"summarize"},
 			},
 		},
 	}

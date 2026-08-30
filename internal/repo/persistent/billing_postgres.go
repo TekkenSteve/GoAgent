@@ -31,9 +31,9 @@ func NewBillingRepo(pg *postgres.Postgres) *BillingRepo {
 // Returns zero balance if the account has no row yet (soft-create).
 func (r *BillingRepo) GetBalance(ctx context.Context, accountID string) (entity.CreditAccount, error) {
 	sql, args, err := r.Builder.
-		Select("account_id", "balance", "currency", "version", "updated_at").
+		Select(_colAccountID, "balance", "currency", "version", "updated_at").
 		From("credit_accounts").
-		Where(sq.Eq{"account_id": accountID}).
+		Where(sq.Eq{_colAccountID: accountID}).
 		ToSql()
 	if err != nil {
 		return entity.CreditAccount{}, fmt.Errorf("BillingRepo - GetBalance - builder: %w", err)
@@ -145,9 +145,9 @@ func (r *BillingRepo) GetHistory(ctx context.Context, accountID string, limit, o
 	}
 
 	sql, args, err := r.Builder.
-		Select("id", "account_id", "amount", "type", "description", "created_at").
+		Select("id", _colAccountID, "amount", "type", "description", "created_at").
 		From("credit_ledger").
-		Where(sq.Eq{"account_id": accountID}).
+		Where(sq.Eq{_colAccountID: accountID}).
 		OrderBy("created_at DESC").
 		Limit(uint64(limit)).
 		Offset(uint64(offset)).

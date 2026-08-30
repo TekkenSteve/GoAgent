@@ -32,6 +32,10 @@ const (
 	pollInterval    = 2 * time.Second
 	pollTimeout     = 4 * time.Minute
 	maxSearchResult = 3
+	_kID            = "id"
+	_kType          = "type"
+	_kInput         = "input"
+	_kTool          = "tool"
 )
 
 func main() {
@@ -85,48 +89,48 @@ func main() {
 func exploratorySteps() []map[string]any {
 	return []map[string]any{
 		{
-			"id": "plan", "type": "agent", "agent_id": "planner",
-			"input": map[string]any{"message": "Create an exploration plan for: 'Impact of AI on software development'"},
+			_kID: "plan", _kType: "agent", "agent_id": "planner",
+			_kInput: map[string]any{"message": "Create an exploration plan for: 'Impact of AI on software development'"},
 		},
 		{
-			"id": "explore", "type": "split",
-			"input": map[string]any{
+			_kID: "explore", _kType: "split",
+			_kInput: map[string]any{
 				"children": []map[string]any{
 					{
-						"id": "explore-automation", "type": "tool", "tool": "web_search",
-						"input": map[string]any{"query": "AI code automation tools 2026", "max_results": maxSearchResult},
+						_kID: "explore-automation", _kType: _kTool, _kTool: "web_search",
+						_kInput: map[string]any{"query": "AI code automation tools 2026", "max_results": maxSearchResult},
 					},
 					{
-						"id": "explore-jobs", "type": "tool", "tool": "web_search",
-						"input": map[string]any{"query": "AI impact developer jobs 2026", "max_results": maxSearchResult},
+						_kID: "explore-jobs", _kType: _kTool, _kTool: "web_search",
+						_kInput: map[string]any{"query": "AI impact developer jobs 2026", "max_results": maxSearchResult},
 					},
 					{
-						"id": "explore-quality", "type": "tool", "tool": "web_search",
-						"input": map[string]any{"query": "AI code quality 2026", "max_results": maxSearchResult},
+						_kID: "explore-quality", _kType: _kTool, _kTool: "web_search",
+						_kInput: map[string]any{"query": "AI code quality 2026", "max_results": maxSearchResult},
 					},
 				},
 			},
 		},
 		{
-			"id": "gather", "type": "join",
-			"input": map[string]any{"_join_group": "explore"},
+			_kID: "gather", _kType: "join",
+			_kInput: map[string]any{"_join_group": "explore"},
 		},
 		{
-			"id": "evaluate", "type": "eval",
-			"input": map[string]any{"condition": "enough_information"},
+			_kID: "evaluate", _kType: "eval",
+			_kInput: map[string]any{"condition": "enough_information"},
 			"on_result": map[string]any{
 				"append_after": "evaluate",
 				"insert_steps": []map[string]any{
 					{
-						"id": "explore-future", "type": "tool", "tool": "web_search",
-						"input": map[string]any{"query": "AI future predictions software engineering", "max_results": maxSearchResult},
+						_kID: "explore-future", _kType: _kTool, _kTool: "web_search",
+						_kInput: map[string]any{"query": "AI future predictions software engineering", "max_results": maxSearchResult},
 					},
 				},
 			},
 		},
 		{
-			"id": "conclude", "type": "agent", "agent_id": "planner",
-			"input":      map[string]any{"message": "Summarize all exploration findings"},
+			_kID: "conclude", _kType: "agent", "agent_id": "planner",
+			_kInput:      map[string]any{"message": "Summarize all exploration findings"},
 			"depends_on": []string{"evaluate"},
 		},
 	}

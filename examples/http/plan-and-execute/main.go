@@ -31,6 +31,15 @@ import (
 const (
 	pollInterval = 2 * time.Second
 	pollTimeout  = 4 * time.Minute
+	_kAgentID    = "agent_id"
+	_kMessage    = "message"
+)
+
+const (
+	_kID    = "id"
+	_kType  = "type"
+	_kInput = "input"
+	_kAgent = "agent"
 )
 
 func main() {
@@ -80,49 +89,49 @@ func main() {
 func planExecuteSteps() []map[string]any {
 	return []map[string]any{
 		{
-			"id": "plan", "type": "agent", "agent_id": "planner",
-			"input": map[string]any{"message": "Create a plan for: 'Set up a CI/CD pipeline with GitHub Actions'. Break it into 3 parallel tasks."},
+			_kID: "plan", _kType: _kAgent, _kAgentID: "planner",
+			_kInput: map[string]any{_kMessage: "Create a plan for: 'Set up a CI/CD pipeline with GitHub Actions'. Break it into 3 parallel tasks."},
 		},
 		{
-			"id": "execute", "type": "split",
-			"input": map[string]any{
+			_kID: "execute", _kType: "split",
+			_kInput: map[string]any{
 				"children": []map[string]any{
 					{
-						"id": "task-setup", "type": "agent", "agent_id": "worker",
-						"input": map[string]any{"message": "Design the workflow structure: triggers, jobs, and environment configuration"},
+						_kID: "task-setup", _kType: _kAgent, _kAgentID: "worker",
+						_kInput: map[string]any{_kMessage: "Design the workflow structure: triggers, jobs, and environment configuration"},
 					},
 					{
-						"id": "task-test", "type": "agent", "agent_id": "worker",
-						"input": map[string]any{"message": "Design the test automation: unit tests, integration tests, and linting steps"},
+						_kID: "task-test", _kType: _kAgent, _kAgentID: "worker",
+						_kInput: map[string]any{_kMessage: "Design the test automation: unit tests, integration tests, and linting steps"},
 					},
 					{
-						"id": "task-deploy", "type": "agent", "agent_id": "worker",
-						"input": map[string]any{"message": "Design the deployment: build, package, and deploy stages with rollback strategy"},
+						_kID: "task-deploy", _kType: _kAgent, _kAgentID: "worker",
+						_kInput: map[string]any{_kMessage: "Design the deployment: build, package, and deploy stages with rollback strategy"},
 					},
 				},
 			},
 		},
 		{
-			"id": "gather", "type": "join",
-			"input": map[string]any{"_join_group": "execute"},
+			_kID: "gather", _kType: "join",
+			_kInput: map[string]any{"_join_group": "execute"},
 		},
 		{
-			"id": "evaluate", "type": "eval",
-			"input": map[string]any{"condition": "plan_complete"},
+			_kID: "evaluate", _kType: "eval",
+			_kInput: map[string]any{"condition": "plan_complete"},
 			"on_result": map[string]any{
 				"append_after": "evaluate",
 				"insert_steps": []map[string]any{
 					{
-						"id": "task-security", "type": "agent", "agent_id": "worker",
-						"input":      map[string]any{"message": "Add security scanning: dependency audit, SAST, and secrets detection"},
+						_kID: "task-security", _kType: _kAgent, _kAgentID: "worker",
+						_kInput:      map[string]any{_kMessage: "Add security scanning: dependency audit, SAST, and secrets detection"},
 						"depends_on": []string{"evaluate"},
 					},
 				},
 			},
 		},
 		{
-			"id": "report", "type": "agent", "agent_id": "planner",
-			"input":      map[string]any{"message": "Synthesize all task outputs into a comprehensive CI/CD implementation plan"},
+			_kID: "report", _kType: _kAgent, _kAgentID: "planner",
+			_kInput:      map[string]any{_kMessage: "Synthesize all task outputs into a comprehensive CI/CD implementation plan"},
 			"depends_on": []string{"evaluate"},
 		},
 	}

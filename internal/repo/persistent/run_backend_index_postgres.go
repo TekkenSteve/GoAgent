@@ -66,7 +66,7 @@ func (r *RunBackendIndexRepo) Get(ctx context.Context, runID string) (entity.Run
 	query, args, err := r.Builder.
 		Select(runBackendIndexColumns()...).
 		From("run_backend_index").
-		Where(sq.Eq{"run_id": runID}).
+		Where(sq.Eq{_colRunID: runID}).
 		ToSql()
 	if err != nil {
 		return entity.RunBackendIndexRecord{}, false, fmt.Errorf("RunBackendIndexRepo - Get - builder: %w", err)
@@ -100,9 +100,9 @@ func (r *RunBackendIndexRepo) runByIdempotencyKey(ctx context.Context, record *e
 		Select(runBackendIndexColumns()...).
 		From("run_backend_index").
 		Where(sq.Eq{
-			"account_id":      record.AccountID,
-			"project_id":      record.ProjectID,
-			"idempotency_key": idempotencyKey,
+			_colAccountID:      record.AccountID,
+			_colProjectID:      record.ProjectID,
+			_colIDempotencyKey: idempotencyKey,
 		}).
 		ToSql()
 	if err != nil {
@@ -175,15 +175,15 @@ func buildRunBackendIndexUpsertSQL(builder sq.StatementBuilderType, record *enti
 	return builder.
 		Insert("run_backend_index").
 		Columns(
-			"run_id",
-			"plan_id",
+			_colRunID,
+			_colPlanID,
 			"node_id",
 			"thread_id",
-			"account_id",
-			"project_id",
+			_colAccountID,
+			_colProjectID,
 			"backend_kind",
 			"backend_name",
-			"idempotency_key",
+			_colIDempotencyKey,
 			"lifecycle_state",
 		).
 		Values(
@@ -336,15 +336,15 @@ WHERE run_id = $1`, existing.RunID, lifecycle)
 
 func runBackendIndexColumns() []string {
 	return []string{
-		"run_id",
+		_colRunID,
 		"COALESCE(plan_id, '') AS plan_id",
 		"COALESCE(node_id, '') AS node_id",
 		"thread_id",
-		"account_id",
-		"project_id",
+		_colAccountID,
+		_colProjectID,
 		"backend_kind",
 		"backend_name",
-		"idempotency_key",
+		_colIDempotencyKey,
 		"lifecycle_state",
 		"created_at",
 		"updated_at",

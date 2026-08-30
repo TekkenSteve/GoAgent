@@ -37,11 +37,11 @@ const (
 
 // SearchAttributesForRun returns the start-time visibility attributes for a
 // run, set on StartWorkflowOptions by every executor.
-func SearchAttributesForRun(runID, lifecycleState string) map[string]any {
-	return map[string]any{
-		SearchAttrRunID:          runID,
-		SearchAttrLifecycleState: lifecycleState,
-	}
+func SearchAttributesForRun(runID, lifecycleState string) temporal.SearchAttributes {
+	return temporal.NewSearchAttributes(
+		temporal.NewSearchAttributeKeyKeyword(SearchAttrRunID).ValueSet(runID),
+		temporal.NewSearchAttributeKeyKeyword(SearchAttrLifecycleState).ValueSet(lifecycleState),
+	)
 }
 
 // syncRunSearchAttributes upserts the visibility attributes that keep the

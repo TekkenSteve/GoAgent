@@ -47,8 +47,7 @@ func TestRunLifecycleTerminalSpellings(t *testing.T) {
 		{state: "completed", want: stream.EventRunFinished},
 		{state: "succeeded", want: stream.EventRunFinished},
 		{state: "failed", want: stream.EventRunError},
-		{state: "canceled", want: stream.EventRunCancelled},
-		{state: "cancelled", want: stream.EventRunCancelled},
+		{state: "canceled", want: stream.EventRunCanceled},
 	}
 
 	for i := range cases {

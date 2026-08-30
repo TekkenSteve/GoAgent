@@ -70,10 +70,10 @@ func (r *AgentOSRunRepo) Upsert(ctx context.Context, record *entity.AgentOSRunRe
 	sql, args, err := r.Builder.
 		Insert("agentos_runs").
 		Columns(
-			"run_id",
+			_colRunID,
 			"thread_id",
-			"account_id",
-			"project_id",
+			_colAccountID,
+			_colProjectID,
 			"backend_kind",
 			"backend_name",
 			"external_workflow_id",
@@ -118,10 +118,10 @@ ON CONFLICT (run_id) DO UPDATE SET
 func (r *AgentOSRunRepo) Get(ctx context.Context, runID string) (entity.AgentOSRunRecord, bool, error) {
 	sql, args, err := r.Builder.
 		Select(
-			"run_id",
+			_colRunID,
 			"thread_id",
-			"account_id",
-			"project_id",
+			_colAccountID,
+			_colProjectID,
 			"backend_kind",
 			"backend_name",
 			"external_workflow_id",
@@ -131,7 +131,7 @@ func (r *AgentOSRunRepo) Get(ctx context.Context, runID string) (entity.AgentOSR
 			"updated_at",
 		).
 		From("agentos_runs").
-		Where(sq.Eq{"run_id": runID}).
+		Where(sq.Eq{_colRunID: runID}).
 		ToSql()
 	if err != nil {
 		return entity.AgentOSRunRecord{}, false, fmt.Errorf("AgentOSRunRepo - Get - builder: %w", err)

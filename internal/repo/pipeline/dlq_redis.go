@@ -2,10 +2,11 @@ package pipeline
 
 import (
 	"context"
+	"crypto/rand"
 	"encoding/json"
 	"errors"
 	"fmt"
-	"math/rand"
+	"math/big"
 	"sync"
 	"time"
 
@@ -206,9 +207,30 @@ func (q *DeadLetterQueue) CollectEntries(ctx context.Context, sampleSize int) ([
 		return entries, nil
 	}
 
-	rand.Shuffle(len(entries), func(i, j int) {
+	if err := cryptoShuffle(len(entries), func(i, j int) {
 		entries[i], entries[j] = entries[j], entries[i]
-	})
+	}); err != nil {
+		return nil, err
+	}
 
 	return entries[:sampleSize], nil
+}
+
+// cryptoShuffle randomizes n elements in place with a crypto-strength source.
+func cryptoShuffle(n int, swap func(i, j int)) error {
+	for i := n - 1; i > 0; i-- {
+		bound := big.NewInt(int64(i + 1))
+
+		j, err := rand.Int(rand.Reader, bound)
+		if err != nil {
+			return fmt.Errorf("dlq_redis - cryptoShuffle - rand.Int: %w", err)
+		}
+
+		idx := int(j.Int64())
+		if idx != i {
+			swap(i, idx)
+		}
+	}
+
+	return nil
 }

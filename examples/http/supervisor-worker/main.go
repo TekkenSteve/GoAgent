@@ -30,6 +30,15 @@ import (
 const (
 	pollInterval = 2 * time.Second
 	pollTimeout  = 4 * time.Minute
+	_kAgentID    = "agent_id"
+	_kMessage    = "message"
+)
+
+const (
+	_kID    = "id"
+	_kType  = "type"
+	_kInput = "input"
+	_kAgent = "agent"
 )
 
 func main() {
@@ -79,35 +88,35 @@ func main() {
 func supervisorWorkerSteps() []map[string]any {
 	return []map[string]any{
 		{
-			"id": "decompose", "type": "agent", "agent_id": "supervisor",
-			"input": map[string]any{"message": "Decompose the task 'Build a web application' into 3 parallel work items: frontend, backend, and database design"},
+			_kID: "decompose", _kType: _kAgent, _kAgentID: "supervisor",
+			_kInput: map[string]any{_kMessage: "Decompose the task 'Build a web application' into 3 parallel work items: frontend, backend, and database design"},
 		},
 		{
-			"id": "execute", "type": "split",
-			"input": map[string]any{
+			_kID: "execute", _kType: "split",
+			_kInput: map[string]any{
 				"children": []map[string]any{
 					{
-						"id": "worker-frontend", "type": "agent", "agent_id": "worker",
-						"input": map[string]any{"message": "Design the frontend architecture: React components, state management, and routing"},
+						_kID: "worker-frontend", _kType: _kAgent, _kAgentID: "worker",
+						_kInput: map[string]any{_kMessage: "Design the frontend architecture: React components, state management, and routing"},
 					},
 					{
-						"id": "worker-backend", "type": "agent", "agent_id": "worker",
-						"input": map[string]any{"message": "Design the backend architecture: API endpoints, database models, and authentication"},
+						_kID: "worker-backend", _kType: _kAgent, _kAgentID: "worker",
+						_kInput: map[string]any{_kMessage: "Design the backend architecture: API endpoints, database models, and authentication"},
 					},
 					{
-						"id": "worker-database", "type": "agent", "agent_id": "worker",
-						"input": map[string]any{"message": "Design the database schema: tables, indexes, and migration strategy"},
+						_kID: "worker-database", _kType: _kAgent, _kAgentID: "worker",
+						_kInput: map[string]any{_kMessage: "Design the database schema: tables, indexes, and migration strategy"},
 					},
 				},
 			},
 		},
 		{
-			"id": "gather", "type": "join",
-			"input": map[string]any{"_join_group": "execute"},
+			_kID: "gather", _kType: "join",
+			_kInput: map[string]any{"_join_group": "execute"},
 		},
 		{
-			"id": "synthesize", "type": "agent", "agent_id": "supervisor",
-			"input":      map[string]any{"message": "Synthesize the worker outputs into a cohesive architecture plan"},
+			_kID: "synthesize", _kType: _kAgent, _kAgentID: "supervisor",
+			_kInput:      map[string]any{_kMessage: "Synthesize the worker outputs into a cohesive architecture plan"},
 			"depends_on": []string{"gather"},
 		},
 	}

@@ -34,49 +34,65 @@ import (
 )
 
 const (
-	pollInterval = 2 * time.Second
-	pollTimeout  = 4 * time.Minute
+	pollInterval   = 2 * time.Second
+	pollTimeout    = 4 * time.Minute
+	_kModelRef     = "model_ref"
+	_kAgentRef     = "agent_ref"
+	_kMessage      = "message"
+	_kSystemPrompt = "system_prompt"
+	_kSteps        = "steps"
+	_kAgents       = "agents"
 )
 
 func teamTeamSpec() map[string]any {
 	return map[string]any{
-		"id": "dev-team", "name": "Software Development Team",
-		"agents": []map[string]any{
-			{"id": "architect", "name": "Architect", "model_ref": "gpt-4.1-mini", "system_prompt": "You design system architecture."},
-			{"id": "developer", "name": "Developer", "model_ref": "gpt-4.1-mini", "system_prompt": "You write Go code."},
-			{"id": "reviewer", "name": "Reviewer", "model_ref": "gpt-4.1-mini", "system_prompt": "You review code."},
+		_kID: "dev-team", _kName: "Software Development Team",
+		_kAgents: []map[string]any{
+			{_kID: "architect", _kName: "Architect", _kModelRef: _kModelMini, _kSystemPrompt: "You design system architecture."},
+			{_kID: "developer", _kName: "Developer", _kModelRef: _kModelMini, _kSystemPrompt: "You write Go code."},
+			{_kID: "reviewer", _kName: "Reviewer", _kModelRef: _kModelMini, _kSystemPrompt: "You review code."},
 		},
 		"sub_teams": []map[string]any{
 			{
-				"id": "research-team", "name": "Research Team",
-				"agents": []map[string]any{
-					{"id": "researcher", "name": "Researcher", "model_ref": "gpt-4.1-mini", "system_prompt": "You research requirements.", "tools": []map[string]any{{"name": "web_search", "required": true}}},
-					{"id": "analyst", "name": "Analyst", "model_ref": "gpt-4.1-mini", "system_prompt": "You analyze feasibility."},
+				_kID: "research-team", _kName: "Research Team",
+				_kAgents: []map[string]any{
+					{_kID: "researcher", _kName: "Researcher", _kModelRef: _kModelMini, _kSystemPrompt: "You research requirements.", "tools": []map[string]any{{_kName: "web_search", "required": true}}},
+					{_kID: "analyst", _kName: "Analyst", _kModelRef: _kModelMini, _kSystemPrompt: "You analyze feasibility."},
 				},
-				"steps": []map[string]any{
-					{"id": "research", "type": "agent", "agent_ref": "researcher", "input": map[string]any{"message": "Research requirements for a task management API"}},
-					{"id": "analyze", "type": "agent", "agent_ref": "analyst", "input": map[string]any{"message": "Analyze the research findings"}, "depends_on": []string{"research"}},
+				_kSteps: []map[string]any{
+					{_kID: "research", _kType: _kAgent, _kAgentRef: "researcher", _kInput: map[string]any{_kMessage: "Research requirements for a task management API"}},
+					{_kID: "analyze", _kType: _kAgent, _kAgentRef: "analyst", _kInput: map[string]any{_kMessage: "Analyze the research findings"}, _kDependsOn: []string{"research"}},
 				},
 			},
 			{
-				"id": "qa-team", "name": "QA Team",
-				"agents": []map[string]any{
-					{"id": "tester", "name": "Tester", "model_ref": "gpt-4.1-mini", "system_prompt": "You write and run tests."},
-					{"id": "docs-writer", "name": "Docs Writer", "model_ref": "gpt-4.1-mini", "system_prompt": "You write documentation."},
+				_kID: "qa-team", _kName: "QA Team",
+				_kAgents: []map[string]any{
+					{_kID: "tester", _kName: "Tester", _kModelRef: _kModelMini, _kSystemPrompt: "You write and run tests."},
+					{_kID: "docs-writer", _kName: "Docs Writer", _kModelRef: _kModelMini, _kSystemPrompt: "You write documentation."},
 				},
-				"steps": []map[string]any{
-					{"id": "test", "type": "agent", "agent_ref": "tester", "input": map[string]any{"message": "Write tests"}, "depends_on": []string{"dev-review"}},
-					{"id": "document", "type": "agent", "agent_ref": "docs-writer", "input": map[string]any{"message": "Write API documentation"}, "depends_on": []string{"test"}},
+				_kSteps: []map[string]any{
+					{_kID: "test", _kType: _kAgent, _kAgentRef: "tester", _kInput: map[string]any{_kMessage: "Write tests"}, _kDependsOn: []string{"dev-review"}},
+					{_kID: "document", _kType: _kAgent, _kAgentRef: "docs-writer", _kInput: map[string]any{_kMessage: "Write API documentation"}, _kDependsOn: []string{"test"}},
 				},
 			},
 		},
-		"steps": []map[string]any{
-			{"id": "design", "type": "agent", "agent_ref": "architect", "input": map[string]any{"message": "Design architecture"}, "depends_on": []string{"analyze"}},
-			{"id": "implement", "type": "agent", "agent_ref": "developer", "input": map[string]any{"message": "Implement the API"}, "depends_on": []string{"design"}},
-			{"id": "dev-review", "type": "agent", "agent_ref": "reviewer", "input": map[string]any{"message": "Review the implementation"}, "depends_on": []string{"implement"}},
+		_kSteps: []map[string]any{
+			{_kID: "design", _kType: _kAgent, _kAgentRef: "architect", _kInput: map[string]any{_kMessage: "Design architecture"}, _kDependsOn: []string{"analyze"}},
+			{_kID: "implement", _kType: _kAgent, _kAgentRef: "developer", _kInput: map[string]any{_kMessage: "Implement the API"}, _kDependsOn: []string{"design"}},
+			{_kID: "dev-review", _kType: _kAgent, _kAgentRef: "reviewer", _kInput: map[string]any{_kMessage: "Review the implementation"}, _kDependsOn: []string{"implement"}},
 		},
 	}
 }
+
+const (
+	_kID        = "id"
+	_kName      = "name"
+	_kType      = "type"
+	_kInput     = "input"
+	_kDependsOn = "depends_on"
+	_kAgent     = "agent"
+	_kModelMini = "gpt-4.1-mini"
+)
 
 func main() {
 	baseURL := os.Getenv("BASE_URL")

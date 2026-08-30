@@ -434,10 +434,10 @@ WHERE n.plan_id = $1
 
 func (r *AgentOSArtifactRepo) artifactByIdempotencyKey(ctx context.Context, planID string, scope planTenantScope, key string) (agentoscore.ArtifactRef, bool, error) {
 	return r.getRef(ctx, sq.Eq{
-		"plan_id":         planID,
-		"account_id":      scope.AccountID,
-		"project_id":      scope.ProjectID,
-		"idempotency_key": key,
+		_colPlanID:         planID,
+		_colAccountID:      scope.AccountID,
+		_colProjectID:      scope.ProjectID,
+		_colIDempotencyKey: key,
 	})
 }
 
@@ -460,9 +460,9 @@ func artifactIDConflictError(existing *agentoscore.ArtifactRef, requestedID stri
 
 func artifactScopeWhere(scope *agentos.PlanArtifactScope) sq.Eq {
 	where := sq.Eq{
-		"plan_id":    scope.PlanID,
-		"account_id": scope.AccountID,
-		"project_id": scope.ProjectID,
+		_colPlanID:    scope.PlanID,
+		_colAccountID: scope.AccountID,
+		_colProjectID: scope.ProjectID,
 	}
 	if scope.ArtifactID != "" {
 		where["artifact_id"] = scope.ArtifactID
@@ -473,7 +473,7 @@ func artifactScopeWhere(scope *agentos.PlanArtifactScope) sq.Eq {
 	}
 
 	if scope.RunID != "" {
-		where["run_id"] = scope.RunID
+		where[_colRunID] = scope.RunID
 	}
 
 	return where
@@ -504,7 +504,7 @@ func (r *AgentOSArtifactRepo) getRef(ctx context.Context, where sq.Eq) (agentosc
 }
 
 func artifactColumns() []string {
-	return []string{"artifact_id", "plan_id", "COALESCE(node_id, '') AS node_id", "COALESCE(run_id, '') AS run_id", "name", "kind", "media_type", "uri", "size_bytes", "digest", "metadata_json", "created_at"}
+	return []string{"artifact_id", _colPlanID, "COALESCE(node_id, '') AS node_id", "COALESCE(run_id, '') AS run_id", "name", "kind", "media_type", "uri", "size_bytes", "digest", "metadata_json", "created_at"}
 }
 
 func artifactBlobKey(artifactID, digest string) string {
