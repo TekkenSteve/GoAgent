@@ -3,7 +3,6 @@ package mcp
 import (
 	"errors"
 	"fmt"
-	"os"
 )
 
 const (
@@ -77,15 +76,4 @@ func (c *ServerConfig) Validate() error {
 	}
 
 	return nil
-}
-
-// BuildEnv merges the server's Env map with the current process environment.
-// Server-specific env vars override process-level ones.
-func (c *ServerConfig) BuildEnv() []string {
-	merged := os.Environ()
-	for k, v := range c.Env {
-		merged = append(merged, fmt.Sprintf("%s=%s", k, v))
-	}
-
-	return merged
 }
