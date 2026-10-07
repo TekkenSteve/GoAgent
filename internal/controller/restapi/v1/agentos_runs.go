@@ -22,6 +22,7 @@ import (
 // @Failure     404 {object} response.Error
 // @Failure     500 {object} response.Error
 // @Router      /agentos/runs [post]
+// The run is started on its declared backend.
 func (r *V1) startAgentOSRun(ctx *fiber.Ctx) error {
 	if r.agentOSRuntime == nil {
 		return errorResponse(ctx, http.StatusNotFound, "agentos runtime is not configured")
@@ -36,15 +37,24 @@ func (r *V1) startAgentOSRun(ctx *fiber.Ctx) error {
 		return errorResponse(ctx, http.StatusBadRequest, err.Error())
 	}
 
-	if isNativeAgentOSBackend(req.Backend) && req.UserMessage == "" {
-		return errorResponse(ctx, http.StatusBadRequest, "user_message is required for native backend")
+	// A native run carries what to do either as a message or as the backend's
+	// own payload (a step queue or a team). The payload is not interpreted
+	// here: the backend reads it and refuses what it cannot run, with an error
+	// that names the accepted input.
+	if isNativeAgentOSBackend(req.Backend) && req.UserMessage == "" && len(req.Input) == 0 {
+		return errorResponse(ctx, http.StatusBadRequest, "user_message or a native input payload is required for the native backend")
+	}
+
+	scope, authorized := r.tenantFromRequest(ctx, req.ProjectID, agentoscore.ActionRunStart, "run")
+	if !authorized {
+		return nil
 	}
 
 	spec := agentos.RunSpec{
 		RunID:          req.RunID,
 		ThreadID:       req.ThreadID,
-		AccountID:      req.AccountID,
-		ProjectID:      req.ProjectID,
+		AccountID:      scope.AccountID,
+		ProjectID:      scope.ProjectID,
 		AgentID:        req.AgentID,
 		ModelRef:       req.ModelRef,
 		SystemPrompt:   req.SystemPrompt,
@@ -81,6 +91,7 @@ func isNativeAgentOSBackend(ref agentos.BackendRef) bool {
 // @Failure     404 {object} response.Error
 // @Failure     500 {object} response.Error
 // @Router      /agentos/runs/{run_id}/signals [post]
+// The signal is forwarded to the active run.
 func (r *V1) signalAgentOSRun(ctx *fiber.Ctx) error {
 	if r.agentOSRuntime == nil {
 		return errorResponse(ctx, http.StatusNotFound, "agentos runtime is not configured")
@@ -95,15 +106,23 @@ func (r *V1) signalAgentOSRun(ctx *fiber.Ctx) error {
 		return errorResponse(ctx, http.StatusBadRequest, err.Error())
 	}
 
+	principal, ref, ok := r.runActorFromRequest(ctx)
+	if !ok {
+		return nil
+	}
+
+	// The actor comes from the credential: an `act` claim when the token
+	// delegates, the account otherwise. A caller-supplied actor would be an
+	// audit trail anyone can write.
 	signal := agentoscore.Signal{
 		Type:           req.Type,
 		IdempotencyKey: req.IdempotencyKey,
-		ActorID:        req.ActorID,
+		ActorID:        principal.EffectiveActor(),
 		Payload:        req.Payload,
 		SentAt:         req.SentAt,
 	}
 
-	err := r.agentOSRuntime.Signal(ctx.UserContext(), ctx.Params("run_id"), &signal)
+	err := r.agentOSRuntime.Signal(ctx.UserContext(), ref, &signal)
 	if err != nil {
 		return agentOSError(ctx, err)
 	}
@@ -124,6 +143,7 @@ func (r *V1) signalAgentOSRun(ctx *fiber.Ctx) error {
 // @Failure     404 {object} response.Error
 // @Failure     500 {object} response.Error
 // @Router      /agentos/runs/{run_id}/control [post]
+// The control operation is applied to the run.
 func (r *V1) controlAgentOSRun(ctx *fiber.Ctx) error {
 	if r.agentOSRuntime == nil {
 		return errorResponse(ctx, http.StatusNotFound, "agentos runtime is not configured")
@@ -138,14 +158,21 @@ func (r *V1) controlAgentOSRun(ctx *fiber.Ctx) error {
 		return errorResponse(ctx, http.StatusBadRequest, err.Error())
 	}
 
+	principal, ref, ok := r.runActorFromRequest(ctx)
+	if !ok {
+		return nil
+	}
+
+	// As with signals, the actor is the credential's, not the caller's claim.
 	control := agentoscore.ControlRequest{
 		Operation:      req.Operation,
 		IdempotencyKey: req.IdempotencyKey,
 		RequestedAt:    req.RequestedAt,
-		ActorID:        req.ActorID,
+		ActorID:        principal.EffectiveActor(),
 		Metadata:       req.Metadata,
 	}
-	if err := r.agentOSRuntime.Control(ctx.UserContext(), ctx.Params("run_id"), &control); err != nil {
+
+	if err := r.agentOSRuntime.Control(ctx.UserContext(), ref, &control); err != nil {
 		return agentOSError(ctx, err)
 	}
 
@@ -163,12 +190,18 @@ func (r *V1) controlAgentOSRun(ctx *fiber.Ctx) error {
 // @Failure     404 {object} response.Error
 // @Failure     500 {object} response.Error
 // @Router      /agentos/runs/{run_id}/status [get]
+// The status aggregates run state and events.
 func (r *V1) statusAgentOSRun(ctx *fiber.Ctx) error {
 	if r.agentOSRuntime == nil {
 		return errorResponse(ctx, http.StatusNotFound, "agentos runtime is not configured")
 	}
 
-	status, err := r.agentOSRuntime.Status(ctx.UserContext(), ctx.Params("run_id"))
+	_, ref, ok := r.runActorFromRequest(ctx)
+	if !ok {
+		return nil
+	}
+
+	status, err := r.agentOSRuntime.Status(ctx.UserContext(), ref)
 	if err != nil {
 		return agentOSError(ctx, err)
 	}

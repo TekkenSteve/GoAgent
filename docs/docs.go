@@ -32,13 +32,6 @@ const docTemplate = `{
                 "parameters": [
                     {
                         "type": "string",
-                        "description": "Account ID",
-                        "name": "account_id",
-                        "in": "query",
-                        "required": true
-                    },
-                    {
-                        "type": "string",
                         "description": "Project ID",
                         "name": "project_id",
                         "in": "query",
@@ -87,7 +80,7 @@ const docTemplate = `{
                         "schema": {
                             "type": "array",
                             "items": {
-                                "$ref": "#/definitions/github_com_TekkenSteve_GoAgent_agentos_process.GovernedActionStatus"
+                                "$ref": "#/definitions/process.GovernedActionStatus"
                             }
                         }
                     },
@@ -131,7 +124,7 @@ const docTemplate = `{
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/github_com_TekkenSteve_GoAgent_agentos_process.GovernedActionSpec"
+                            "$ref": "#/definitions/process.GovernedActionSpec"
                         }
                     }
                 ],
@@ -139,7 +132,7 @@ const docTemplate = `{
                     "202": {
                         "description": "Accepted",
                         "schema": {
-                            "$ref": "#/definitions/github_com_TekkenSteve_GoAgent_agentos_process.GovernedActionStatus"
+                            "$ref": "#/definitions/process.GovernedActionStatus"
                         }
                     },
                     "400": {
@@ -187,13 +180,6 @@ const docTemplate = `{
                     },
                     {
                         "type": "string",
-                        "description": "Account ID",
-                        "name": "account_id",
-                        "in": "query",
-                        "required": true
-                    },
-                    {
-                        "type": "string",
                         "description": "Project ID",
                         "name": "project_id",
                         "in": "query",
@@ -204,7 +190,7 @@ const docTemplate = `{
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/github_com_TekkenSteve_GoAgent_agentos_process.GovernedActionStatus"
+                            "$ref": "#/definitions/process.GovernedActionStatus"
                         }
                     },
                     "400": {
@@ -252,13 +238,6 @@ const docTemplate = `{
                     },
                     {
                         "type": "string",
-                        "description": "Account ID",
-                        "name": "account_id",
-                        "in": "query",
-                        "required": true
-                    },
-                    {
-                        "type": "string",
                         "description": "Project ID",
                         "name": "project_id",
                         "in": "query",
@@ -270,7 +249,7 @@ const docTemplate = `{
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/github_com_TekkenSteve_GoAgent_agentos_process.ActionApprovalDecision"
+                            "$ref": "#/definitions/process.ActionApprovalDecision"
                         }
                     }
                 ],
@@ -278,7 +257,7 @@ const docTemplate = `{
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/github_com_TekkenSteve_GoAgent_agentos_process.GovernedActionStatus"
+                            "$ref": "#/definitions/process.GovernedActionStatus"
                         }
                     },
                     "400": {
@@ -326,13 +305,6 @@ const docTemplate = `{
                     },
                     {
                         "type": "string",
-                        "description": "Account ID",
-                        "name": "account_id",
-                        "in": "query",
-                        "required": true
-                    },
-                    {
-                        "type": "string",
                         "description": "Project ID",
                         "name": "project_id",
                         "in": "query",
@@ -344,7 +316,7 @@ const docTemplate = `{
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/github_com_TekkenSteve_GoAgent_agentos_process.ActionCancelRequest"
+                            "$ref": "#/definitions/process.ActionCancelRequest"
                         }
                     }
                 ],
@@ -352,7 +324,7 @@ const docTemplate = `{
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/github_com_TekkenSteve_GoAgent_agentos_process.GovernedActionStatus"
+                            "$ref": "#/definitions/process.GovernedActionStatus"
                         }
                     },
                     "400": {
@@ -400,13 +372,6 @@ const docTemplate = `{
                     },
                     {
                         "type": "string",
-                        "description": "Account ID",
-                        "name": "account_id",
-                        "in": "query",
-                        "required": true
-                    },
-                    {
-                        "type": "string",
                         "description": "Project ID",
                         "name": "project_id",
                         "in": "query",
@@ -418,7 +383,7 @@ const docTemplate = `{
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/github_com_TekkenSteve_GoAgent_agentos_process.ActionDryRunResult"
+                            "$ref": "#/definitions/process.ActionDryRunResult"
                         }
                     }
                 ],
@@ -426,7 +391,7 @@ const docTemplate = `{
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/github_com_TekkenSteve_GoAgent_agentos_process.GovernedActionStatus"
+                            "$ref": "#/definitions/process.GovernedActionStatus"
                         }
                     },
                     "400": {
@@ -474,13 +439,6 @@ const docTemplate = `{
                     },
                     {
                         "type": "string",
-                        "description": "Account ID",
-                        "name": "account_id",
-                        "in": "query",
-                        "required": true
-                    },
-                    {
-                        "type": "string",
                         "description": "Project ID",
                         "name": "project_id",
                         "in": "query",
@@ -492,7 +450,7 @@ const docTemplate = `{
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/github_com_TekkenSteve_GoAgent_agentos_process.ActionExecutionResult"
+                            "$ref": "#/definitions/process.ActionExecutionResult"
                         }
                     }
                 ],
@@ -500,7 +458,7 @@ const docTemplate = `{
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/github_com_TekkenSteve_GoAgent_agentos_process.GovernedActionStatus"
+                            "$ref": "#/definitions/process.GovernedActionStatus"
                         }
                     },
                     "400": {
@@ -539,13 +497,6 @@ const docTemplate = `{
                 "summary": "List AgentOS ledger entries",
                 "operationId": "agentos-list-ledger-entries",
                 "parameters": [
-                    {
-                        "type": "string",
-                        "description": "Account ID",
-                        "name": "account_id",
-                        "in": "query",
-                        "required": true
-                    },
                     {
                         "type": "string",
                         "description": "Project ID",
@@ -596,7 +547,7 @@ const docTemplate = `{
                         "schema": {
                             "type": "array",
                             "items": {
-                                "$ref": "#/definitions/github_com_TekkenSteve_GoAgent_agentos_process.LedgerEntry"
+                                "$ref": "#/definitions/process.LedgerEntry"
                             }
                         }
                     },
@@ -640,7 +591,7 @@ const docTemplate = `{
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/github_com_TekkenSteve_GoAgent_agentos_process.LedgerEntrySpec"
+                            "$ref": "#/definitions/process.LedgerEntrySpec"
                         }
                     }
                 ],
@@ -648,7 +599,7 @@ const docTemplate = `{
                     "201": {
                         "description": "Created",
                         "schema": {
-                            "$ref": "#/definitions/github_com_TekkenSteve_GoAgent_agentos_process.LedgerEntry"
+                            "$ref": "#/definitions/process.LedgerEntry"
                         }
                     },
                     "400": {
@@ -693,7 +644,7 @@ const docTemplate = `{
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/github_com_TekkenSteve_GoAgent_agentos_control.RunPlanSpec"
+                            "$ref": "#/definitions/control.RunPlanSpec"
                         }
                     }
                 ],
@@ -701,7 +652,7 @@ const docTemplate = `{
                     "202": {
                         "description": "Accepted",
                         "schema": {
-                            "$ref": "#/definitions/github_com_TekkenSteve_GoAgent_agentos_control.RunPlanStatus"
+                            "$ref": "#/definitions/control.RunPlanStatus"
                         }
                     },
                     "400": {
@@ -816,13 +767,6 @@ const docTemplate = `{
                     },
                     {
                         "type": "string",
-                        "description": "Account ID",
-                        "name": "account_id",
-                        "in": "query",
-                        "required": true
-                    },
-                    {
-                        "type": "string",
                         "description": "Project ID",
                         "name": "project_id",
                         "in": "query",
@@ -853,7 +797,7 @@ const docTemplate = `{
                         "schema": {
                             "type": "array",
                             "items": {
-                                "$ref": "#/definitions/github_com_TekkenSteve_GoAgent_agentos_core.ArtifactRef"
+                                "$ref": "#/definitions/core.ArtifactRef"
                             }
                         }
                     },
@@ -909,13 +853,6 @@ const docTemplate = `{
                     },
                     {
                         "type": "string",
-                        "description": "Account ID",
-                        "name": "account_id",
-                        "in": "query",
-                        "required": true
-                    },
-                    {
-                        "type": "string",
                         "description": "Project ID",
                         "name": "project_id",
                         "in": "query",
@@ -926,7 +863,7 @@ const docTemplate = `{
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/github_com_TekkenSteve_GoAgent_agentos_core.Artifact"
+                            "$ref": "#/definitions/core.Artifact"
                         }
                     },
                     "400": {
@@ -974,13 +911,6 @@ const docTemplate = `{
                     },
                     {
                         "type": "string",
-                        "description": "Account ID",
-                        "name": "account_id",
-                        "in": "query",
-                        "required": true
-                    },
-                    {
-                        "type": "string",
                         "description": "Project ID",
                         "name": "project_id",
                         "in": "query",
@@ -1017,7 +947,7 @@ const docTemplate = `{
                         "schema": {
                             "type": "array",
                             "items": {
-                                "$ref": "#/definitions/github_com_TekkenSteve_GoAgent_agentos_control.PlanAuditRecord"
+                                "$ref": "#/definitions/control.PlanAuditRecord"
                             }
                         }
                     },
@@ -1062,13 +992,6 @@ const docTemplate = `{
                         "description": "Plan ID",
                         "name": "plan_id",
                         "in": "path",
-                        "required": true
-                    },
-                    {
-                        "type": "string",
-                        "description": "Account ID",
-                        "name": "account_id",
-                        "in": "query",
                         "required": true
                     },
                     {
@@ -1206,13 +1129,6 @@ const docTemplate = `{
                     },
                     {
                         "type": "string",
-                        "description": "Account ID",
-                        "name": "account_id",
-                        "in": "query",
-                        "required": true
-                    },
-                    {
-                        "type": "string",
                         "description": "Project ID",
                         "name": "project_id",
                         "in": "query",
@@ -1249,7 +1165,7 @@ const docTemplate = `{
                         "schema": {
                             "type": "array",
                             "items": {
-                                "$ref": "#/definitions/github_com_TekkenSteve_GoAgent_agentos_control.PlanDebugTrace"
+                                "$ref": "#/definitions/control.PlanDebugTrace"
                             }
                         }
                     },
@@ -1298,13 +1214,6 @@ const docTemplate = `{
                     },
                     {
                         "type": "string",
-                        "description": "Account ID",
-                        "name": "account_id",
-                        "in": "query",
-                        "required": true
-                    },
-                    {
-                        "type": "string",
                         "description": "Project ID",
                         "name": "project_id",
                         "in": "query",
@@ -1315,7 +1224,7 @@ const docTemplate = `{
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/github_com_TekkenSteve_GoAgent_agentos_control.RunPlanDescription"
+                            "$ref": "#/definitions/control.RunPlanDescription"
                         }
                     },
                     "400": {
@@ -1359,6 +1268,13 @@ const docTemplate = `{
                         "description": "Plan ID",
                         "name": "plan_id",
                         "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Project ID",
+                        "name": "project_id",
+                        "in": "query",
                         "required": true
                     },
                     {
@@ -1432,13 +1348,6 @@ const docTemplate = `{
                     },
                     {
                         "type": "string",
-                        "description": "Account ID",
-                        "name": "account_id",
-                        "in": "query",
-                        "required": true
-                    },
-                    {
-                        "type": "string",
                         "description": "Project ID",
                         "name": "project_id",
                         "in": "query",
@@ -1475,7 +1384,7 @@ const docTemplate = `{
                         "schema": {
                             "type": "array",
                             "items": {
-                                "$ref": "#/definitions/github_com_TekkenSteve_GoAgent_agentos_control.PlanEvent"
+                                "$ref": "#/definitions/control.PlanEvent"
                             }
                         }
                     },
@@ -1578,13 +1487,20 @@ const docTemplate = `{
                         "name": "plan_id",
                         "in": "path",
                         "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Project ID",
+                        "name": "project_id",
+                        "in": "query",
+                        "required": true
                     }
                 ],
                 "responses": {
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/github_com_TekkenSteve_GoAgent_agentos_control.RunPlanStatus"
+                            "$ref": "#/definitions/control.RunPlanStatus"
                         }
                     },
                     "404": {
@@ -1617,13 +1533,6 @@ const docTemplate = `{
                 "summary": "List AgentOS processes",
                 "operationId": "agentos-list-processes",
                 "parameters": [
-                    {
-                        "type": "string",
-                        "description": "Account ID",
-                        "name": "account_id",
-                        "in": "query",
-                        "required": true
-                    },
                     {
                         "type": "string",
                         "description": "Project ID",
@@ -1668,7 +1577,7 @@ const docTemplate = `{
                         "schema": {
                             "type": "array",
                             "items": {
-                                "$ref": "#/definitions/github_com_TekkenSteve_GoAgent_agentos_process.Status"
+                                "$ref": "#/definitions/process.Status"
                             }
                         }
                     },
@@ -1712,7 +1621,7 @@ const docTemplate = `{
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/github_com_TekkenSteve_GoAgent_agentos_process.Spec"
+                            "$ref": "#/definitions/process.Spec"
                         }
                     }
                 ],
@@ -1720,7 +1629,7 @@ const docTemplate = `{
                     "202": {
                         "description": "Accepted",
                         "schema": {
-                            "$ref": "#/definitions/github_com_TekkenSteve_GoAgent_agentos_process.Status"
+                            "$ref": "#/definitions/process.Status"
                         }
                     },
                     "400": {
@@ -1768,13 +1677,6 @@ const docTemplate = `{
                     },
                     {
                         "type": "string",
-                        "description": "Account ID",
-                        "name": "account_id",
-                        "in": "query",
-                        "required": true
-                    },
-                    {
-                        "type": "string",
                         "description": "Project ID",
                         "name": "project_id",
                         "in": "query",
@@ -1785,7 +1687,7 @@ const docTemplate = `{
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/github_com_TekkenSteve_GoAgent_agentos_process.Description"
+                            "$ref": "#/definitions/process.Description"
                         }
                     },
                     "400": {
@@ -1833,13 +1735,6 @@ const docTemplate = `{
                     },
                     {
                         "type": "string",
-                        "description": "Account ID",
-                        "name": "account_id",
-                        "in": "query",
-                        "required": true
-                    },
-                    {
-                        "type": "string",
                         "description": "Project ID",
                         "name": "project_id",
                         "in": "query",
@@ -1850,7 +1745,7 @@ const docTemplate = `{
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/github_com_TekkenSteve_GoAgent_agentos_process.Status"
+                            "$ref": "#/definitions/process.Status"
                         }
                     },
                     "400": {
@@ -1891,13 +1786,6 @@ const docTemplate = `{
                 "parameters": [
                     {
                         "type": "string",
-                        "description": "Account ID",
-                        "name": "account_id",
-                        "in": "query",
-                        "required": true
-                    },
-                    {
-                        "type": "string",
                         "description": "Project ID",
                         "name": "project_id",
                         "in": "query",
@@ -1932,7 +1820,7 @@ const docTemplate = `{
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/github_com_TekkenSteve_GoAgent_agentos_process.ResourceProjection"
+                            "$ref": "#/definitions/process.ResourceProjection"
                         }
                     },
                     "400": {
@@ -1985,7 +1873,7 @@ const docTemplate = `{
                     "202": {
                         "description": "Accepted",
                         "schema": {
-                            "$ref": "#/definitions/github_com_TekkenSteve_GoAgent_agentos_control.RunStatus"
+                            "$ref": "#/definitions/control.RunStatus"
                         }
                     },
                     "400": {
@@ -2126,6 +2014,72 @@ const docTemplate = `{
                 }
             }
         },
+        "/agentos/runs/{run_id}/events/history": {
+            "get": {
+                "description": "Query the durable projected milestone timeline of an AgentOS run.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "agentos"
+                ],
+                "summary": "List AgentOS run event history",
+                "operationId": "agentos-list-run-events",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Run ID",
+                        "name": "run_id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "integer",
+                        "description": "Only return events after this sequence",
+                        "name": "after_sequence",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "description": "Maximum events",
+                        "name": "limit",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "array",
+                            "items": {
+                                "$ref": "#/definitions/github_com_TekkenSteve_GoAgent_agentos_core.Event"
+                            }
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/response.Error"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/response.Error"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/response.Error"
+                        }
+                    }
+                }
+            }
+        },
         "/agentos/runs/{run_id}/signals": {
             "post": {
                 "description": "Send business input such as user.message to an AgentOS run.",
@@ -2210,7 +2164,7 @@ const docTemplate = `{
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/github_com_TekkenSteve_GoAgent_agentos_control.RunStatus"
+                            "$ref": "#/definitions/control.RunStatus"
                         }
                     },
                     "404": {
@@ -2243,13 +2197,6 @@ const docTemplate = `{
                 "summary": "List AgentOS worksets",
                 "operationId": "agentos-list-worksets",
                 "parameters": [
-                    {
-                        "type": "string",
-                        "description": "Account ID",
-                        "name": "account_id",
-                        "in": "query",
-                        "required": true
-                    },
                     {
                         "type": "string",
                         "description": "Project ID",
@@ -2300,7 +2247,7 @@ const docTemplate = `{
                         "schema": {
                             "type": "array",
                             "items": {
-                                "$ref": "#/definitions/github_com_TekkenSteve_GoAgent_agentos_process.WorksetStatus"
+                                "$ref": "#/definitions/process.WorksetStatus"
                             }
                         }
                     },
@@ -2344,7 +2291,7 @@ const docTemplate = `{
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/github_com_TekkenSteve_GoAgent_agentos_process.WorksetSpec"
+                            "$ref": "#/definitions/process.WorksetSpec"
                         }
                     }
                 ],
@@ -2352,7 +2299,7 @@ const docTemplate = `{
                     "202": {
                         "description": "Accepted",
                         "schema": {
-                            "$ref": "#/definitions/github_com_TekkenSteve_GoAgent_agentos_process.WorksetStatus"
+                            "$ref": "#/definitions/process.WorksetStatus"
                         }
                     },
                     "400": {
@@ -2400,13 +2347,6 @@ const docTemplate = `{
                     },
                     {
                         "type": "string",
-                        "description": "Account ID",
-                        "name": "account_id",
-                        "in": "query",
-                        "required": true
-                    },
-                    {
-                        "type": "string",
                         "description": "Project ID",
                         "name": "project_id",
                         "in": "query",
@@ -2417,7 +2357,7 @@ const docTemplate = `{
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/github_com_TekkenSteve_GoAgent_agentos_process.WorksetStatus"
+                            "$ref": "#/definitions/process.WorksetStatus"
                         }
                     },
                     "400": {
@@ -2430,89 +2370,6 @@ const docTemplate = `{
                         "description": "Not Found",
                         "schema": {
                             "$ref": "#/definitions/response.Error"
-                        }
-                    },
-                    "500": {
-                        "description": "Internal Server Error",
-                        "schema": {
-                            "$ref": "#/definitions/response.Error"
-                        }
-                    }
-                }
-            }
-        },
-        "/orchestration/execute": {
-            "post": {
-                "description": "Start a multi-step orchestration workflow from a TeamSpec or step queue",
-                "consumes": [
-                    "application/json"
-                ],
-                "produces": [
-                    "application/json"
-                ],
-                "tags": [
-                    "orchestration"
-                ],
-                "summary": "Execute orchestration workflow",
-                "operationId": "orchestrate",
-                "parameters": [
-                    {
-                        "description": "Orchestration request",
-                        "name": "request",
-                        "in": "body",
-                        "required": true,
-                        "schema": {
-                            "$ref": "#/definitions/request.Orchestrate"
-                        }
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "OK",
-                        "schema": {
-                            "$ref": "#/definitions/response.RunStatus"
-                        }
-                    },
-                    "400": {
-                        "description": "Bad Request",
-                        "schema": {
-                            "$ref": "#/definitions/response.Error"
-                        }
-                    },
-                    "500": {
-                        "description": "Internal Server Error",
-                        "schema": {
-                            "$ref": "#/definitions/response.Error"
-                        }
-                    }
-                }
-            }
-        },
-        "/orchestration/status/{run_id}": {
-            "get": {
-                "description": "Query the current status of an orchestration workflow",
-                "produces": [
-                    "application/json"
-                ],
-                "tags": [
-                    "orchestration"
-                ],
-                "summary": "Get orchestration workflow status",
-                "operationId": "orchestration-status",
-                "parameters": [
-                    {
-                        "type": "string",
-                        "description": "Run ID",
-                        "name": "run_id",
-                        "in": "path",
-                        "required": true
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "OK",
-                        "schema": {
-                            "$ref": "#/definitions/response.RunStatus"
                         }
                     },
                     "500": {
@@ -2552,13 +2409,15 @@ const docTemplate = `{
                 "native",
                 "temporal_external",
                 "http",
-                "grpc"
+                "grpc",
+                "dsh"
             ],
             "x-enum-varnames": [
                 "BackendKindNative",
                 "BackendKindTemporalExternal",
                 "BackendKindHTTP",
-                "BackendKindGRPC"
+                "BackendKindGRPC",
+                "BackendKindDSH"
             ]
         },
         "control.BackendRef": {
@@ -2624,6 +2483,72 @@ const docTemplate = `{
                 }
             }
         },
+        "control.PlanApprovalDecision": {
+            "type": "object",
+            "properties": {
+                "actor_id": {
+                    "type": "string"
+                },
+                "approved": {
+                    "type": "boolean"
+                },
+                "decided_at": {
+                    "type": "string"
+                },
+                "policy_version": {
+                    "type": "string"
+                },
+                "reason": {
+                    "type": "string"
+                }
+            }
+        },
+        "control.PlanApprovalGate": {
+            "type": "object",
+            "properties": {
+                "expires_at": {
+                    "description": "ExpiresAt is when the gate auto-rejects. Zero means no expiry\n(ApprovalTimeoutSeconds == 0).",
+                    "type": "string"
+                },
+                "node_ids": {
+                    "description": "NodeIDs are the precise plan-node references the gate covers: the nodes\nthat resume or start once the gate is approved.",
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "policy_version": {
+                    "description": "PolicyVersion is a deterministic fingerprint of the plan policy and node\nset at gate creation. It changes when the topology is replanned\n(PlanDelta), which invalidates an existing decision.",
+                    "type": "string"
+                },
+                "requested_at": {
+                    "description": "RequestedAt is when the gate was created (plan entered blocked).",
+                    "type": "string"
+                },
+                "risk_reason": {
+                    "description": "RiskReason is the rationale for requiring approval (why the plan paused).",
+                    "type": "string"
+                },
+                "summary": {
+                    "description": "Summary describes what the gate covers (gated node count and plan id).",
+                    "type": "string"
+                }
+            }
+        },
+        "control.PlanApprovalStatus": {
+            "type": "object",
+            "properties": {
+                "decision": {
+                    "$ref": "#/definitions/control.PlanApprovalDecision"
+                },
+                "gate": {
+                    "$ref": "#/definitions/control.PlanApprovalGate"
+                },
+                "lifecycle_state": {
+                    "type": "string"
+                }
+            }
+        },
         "control.PlanAuditAction": {
             "type": "string",
             "enum": [
@@ -2636,6 +2561,45 @@ const docTemplate = `{
                 "PlanAuditActionSignal",
                 "PlanAuditActionControl"
             ]
+        },
+        "control.PlanAuditRecord": {
+            "type": "object",
+            "properties": {
+                "account_id": {
+                    "type": "string"
+                },
+                "action": {
+                    "$ref": "#/definitions/control.PlanAuditAction"
+                },
+                "actor_id": {
+                    "type": "string"
+                },
+                "audit_id": {
+                    "type": "string"
+                },
+                "created_at": {
+                    "type": "string"
+                },
+                "idempotency_key": {
+                    "type": "string"
+                },
+                "node_id": {
+                    "type": "string"
+                },
+                "payload": {
+                    "type": "object",
+                    "additionalProperties": {}
+                },
+                "plan_id": {
+                    "type": "string"
+                },
+                "project_id": {
+                    "type": "string"
+                },
+                "run_id": {
+                    "type": "string"
+                }
+            }
         },
         "control.PlanBudgetUsage": {
             "type": "object",
@@ -2706,6 +2670,50 @@ const docTemplate = `{
                 }
             }
         },
+        "control.PlanDebugTrace": {
+            "type": "object",
+            "properties": {
+                "capability": {
+                    "$ref": "#/definitions/control.PlanCapabilityTrace"
+                },
+                "conditions": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/control.PlanConditionTrace"
+                    }
+                },
+                "event_id": {
+                    "type": "string"
+                },
+                "event_type": {
+                    "$ref": "#/definitions/core.EventType"
+                },
+                "input_resolution": {
+                    "$ref": "#/definitions/control.PlanInputResolutionTrace"
+                },
+                "node_id": {
+                    "type": "string"
+                },
+                "plan_id": {
+                    "type": "string"
+                },
+                "run_id": {
+                    "type": "string"
+                },
+                "sequence": {
+                    "type": "integer"
+                },
+                "thread_id": {
+                    "type": "string"
+                },
+                "timestamp": {
+                    "type": "string"
+                },
+                "transition": {
+                    "$ref": "#/definitions/control.PlanStateTransition"
+                }
+            }
+        },
         "control.PlanEdgeSpec": {
             "type": "object",
             "properties": {
@@ -2728,6 +2736,54 @@ const docTemplate = `{
                     "$ref": "#/definitions/control.EdgeTrigger"
                 },
                 "to": {
+                    "type": "string"
+                }
+            }
+        },
+        "control.PlanEvent": {
+            "type": "object",
+            "properties": {
+                "account_id": {
+                    "type": "string"
+                },
+                "event_id": {
+                    "type": "string"
+                },
+                "event_type": {
+                    "$ref": "#/definitions/core.EventType"
+                },
+                "external_event_id": {
+                    "type": "string"
+                },
+                "node_id": {
+                    "type": "string"
+                },
+                "payload": {
+                    "type": "object",
+                    "additionalProperties": {}
+                },
+                "plan_id": {
+                    "type": "string"
+                },
+                "process_id": {
+                    "type": "string"
+                },
+                "project_id": {
+                    "type": "string"
+                },
+                "run_id": {
+                    "type": "string"
+                },
+                "sequence": {
+                    "type": "integer"
+                },
+                "source": {
+                    "type": "string"
+                },
+                "thread_id": {
+                    "type": "string"
+                },
+                "timestamp": {
                     "type": "string"
                 }
             }
@@ -2818,6 +2874,10 @@ const docTemplate = `{
                         "$ref": "#/definitions/control.ArtifactSpec"
                     }
                 },
+                "peer": {
+                    "description": "Peer names the town this node's run happens in, resolved through the\ndeployment's peer → Nexus endpoint map. Empty runs it here.",
+                    "type": "string"
+                },
                 "policy": {
                     "$ref": "#/definitions/control.NodePolicy"
                 },
@@ -2870,6 +2930,10 @@ const docTemplate = `{
         "control.PlanPolicy": {
             "type": "object",
             "properties": {
+                "approval_timeout_seconds": {
+                    "description": "ApprovalTimeoutSeconds bounds how long a plan may stay blocked waiting\nfor human approval (approve/reject signal). When it elapses the plan is\nauto-rejected. 0 disables the gate (plan waits indefinitely).",
+                    "type": "integer"
+                },
                 "budget_cents": {
                     "type": "integer"
                 },
@@ -3000,6 +3064,89 @@ const docTemplate = `{
                 }
             }
         },
+        "control.RunPlanDescription": {
+            "type": "object",
+            "properties": {
+                "account_id": {
+                    "type": "string"
+                },
+                "metadata": {
+                    "type": "object",
+                    "additionalProperties": {
+                        "type": "string"
+                    }
+                },
+                "plan_id": {
+                    "type": "string"
+                },
+                "policy": {
+                    "$ref": "#/definitions/control.PlanPolicy"
+                },
+                "project_id": {
+                    "type": "string"
+                },
+                "status": {
+                    "$ref": "#/definitions/control.RunPlanStatus"
+                },
+                "thread_id": {
+                    "type": "string"
+                },
+                "topology": {
+                    "$ref": "#/definitions/control.PlanTopology"
+                },
+                "updated_at": {
+                    "type": "string"
+                }
+            }
+        },
+        "control.RunPlanSpec": {
+            "type": "object",
+            "properties": {
+                "account_id": {
+                    "type": "string"
+                },
+                "edges": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/control.PlanEdgeSpec"
+                    }
+                },
+                "idempotency_key": {
+                    "type": "string"
+                },
+                "inputs": {
+                    "type": "object",
+                    "additionalProperties": {}
+                },
+                "metadata": {
+                    "type": "object",
+                    "additionalProperties": {
+                        "type": "string"
+                    }
+                },
+                "nodes": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/control.PlanNodeSpec"
+                    }
+                },
+                "plan_id": {
+                    "type": "string"
+                },
+                "policy": {
+                    "$ref": "#/definitions/control.PlanPolicy"
+                },
+                "project_id": {
+                    "type": "string"
+                },
+                "requested_at": {
+                    "type": "string"
+                },
+                "thread_id": {
+                    "type": "string"
+                }
+            }
+        },
         "control.RunPlanStatus": {
             "type": "object",
             "properties": {
@@ -3009,11 +3156,23 @@ const docTemplate = `{
                         "type": "string"
                     }
                 },
+                "approval": {
+                    "description": "Approval is the live approval-gate projection. It is nil while no gate\nis active: a plan that is not blocked, or a blocked plan persisted before\nthe auditable-approval feature (the decision is then derived lazily).",
+                    "allOf": [
+                        {
+                            "$ref": "#/definitions/control.PlanApprovalStatus"
+                        }
+                    ]
+                },
                 "artifacts": {
                     "type": "array",
                     "items": {
                         "$ref": "#/definitions/core.ArtifactRef"
                     }
+                },
+                "blocked_at": {
+                    "description": "BlockedAt records when the plan entered the blocked (awaiting-approval)\nlifecycle state. It is zero outside the blocked state and anchors the\nApprovalTimeoutSeconds gate.",
+                    "type": "string"
                 },
                 "budget_usage": {
                     "$ref": "#/definitions/control.PlanBudgetUsage"
@@ -3063,6 +3222,7 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "input": {
+                    "description": "Input is backend-owned and carried opaquely: each backend reads the key\nit owns (the native backend reads \"native\") and ignores the rest, so a\ncaller may keep its own metadata here without a backend tripping over it.",
                     "type": "object",
                     "additionalProperties": {}
                 },
@@ -3092,6 +3252,44 @@ const docTemplate = `{
                 },
                 "user_message": {
                     "type": "string"
+                }
+            }
+        },
+        "control.RunStatus": {
+            "type": "object",
+            "properties": {
+                "artifacts": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/core.ArtifactRef"
+                    }
+                },
+                "budget_usage": {
+                    "$ref": "#/definitions/control.PlanBudgetUsage"
+                },
+                "lifecycle_state": {
+                    "type": "string"
+                },
+                "progress": {
+                    "$ref": "#/definitions/core.RunProgress"
+                },
+                "reason": {
+                    "type": "string"
+                },
+                "run_id": {
+                    "type": "string"
+                },
+                "updated_at": {
+                    "type": "string"
+                }
+            }
+        },
+        "core.Artifact": {
+            "type": "object",
+            "properties": {
+                "payload": {},
+                "ref": {
+                    "$ref": "#/definitions/core.ArtifactRef"
                 }
             }
         },
@@ -3179,7 +3377,7 @@ const docTemplate = `{
                 "run.started",
                 "run.completed",
                 "run.failed",
-                "run.cancelled",
+                "run.canceled",
                 "run.paused",
                 "run.resumed",
                 "agent.step.started",
@@ -3230,7 +3428,7 @@ const docTemplate = `{
                 "EventRunStarted",
                 "EventRunCompleted",
                 "EventRunFailed",
-                "EventRunCancelled",
+                "EventRunCanceled",
                 "EventRunPaused",
                 "EventRunResumed",
                 "EventAgentStepStarted",
@@ -3307,6 +3505,8 @@ const docTemplate = `{
                 "tool.result",
                 "human.feedback",
                 "config.patch",
+                "step.modify",
+                "event.external",
                 "memory.patch"
             ],
             "x-enum-varnames": [
@@ -3322,129 +3522,25 @@ const docTemplate = `{
                 "SignalToolResult",
                 "SignalHumanFeedback",
                 "SignalConfigPatch",
+                "SignalStepModify",
+                "SignalExternalEvent",
                 "SignalMemoryPatch"
             ]
         },
-        "github_com_TekkenSteve_GoAgent_agentos_control.BackendRef": {
+        "github_com_TekkenSteve_GoAgent_agentos_core.Event": {
             "type": "object",
             "properties": {
-                "kind": {
-                    "$ref": "#/definitions/control.BackendKind"
-                },
-                "name": {
-                    "type": "string"
-                }
-            }
-        },
-        "github_com_TekkenSteve_GoAgent_agentos_control.PlanAuditRecord": {
-            "type": "object",
-            "properties": {
-                "account_id": {
-                    "type": "string"
-                },
-                "action": {
-                    "$ref": "#/definitions/control.PlanAuditAction"
-                },
-                "actor_id": {
-                    "type": "string"
-                },
-                "audit_id": {
-                    "type": "string"
-                },
-                "created_at": {
-                    "type": "string"
-                },
-                "idempotency_key": {
-                    "type": "string"
-                },
-                "node_id": {
-                    "type": "string"
-                },
-                "payload": {
-                    "type": "object",
-                    "additionalProperties": {}
-                },
-                "plan_id": {
-                    "type": "string"
-                },
-                "project_id": {
-                    "type": "string"
-                },
-                "run_id": {
-                    "type": "string"
-                }
-            }
-        },
-        "github_com_TekkenSteve_GoAgent_agentos_control.PlanDebugTrace": {
-            "type": "object",
-            "properties": {
-                "capability": {
-                    "$ref": "#/definitions/control.PlanCapabilityTrace"
-                },
-                "conditions": {
-                    "type": "array",
-                    "items": {
-                        "$ref": "#/definitions/control.PlanConditionTrace"
-                    }
-                },
                 "event_id": {
                     "type": "string"
                 },
                 "event_type": {
                     "$ref": "#/definitions/core.EventType"
                 },
-                "input_resolution": {
-                    "$ref": "#/definitions/control.PlanInputResolutionTrace"
-                },
-                "node_id": {
-                    "type": "string"
-                },
-                "plan_id": {
-                    "type": "string"
-                },
-                "run_id": {
-                    "type": "string"
-                },
-                "sequence": {
-                    "type": "integer"
-                },
-                "thread_id": {
-                    "type": "string"
-                },
-                "timestamp": {
-                    "type": "string"
-                },
-                "transition": {
-                    "$ref": "#/definitions/control.PlanStateTransition"
-                }
-            }
-        },
-        "github_com_TekkenSteve_GoAgent_agentos_control.PlanEvent": {
-            "type": "object",
-            "properties": {
-                "account_id": {
-                    "type": "string"
-                },
-                "event_id": {
-                    "type": "string"
-                },
-                "event_type": {
-                    "$ref": "#/definitions/core.EventType"
-                },
-                "node_id": {
-                    "type": "string"
-                },
                 "payload": {
                     "type": "object",
                     "additionalProperties": {}
-                },
-                "plan_id": {
-                    "type": "string"
                 },
                 "process_id": {
-                    "type": "string"
-                },
-                "project_id": {
                     "type": "string"
                 },
                 "run_id": {
@@ -3464,370 +3560,7 @@ const docTemplate = `{
                 }
             }
         },
-        "github_com_TekkenSteve_GoAgent_agentos_control.RunPlanDescription": {
-            "type": "object",
-            "properties": {
-                "account_id": {
-                    "type": "string"
-                },
-                "metadata": {
-                    "type": "object",
-                    "additionalProperties": {
-                        "type": "string"
-                    }
-                },
-                "plan_id": {
-                    "type": "string"
-                },
-                "policy": {
-                    "$ref": "#/definitions/control.PlanPolicy"
-                },
-                "project_id": {
-                    "type": "string"
-                },
-                "status": {
-                    "$ref": "#/definitions/control.RunPlanStatus"
-                },
-                "thread_id": {
-                    "type": "string"
-                },
-                "topology": {
-                    "$ref": "#/definitions/control.PlanTopology"
-                },
-                "updated_at": {
-                    "type": "string"
-                }
-            }
-        },
-        "github_com_TekkenSteve_GoAgent_agentos_control.RunPlanSpec": {
-            "type": "object",
-            "properties": {
-                "account_id": {
-                    "type": "string"
-                },
-                "edges": {
-                    "type": "array",
-                    "items": {
-                        "$ref": "#/definitions/control.PlanEdgeSpec"
-                    }
-                },
-                "idempotency_key": {
-                    "type": "string"
-                },
-                "inputs": {
-                    "type": "object",
-                    "additionalProperties": {}
-                },
-                "metadata": {
-                    "type": "object",
-                    "additionalProperties": {
-                        "type": "string"
-                    }
-                },
-                "nodes": {
-                    "type": "array",
-                    "items": {
-                        "$ref": "#/definitions/control.PlanNodeSpec"
-                    }
-                },
-                "plan_id": {
-                    "type": "string"
-                },
-                "policy": {
-                    "$ref": "#/definitions/control.PlanPolicy"
-                },
-                "project_id": {
-                    "type": "string"
-                },
-                "requested_at": {
-                    "type": "string"
-                },
-                "thread_id": {
-                    "type": "string"
-                }
-            }
-        },
-        "github_com_TekkenSteve_GoAgent_agentos_control.RunPlanStatus": {
-            "type": "object",
-            "properties": {
-                "active_run_ids": {
-                    "type": "array",
-                    "items": {
-                        "type": "string"
-                    }
-                },
-                "artifacts": {
-                    "type": "array",
-                    "items": {
-                        "$ref": "#/definitions/core.ArtifactRef"
-                    }
-                },
-                "budget_usage": {
-                    "$ref": "#/definitions/control.PlanBudgetUsage"
-                },
-                "lifecycle_state": {
-                    "type": "string"
-                },
-                "metadata": {
-                    "type": "object",
-                    "additionalProperties": {
-                        "type": "string"
-                    }
-                },
-                "nodes": {
-                    "type": "array",
-                    "items": {
-                        "$ref": "#/definitions/control.PlanNodeStatus"
-                    }
-                },
-                "plan_id": {
-                    "type": "string"
-                },
-                "reason": {
-                    "type": "string"
-                },
-                "started_at": {
-                    "type": "string"
-                },
-                "updated_at": {
-                    "type": "string"
-                }
-            }
-        },
-        "github_com_TekkenSteve_GoAgent_agentos_control.RunStatus": {
-            "type": "object",
-            "properties": {
-                "artifacts": {
-                    "type": "array",
-                    "items": {
-                        "$ref": "#/definitions/core.ArtifactRef"
-                    }
-                },
-                "budget_usage": {
-                    "$ref": "#/definitions/control.PlanBudgetUsage"
-                },
-                "lifecycle_state": {
-                    "type": "string"
-                },
-                "progress": {
-                    "$ref": "#/definitions/core.RunProgress"
-                },
-                "reason": {
-                    "type": "string"
-                },
-                "run_id": {
-                    "type": "string"
-                },
-                "updated_at": {
-                    "type": "string"
-                }
-            }
-        },
-        "github_com_TekkenSteve_GoAgent_agentos_core.Artifact": {
-            "type": "object",
-            "properties": {
-                "payload": {},
-                "ref": {
-                    "$ref": "#/definitions/core.ArtifactRef"
-                }
-            }
-        },
-        "github_com_TekkenSteve_GoAgent_agentos_core.ArtifactRef": {
-            "type": "object",
-            "properties": {
-                "artifact_id": {
-                    "type": "string"
-                },
-                "created_at": {
-                    "type": "string"
-                },
-                "digest": {
-                    "type": "string"
-                },
-                "kind": {
-                    "$ref": "#/definitions/core.ArtifactKind"
-                },
-                "media_type": {
-                    "type": "string"
-                },
-                "metadata": {
-                    "type": "object",
-                    "additionalProperties": {
-                        "type": "string"
-                    }
-                },
-                "name": {
-                    "type": "string"
-                },
-                "node_id": {
-                    "type": "string"
-                },
-                "plan_id": {
-                    "type": "string"
-                },
-                "run_id": {
-                    "type": "string"
-                },
-                "size_bytes": {
-                    "type": "integer"
-                },
-                "uri": {
-                    "type": "string"
-                }
-            }
-        },
-        "github_com_TekkenSteve_GoAgent_agentos_core.ControlOperation": {
-            "type": "string",
-            "enum": [
-                "pause",
-                "resume",
-                "cancel"
-            ],
-            "x-enum-varnames": [
-                "ControlPause",
-                "ControlResume",
-                "ControlCancel"
-            ]
-        },
-        "github_com_TekkenSteve_GoAgent_agentos_core.EventType": {
-            "type": "string",
-            "enum": [
-                "run.started",
-                "run.completed",
-                "run.failed",
-                "run.cancelled",
-                "run.paused",
-                "run.resumed",
-                "agent.step.started",
-                "agent.step.completed",
-                "agent.step.failed",
-                "agent.message.delta",
-                "agent.message.completed",
-                "tool.call.started",
-                "tool.call.delta",
-                "tool.call.completed",
-                "tool.call.failed",
-                "approval.requested",
-                "approval.resolved",
-                "usage.reported",
-                "checkpoint.created",
-                "artifact.created",
-                "node.input.resolved",
-                "node.output.published",
-                "capability.selected",
-                "condition.evaluated",
-                "plan.started",
-                "plan.blocked",
-                "plan.expanded",
-                "plan.approved",
-                "plan.rejected",
-                "plan.succeeded",
-                "plan.failed",
-                "plan.canceled",
-                "plan.node.ready",
-                "plan.node.started",
-                "plan.node.succeeded",
-                "plan.node.failed",
-                "plan.node.retry_scheduled",
-                "plan.node.skipped",
-                "plan.node.canceled",
-                "process.started",
-                "process.waiting",
-                "process.blocked",
-                "process.succeeded",
-                "process.failed",
-                "process.canceled",
-                "process.timer.scheduled",
-                "process.timer.fired",
-                "process.signal.received",
-                "process.control.received"
-            ],
-            "x-enum-varnames": [
-                "EventRunStarted",
-                "EventRunCompleted",
-                "EventRunFailed",
-                "EventRunCancelled",
-                "EventRunPaused",
-                "EventRunResumed",
-                "EventAgentStepStarted",
-                "EventAgentStepCompleted",
-                "EventAgentStepFailed",
-                "EventAgentMessageDelta",
-                "EventAgentMessageCompleted",
-                "EventToolCallStarted",
-                "EventToolCallDelta",
-                "EventToolCallCompleted",
-                "EventToolCallFailed",
-                "EventApprovalRequested",
-                "EventApprovalResolved",
-                "EventUsageReported",
-                "EventCheckpointCreated",
-                "EventArtifactCreated",
-                "EventNodeInputResolved",
-                "EventNodeOutputPublished",
-                "EventCapabilitySelected",
-                "EventConditionEvaluated",
-                "EventPlanStarted",
-                "EventPlanBlocked",
-                "EventPlanExpanded",
-                "EventPlanApproved",
-                "EventPlanRejected",
-                "EventPlanSucceeded",
-                "EventPlanFailed",
-                "EventPlanCanceled",
-                "EventPlanNodeReady",
-                "EventPlanNodeStarted",
-                "EventPlanNodeSucceeded",
-                "EventPlanNodeFailed",
-                "EventPlanNodeRetryScheduled",
-                "EventPlanNodeSkipped",
-                "EventPlanNodeCanceled",
-                "EventProcessStarted",
-                "EventProcessWaiting",
-                "EventProcessBlocked",
-                "EventProcessSucceeded",
-                "EventProcessFailed",
-                "EventProcessCanceled",
-                "EventProcessTimerScheduled",
-                "EventProcessTimerFired",
-                "EventProcessSignalReceived",
-                "EventProcessControlReceived"
-            ]
-        },
-        "github_com_TekkenSteve_GoAgent_agentos_core.SignalType": {
-            "type": "string",
-            "enum": [
-                "control.pause",
-                "control.resume",
-                "control.cancel",
-                "plan.node.retry",
-                "plan.approve",
-                "plan.reject",
-                "user.message",
-                "user.approval",
-                "user.reject",
-                "tool.result",
-                "human.feedback",
-                "config.patch",
-                "memory.patch"
-            ],
-            "x-enum-varnames": [
-                "SignalControlPause",
-                "SignalControlResume",
-                "SignalControlCancel",
-                "SignalPlanNodeRetry",
-                "SignalPlanApprove",
-                "SignalPlanReject",
-                "SignalUserMessage",
-                "SignalUserApproval",
-                "SignalUserReject",
-                "SignalToolResult",
-                "SignalHumanFeedback",
-                "SignalConfigPatch",
-                "SignalMemoryPatch"
-            ]
-        },
-        "github_com_TekkenSteve_GoAgent_agentos_process.ActionApprovalDecision": {
+        "process.ActionApprovalDecision": {
             "type": "object",
             "properties": {
                 "actor": {
@@ -3847,7 +3580,7 @@ const docTemplate = `{
                 }
             }
         },
-        "github_com_TekkenSteve_GoAgent_agentos_process.ActionCancelRequest": {
+        "process.ActionCancelRequest": {
             "type": "object",
             "properties": {
                 "actor": {
@@ -3864,7 +3597,7 @@ const docTemplate = `{
                 }
             }
         },
-        "github_com_TekkenSteve_GoAgent_agentos_process.ActionDryRunResult": {
+        "process.ActionDryRunResult": {
             "type": "object",
             "properties": {
                 "idempotency_key": {
@@ -3890,7 +3623,7 @@ const docTemplate = `{
                 }
             }
         },
-        "github_com_TekkenSteve_GoAgent_agentos_process.ActionExecutionResult": {
+        "process.ActionExecutionResult": {
             "type": "object",
             "properties": {
                 "artifact_refs": {
@@ -3919,7 +3652,53 @@ const docTemplate = `{
                 }
             }
         },
-        "github_com_TekkenSteve_GoAgent_agentos_process.Description": {
+        "process.ActionRiskAssessment": {
+            "type": "object",
+            "properties": {
+                "assessed_at": {
+                    "type": "string"
+                },
+                "evidence_refs": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/process.LedgerDataRef"
+                    }
+                },
+                "level": {
+                    "$ref": "#/definitions/process.ActionRiskLevel"
+                },
+                "reason": {
+                    "type": "string"
+                }
+            }
+        },
+        "process.ActionRiskLevel": {
+            "type": "string",
+            "enum": [
+                "low",
+                "medium",
+                "high",
+                "critical"
+            ],
+            "x-enum-varnames": [
+                "ActionRiskLow",
+                "ActionRiskMedium",
+                "ActionRiskHigh",
+                "ActionRiskCritical"
+            ]
+        },
+        "process.ActorRef": {
+            "type": "object",
+            "properties": {
+                "actor_id": {
+                    "type": "string"
+                },
+                "kind": {
+                    "type": "string"
+                }
+            }
+        },
+        "process.Description": {
             "type": "object",
             "properties": {
                 "account_id": {
@@ -3960,7 +3739,7 @@ const docTemplate = `{
                 }
             }
         },
-        "github_com_TekkenSteve_GoAgent_agentos_process.GovernedActionSpec": {
+        "process.GovernedActionSpec": {
             "type": "object",
             "properties": {
                 "account_id": {
@@ -4016,438 +3795,6 @@ const docTemplate = `{
                 },
                 "risk": {
                     "$ref": "#/definitions/process.ActionRiskAssessment"
-                }
-            }
-        },
-        "github_com_TekkenSteve_GoAgent_agentos_process.GovernedActionStatus": {
-            "type": "object",
-            "properties": {
-                "account_id": {
-                    "type": "string"
-                },
-                "action_id": {
-                    "type": "string"
-                },
-                "approval_state": {
-                    "type": "string"
-                },
-                "dry_run_state": {
-                    "type": "string"
-                },
-                "execution_state": {
-                    "type": "string"
-                },
-                "kind": {
-                    "type": "string"
-                },
-                "lifecycle_state": {
-                    "type": "string"
-                },
-                "process_id": {
-                    "type": "string"
-                },
-                "project_id": {
-                    "type": "string"
-                },
-                "reason": {
-                    "type": "string"
-                },
-                "resource": {
-                    "$ref": "#/definitions/process.ResourceRef"
-                },
-                "risk": {
-                    "$ref": "#/definitions/process.ActionRiskAssessment"
-                },
-                "updated_at": {
-                    "type": "string"
-                }
-            }
-        },
-        "github_com_TekkenSteve_GoAgent_agentos_process.LedgerEntry": {
-            "type": "object",
-            "properties": {
-                "account_id": {
-                    "type": "string"
-                },
-                "actor": {
-                    "$ref": "#/definitions/process.ActorRef"
-                },
-                "artifact_refs": {
-                    "type": "array",
-                    "items": {
-                        "$ref": "#/definitions/core.ArtifactRef"
-                    }
-                },
-                "created_at": {
-                    "type": "string"
-                },
-                "data_refs": {
-                    "type": "array",
-                    "items": {
-                        "$ref": "#/definitions/process.LedgerDataRef"
-                    }
-                },
-                "entry_id": {
-                    "type": "string"
-                },
-                "idempotency_key": {
-                    "type": "string"
-                },
-                "kind": {
-                    "$ref": "#/definitions/process.LedgerEntryKind"
-                },
-                "metadata": {
-                    "type": "object",
-                    "additionalProperties": {
-                        "type": "string"
-                    }
-                },
-                "occurred_at": {
-                    "type": "string"
-                },
-                "process_id": {
-                    "type": "string"
-                },
-                "project_id": {
-                    "type": "string"
-                },
-                "rationale": {
-                    "type": "string"
-                },
-                "resource": {
-                    "$ref": "#/definitions/process.ResourceRef"
-                },
-                "sequence": {
-                    "type": "integer"
-                },
-                "summary": {
-                    "type": "string"
-                }
-            }
-        },
-        "github_com_TekkenSteve_GoAgent_agentos_process.LedgerEntrySpec": {
-            "type": "object",
-            "properties": {
-                "account_id": {
-                    "type": "string"
-                },
-                "actor": {
-                    "$ref": "#/definitions/process.ActorRef"
-                },
-                "artifact_refs": {
-                    "type": "array",
-                    "items": {
-                        "$ref": "#/definitions/core.ArtifactRef"
-                    }
-                },
-                "data_refs": {
-                    "type": "array",
-                    "items": {
-                        "$ref": "#/definitions/process.LedgerDataRef"
-                    }
-                },
-                "entry_id": {
-                    "type": "string"
-                },
-                "idempotency_key": {
-                    "type": "string"
-                },
-                "kind": {
-                    "$ref": "#/definitions/process.LedgerEntryKind"
-                },
-                "metadata": {
-                    "type": "object",
-                    "additionalProperties": {
-                        "type": "string"
-                    }
-                },
-                "occurred_at": {
-                    "type": "string"
-                },
-                "process_id": {
-                    "type": "string"
-                },
-                "project_id": {
-                    "type": "string"
-                },
-                "rationale": {
-                    "type": "string"
-                },
-                "resource": {
-                    "$ref": "#/definitions/process.ResourceRef"
-                },
-                "summary": {
-                    "type": "string"
-                }
-            }
-        },
-        "github_com_TekkenSteve_GoAgent_agentos_process.ResourceProjection": {
-            "type": "object",
-            "properties": {
-                "actions": {
-                    "type": "array",
-                    "items": {
-                        "$ref": "#/definitions/process.GovernedActionStatus"
-                    }
-                },
-                "artifacts": {
-                    "type": "array",
-                    "items": {
-                        "$ref": "#/definitions/core.ArtifactRef"
-                    }
-                },
-                "ledger": {
-                    "type": "array",
-                    "items": {
-                        "$ref": "#/definitions/process.LedgerEntry"
-                    }
-                },
-                "metadata": {
-                    "type": "object",
-                    "additionalProperties": {
-                        "type": "string"
-                    }
-                },
-                "processes": {
-                    "type": "array",
-                    "items": {
-                        "$ref": "#/definitions/process.Status"
-                    }
-                },
-                "resource": {
-                    "$ref": "#/definitions/process.ResourceRef"
-                },
-                "updated_at": {
-                    "type": "string"
-                },
-                "worksets": {
-                    "type": "array",
-                    "items": {
-                        "$ref": "#/definitions/process.WorksetStatus"
-                    }
-                }
-            }
-        },
-        "github_com_TekkenSteve_GoAgent_agentos_process.Spec": {
-            "type": "object",
-            "properties": {
-                "account_id": {
-                    "type": "string"
-                },
-                "idempotency_key": {
-                    "type": "string"
-                },
-                "inputs": {
-                    "type": "object",
-                    "additionalProperties": {}
-                },
-                "kind": {
-                    "type": "string"
-                },
-                "metadata": {
-                    "type": "object",
-                    "additionalProperties": {
-                        "type": "string"
-                    }
-                },
-                "policy": {
-                    "$ref": "#/definitions/process.Policy"
-                },
-                "process_id": {
-                    "type": "string"
-                },
-                "project_id": {
-                    "type": "string"
-                },
-                "requested_at": {
-                    "type": "string"
-                },
-                "resource": {
-                    "$ref": "#/definitions/process.ResourceRef"
-                },
-                "timers": {
-                    "type": "array",
-                    "items": {
-                        "$ref": "#/definitions/process.TimerSpec"
-                    }
-                }
-            }
-        },
-        "github_com_TekkenSteve_GoAgent_agentos_process.Status": {
-            "type": "object",
-            "properties": {
-                "account_id": {
-                    "type": "string"
-                },
-                "kind": {
-                    "type": "string"
-                },
-                "lifecycle_state": {
-                    "type": "string"
-                },
-                "metadata": {
-                    "type": "object",
-                    "additionalProperties": {
-                        "type": "string"
-                    }
-                },
-                "process_id": {
-                    "type": "string"
-                },
-                "progress": {
-                    "$ref": "#/definitions/core.RunProgress"
-                },
-                "project_id": {
-                    "type": "string"
-                },
-                "reason": {
-                    "type": "string"
-                },
-                "resource": {
-                    "$ref": "#/definitions/process.ResourceRef"
-                },
-                "started_at": {
-                    "type": "string"
-                },
-                "updated_at": {
-                    "type": "string"
-                }
-            }
-        },
-        "github_com_TekkenSteve_GoAgent_agentos_process.WorksetSpec": {
-            "type": "object",
-            "properties": {
-                "account_id": {
-                    "type": "string"
-                },
-                "chunks": {
-                    "type": "array",
-                    "items": {
-                        "$ref": "#/definitions/process.WorksetChunkSpec"
-                    }
-                },
-                "idempotency_key": {
-                    "type": "string"
-                },
-                "items_ref": {
-                    "$ref": "#/definitions/process.WorksetItemsRef"
-                },
-                "kind": {
-                    "type": "string"
-                },
-                "metadata": {
-                    "type": "object",
-                    "additionalProperties": {
-                        "type": "string"
-                    }
-                },
-                "policy": {
-                    "$ref": "#/definitions/process.WorksetPolicy"
-                },
-                "process_id": {
-                    "type": "string"
-                },
-                "project_id": {
-                    "type": "string"
-                },
-                "requested_at": {
-                    "type": "string"
-                },
-                "requested_by": {
-                    "$ref": "#/definitions/process.ActorRef"
-                },
-                "resource": {
-                    "$ref": "#/definitions/process.ResourceRef"
-                },
-                "workset_id": {
-                    "type": "string"
-                }
-            }
-        },
-        "github_com_TekkenSteve_GoAgent_agentos_process.WorksetStatus": {
-            "type": "object",
-            "properties": {
-                "account_id": {
-                    "type": "string"
-                },
-                "kind": {
-                    "type": "string"
-                },
-                "lifecycle_state": {
-                    "type": "string"
-                },
-                "metadata": {
-                    "type": "object",
-                    "additionalProperties": {
-                        "type": "string"
-                    }
-                },
-                "process_id": {
-                    "type": "string"
-                },
-                "progress": {
-                    "$ref": "#/definitions/process.WorksetProgress"
-                },
-                "project_id": {
-                    "type": "string"
-                },
-                "reason": {
-                    "type": "string"
-                },
-                "resource": {
-                    "$ref": "#/definitions/process.ResourceRef"
-                },
-                "updated_at": {
-                    "type": "string"
-                },
-                "workset_id": {
-                    "type": "string"
-                }
-            }
-        },
-        "process.ActionRiskAssessment": {
-            "type": "object",
-            "properties": {
-                "assessed_at": {
-                    "type": "string"
-                },
-                "evidence_refs": {
-                    "type": "array",
-                    "items": {
-                        "$ref": "#/definitions/process.LedgerDataRef"
-                    }
-                },
-                "level": {
-                    "$ref": "#/definitions/process.ActionRiskLevel"
-                },
-                "reason": {
-                    "type": "string"
-                }
-            }
-        },
-        "process.ActionRiskLevel": {
-            "type": "string",
-            "enum": [
-                "low",
-                "medium",
-                "high",
-                "critical"
-            ],
-            "x-enum-varnames": [
-                "ActionRiskLow",
-                "ActionRiskMedium",
-                "ActionRiskHigh",
-                "ActionRiskCritical"
-            ]
-        },
-        "process.ActorRef": {
-            "type": "object",
-            "properties": {
-                "actor_id": {
-                    "type": "string"
-                },
-                "kind": {
-                    "type": "string"
                 }
             }
         },
@@ -4606,6 +3953,62 @@ const docTemplate = `{
                 "LedgerEntryRationale"
             ]
         },
+        "process.LedgerEntrySpec": {
+            "type": "object",
+            "properties": {
+                "account_id": {
+                    "type": "string"
+                },
+                "actor": {
+                    "$ref": "#/definitions/process.ActorRef"
+                },
+                "artifact_refs": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/core.ArtifactRef"
+                    }
+                },
+                "data_refs": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/process.LedgerDataRef"
+                    }
+                },
+                "entry_id": {
+                    "type": "string"
+                },
+                "idempotency_key": {
+                    "type": "string"
+                },
+                "kind": {
+                    "$ref": "#/definitions/process.LedgerEntryKind"
+                },
+                "metadata": {
+                    "type": "object",
+                    "additionalProperties": {
+                        "type": "string"
+                    }
+                },
+                "occurred_at": {
+                    "type": "string"
+                },
+                "process_id": {
+                    "type": "string"
+                },
+                "project_id": {
+                    "type": "string"
+                },
+                "rationale": {
+                    "type": "string"
+                },
+                "resource": {
+                    "$ref": "#/definitions/process.ResourceRef"
+                },
+                "summary": {
+                    "type": "string"
+                }
+            }
+        },
         "process.Policy": {
             "type": "object",
             "properties": {
@@ -4617,6 +4020,53 @@ const docTemplate = `{
                 },
                 "timeout_seconds": {
                     "type": "integer"
+                }
+            }
+        },
+        "process.ResourceProjection": {
+            "type": "object",
+            "properties": {
+                "actions": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/process.GovernedActionStatus"
+                    }
+                },
+                "artifacts": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/core.ArtifactRef"
+                    }
+                },
+                "ledger": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/process.LedgerEntry"
+                    }
+                },
+                "metadata": {
+                    "type": "object",
+                    "additionalProperties": {
+                        "type": "string"
+                    }
+                },
+                "processes": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/process.Status"
+                    }
+                },
+                "resource": {
+                    "$ref": "#/definitions/process.ResourceRef"
+                },
+                "updated_at": {
+                    "type": "string"
+                },
+                "worksets": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/process.WorksetStatus"
+                    }
                 }
             }
         },
@@ -4634,6 +4084,51 @@ const docTemplate = `{
                 },
                 "resource_id": {
                     "type": "string"
+                }
+            }
+        },
+        "process.Spec": {
+            "type": "object",
+            "properties": {
+                "account_id": {
+                    "type": "string"
+                },
+                "idempotency_key": {
+                    "type": "string"
+                },
+                "inputs": {
+                    "type": "object",
+                    "additionalProperties": {}
+                },
+                "kind": {
+                    "type": "string"
+                },
+                "metadata": {
+                    "type": "object",
+                    "additionalProperties": {
+                        "type": "string"
+                    }
+                },
+                "policy": {
+                    "$ref": "#/definitions/process.Policy"
+                },
+                "process_id": {
+                    "type": "string"
+                },
+                "project_id": {
+                    "type": "string"
+                },
+                "requested_at": {
+                    "type": "string"
+                },
+                "resource": {
+                    "$ref": "#/definitions/process.ResourceRef"
+                },
+                "timers": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/process.TimerSpec"
+                    }
                 }
             }
         },
@@ -4785,6 +4280,56 @@ const docTemplate = `{
                 }
             }
         },
+        "process.WorksetSpec": {
+            "type": "object",
+            "properties": {
+                "account_id": {
+                    "type": "string"
+                },
+                "chunks": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/process.WorksetChunkSpec"
+                    }
+                },
+                "idempotency_key": {
+                    "type": "string"
+                },
+                "items_ref": {
+                    "$ref": "#/definitions/process.WorksetItemsRef"
+                },
+                "kind": {
+                    "type": "string"
+                },
+                "metadata": {
+                    "type": "object",
+                    "additionalProperties": {
+                        "type": "string"
+                    }
+                },
+                "policy": {
+                    "$ref": "#/definitions/process.WorksetPolicy"
+                },
+                "process_id": {
+                    "type": "string"
+                },
+                "project_id": {
+                    "type": "string"
+                },
+                "requested_at": {
+                    "type": "string"
+                },
+                "requested_by": {
+                    "$ref": "#/definitions/process.ActorRef"
+                },
+                "resource": {
+                    "$ref": "#/definitions/process.ResourceRef"
+                },
+                "workset_id": {
+                    "type": "string"
+                }
+            }
+        },
         "process.WorksetStatus": {
             "type": "object",
             "properties": {
@@ -4832,9 +4377,6 @@ const docTemplate = `{
                 "operation"
             ],
             "properties": {
-                "actor_id": {
-                    "type": "string"
-                },
                 "idempotency_key": {
                     "type": "string"
                 },
@@ -4845,7 +4387,7 @@ const docTemplate = `{
                     }
                 },
                 "operation": {
-                    "$ref": "#/definitions/github_com_TekkenSteve_GoAgent_agentos_core.ControlOperation"
+                    "$ref": "#/definitions/core.ControlOperation"
                 },
                 "requested_at": {
                     "type": "string"
@@ -4864,7 +4406,7 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "event_type": {
-                    "$ref": "#/definitions/github_com_TekkenSteve_GoAgent_agentos_core.EventType"
+                    "$ref": "#/definitions/core.EventType"
                 },
                 "payload": {
                     "type": "object",
@@ -4899,14 +4441,10 @@ const docTemplate = `{
         "request.AgentOSPlanControl": {
             "type": "object",
             "required": [
-                "account_id",
                 "operation",
                 "project_id"
             ],
             "properties": {
-                "account_id": {
-                    "type": "string"
-                },
                 "actor_id": {
                     "type": "string"
                 },
@@ -4920,7 +4458,7 @@ const docTemplate = `{
                     }
                 },
                 "operation": {
-                    "$ref": "#/definitions/github_com_TekkenSteve_GoAgent_agentos_core.ControlOperation"
+                    "$ref": "#/definitions/core.ControlOperation"
                 },
                 "project_id": {
                     "type": "string"
@@ -4933,14 +4471,10 @@ const docTemplate = `{
         "request.AgentOSPlanSignal": {
             "type": "object",
             "required": [
-                "account_id",
                 "project_id",
                 "type"
             ],
             "properties": {
-                "account_id": {
-                    "type": "string"
-                },
                 "actor_id": {
                     "type": "string"
                 },
@@ -4958,7 +4492,7 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "type": {
-                    "$ref": "#/definitions/github_com_TekkenSteve_GoAgent_agentos_core.SignalType"
+                    "$ref": "#/definitions/core.SignalType"
                 }
             }
         },
@@ -4968,9 +4502,6 @@ const docTemplate = `{
                 "type"
             ],
             "properties": {
-                "actor_id": {
-                    "type": "string"
-                },
                 "idempotency_key": {
                     "type": "string"
                 },
@@ -4982,26 +4513,23 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "type": {
-                    "$ref": "#/definitions/github_com_TekkenSteve_GoAgent_agentos_core.SignalType"
+                    "$ref": "#/definitions/core.SignalType"
                 }
             }
         },
         "request.AgentOSStart": {
             "type": "object",
             "required": [
-                "account_id",
                 "backend",
+                "project_id",
                 "run_id"
             ],
             "properties": {
-                "account_id": {
-                    "type": "string"
-                },
                 "agent_id": {
                     "type": "string"
                 },
                 "backend": {
-                    "$ref": "#/definitions/github_com_TekkenSteve_GoAgent_agentos_control.BackendRef"
+                    "$ref": "#/definitions/control.BackendRef"
                 },
                 "idempotency_key": {
                     "type": "string"
@@ -5039,70 +4567,12 @@ const docTemplate = `{
                 }
             }
         },
-        "request.Orchestrate": {
-            "type": "object",
-            "required": [
-                "account_id",
-                "run_id"
-            ],
-            "properties": {
-                "account_id": {
-                    "type": "string",
-                    "example": "acct-001"
-                },
-                "continue_policy": {
-                    "type": "object"
-                },
-                "max_depth": {
-                    "type": "integer"
-                },
-                "message": {
-                    "type": "string"
-                },
-                "run_id": {
-                    "type": "string",
-                    "example": "run-550e8400-e29b-41d4-a716-446655440000"
-                },
-                "steps": {
-                    "type": "array",
-                    "items": {
-                        "type": "object"
-                    }
-                },
-                "system_prompt": {
-                    "type": "string"
-                },
-                "team_spec": {
-                    "type": "object"
-                }
-            }
-        },
         "response.Error": {
             "type": "object",
             "properties": {
                 "error": {
                     "type": "string",
                     "example": "message"
-                }
-            }
-        },
-        "response.RunStatus": {
-            "type": "object",
-            "properties": {
-                "lifecycle_state": {
-                    "type": "string"
-                },
-                "reason": {
-                    "type": "string"
-                },
-                "run_id": {
-                    "type": "string"
-                },
-                "step": {
-                    "type": "integer"
-                },
-                "updated_at": {
-                    "type": "integer"
                 }
             }
         },

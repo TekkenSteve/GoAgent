@@ -1,3 +1,4 @@
+// Package webapi calls external web APIs such as scenario and LLM services.
 package webapi
 
 import (

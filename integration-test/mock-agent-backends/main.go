@@ -1,3 +1,4 @@
+// Package main is a mock AgentOS HTTP backend used by integration tests.
 package main
 
 import (

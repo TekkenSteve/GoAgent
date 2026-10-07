@@ -23,3 +23,12 @@ bin/
 vendor/
 
 coverage.txt
+
+archive/
+
+# Local Go caches (environment module cache is read-only)
+.gopath/
+.gocache/
+
+# compiled healthcheck binary (source: cmd/healthcheck)
+/healthcheck

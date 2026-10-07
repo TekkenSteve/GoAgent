@@ -1,6 +1,6 @@
 // Package repo defines output port interfaces and provides infrastructure adapters
 // that implement them. Output ports are called by use cases and implemented by
-// repo sub-packages (persistent, webapi, pipeline, etc.).
+// repo sub-packages (persistent, webapi, etc.).
 package repo
 
 import (
@@ -10,25 +10,6 @@ import (
 )
 
 type (
-	// WarmStateRepo persists and queries operational state outside workflow history.
-	WarmStateRepo interface {
-		PersistMessage(ctx context.Context, record entity.MessageRecord) (string, error)
-		PersistToolResult(ctx context.Context, record entity.ToolResultRecord) (string, error)
-		GetMessage(ctx context.Context, ref string) (entity.MessageRecord, bool, error)
-		GetToolResult(ctx context.Context, ref string) (entity.ToolResultRecord, bool, error)
-		ListMessagesByRun(ctx context.Context, runID string, limit, offset uint64) ([]entity.MessageRecord, error)
-		ListToolResultsByRun(ctx context.Context, runID string, limit, offset uint64) ([]entity.ToolResultRecord, error)
-	}
-	// ColdStateRepo persists archival state outside workflow history.
-	ColdStateRepo interface {
-		PersistArchive(ctx context.Context, record entity.ArchiveRecord) (string, error)
-		GetArchive(ctx context.Context, ref string) (entity.ArchiveRecord, bool, error)
-	}
-	// WorkflowStateRepo binds warm and cold adapters as boundary contracts for orchestration.
-	WorkflowStateRepo interface {
-		WarmStateRepo
-		ColdStateRepo
-	}
 	// AgentRepo persists agent definitions and version snapshots.
 	AgentRepo interface {
 		Create(ctx context.Context, req *entity.CreateAgentRequest) (entity.AgentRecord, error)
@@ -52,51 +33,20 @@ type (
 	ToolExecutor interface {
 		Execute(ctx context.Context, req *entity.ToolRequest) (entity.ToolResult, error)
 	}
-	// WALAppender appends entries to a write-ahead log for async persistence.
-	// The agent usecase writes to the WAL; a BatchWriter flushes WAL -> Postgres.
-	WALAppender interface {
-		AppendMessage(ctx context.Context, runID string, record entity.MessageRecord) error
-		AppendToolResult(ctx context.Context, runID string, record entity.ToolResultRecord) error
-	}
 	// ContextCompressor reduces message token count when approaching context limits.
 	ContextCompressor interface {
 		Compress(ctx context.Context, messages []entity.Message, config entity.LLMConfig) ([]entity.Message, bool, error)
 	}
-	// ExecutorRepo starts, queries and controls agent and orchestration executions.
-	ExecutorRepo interface {
-		StartExecution(ctx context.Context, req *entity.ExecuteRequest) (entity.RunStatus, error)
-		GetStatus(ctx context.Context, runID string) (entity.RunStatus, error)
-		Pause(ctx context.Context, runID string) error
-		Resume(ctx context.Context, runID string) error
-		Cancel(ctx context.Context, runID string) error
-		StartOrchestration(ctx context.Context, input *entity.OrchestrationInput) (entity.RunStatus, error)
-		GetOrchestrationStatus(ctx context.Context, runID string) (entity.RunStatus, error)
-	}
 	// WorkflowTemplateRepo persists workflow template definitions.
 	WorkflowTemplateRepo interface {
 		Create(ctx context.Context, req *entity.CreateWorkflowTemplateRequest) (entity.WorkflowTemplate, error)
-		Get(ctx context.Context, templateID string) (entity.WorkflowTemplate, bool, error)
-		Update(ctx context.Context, templateID string, req entity.UpdateWorkflowTemplateRequest) (entity.WorkflowTemplate, error)
-		Delete(ctx context.Context, templateID string) error
+		// The account is part of every by-id lookup: a template belongs to its
+		// account, and a foreign id answers "not found" rather than being
+		// fetched and checked afterwards.
+		Get(ctx context.Context, accountID, templateID string) (entity.WorkflowTemplate, bool, error)
+		Update(ctx context.Context, accountID, templateID string, req entity.UpdateWorkflowTemplateRequest) (entity.WorkflowTemplate, error)
+		Delete(ctx context.Context, accountID, templateID string) error
 		ListByAccount(ctx context.Context, accountID string) ([]entity.WorkflowTemplate, error)
-	}
-	// TriggerRepo persists trigger specifications for scheduled/event-based execution.
-	TriggerRepo interface {
-		Create(ctx context.Context, req *entity.CreateTriggerRequest) (entity.TriggerSpec, error)
-		Get(ctx context.Context, triggerID string) (entity.TriggerSpec, bool, error)
-		Update(ctx context.Context, triggerID string, req entity.UpdateTriggerRequest) (entity.TriggerSpec, error)
-		Delete(ctx context.Context, triggerID string) error
-		ListByTemplate(ctx context.Context, templateID string) ([]entity.TriggerSpec, error)
-		ListByType(ctx context.Context, triggerType entity.TriggerType) ([]entity.TriggerSpec, error)
-		ListActive(ctx context.Context) ([]entity.TriggerSpec, error)
-		RecordFired(ctx context.Context, triggerID string) error
-		InsertTriggerEvent(ctx context.Context, event *entity.TriggerEventLog) error
-	}
-	// TriggerScheduler manages the lifecycle of scheduled trigger executions.
-	// Implementations use Temporal cron workflows or the Schedule API.
-	TriggerScheduler interface {
-		Schedule(ctx context.Context, trigger *entity.TriggerSpec) error
-		Unschedule(ctx context.Context, triggerID string) error
 	}
 	// CreditManager manages account credit balances and transactions.
 	CreditManager interface {

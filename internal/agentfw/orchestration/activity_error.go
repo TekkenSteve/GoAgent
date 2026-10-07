@@ -1,0 +1,97 @@
+package orchestration
+
+import (
+	"context"
+	"crypto/rand"
+	"errors"
+	"math/big"
+	"time"
+
+	"github.com/TekkenSteve/GoAgent/internal/entity"
+	"go.temporal.io/sdk/temporal"
+)
+
+// llmRateLimitRetries is how many times a rate-limit (HTTP 429) failure is
+// retried inside the activity, with exponential backoff + jitter, before the
+// error is returned to the platform retry policy. Temporal's RetryPolicy has
+// no jitter, so a fleet of agents sharing one provider rate limit would
+// otherwise retry in lockstep and re-trigger the limit (retry storm).
+const llmRateLimitRetries = 2
+
+// toActivityError maps a domain error onto a Temporal ApplicationError so the
+// workflow retry policy can distinguish permanent failures from transient
+// ones. AgentErrors marked non-retryable (content filters, context-length
+// errors, missing provider support) become non-retryable ApplicationErrors —
+// the platform gives up instead of burning retries on a failure more calls
+// cannot fix. Everything else passes through unchanged and stays retryable
+// under the workflow-level RetryPolicy.
+func toActivityError(err error) error {
+	var agentErr *entity.AgentError
+	if errors.As(err, &agentErr) && !agentErr.Retryable {
+		return temporal.NewNonRetryableApplicationError(
+			agentErr.Error(),
+			string(agentErr.Code),
+			agentErr,
+			agentErr.UserMessage,
+		)
+	}
+
+	return err
+}
+
+// nonRetryableAfterSideEffect marks a failure that occurs after the guarded
+// operation has already run. The platform's retry would run it a second time —
+// a second email, a second write — so the run fails visibly instead: whoever
+// re-drives it issues a new call with a new identity.
+func nonRetryableAfterSideEffect(err error) error {
+	return temporal.NewNonRetryableApplicationError(err.Error(), "SIDE_EFFECT", err)
+}
+
+// retryRateLimited runs fn, retrying rate-limit failures (LLM_RATE_LIMIT) up
+// to llmRateLimitRetries extra times with exponential backoff + jitter. All
+// other errors — including context cancellation — are returned immediately.
+//
+// Retrying is safe at the call sites in this package: a 429 from the LLM
+// provider arrives before any stream delta is written or any cost is
+// deducted, so re-running fn produces no duplicate side effects.
+func retryRateLimited[T any](ctx context.Context, fn func() (T, error)) (T, error) {
+	for attempt := 0; ; attempt++ {
+		result, err := fn()
+		if err == nil {
+			return result, nil
+		}
+
+		var agentErr *entity.AgentError
+		if !errors.As(err, &agentErr) || agentErr.Code != entity.ErrorCodeLLMRateLimit || attempt >= llmRateLimitRetries {
+			return result, err
+		}
+
+		// Exponential backoff with up to 100% jitter, so agents retrying the
+		// same provider limit spread out instead of hitting it in sync.
+		delay := time.Duration(1<<attempt) * time.Second
+		delay += jitterUpto(delay)
+
+		select {
+		case <-ctx.Done():
+			return result, ctx.Err()
+		case <-time.After(delay):
+		}
+	}
+}
+
+// jitterUpto returns a uniformly random duration in [0, bound). Rate-limit
+// retry jitter does not need cryptographic strength — its job is to spread a
+// fleet's retries — but drawing from crypto/rand keeps gosec G404 (weak
+// random) satisfied repo-wide instead of suppressing it for one call site.
+func jitterUpto(bound time.Duration) time.Duration {
+	if bound <= 0 {
+		return 0
+	}
+
+	n, err := rand.Int(rand.Reader, big.NewInt(int64(bound)))
+	if err != nil {
+		return 0
+	}
+
+	return time.Duration(n.Int64())
+}

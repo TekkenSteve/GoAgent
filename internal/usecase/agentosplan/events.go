@@ -16,6 +16,7 @@ const (
 	idempotencyOperationNodeControl      = "node_control"
 	idempotencyOperationNodeTimeout      = "node_timeout"
 	idempotencyOperationPlanTimeout      = "plan_timeout"
+	idempotencyOperationPlanBlocked      = "plan_blocked_timeout"
 	idempotencyOperationPlanSignalCancel = "plan_signal_cancel"
 	idempotencyOperationArtifactPublish  = "artifact_publish"
 	idempotencyOperationBudgetExceeded   = "budget_exceeded"
@@ -36,10 +37,12 @@ const (
 	planEventPayloadInputResolution = "input_resolution"
 	planEventPayloadCapability      = "capability"
 	planEventPayloadConditions      = "conditions"
+
+	// PlanEventPayloadApproval is the public event payload key for the auditable
+	// approval-gate context on plan.blocked/approved/rejected events.
+	PlanEventPayloadApproval = "approval"
 )
 
-// PlanEventFromStateEvent maps a deterministic reducer transition to the public
-// PlanEvent envelope used by durable event stores and UI timelines.
 func buildPlanEventPayload(spec *agentos.RunPlanSpec, status *agentos.RunPlanStatus, event *StateEvent) map[string]any {
 	payload := map[string]any{
 		planEventPayloadLifecycleState: status.LifecycleState,
@@ -51,8 +54,32 @@ func buildPlanEventPayload(spec *agentos.RunPlanSpec, status *agentos.RunPlanSta
 	addPlanEventArtifactPayload(payload, event)
 	addPlanEventBudgetPayload(payload, status, event)
 	addPlanEventTracePayload(payload, event)
+	addPlanEventApprovalPayload(payload, event)
 
 	return payload
+}
+
+// addPlanEventApprovalPayload records the auditable approval-gate context so
+// the durable event timeline shows what was gated and who decided.
+func addPlanEventApprovalPayload(payload map[string]any, event *StateEvent) {
+	if event.Approval == nil {
+		return
+	}
+
+	approval := map[string]any{}
+	if gate := event.Approval.Gate; gate.Summary != "" || len(gate.NodeIDs) > 0 || gate.PolicyVersion != "" {
+		approval["gate"] = gate
+	}
+
+	if decision := event.Approval.Decision; decision != nil {
+		approval["decision"] = decision
+	}
+
+	if len(approval) == 0 {
+		return
+	}
+
+	payload[PlanEventPayloadApproval] = approval
 }
 
 func addPlanEventIdentityPayload(payload map[string]any, event *StateEvent) {
@@ -113,6 +140,8 @@ func addPlanEventTracePayload(payload map[string]any, event *StateEvent) {
 	}
 }
 
+// PlanEventFromStateEvent maps a deterministic reducer transition to the public
+// PlanEvent envelope used by durable event stores and UI timelines.
 func PlanEventFromStateEvent(spec *agentos.RunPlanSpec, status *agentos.RunPlanStatus, event *StateEvent) (agentos.PlanEvent, string, error) {
 	if err := ValidateRunPlanScope(spec); err != nil {
 		return agentos.PlanEvent{}, "", err
@@ -174,20 +203,26 @@ func StateEventIdempotencyKey(planID string, event *StateEvent) (string, error) 
 }
 
 type stateEventIdempotencyFields struct {
-	Kind                   EventKind                  `json:"kind"`
-	NodeID                 string                     `json:"node_id,omitempty"`
-	RunID                  string                     `json:"run_id,omitempty"`
-	Reason                 string                     `json:"reason,omitempty"`
-	Attempt                int32                      `json:"attempt,omitempty"`
-	Expansion              *PlanDelta                 `json:"expansion,omitempty"`
-	Artifacts              []agentoscore.ArtifactRef  `json:"artifacts,omitempty"`
-	BudgetDelta            *agentos.PlanBudgetUsage   `json:"budget_delta,omitempty"`
-	InputTrace             *InputResolutionTrace      `json:"input_trace,omitempty"`
-	Capability             *CapabilitySelectionTrace  `json:"capability,omitempty"`
-	ConditionTraces        []ConditionEvaluationTrace `json:"condition_traces,omitempty"`
-	PreviousLifecycleState string                     `json:"previous_lifecycle_state,omitempty"`
-	NextLifecycleState     string                     `json:"next_lifecycle_state,omitempty"`
-	At                     *time.Time                 `json:"at,omitempty"`
+	Kind                   EventKind                   `json:"kind"`
+	NodeID                 string                      `json:"node_id,omitempty"`
+	RunID                  string                      `json:"run_id,omitempty"`
+	Reason                 string                      `json:"reason,omitempty"`
+	Attempt                int32                       `json:"attempt,omitempty"`
+	Expansion              *PlanDelta                  `json:"expansion,omitempty"`
+	Artifacts              []agentoscore.ArtifactRef   `json:"artifacts,omitempty"`
+	BudgetDelta            *agentos.PlanBudgetUsage    `json:"budget_delta,omitempty"`
+	InputTrace             *InputResolutionTrace       `json:"input_trace,omitempty"`
+	Capability             *CapabilitySelectionTrace   `json:"capability,omitempty"`
+	ConditionTraces        []ConditionEvaluationTrace  `json:"condition_traces,omitempty"`
+	PreviousLifecycleState string                      `json:"previous_lifecycle_state,omitempty"`
+	NextLifecycleState     string                      `json:"next_lifecycle_state,omitempty"`
+	At                     *time.Time                  `json:"at,omitempty"`
+	Approval               *stateEventApprovalIdentity `json:"approval,omitempty"`
+}
+
+type stateEventApprovalIdentity struct {
+	Gate     agentos.PlanApprovalGate      `json:"gate,omitzero" schema:"optional"`
+	Decision *agentos.PlanApprovalDecision `json:"decision,omitempty"`
 }
 
 func stateEventIdempotencyIdentity(event *StateEvent) stateEventIdempotencyFields {
@@ -206,7 +241,26 @@ func stateEventIdempotencyIdentity(event *StateEvent) stateEventIdempotencyField
 		PreviousLifecycleState: event.PreviousLifecycleState,
 		NextLifecycleState:     event.NextLifecycleState,
 		At:                     idempotencyTime(event.At),
+		Approval:               idempotencyApproval(event.Approval),
 	}
+}
+
+func idempotencyApproval(approval *StateEventApproval) *stateEventApprovalIdentity {
+	if approval == nil {
+		return nil
+	}
+
+	identity := stateEventApprovalIdentity{Gate: approval.Gate}
+	if approval.Decision != nil {
+		decision := *approval.Decision
+		identity.Decision = &decision
+	}
+
+	if identity.Gate.Summary == "" && len(identity.Gate.NodeIDs) == 0 && identity.Gate.PolicyVersion == "" && identity.Decision == nil {
+		return nil
+	}
+
+	return &identity
 }
 
 func idempotencyExpansion(expansion PlanDelta) *PlanDelta {
@@ -305,22 +359,30 @@ func NodeTimeoutControlIdempotencyKey(planID, nodeID, runID string) (string, err
 	})
 }
 
-// PlanTimeoutControlIdempotencyKey creates the parent idempotency key for
-// propagating cancellation after a plan-level timeout guard trips.
-func PlanTimeoutControlIdempotencyKey(planID string, startedAt time.Time, timeoutSeconds int64) (string, error) {
+// planTimeoutIdempotencyHash validates the inputs shared by every plan-level
+// timeout key and hashes the caller's payload. The payload struct — and
+// therefore the resulting key — stays owned by each caller so keys issued by
+// older versions never change.
+func planTimeoutIdempotencyHash(planID string, anchor time.Time, seconds int64, anchorErr, secondsErr string, payload any) (string, error) {
 	if planID == "" {
 		return "", fmt.Errorf("%w: plan id is required", agentoscore.ErrInvalidRunPlan)
 	}
 
-	if startedAt.IsZero() {
-		return "", fmt.Errorf("%w: plan started_at is required", agentoscore.ErrInvalidRunPlan)
+	if anchor.IsZero() {
+		return "", fmt.Errorf("%w: %s", agentoscore.ErrInvalidRunPlan, anchorErr)
 	}
 
-	if timeoutSeconds <= 0 {
-		return "", fmt.Errorf("%w: plan timeout seconds must be positive", agentoscore.ErrInvalidRunPlan)
+	if seconds <= 0 {
+		return "", fmt.Errorf("%w: %s", agentoscore.ErrInvalidRunPlan, secondsErr)
 	}
 
-	return idempotencyHash(planID, struct {
+	return idempotencyHash(planID, payload)
+}
+
+// PlanTimeoutControlIdempotencyKey creates the parent idempotency key for
+// propagating cancellation after a plan-level timeout guard trips.
+func PlanTimeoutControlIdempotencyKey(planID string, startedAt time.Time, timeoutSeconds int64) (string, error) {
+	payload := struct {
 		Operation      string    `json:"operation"`
 		PlanID         string    `json:"plan_id"`
 		StartedAt      time.Time `json:"started_at"`
@@ -330,7 +392,28 @@ func PlanTimeoutControlIdempotencyKey(planID string, startedAt time.Time, timeou
 		PlanID:         planID,
 		StartedAt:      startedAt,
 		TimeoutSeconds: timeoutSeconds,
-	})
+	}
+
+	return planTimeoutIdempotencyHash(planID, startedAt, timeoutSeconds, "plan started_at is required", "plan timeout seconds must be positive", payload)
+}
+
+// PlanBlockedTimeoutControlIdempotencyKey creates the parent idempotency key
+// for propagating cancellation after the approval-timeout gate trips on a
+// blocked plan.
+func PlanBlockedTimeoutControlIdempotencyKey(planID string, blockedAt time.Time, approvalTimeoutSeconds int64) (string, error) {
+	payload := struct {
+		Operation              string    `json:"operation"`
+		PlanID                 string    `json:"plan_id"`
+		BlockedAt              time.Time `json:"blocked_at"`
+		ApprovalTimeoutSeconds int64     `json:"approval_timeout_seconds"`
+	}{
+		Operation:              idempotencyOperationPlanBlocked,
+		PlanID:                 planID,
+		BlockedAt:              blockedAt,
+		ApprovalTimeoutSeconds: approvalTimeoutSeconds,
+	}
+
+	return planTimeoutIdempotencyHash(planID, blockedAt, approvalTimeoutSeconds, "plan blocked_at is required", "plan approval timeout seconds must be positive", payload)
 }
 
 // ArtifactPublishIdempotencyKey creates the stable idempotency key for publishing

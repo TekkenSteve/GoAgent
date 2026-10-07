@@ -1,3 +1,4 @@
+// Package main is the GoAgent application entrypoint.
 package main
 
 import (

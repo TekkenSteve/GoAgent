@@ -8,6 +8,7 @@ import (
 	"github.com/google/jsonschema-go/jsonschema"
 )
 
+// JSONSchemaFor builds a JSON schema for T, applying schema:"optional" tags to relax required fields.
 func JSONSchemaFor[T any]() ([]byte, error) {
 	schema, err := jsonschema.For[T](&jsonschema.ForOptions{
 		TypeSchemas: map[reflect.Type]*jsonschema.Schema{

@@ -44,7 +44,6 @@ func TestExecuteStep_EmptyMessage(t *testing.T) {
 		nil,
 		nil,
 		nil,
-		nil,
 	)
 
 	result, err := uc.ExecuteStep(context.Background(), &agent.StepRequest{
@@ -72,7 +71,6 @@ func TestExecuteStep_TextOnly(t *testing.T) {
 	uc := agent.New(
 		&mockLLM{response: entity.LLMResponse{Content: "Hello!", FinishReason: "stop", Usage: entity.Usage{PromptTokens: 10, CompletionTokens: 5, TotalTokens: 15}}},
 		&mockTool{},
-		nil,
 		nil,
 		nil,
 		nil,
@@ -141,7 +139,6 @@ func TestExecuteStep_ToolCallThenText(t *testing.T) {
 		nil,
 		nil,
 		nil,
-		nil,
 	)
 
 	result, err := uc.ExecuteStep(context.Background(), &agent.StepRequest{
@@ -191,7 +188,6 @@ func TestExecuteStep_ToolExecutionError(t *testing.T) {
 			callCount: &callCount,
 		},
 		&mockTool{err: errTestToolCrashed},
-		nil,
 		nil,
 		nil,
 		nil,
@@ -251,7 +247,6 @@ func TestExecuteStep_MaxToolRounds(t *testing.T) {
 		nil,
 		nil,
 		nil,
-		nil,
 	)
 
 	result, err := uc.ExecuteStep(context.Background(), &agent.StepRequest{
@@ -274,7 +269,6 @@ func TestExecuteStep_WithSystemPrompt(t *testing.T) {
 	uc := agent.New(
 		&mockLLM{response: entity.LLMResponse{Content: "Understood!", FinishReason: "stop", Usage: entity.Usage{PromptTokens: 10, CompletionTokens: 3, TotalTokens: 13}}},
 		&mockTool{},
-		nil,
 		nil,
 		nil,
 		nil,
@@ -320,7 +314,6 @@ func TestExecuteStep_WithHistoryDoesNotReinjectSystemPrompt(t *testing.T) {
 		nil,
 		nil,
 		nil,
-		nil,
 	)
 
 	result, err := uc.ExecuteStep(context.Background(), &agent.StepRequest{
@@ -358,7 +351,6 @@ func TestPrep_InvalidToolDefinition(t *testing.T) {
 		nil,
 		nil,
 		nil,
-		nil,
 	)
 
 	result, err := uc.ExecuteStep(context.Background(), &agent.StepRequest{
@@ -386,7 +378,6 @@ func TestPrep_ToolMissingType(t *testing.T) {
 	uc := agent.New(
 		&mockLLM{response: entity.LLMResponse{Content: "ok", FinishReason: "stop", Usage: entity.Usage{PromptTokens: 1, CompletionTokens: 1, TotalTokens: 2}}},
 		&mockTool{},
-		nil,
 		nil,
 		nil,
 		nil,
@@ -422,8 +413,7 @@ func testLLMError(t *testing.T, tc llmErrorTest) {
 
 	uc := agent.New(
 		&mockLLM{err: tc.err},
-		&mockTool{},
-		nil, nil, nil, nil,
+		&mockTool{}, nil, nil, nil,
 	)
 
 	_, err := uc.ExecuteStep(context.Background(), &agent.StepRequest{
@@ -642,7 +632,7 @@ func testAutoVersionNameOnly(t *testing.T) {
 			return updated, nil
 		},
 	}
-	uc := agent.New(nil, nil, nil, nil, nil, mock)
+	uc := agent.New(nil, nil, nil, nil, mock)
 	newName := "Updated Name"
 
 	_, err := uc.UpdateAgent(context.Background(), "agent-1", entity.UpdateAgentRequest{Name: &newName})
@@ -685,7 +675,7 @@ func testAutoVersionSystemPrompt(t *testing.T) {
 			return updated, nil
 		},
 	}
-	uc := agent.New(nil, nil, nil, nil, nil, mock)
+	uc := agent.New(nil, nil, nil, nil, mock)
 	newPrompt := testNewSystemPrompt
 
 	_, err := uc.UpdateAgent(context.Background(), "agent-1", entity.UpdateAgentRequest{SystemPrompt: &newPrompt})
@@ -736,7 +726,7 @@ func testAutoVersionModelRef(t *testing.T) {
 			return existingAgentRecord(), nil
 		},
 	}
-	uc := agent.New(nil, nil, nil, nil, nil, mock)
+	uc := agent.New(nil, nil, nil, nil, mock)
 	newModel := "gpt-4o"
 
 	_, err := uc.UpdateAgent(context.Background(), "agent-1", entity.UpdateAgentRequest{ModelRef: &newModel})
@@ -767,7 +757,7 @@ func testAutoVersionConfigChange(t *testing.T) {
 			return existingAgentRecord(), nil
 		},
 	}
-	uc := agent.New(nil, nil, nil, nil, nil, mock)
+	uc := agent.New(nil, nil, nil, nil, mock)
 	newConfig := entity.LLMConfig{Model: "gpt-4", Temperature: 0.9}
 
 	_, err := uc.UpdateAgent(context.Background(), "agent-1", entity.UpdateAgentRequest{Config: &newConfig})
@@ -798,7 +788,7 @@ func testAutoVersionSameValue(t *testing.T) {
 			return existingAgentRecord(), nil
 		},
 	}
-	uc := agent.New(nil, nil, nil, nil, nil, mock)
+	uc := agent.New(nil, nil, nil, nil, mock)
 	// Same value but non-nil pointer — considered a change
 	samePrompt := "Original prompt"
 
@@ -830,7 +820,7 @@ func testAutoVersionMultipleFields(t *testing.T) {
 			return existingAgentRecord(), nil
 		},
 	}
-	uc := agent.New(nil, nil, nil, nil, nil, mock)
+	uc := agent.New(nil, nil, nil, nil, mock)
 	newPrompt := testNewPrompt
 	newModel := testGpt5
 
@@ -854,7 +844,7 @@ func testAutoVersionMultipleFields(t *testing.T) {
 func TestUpdateAgent_RepoIsNil(t *testing.T) {
 	t.Parallel()
 
-	uc := agent.New(nil, nil, nil, nil, nil, nil)
+	uc := agent.New(nil, nil, nil, nil, nil)
 
 	_, err := uc.UpdateAgent(context.Background(), "agent-1", entity.UpdateAgentRequest{})
 	if err == nil {
@@ -870,7 +860,7 @@ func TestUpdateAgent_NotFound(t *testing.T) {
 			return entity.AgentRecord{}, false, nil
 		},
 	}
-	uc := agent.New(nil, nil, nil, nil, nil, mock)
+	uc := agent.New(nil, nil, nil, nil, mock)
 
 	_, err := uc.UpdateAgent(context.Background(), "missing", entity.UpdateAgentRequest{})
 	if err == nil {
@@ -893,7 +883,7 @@ func TestUpdateAgent_CreateVersionFails(t *testing.T) {
 			return errTestDB
 		},
 	}
-	uc := agent.New(nil, nil, nil, nil, nil, mock)
+	uc := agent.New(nil, nil, nil, nil, mock)
 	newPrompt := testNew
 
 	_, err := uc.UpdateAgent(context.Background(), "agent-1", entity.UpdateAgentRequest{SystemPrompt: &newPrompt})
@@ -910,7 +900,7 @@ func TestUpdateAgent_GetFails(t *testing.T) {
 			return entity.AgentRecord{}, false, errTestConnectionError
 		},
 	}
-	uc := agent.New(nil, nil, nil, nil, nil, mock)
+	uc := agent.New(nil, nil, nil, nil, mock)
 
 	_, err := uc.UpdateAgent(context.Background(), "agent-1", entity.UpdateAgentRequest{})
 	if err == nil {
@@ -940,7 +930,7 @@ func TestUpdateAgent_UpdateFailsAfterVersionCreated(t *testing.T) {
 			return entity.AgentRecord{}, errTestUpdateFailed
 		},
 	}
-	uc := agent.New(nil, nil, nil, nil, nil, mock)
+	uc := agent.New(nil, nil, nil, nil, mock)
 	newPrompt := testNew
 
 	_, err := uc.UpdateAgent(context.Background(), "agent-1", entity.UpdateAgentRequest{SystemPrompt: &newPrompt})
@@ -958,7 +948,7 @@ func TestUpdateAgent_UpdateFailsAfterVersionCreated(t *testing.T) {
 func TestPrep_WithSystemPrompt(t *testing.T) {
 	t.Parallel()
 
-	uc := agent.New(nil, nil, nil, nil, nil, nil)
+	uc := agent.New(nil, nil, nil, nil, nil)
 
 	result, err := uc.Prep(context.Background(), &agent.PrepRequest{
 		SystemPrompt: testSystemPrompt,
@@ -989,7 +979,7 @@ func TestPrep_WithSystemPrompt(t *testing.T) {
 func TestPrep_WithHistoryNoSystemPrompt(t *testing.T) {
 	t.Parallel()
 
-	uc := agent.New(nil, nil, nil, nil, nil, nil)
+	uc := agent.New(nil, nil, nil, nil, nil)
 
 	result, err := uc.Prep(context.Background(), &agent.PrepRequest{
 		SystemPrompt: testSystemPrompt,
@@ -1016,7 +1006,7 @@ func TestPrep_WithHistoryNoSystemPrompt(t *testing.T) {
 func TestPrep_EmptyMessage(t *testing.T) {
 	t.Parallel()
 
-	uc := agent.New(nil, nil, nil, nil, nil, nil)
+	uc := agent.New(nil, nil, nil, nil, nil)
 
 	result, err := uc.Prep(context.Background(), &agent.PrepRequest{
 		SystemPrompt: testSystemPrompt,
@@ -1038,7 +1028,7 @@ func TestPrep_EmptyMessage(t *testing.T) {
 func TestPrep_WithTools(t *testing.T) {
 	t.Parallel()
 
-	uc := agent.New(nil, nil, nil, nil, nil, nil)
+	uc := agent.New(nil, nil, nil, nil, nil)
 	tools := []entity.ToolDef{
 		{Type: "function", Function: entity.ToolFuncDef{Name: "search", Description: "Search the web"}},
 	}
@@ -1071,12 +1061,11 @@ func TestLLMStep_TextResponse(t *testing.T) {
 			Content: "Hello!", FinishReason: "stop",
 			Usage: entity.Usage{PromptTokens: 10, CompletionTokens: 5, TotalTokens: 15},
 		}},
-		&mockTool{},
-		nil, nil, nil, nil,
+		&mockTool{}, nil, nil, nil,
 	)
 
 	result, err := uc.LLMStep(
-		context.Background(), "run-1",
+		context.Background(),
 		[]entity.Message{{Role: entity.RoleUser, Content: "Hi"}},
 		[]entity.ToolDef{},
 		entity.LLMConfig{Model: "gpt-4"},
@@ -1114,12 +1103,11 @@ func TestLLMStep_ToolCallResponse(t *testing.T) {
 			FinishReason: "tool_calls",
 			Usage:        entity.Usage{PromptTokens: 10, CompletionTokens: 5, TotalTokens: 15},
 		}},
-		&mockTool{},
-		nil, nil, nil, nil,
+		&mockTool{}, nil, nil, nil,
 	)
 
 	result, err := uc.LLMStep(
-		context.Background(), "run-1",
+		context.Background(),
 		[]entity.Message{{Role: entity.RoleUser, Content: "Weather?"}},
 		[]entity.ToolDef{{Type: "function", Function: entity.ToolFuncDef{Name: "search"}}},
 		entity.LLMConfig{Model: "gpt-4"},
@@ -1146,12 +1134,11 @@ func TestLLMStep_LLMError(t *testing.T) {
 
 	uc := agent.New(
 		&mockLLM{err: errTestRateLimitExceeded},
-		&mockTool{},
-		nil, nil, nil, nil,
+		&mockTool{}, nil, nil, nil,
 	)
 
 	_, err := uc.LLMStep(
-		context.Background(), "run-1",
+		context.Background(),
 		[]entity.Message{{Role: entity.RoleUser, Content: "Hi"}},
 		nil,
 		entity.LLMConfig{Model: "gpt-4"},
@@ -1170,6 +1157,13 @@ func TestLLMStep_LLMError(t *testing.T) {
 	}
 }
 
+// testRunIdentity is the tenant these tool-call tests execute as: the pipeline
+// authorizes a call as its run, so a call without an identity is refused before
+// it reaches a tool.
+func testRunIdentity() agent.RunIdentity {
+	return agent.RunIdentity{RunID: "run-1", AccountID: "acct-1", ProjectID: "proj-1"}
+}
+
 // --- ExecTool tests ---
 
 func TestExecTool_Success(t *testing.T) {
@@ -1179,11 +1173,10 @@ func TestExecTool_Success(t *testing.T) {
 		&mockLLM{},
 		&mockTool{result: entity.ToolResult{
 			ToolName: "search", Output: map[string]any{"temp": "72F"},
-		}},
-		nil, nil, nil, nil,
+		}}, nil, nil, nil,
 	)
 
-	result, err := uc.ExecTool(context.Background(), "run-1", entity.ToolCall{
+	result, err := uc.ExecTool(context.Background(), testRunIdentity(), entity.ToolCall{
 		ID: "call-1", Type: "function",
 		Function: entity.ToolCallFunction{Name: "search", Arguments: `{"q":"weather"}`},
 	})
@@ -1209,11 +1202,10 @@ func TestExecTool_Error(t *testing.T) {
 
 	uc := agent.New(
 		&mockLLM{},
-		&mockTool{err: errTestToolExecFailed},
-		nil, nil, nil, nil,
+		&mockTool{err: errTestToolExecFailed}, nil, nil, nil,
 	)
 
-	result, err := uc.ExecTool(context.Background(), "run-1", entity.ToolCall{
+	result, err := uc.ExecTool(context.Background(), testRunIdentity(), entity.ToolCall{
 		ID: "call-1", Type: "function",
 		Function: entity.ToolCallFunction{Name: "fail_tool", Arguments: `{}`},
 	})
@@ -1239,11 +1231,10 @@ func TestExecTool_InvalidArgs(t *testing.T) {
 
 	uc := agent.New(
 		&mockLLM{},
-		&mockTool{result: entity.ToolResult{ToolName: "noop", Output: map[string]any{"ok": true}}},
-		nil, nil, nil, nil,
+		&mockTool{result: entity.ToolResult{ToolName: "noop", Output: map[string]any{"ok": true}}}, nil, nil, nil,
 	)
 
-	result, err := uc.ExecTool(context.Background(), "run-1", entity.ToolCall{
+	result, err := uc.ExecTool(context.Background(), testRunIdentity(), entity.ToolCall{
 		ID: "call-1", Type: "function",
 		Function: entity.ToolCallFunction{Name: "noop", Arguments: ""},
 	})
@@ -1253,5 +1244,32 @@ func TestExecTool_InvalidArgs(t *testing.T) {
 
 	if result.IsError {
 		t.Error("expected no error")
+	}
+}
+
+// A tool call that cannot name its tenant is refused here, where the reason can
+// be said in one sentence, rather than at the authorization port, where the
+// caller learns only that a tool was denied.
+func TestExecToolRefusesAnIdentityWithoutATenant(t *testing.T) {
+	t.Parallel()
+
+	uc := agent.New(&mockLLM{}, &mockTool{}, nil, nil, nil)
+
+	cases := map[string]agent.RunIdentity{
+		"no account": {RunID: "run-1", ProjectID: "proj-1"},
+		"no project": {RunID: "run-1", AccountID: "acct-1"},
+		"no run":     {AccountID: "acct-1", ProjectID: "proj-1"},
+		"nothing":    {},
+	}
+
+	for name, identity := range cases {
+		_, err := uc.ExecTool(context.Background(), identity, entity.ToolCall{
+			ID: "call-1", Type: "function",
+			Function: entity.ToolCallFunction{Name: "search", Arguments: `{}`},
+		})
+
+		if !errors.Is(err, agent.ErrInvalidRunIdentity) {
+			t.Fatalf("%s: error = %v, want ErrInvalidRunIdentity", name, err)
+		}
 	}
 }

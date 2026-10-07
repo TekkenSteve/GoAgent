@@ -1,6 +1,13 @@
 limit.maxIDLength:
   - value: 255
     constraints: {}
+# Custom search attributes used by GoAgent workflows
+# (internal/agentfw/orchestration/search_attributes.go) are NOT registered via
+# dynamic config — Temporal has no such key (only the dev-only cache-refresh
+# flag below). They are registered against the cluster by the
+# temporal-create-namespace admin container, which runs
+# scripts/temporal/create-namespace.sh (see register_search_attributes in that
+# script) on every `docker compose up`.
 # system.forceSearchAttributesCacheRefreshOnRead:
 #   - value: true # Dev setup only. Please don't turn this on in production.
 #     constraints: {}

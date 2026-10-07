@@ -25,9 +25,14 @@ import (
 	"github.com/jackc/pgx/v5"
 )
 
-const postgresIdentifierMaxBytes = 63
-const postgresIntegrationDatabasePrefix = "goagent_plan_"
-const postgresIntegrationDatabaseTokenLength = 12
+const (
+	postgresIdentifierMaxBytes             = 63
+	postgresIntegrationDatabaseTokenLength = 12
+	// agentosPlanPostgresIntegrationPrefix names the throwaway databases the
+	// plan persistence tests create. Each suite carries its own prefix so a
+	// leaked database says which suite leaked it.
+	agentosPlanPostgresIntegrationPrefix = "goagent_plan_"
+)
 
 func TestAgentOSPlanPostgresDurablePersistence(t *testing.T) {
 	t.Parallel()
@@ -1566,11 +1571,11 @@ func newAgentOSPlanPostgresIntegrationDB(t *testing.T) (context.Context, *postgr
 	if pgURL == "" {
 		t.Fatal("GOAGENT_POSTGRES_TEST_URL is required for postgres_integration tests")
 	}
-	suffix := postgresIntegrationSuffix(t)
+	suffix := postgresIntegrationSuffix(t, agentosPlanPostgresIntegrationPrefix)
 	isolatedURL, cleanup := createPostgresIntegrationDatabase(
 		t,
 		pgURL,
-		postgresIntegrationDatabasePrefix+suffix,
+		agentosPlanPostgresIntegrationPrefix+suffix,
 	)
 	t.Cleanup(cleanup)
 
@@ -1636,14 +1641,17 @@ WHERE datname = $1 AND pid <> pg_backend_pid()`, dbName)
 	return parsed.String(), cleanup
 }
 
-func postgresIntegrationSuffix(t *testing.T) string {
+// postgresIntegrationSuffix derives a unique, identifier-safe suffix for one
+// test's throwaway database. The prefix is a parameter because the budget
+// Postgres allows a name (NAMEDATALEN-1) is shared between the two.
+func postgresIntegrationSuffix(t *testing.T, prefix string) string {
 	t.Helper()
 
 	replacer := strings.NewReplacer("/", "_", "-", "_", ".", "_")
 	name := strings.ToLower(replacer.Replace(t.Name()))
 	token := strings.ReplaceAll(uuid.NewString(), "-", "")[:postgresIntegrationDatabaseTokenLength]
 	nameBudget := postgresIdentifierMaxBytes -
-		len(postgresIntegrationDatabasePrefix) -
+		len(prefix) -
 		1 -
 		postgresIntegrationDatabaseTokenLength
 	if len(name) > nameBudget {
@@ -1654,49 +1662,14 @@ func postgresIntegrationSuffix(t *testing.T) string {
 
 func applyAgentOSPlanMigrations(t *testing.T, pg *postgres.Postgres) {
 	t.Helper()
-	for _, migration := range []string{
-		"20260617000001_create_agentos_plan_persistence.up.sql",
-		"20260618000001_add_artifact_idempotency.up.sql",
-		"20260619000001_create_agentos_capabilities.up.sql",
-		"20260619000002_require_plan_event_idempotency.up.sql",
-		"20260619000003_require_control_plane_idempotency.up.sql",
-		"20260619000004_create_plan_commands.up.sql",
-		"20260619000005_scope_plan_control_plane_records.up.sql",
-		"20260619000006_create_plan_metric_checkpoints.up.sql",
-		"20260619000007_create_plan_metric_samples.up.sql",
-		"20260619000008_create_agentos_artifact_schemas.up.sql",
-		"20260620000001_scope_agentos_idempotency_keys.up.sql",
-		"20260620000002_scope_plan_event_idempotency_keys.up.sql",
-		"20260620000003_require_agentos_control_plane_scope.up.sql",
-		"20260620000004_constrain_run_backend_plan_nodes.up.sql",
-		"20260620000005_constrain_artifact_plan_scope.up.sql",
-		"20260620000006_constrain_audit_log_plan_scope.up.sql",
-		"20260620000007_enforce_plan_command_lifecycle.up.sql",
-		"20260620000008_add_plan_event_transition_snapshots.up.sql",
-		"20260620000009_require_delivered_command_audit.up.sql",
-		"20260620000010_protect_delivered_command_audits.up.sql",
-		"20260620000011_protect_plan_events_append_only.up.sql",
-		"20260620000012_protect_audit_logs_append_only.up.sql",
-		"20260620000013_protect_artifacts_append_only.up.sql",
-		"20260620000014_protect_plan_metric_samples_append_only.up.sql",
-		"20260620000015_protect_run_backend_ownership.up.sql",
-		"20260620000016_protect_plan_identity.up.sql",
-		"20260620000017_protect_plan_command_identity.up.sql",
-		"20260620000018_constrain_plan_event_json.up.sql",
-		"20260620000019_constrain_plan_state_json.up.sql",
-		"20260620000020_constrain_run_backend_plan_tenant.up.sql",
-		"20260620000021_constrain_plan_record_tenants.up.sql",
-		"20260621000001_create_agentos_processes.up.sql",
-		"20260621000002_create_agentos_process_platform_stores.up.sql",
-	} {
-		path := filepath.Join("..", "..", "..", "migrations", migration)
-		data, err := os.ReadFile(path)
-		if err != nil {
-			t.Fatalf("read migration %s: %v", migration, err)
-		}
-		if _, err := pg.Pool.Exec(t.Context(), string(data)); err != nil {
-			t.Fatalf("apply migration %s: %v", migration, err)
-		}
+
+	data, err := os.ReadFile(filepath.Join("..", "..", "..", "migrations", "20261010000001_baseline.up.sql"))
+	if err != nil {
+		t.Fatalf("read baseline schema: %v", err)
+	}
+
+	if _, err := pg.Pool.Exec(t.Context(), string(data)); err != nil {
+		t.Fatalf("apply baseline schema: %v", err)
 	}
 }
 

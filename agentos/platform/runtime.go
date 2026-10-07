@@ -1,3 +1,4 @@
+// Package platform implements the AgentOS platform runtime used by the app entrypoint.
 package platform
 
 import (

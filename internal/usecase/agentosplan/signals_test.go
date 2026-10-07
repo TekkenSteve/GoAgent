@@ -53,6 +53,7 @@ func TestValidatePlanSignalAcceptsPlanSignals(t *testing.T) {
 		},
 		{Type: agentoscore.SignalPlanApprove, IdempotencyKey: "approve-1", ActorID: "operator-1"},
 		{Type: agentoscore.SignalPlanReject, IdempotencyKey: "reject-1", ActorID: "operator-1"},
+		{Type: agentoscore.SignalUserMessage, IdempotencyKey: "message-1", ActorID: "operator-1"},
 	}
 	for _, signal := range signals {
 		if err := ValidatePlanSignal(&signal); err != nil {
@@ -65,8 +66,8 @@ func TestValidatePlanSignalRejectsUnsupportedSignal(t *testing.T) {
 	t.Parallel()
 
 	err := ValidatePlanSignal(&agentoscore.Signal{
-		Type:           agentoscore.SignalUserMessage,
-		IdempotencyKey: "message-1",
+		Type:           agentoscore.SignalType("unsupported"),
+		IdempotencyKey: "unsupported-1",
 		ActorID:        "operator-1",
 	})
 	if !errors.Is(err, agentoscore.ErrInvalidSignal) {

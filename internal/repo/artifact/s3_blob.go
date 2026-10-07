@@ -21,9 +21,13 @@ import (
 const s3Scheme = "s3"
 
 var (
-	ErrS3BucketRequired          = errors.New("artifact s3 blob store: bucket is required")
-	ErrS3RegionRequired          = errors.New("artifact s3 blob store: region is required")
-	ErrS3AccessKeyIDRequired     = errors.New("artifact s3 blob store: access key id is required")
+	// ErrS3BucketRequired is returned when the S3 bucket is not configured.
+	ErrS3BucketRequired = errors.New("artifact s3 blob store: bucket is required")
+	// ErrS3RegionRequired is returned when the S3 region is not configured.
+	ErrS3RegionRequired = errors.New("artifact s3 blob store: region is required")
+	// ErrS3AccessKeyIDRequired is returned when the S3 access key ID is not configured.
+	ErrS3AccessKeyIDRequired = errors.New("artifact s3 blob store: access key id is required")
+	// ErrS3SecretAccessKeyRequired is returned when the S3 secret access key is not configured.
 	ErrS3SecretAccessKeyRequired = errors.New("artifact s3 blob store: secret access key is required")
 
 	errS3BlobStoreClientRequired = errors.New("artifact s3 blob store: client is required")
@@ -34,6 +38,7 @@ var (
 	errS3BlobStoreInvalidKey     = errors.New("artifact s3 blob store: invalid key")
 )
 
+// S3Config configures a connection to an S3-compatible object store.
 type S3Config struct {
 	Bucket          string
 	Region          string
@@ -55,6 +60,7 @@ type S3BlobStore struct {
 	bucket string
 }
 
+// NewS3BlobStore creates an S3 blob store from cfg using static credentials.
 func NewS3BlobStore(_ context.Context, cfg *S3Config) (*S3BlobStore, error) {
 	if cfg.Bucket == "" {
 		return nil, ErrS3BucketRequired
@@ -91,6 +97,7 @@ func NewS3BlobStore(_ context.Context, cfg *S3Config) (*S3BlobStore, error) {
 	return NewS3BlobStoreWithClient(client, cfg.Bucket)
 }
 
+// NewS3BlobStoreWithClient creates an S3 blob store backed by an existing client for the given bucket.
 func NewS3BlobStoreWithClient(client s3ObjectClient, bucket string) (*S3BlobStore, error) {
 	if client == nil {
 		return nil, errS3BlobStoreClientRequired
@@ -103,6 +110,7 @@ func NewS3BlobStoreWithClient(client s3ObjectClient, bucket string) (*S3BlobStor
 	return &S3BlobStore{client: client, bucket: bucket}, nil
 }
 
+// Put uploads payload to the configured S3 bucket under key and returns the stored blob's metadata.
 func (s *S3BlobStore) Put(ctx context.Context, key string, payload []byte) (BlobObject, error) {
 	objectKey, err := cleanS3Key(key)
 	if err != nil {
@@ -126,7 +134,8 @@ func (s *S3BlobStore) Put(ctx context.Context, key string, payload []byte) (Blob
 	}, nil
 }
 
-func (s *S3BlobStore) Get(ctx context.Context, rawURI string) ([]byte, error) {
+// Get downloads and returns the artifact payload at the given S3 URI.
+func (s *S3BlobStore) Get(ctx context.Context, rawURI string) (data []byte, err error) {
 	objectKey, err := keyFromS3URI(rawURI, s.bucket)
 	if err != nil {
 		return nil, err
@@ -139,9 +148,14 @@ func (s *S3BlobStore) Get(ctx context.Context, rawURI string) ([]byte, error) {
 	if err != nil {
 		return nil, fmt.Errorf("artifact s3 blob store: get object: %w", err)
 	}
-	defer output.Body.Close()
 
-	data, err := io.ReadAll(output.Body)
+	defer func() {
+		if closeErr := output.Body.Close(); closeErr != nil {
+			err = errors.Join(err, fmt.Errorf("artifact s3 blob store: close body: %w", closeErr))
+		}
+	}()
+
+	data, err = io.ReadAll(output.Body)
 	if err != nil {
 		return nil, fmt.Errorf("artifact s3 blob store: read object: %w", err)
 	}

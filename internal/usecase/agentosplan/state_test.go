@@ -137,6 +137,44 @@ func TestStatePlanApprovalAndRejection(t *testing.T) {
 	}
 }
 
+func TestStatePlanBlockedAtAnchorsApprovalTimeout(t *testing.T) {
+	t.Parallel()
+
+	now := time.Date(2026, 6, 19, 12, 0, 0, 0, time.UTC)
+	ref := agentos.BackendRef{Kind: agentos.BackendKindNative, Name: agentos.BackendNameGoAgentNative}
+	state := NewState(&agentos.RunPlanSpec{
+		PlanID: "plan-blocked-at",
+		Nodes:  []agentos.PlanNodeSpec{{NodeID: "a", Run: agentos.RunSpec{RunID: "run-a", Backend: ref}}},
+	}, now)
+
+	blockedAt := now.Add(time.Minute)
+	if err := state.Apply(&StateEvent{Kind: EventPlanBlocked, Reason: "waiting approval", At: blockedAt}); err != nil {
+		t.Fatalf("Apply blocked: %v", err)
+	}
+
+	if !state.Status.BlockedAt.Equal(blockedAt) {
+		t.Fatalf("blocked_at = %s, want %s", state.Status.BlockedAt, blockedAt)
+	}
+
+	// Node lifecycle events while blocked must not advance the approval clock.
+	nodeAt := blockedAt.Add(5 * time.Second)
+	if err := state.Apply(&StateEvent{Kind: EventNodeSucceeded, NodeID: "a", At: nodeAt}); err != nil {
+		t.Fatalf("Apply node succeeded: %v", err)
+	}
+
+	if !state.Status.BlockedAt.Equal(blockedAt) {
+		t.Fatalf("node event moved blocked_at = %s, want %s", state.Status.BlockedAt, blockedAt)
+	}
+
+	if err := state.Apply(&StateEvent{Kind: EventPlanApproved, At: nodeAt}); err != nil {
+		t.Fatalf("Apply approved: %v", err)
+	}
+
+	if !state.Status.BlockedAt.IsZero() {
+		t.Fatalf("blocked_at not cleared after approval: %s", state.Status.BlockedAt)
+	}
+}
+
 func TestStatePlanStartedRecordsInitialStartTime(t *testing.T) {
 	t.Parallel()
 

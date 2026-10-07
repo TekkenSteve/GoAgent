@@ -7,6 +7,7 @@ import (
 
 	agentos "github.com/TekkenSteve/GoAgent/agentos/control"
 	agentoscore "github.com/TekkenSteve/GoAgent/agentos/core"
+	agentfwconfig "github.com/TekkenSteve/GoAgent/internal/agentfw/config"
 	"github.com/TekkenSteve/GoAgent/internal/usecase/agentosplan"
 )
 
@@ -39,7 +40,7 @@ func TestPlanCommandReconcilerDeliversRecoverableCommands(t *testing.T) {
 	}
 
 	temporalClient := &fakePlanTemporalClient{}
-	reconciler := newPlanCommandReconciler(temporalClient, testPlanTaskQueues(), store, store, store)
+	reconciler := newPlanCommandReconciler(temporalClient, testPlanTaskQueues(), testNexusEndpoint(), nil, store, store, store)
 
 	result, err := reconciler.Recover(t.Context(), 0)
 	if err != nil {
@@ -76,7 +77,7 @@ func TestPlanCommandReconcilerMarksInvalidPayloadFailed(t *testing.T) {
 	}
 
 	temporalClient := &fakePlanTemporalClient{}
-	reconciler := newPlanCommandReconciler(temporalClient, testPlanTaskQueues(), store, store, store)
+	reconciler := newPlanCommandReconciler(temporalClient, testPlanTaskQueues(), testNexusEndpoint(), nil, store, store, store)
 
 	result, err := reconciler.Recover(t.Context(), 0)
 	if !errors.Is(err, agentoscore.ErrInvalidRunPlan) {
@@ -196,7 +197,7 @@ func TestWorkerKitRecoverPlanCommandsUsesReconciler(t *testing.T) {
 		t.Fatalf("RecordPlanCommand: %v", err)
 	}
 
-	kit := &WorkerKit{planCommandReconciler: newPlanCommandReconciler(&fakePlanTemporalClient{}, testPlanTaskQueues(), store, store, store)}
+	kit := &WorkerKit{planCommandReconciler: newPlanCommandReconciler(&fakePlanTemporalClient{}, testPlanTaskQueues(), testNexusEndpoint(), nil, store, store, store)}
 
 	result, err := kit.RecoverPlanCommands(t.Context(), 1)
 	if err != nil {
@@ -257,7 +258,7 @@ func TestPlanCommandReconcilerDeliversPlanStart(t *testing.T) {
 
 	temporalClient := &fakePlanTemporalClient{}
 	taskQueues := testPlanTaskQueues()
-	reconciler := newPlanCommandReconciler(temporalClient, taskQueues, store, store, store)
+	reconciler := newPlanCommandReconciler(temporalClient, taskQueues, testNexusEndpoint(), nil, store, store, store)
 
 	result, err := reconciler.Recover(t.Context(), 1)
 	if err != nil {
@@ -271,6 +272,10 @@ func TestPlanCommandReconcilerDeliversPlanStart(t *testing.T) {
 	}
 
 	assertDeliveredPlanCommands(t, store, ref, spec.IdempotencyKey)
+}
+
+func testNexusEndpoint() string {
+	return agentfwconfig.DefaultNexusEndpoint
 }
 
 func testPlanTaskQueues() *TaskQueues {

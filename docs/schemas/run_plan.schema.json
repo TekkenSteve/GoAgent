@@ -43,6 +43,9 @@
           "capability": {
             "type": "string"
           },
+          "peer": {
+            "type": "string"
+          },
           "run": {
             "type": "object",
             "properties": {
@@ -314,6 +317,9 @@
           "type": "integer"
         },
         "timeout_seconds": {
+          "type": "integer"
+        },
+        "approval_timeout_seconds": {
           "type": "integer"
         }
       },

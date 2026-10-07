@@ -9,7 +9,7 @@ import (
 	"math"
 	"time"
 
-	"github.com/Masterminds/squirrel"
+	"github.com/exaring/otelpgx"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
@@ -30,8 +30,7 @@ type Postgres struct {
 	connAttempts int
 	connTimeout  time.Duration
 
-	Builder squirrel.StatementBuilderType
-	Pool    *pgxpool.Pool
+	Pool *pgxpool.Pool
 }
 
 // New -.
@@ -47,8 +46,6 @@ func New(url string, opts ...Option) (*Postgres, error) {
 		opt(pg)
 	}
 
-	pg.Builder = squirrel.StatementBuilder.PlaceholderFormat(squirrel.Dollar)
-
 	poolConfig, err := pgxpool.ParseConfig(url)
 	if err != nil {
 		return nil, fmt.Errorf("postgres - NewPostgres - pgxpool.ParseConfig: %w", err)
@@ -60,6 +57,7 @@ func New(url string, opts ...Option) (*Postgres, error) {
 	}
 
 	poolConfig.MaxConns = maxConns
+	poolConfig.ConnConfig.Tracer = otelpgx.NewTracer()
 
 	for pg.connAttempts > 0 {
 		pg.Pool, err = pgxpool.NewWithConfig(context.Background(), poolConfig)

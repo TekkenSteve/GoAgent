@@ -6,6 +6,7 @@ import (
 	"slices"
 	"testing"
 
+	agentosproc "github.com/TekkenSteve/GoAgent/agentos/process"
 	"github.com/TekkenSteve/GoAgent/internal/agentfw/orchestration"
 	"github.com/TekkenSteve/GoAgent/internal/usecase/agentosprocess"
 	"github.com/nexus-rpc/sdk-go/nexus"
@@ -24,25 +25,11 @@ func TestNewWorkerKitRequiresPostgresURL(t *testing.T) {
 	}
 }
 
-func TestNewWorkerKitRequiresRedisURL(t *testing.T) {
-	t.Parallel()
-
-	cfg := WorkerConfig{
-		PostgresURL: "postgres://localhost:5432/testdb",
-	}
-
-	_, err := NewWorkerKit(context.Background(), &cfg)
-	if !errors.Is(err, ErrWorkerRedisURLRequired) {
-		t.Fatalf("NewWorkerKit error = %v, want %v", err, ErrWorkerRedisURLRequired)
-	}
-}
-
 func TestNewWorkerKitRequiresArtifactStoreBackend(t *testing.T) {
 	t.Parallel()
 
 	cfg := WorkerConfig{
 		PostgresURL:        "postgres://localhost:5432/testdb",
-		RedisURL:           "redis://localhost:6379",
 		TemporalTaskQueues: DefaultTaskQueues(),
 	}
 
@@ -57,7 +44,6 @@ func TestNewWorkerKitRequiresLocalArtifactStoreRoot(t *testing.T) {
 
 	cfg := WorkerConfig{
 		PostgresURL:        "postgres://localhost:5432/testdb",
-		RedisURL:           "redis://localhost:6379",
 		TemporalTaskQueues: DefaultTaskQueues(),
 		ArtifactStore: ArtifactStoreConfig{
 			Backend: ArtifactStoreBackendLocal,
@@ -75,7 +61,6 @@ func TestNewWorkerKitRequiresS3ArtifactStoreBucket(t *testing.T) {
 
 	cfg := WorkerConfig{
 		PostgresURL:        "postgres://localhost:5432/testdb",
-		RedisURL:           "redis://localhost:6379",
 		TemporalTaskQueues: DefaultTaskQueues(),
 		ArtifactStore: ArtifactStoreConfig{
 			Backend: ArtifactStoreBackendS3,
@@ -128,6 +113,26 @@ func TestWorkerKitRegistersPlanWorkflowAndActivities(t *testing.T) {
 	}
 }
 
+func TestPlanWorkerKitRegistersOnlyPlanWorkloads(t *testing.T) {
+	t.Parallel()
+
+	kit := &PlanWorkerKit{planActivities: newTestPlanActivities(t, &fakePlanRuntime{})}
+	control := &fakeWorker{}
+	activityWorker := &fakeWorker{}
+
+	if err := kit.Register(&PlanWorkerSet{Control: control, Activity: activityWorker}); err != nil {
+		t.Fatalf("Register: %v", err)
+	}
+
+	if !control.workflowRegistered(PlanWorkflowName) {
+		t.Fatalf("plan workflow was not registered: %#v", control.workflows)
+	}
+
+	if !activityWorker.activityRegistered(StartPlanNodeActivityName) {
+		t.Fatalf("plan activity was not registered: %#v", activityWorker.activities)
+	}
+}
+
 func TestWorkerKitRegistersProcessWorkflowAndActivities(t *testing.T) {
 	t.Parallel()
 
@@ -170,8 +175,16 @@ func TestAgentOSOwnedWorkflowRegistrationsHaveVersionPins(t *testing.T) {
 		t.Fatalf("Register: %v", err)
 	}
 
+	triggerWorker := &fakeWorker{}
+	if err := RegisterTriggerDispatcher(triggerWorker, func(context.Context, agentosproc.TriggerDelivery) error {
+		return nil
+	}); err != nil {
+		t.Fatalf("RegisterTriggerDispatcher: %v", err)
+	}
+
 	registered := append([]string{}, workers.planControl.workflows...)
 	registered = append(registered, workers.processControl.workflows...)
+	registered = append(registered, triggerWorker.workflows...)
 
 	for _, pin := range agentOSWorkflowVersionPins() {
 		if !slices.Contains(registered, pin.Name) {
@@ -205,7 +218,6 @@ func TestWorkerKitRegistersNativeWorkloadsOnDedicatedWorkers(t *testing.T) {
 	assertNativeControlRegistrations(t, workers.nativeControl)
 	assertNativeActivityRegistrations(t, workers.nativeLLM, workers.nativeTool)
 	assertStreamRegistrations(t, workers.stream)
-	assertTriggerRegistrations(t, workers.trigger)
 }
 
 func assertNativeControlRegistrations(t *testing.T, worker *fakeWorker) {
@@ -256,18 +268,6 @@ func assertStreamRegistrations(t *testing.T, worker *fakeWorker) {
 	}
 }
 
-func assertTriggerRegistrations(t *testing.T, worker *fakeWorker) {
-	t.Helper()
-
-	if !worker.workflowRegistered(orchestration.TriggerFireWorkflowName) {
-		t.Fatalf("trigger workflow was not isolated on trigger worker; got %#v", worker.workflows)
-	}
-
-	if !worker.activityRegistered(orchestration.FireTriggerActivityName) {
-		t.Fatalf("trigger activity was not isolated on trigger worker; got %#v", worker.activities)
-	}
-}
-
 func newTestProcessActivities(t *testing.T) *ProcessActivities {
 	t.Helper()
 
@@ -282,8 +282,9 @@ func newTestProcessActivities(t *testing.T) *ProcessActivities {
 }
 
 type fakeWorker struct {
-	workflows  []string
-	activities []string
+	workflows     []string
+	activities    []string
+	nexusServices []*nexus.Service
 }
 
 func (w *fakeWorker) RegisterWorkflow(any) {}
@@ -298,7 +299,9 @@ func (w *fakeWorker) RegisterActivityWithOptions(_ any, options activity.Registe
 	w.activities = append(w.activities, options.Name)
 }
 
-func (w *fakeWorker) RegisterNexusService(*nexus.Service) {}
+func (w *fakeWorker) RegisterNexusService(svc *nexus.Service) {
+	w.nexusServices = append(w.nexusServices, svc)
+}
 
 func (w *fakeWorker) Start() error { return nil }
 
@@ -314,6 +317,10 @@ func (w *fakeWorker) activityRegistered(name string) bool {
 	return slices.Contains(w.activities, name)
 }
 
+func (w *fakeWorker) nexusServiceCount() int {
+	return len(w.nexusServices)
+}
+
 type fakeWorkers struct {
 	planControl     *fakeWorker
 	planActivity    *fakeWorker
@@ -323,7 +330,6 @@ type fakeWorkers struct {
 	nativeLLM       *fakeWorker
 	nativeTool      *fakeWorker
 	stream          *fakeWorker
-	trigger         *fakeWorker
 }
 
 func fakeWorkerSet() fakeWorkers {
@@ -336,7 +342,6 @@ func fakeWorkerSet() fakeWorkers {
 		nativeLLM:       &fakeWorker{},
 		nativeTool:      &fakeWorker{},
 		stream:          &fakeWorker{},
-		trigger:         &fakeWorker{},
 	}
 }
 
@@ -350,6 +355,5 @@ func (w fakeWorkers) workerSet() *WorkerSet {
 		NativeLLM:       w.nativeLLM,
 		NativeTool:      w.nativeTool,
 		Stream:          w.stream,
-		Trigger:         w.trigger,
 	}
 }

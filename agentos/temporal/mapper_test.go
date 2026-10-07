@@ -9,7 +9,9 @@ import (
 	agentos "github.com/TekkenSteve/GoAgent/agentos/control"
 	agentoscore "github.com/TekkenSteve/GoAgent/agentos/core"
 	agentfwconfig "github.com/TekkenSteve/GoAgent/internal/agentfw/config"
+	"github.com/TekkenSteve/GoAgent/internal/agentfw/orchestration"
 	"github.com/TekkenSteve/GoAgent/internal/entity"
+	"github.com/stretchr/testify/require"
 )
 
 const (
@@ -189,5 +191,76 @@ func TestGRPCBackendConfig(t *testing.T) {
 		got.Methods.Control != "ControlRun" ||
 		got.Methods.Status != "StatusRun" {
 		t.Fatalf("unexpected grpc backend config: %#v", got)
+	}
+}
+
+// A run spec asking for the native backend's step-queue mode carries its queue
+// in the backend's own payload. The mapper hands it to the executor without
+// interpreting it: what a step queue means is the native backend's business.
+func TestExecutionRequestFromRunSpecCarriesAStepQueue(t *testing.T) {
+	t.Parallel()
+
+	spec := agentos.RunSpec{
+		RunID:     Run1,
+		AccountID: Acct1,
+		ProjectID: Proj1,
+		Backend:   agentos.BackendRef{Kind: agentos.BackendKindNative, Name: agentos.BackendNameGoAgentNative},
+		Input: map[string]any{
+			orchestration.RunInputKey: map[string]any{
+				"steps": []any{
+					map[string]any{"id": "research", "type": "agent", "input": map[string]any{"message": "go"}},
+				},
+				"max_depth": float64(2),
+			},
+		},
+	}
+
+	req, err := executionRequestFromRunSpec(&spec)
+	if err != nil {
+		t.Fatalf("executionRequestFromRunSpec: %v", err)
+	}
+
+	require.True(t, req.HasStepQueue())
+	require.Len(t, req.Steps, 1)
+	require.Equal(t, "research", req.Steps[0].ID)
+	require.Equal(t, 2, req.MaxDepth)
+	require.Equal(t, Acct1, req.AccountID)
+	require.Equal(t, Proj1, req.ProjectID)
+}
+
+// A step queue carries its own messages, so the run does not also need a
+// top-level one; a request with neither is still refused.
+func TestExecutionRequestFromRunSpecRequiresAMessageOrAStepQueue(t *testing.T) {
+	t.Parallel()
+
+	base := agentos.RunSpec{
+		RunID:     Run1,
+		AccountID: Acct1,
+		ProjectID: Proj1,
+		Backend:   agentos.BackendRef{Kind: agentos.BackendKindNative, Name: agentos.BackendNameGoAgentNative},
+	}
+
+	_, err := executionRequestFromRunSpec(&base)
+	if !errors.Is(err, agentoscore.ErrInvalidRunSpec) {
+		t.Fatalf("a run with neither a message nor a queue must be refused, got %v", err)
+	}
+}
+
+func TestExecutionRequestFromRunSpecRefusesAnUnknownRunInput(t *testing.T) {
+	t.Parallel()
+
+	spec := agentos.RunSpec{
+		RunID:       Run1,
+		AccountID:   Acct1,
+		ProjectID:   Proj1,
+		UserMessage: Hello,
+		Backend:     agentos.BackendRef{Kind: agentos.BackendKindNative, Name: agentos.BackendNameGoAgentNative},
+		Input:       map[string]any{orchestration.RunInputKey: map[string]any{"stepps": []any{}}},
+	}
+
+	_, err := executionRequestFromRunSpec(&spec)
+
+	if !errors.Is(err, agentoscore.ErrInvalidRunSpec) {
+		t.Fatalf("an unreadable payload must be refused, got %v", err)
 	}
 }

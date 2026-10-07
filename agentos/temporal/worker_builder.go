@@ -8,9 +8,8 @@ import (
 
 	"github.com/TekkenSteve/GoAgent/internal/agentfw/orchestration"
 	agenttool "github.com/TekkenSteve/GoAgent/internal/agentfw/tool"
-	"github.com/TekkenSteve/GoAgent/internal/entity"
+	"github.com/TekkenSteve/GoAgent/internal/authz"
 	"github.com/TekkenSteve/GoAgent/internal/pkg/postgres"
-	goredis "github.com/TekkenSteve/GoAgent/internal/pkg/redis"
 	"github.com/TekkenSteve/GoAgent/internal/repo/agentos/planstream"
 	artifactrepo "github.com/TekkenSteve/GoAgent/internal/repo/artifact"
 	"github.com/TekkenSteve/GoAgent/internal/repo/cached"
@@ -18,76 +17,123 @@ import (
 	"github.com/TekkenSteve/GoAgent/internal/repo/framework"
 	mcpRepo "github.com/TekkenSteve/GoAgent/internal/repo/mcp"
 	temporalrepo "github.com/TekkenSteve/GoAgent/internal/repo/persistent"
-	pipelinepkg "github.com/TekkenSteve/GoAgent/internal/repo/pipeline"
-	repostream "github.com/TekkenSteve/GoAgent/internal/repo/stream"
 	"github.com/TekkenSteve/GoAgent/internal/repo/toolkit"
 	"github.com/TekkenSteve/GoAgent/internal/repo/webapi"
 	"github.com/TekkenSteve/GoAgent/internal/usecase/agent"
 	"github.com/TekkenSteve/GoAgent/internal/usecase/agentosplan"
 	billingpkg "github.com/TekkenSteve/GoAgent/internal/usecase/billing"
 	templatepkg "github.com/TekkenSteve/GoAgent/internal/usecase/template"
-	triggerpkg "github.com/TekkenSteve/GoAgent/internal/usecase/trigger"
 	"github.com/TekkenSteve/GoAgent/pkg/logger"
 	"go.temporal.io/sdk/client"
 )
 
 var (
-	ErrWorkerConfigRequired                   = errors.New("agentos temporal worker: config is required")
-	ErrWorkerPostgresURLRequired              = errors.New("agentos temporal worker: postgres url is required")
-	ErrWorkerRedisURLRequired                 = errors.New("agentos temporal worker: redis url is required")
-	ErrWorkerArtifactStoreBackendRequired     = errors.New("agentos temporal worker: artifact store backend is required")
-	ErrWorkerArtifactStoreBackendUnknown      = errors.New("agentos temporal worker: artifact store backend is unknown")
-	ErrWorkerArtifactStoreLocalRootRequired   = errors.New("agentos temporal worker: artifact local root is required")
-	ErrWorkerArtifactStoreS3BucketRequired    = errors.New("agentos temporal worker: artifact s3 bucket is required")
-	ErrWorkerArtifactStoreS3RegionRequired    = errors.New("agentos temporal worker: artifact s3 region is required")
+	// ErrWorkerConfigRequired reports a missing worker config.
+	ErrWorkerConfigRequired = errors.New("agentos temporal worker: config is required")
+	// ErrWorkerPostgresURLRequired reports a missing Postgres URL in the worker config.
+	ErrWorkerPostgresURLRequired = errors.New("agentos temporal worker: postgres url is required")
+	// ErrWorkerArtifactStoreBackendRequired reports a missing artifact store backend in the worker config.
+	ErrWorkerArtifactStoreBackendRequired = errors.New("agentos temporal worker: artifact store backend is required")
+	// ErrWorkerArtifactStoreBackendUnknown reports an unknown artifact store backend in the worker config.
+	ErrWorkerArtifactStoreBackendUnknown = errors.New("agentos temporal worker: artifact store backend is unknown")
+	// ErrWorkerArtifactStoreLocalRootRequired reports a missing artifact local root in the worker config.
+	ErrWorkerArtifactStoreLocalRootRequired = errors.New("agentos temporal worker: artifact local root is required")
+	// ErrWorkerArtifactStoreS3BucketRequired reports a missing artifact S3 bucket in the worker config.
+	ErrWorkerArtifactStoreS3BucketRequired = errors.New("agentos temporal worker: artifact s3 bucket is required")
+	// ErrWorkerArtifactStoreS3RegionRequired reports a missing artifact S3 region in the worker config.
+	ErrWorkerArtifactStoreS3RegionRequired = errors.New("agentos temporal worker: artifact s3 region is required")
+	// ErrWorkerArtifactStoreS3AccessKeyRequired reports a missing artifact S3 access key ID in the worker config.
 	ErrWorkerArtifactStoreS3AccessKeyRequired = errors.New("agentos temporal worker: artifact s3 access key id is required")
+	// ErrWorkerArtifactStoreS3SecretKeyRequired reports a missing artifact S3 secret access key in the worker config.
 	ErrWorkerArtifactStoreS3SecretKeyRequired = errors.New("agentos temporal worker: artifact s3 secret access key is required")
 )
 
 func newWorkerKit(ctx context.Context, cfg *WorkerConfig) (*WorkerKit, error) {
-	resources, err := openWorkerResources(ctx, cfg)
+	resources, err := openWorkerResources(cfg)
 	if err != nil {
 		return nil, err
 	}
 
-	kit, batchWriter, err := buildWorkerKit(ctx, resources.dependencies())
-	if err != nil {
-		resources.close()
-
-		return nil, err
-	}
-
-	infra, err := initWorkerPlanRuntime(ctx, cfg, resources.postgres, resources.redis, resources.temporalClient)
+	dataPlane, err := newWorkerDataPlane(cfg, resources)
 	if err != nil {
 		resources.close()
 
 		return nil, err
 	}
 
-	configureWorkerPlanRuntime(kit, cfg, resources, batchWriter, infra)
+	kit, err := buildWorkerKit(ctx, resources.dependencies(), dataPlane)
+	if err != nil {
+		dataPlane.Close()
+		resources.close()
+
+		return nil, err
+	}
+
+	infra, err := initWorkerPlanRuntime(ctx, cfg, resources.postgres, resources.temporalClient, dataPlane, resources.logger)
+	if err != nil {
+		dataPlane.Close()
+		resources.close()
+
+		return nil, err
+	}
+
+	configureWorkerPlanRuntime(kit, cfg, resources, infra)
 
 	return kit, nil
+}
+
+// NewPlanWorkerKit creates the minimal worker registration kit required by
+// the AgentOS RunPlan control plane.
+func NewPlanWorkerKit(ctx context.Context, cfg *WorkerConfig) (*PlanWorkerKit, error) {
+	resources, err := openWorkerResources(cfg)
+	if err != nil {
+		return nil, err
+	}
+
+	dataPlane, err := newWorkerDataPlane(cfg, resources)
+	if err != nil {
+		resources.close()
+
+		return nil, err
+	}
+
+	infra, err := initWorkerPlanRuntime(ctx, cfg, resources.postgres, resources.temporalClient, dataPlane, resources.logger)
+	if err != nil {
+		dataPlane.Close()
+		resources.close()
+
+		return nil, err
+	}
+
+	return &PlanWorkerKit{
+		planActivities:        infra.planActivities,
+		planCommandReconciler: newPlanCommandReconciler(newPlanTemporalClient(resources.temporalClient), &cfg.TemporalTaskQueues, workerNexusEndpoint(cfg), cfg.NexusPeers, infra.planStore, infra.planStore, infra.planStore),
+		closeFns: []func() error{
+			infra.planClose,
+			dataPlane.Close,
+			func() error {
+				resources.close()
+
+				return nil
+			},
+		},
+	}, nil
 }
 
 type workerResources struct {
 	cfg            *WorkerConfig
 	logger         *logger.Logger
 	postgres       *postgres.Postgres
-	redis          *goredis.Redis
 	temporalClient client.Client
 }
 
-func openWorkerResources(ctx context.Context, cfg *WorkerConfig) (*workerResources, error) {
+func openWorkerResources(cfg *WorkerConfig) (*workerResources, error) {
 	if cfg == nil {
 		return nil, ErrWorkerConfigRequired
 	}
 
 	if cfg.PostgresURL == "" {
 		return nil, ErrWorkerPostgresURLRequired
-	}
-
-	if cfg.RedisURL == "" {
-		return nil, ErrWorkerRedisURLRequired
 	}
 
 	if err := cfg.TemporalTaskQueues.Validate(); err != nil {
@@ -105,13 +151,6 @@ func openWorkerResources(ctx context.Context, cfg *WorkerConfig) (*workerResourc
 		return nil, fmt.Errorf("agentos temporal worker - postgres: %w", err)
 	}
 
-	rdb, err := goredis.New(ctx, cfg.RedisURL)
-	if err != nil {
-		pg.Close()
-
-		return nil, fmt.Errorf("agentos temporal worker - redis: %w", err)
-	}
-
 	fwTemporal := temporalConfig(&RuntimeConfig{
 		TemporalAddress:    cfg.TemporalAddress,
 		TemporalNamespace:  cfg.TemporalNamespace,
@@ -123,7 +162,6 @@ func openWorkerResources(ctx context.Context, cfg *WorkerConfig) (*workerResourc
 		Namespace: fwTemporal.Namespace,
 	})
 	if err != nil {
-		_ = rdb.Close()
 		pg.Close()
 
 		return nil, fmt.Errorf("agentos temporal worker - temporal client: %w", err)
@@ -133,9 +171,20 @@ func openWorkerResources(ctx context.Context, cfg *WorkerConfig) (*workerResourc
 		cfg:            cfg,
 		logger:         l,
 		postgres:       pg,
-		redis:          rdb,
 		temporalClient: temporalClient,
 	}, nil
+}
+
+// newWorkerDataPlane assembles the shared data-plane bus (Centrifugo by
+// default, degrading to the in-process memstream bus when no base URL is
+// configured) plus the milestone recorder. The single instance feeds the run
+// activities' publisher and fact recorder and the plan runtime's
+// subscriber/plan bus, so in-process subscribers see the activities'
+// publishes.
+func newWorkerDataPlane(cfg *WorkerConfig, resources *workerResources) (*StreamingDataPlane, error) {
+	// The whole config travels: EventOutbox decides whether the recorder's
+	// milestones are queued for the fact log alongside being persisted.
+	return NewStreamingDataPlane(cfg.StreamCentrifugo, resources.postgres, resources.logger)
 }
 
 func (r *workerResources) dependencies() *workerDependencies {
@@ -143,41 +192,28 @@ func (r *workerResources) dependencies() *workerDependencies {
 		cfg:            r.cfg,
 		logger:         r.logger,
 		postgres:       r.postgres,
-		redis:          r.redis,
 		temporalClient: r.temporalClient,
 	}
 }
 
 func (r *workerResources) close() {
 	r.temporalClient.Close()
-	_ = r.redis.Close()
+
 	r.postgres.Close()
 }
 
-func configureWorkerPlanRuntime(kit *WorkerKit, cfg *WorkerConfig, resources *workerResources, batchWriter *pipelinepkg.BatchWriter, infra *workerPlanRuntime) {
+func configureWorkerPlanRuntime(kit *WorkerKit, cfg *WorkerConfig, resources *workerResources, infra *workerPlanRuntime) {
 	kit.planActivities = infra.planActivities
 	kit.processActivities = infra.processActivities
-	kit.planCommandReconciler = newPlanCommandReconciler(newPlanTemporalClient(resources.temporalClient), &cfg.TemporalTaskQueues, infra.planStore, infra.planStore, infra.planStore)
+	kit.planCommandReconciler = newPlanCommandReconciler(newPlanTemporalClient(resources.temporalClient), &cfg.TemporalTaskQueues, workerNexusEndpoint(cfg), cfg.NexusPeers, infra.planStore, infra.planStore, infra.planStore)
 	kit.closeFns = append(
 		kit.closeFns,
-		func() error {
-			if batchWriter != nil {
-				batchWriter.Stop()
-			}
-
-			return nil
-		},
 		func() error {
 			resources.temporalClient.Close()
 
 			return nil
 		},
 		infra.planClose,
-		func() error {
-			resources.redis.Close()
-
-			return nil
-		},
 		func() error {
 			resources.postgres.Close()
 
@@ -193,7 +229,7 @@ type workerPlanRuntime struct {
 	planStore         *temporalrepo.AgentOSPlanRepo
 }
 
-func initWorkerPlanRuntime(ctx context.Context, cfg *WorkerConfig, pg *postgres.Postgres, rdb *goredis.Redis, temporalClient client.Client) (*workerPlanRuntime, error) {
+func initWorkerPlanRuntime(ctx context.Context, cfg *WorkerConfig, pg *postgres.Postgres, temporalClient client.Client, dataPlane *StreamingDataPlane, l logger.Interface) (*workerPlanRuntime, error) {
 	runBackendIndex := temporalrepo.NewRunBackendIndexRepo(pg)
 	planStore := temporalrepo.NewAgentOSPlanRepo(pg)
 	blobCfg := artifactBlobConfig(&cfg.ArtifactStore)
@@ -215,7 +251,10 @@ func initWorkerPlanRuntime(ctx context.Context, cfg *WorkerConfig, pg *postgres.
 		return nil, fmt.Errorf("agentos temporal worker - register artifact schemas: %w", err)
 	}
 
-	planEventStream := planstream.NewRedisPlanEventStream(rdb)
+	// The live plan event tail rides the shared data plane (planbus): the
+	// publisher carries plan activities' fan-out and the subscriber feeds the
+	// runtime's SubscribePlan live tail.
+	planEventStream := planstream.New(dataPlane.Publisher, dataPlane.Subscriber)
 	processStore := temporalrepo.NewAgentOSProcessRepo(pg)
 
 	planRuntime, err := NewRuntimeWithClient(ctx, &RuntimeConfig{
@@ -225,7 +264,14 @@ func initWorkerPlanRuntime(ctx context.Context, cfg *WorkerConfig, pg *postgres.
 		TemporalExternalBackends: cfg.TemporalExternalBackends,
 		HTTPBackends:             cfg.HTTPBackends,
 		GRPCBackends:             cfg.GRPCBackends,
+		DSHBackends:              cfg.DSHBackends,
 		ArtifactStore:            cfg.ArtifactStore,
+		Subscriber:               dataPlane.Subscriber,
+		Publisher:                dataPlane.Publisher,
+		Facts:                    dataPlane.Facts,
+		Logger:                   l,
+		PlanEventPublisher:       planEventStream,
+		PlanEventSubscriber:      planEventStream,
 	}, temporalClient, WithRunBackendIndex(runBackendIndex))
 	if err != nil {
 		return nil, fmt.Errorf("agentos temporal worker - plan runtime: %w", err)
@@ -233,16 +279,12 @@ func initWorkerPlanRuntime(ctx context.Context, cfg *WorkerConfig, pg *postgres.
 
 	planActivities, err := NewPlanActivitiesWithCatalogAndSchemas(planRuntime, capabilityCatalog, artifactSchemaCatalog, planStore, planEventStream, artifactStore)
 	if err != nil {
-		planRuntime.Close()
-
-		return nil, fmt.Errorf("agentos temporal worker - plan activities: %w", err)
+		return nil, errors.Join(fmt.Errorf("agentos temporal worker - plan activities: %w", err), planRuntime.Close())
 	}
 
 	processActivities, err := NewProcessActivities(processStore, processStore)
 	if err != nil {
-		planRuntime.Close()
-
-		return nil, fmt.Errorf("agentos temporal worker - process activities: %w", err)
+		return nil, errors.Join(fmt.Errorf("agentos temporal worker - process activities: %w", err), planRuntime.Close())
 	}
 
 	return &workerPlanRuntime{
@@ -295,26 +337,23 @@ type workerDependencies struct {
 	cfg            *WorkerConfig
 	logger         *logger.Logger
 	postgres       *postgres.Postgres
-	redis          *goredis.Redis
 	temporalClient client.Client
 }
 
-func buildWorkerKit(ctx context.Context, deps *workerDependencies) (*WorkerKit, *pipelinepkg.BatchWriter, error) {
-	messageRepo := temporalrepo.NewMessageRepo(deps.postgres)
+func buildWorkerKit(ctx context.Context, deps *workerDependencies, dataPlane *StreamingDataPlane) (*WorkerKit, error) {
 	persistentAgentRepo := temporalrepo.NewAgentRepo(deps.postgres)
 	agentRepo := cached.NewAgentRepo(persistentAgentRepo)
 	templateRepo := temporalrepo.NewWorkflowTemplateRepo(deps.postgres)
-	triggerRepo := temporalrepo.NewTriggerRepo(deps.postgres)
 	templateUC := templatepkg.New(templateRepo)
 
 	llmResult, err := webapi.LoadLLMProviders(deps.cfg.LLMConfigPath)
 	if err != nil {
-		return nil, nil, fmt.Errorf("agentos temporal worker - load llm providers: %w", err)
+		return nil, fmt.Errorf("agentos temporal worker - load llm providers: %w", err)
 	}
 
 	llmProvider, err := newBifrostProvider(deps.cfg.LLMConfigPath, llmResult, deps.logger)
 	if err != nil {
-		return nil, nil, err
+		return nil, err
 	}
 
 	billingRepo := temporalrepo.NewBillingRepo(deps.postgres)
@@ -325,36 +364,40 @@ func buildWorkerKit(ctx context.Context, deps *workerDependencies) (*WorkerKit, 
 		registerEnvTools(deps.logger, toolRegistry)
 	}
 
-	toolPipe := agenttool.Pipeline{Executor: toolRegistry}
-	toolExecutor := framework.NewToolPipeline(&toolPipe)
-	agentCompressor := compressor.New(compressor.Config{LLM: llmProvider})
-	wal := pipelinepkg.NewWriteAheadLog(deps.redis.GeneralClient)
-	dlq := pipelinepkg.NewDeadLetterQueue(deps.redis.GeneralClient)
-	batchWriter := pipelinepkg.NewBatchWriter(wal, dlq, messageRepo, deps.logger)
-	batchWriter.Start()
-
-	agentUC := agent.New(llmProvider, toolExecutor, wal, agentCompressor, toolRegistry, agentRepo)
-	agentUC.SetLogger(deps.logger)
-	workflowTaskQueues := orchestration.WorkflowTaskQueues{
-		NativeControl: deps.cfg.TemporalTaskQueues.NativeControl,
-		NativeLLM:     deps.cfg.TemporalTaskQueues.NativeLLM,
-		NativeTool:    deps.cfg.TemporalTaskQueues.NativeTool,
-		Stream:        deps.cfg.TemporalTaskQueues.Stream,
-		Trigger:       deps.cfg.TemporalTaskQueues.Trigger,
+	// Every protective stage is present, or the worker refuses to start.
+	toolPipe, err := agenttool.NewPipeline(&agenttool.PipelineConfig{
+		Authorizer: &agenttool.TenantAuthorizer{
+			Authorizer: authz.TenantAuthorizer{},
+			Audit:      agenttool.NewLoggerAuditSink(deps.logger),
+		},
+		Executor:    toolRegistry,
+		Redactor:    agenttool.NewRedactor(nil),
+		Policies:    &agenttool.DefaultPolicyProvider{},
+		Idempotency: temporalrepo.NewToolIdempotencyStore(deps.postgres),
+	})
+	if err != nil {
+		return nil, fmt.Errorf("agentfw worker - tool pipeline: %w", err)
 	}
-	triggerScheduler := temporalrepo.NewTemporalTriggerScheduler(deps.temporalClient, deps.cfg.TemporalTaskQueues.Trigger, &workflowTaskQueues)
-	triggerUC := triggerpkg.New(triggerRepo, triggerScheduler, templateRepo)
-	mcpManager := mcpRepo.NewManager()
+
+	toolExecutor := framework.NewToolPipeline(toolPipe)
+	agentCompressor := compressor.New(compressor.Config{LLM: llmProvider})
+	agentUC := agent.New(llmProvider, toolExecutor, agentCompressor, toolRegistry, agentRepo)
+	agentUC.SetLogger(deps.logger)
+
+	// Nil policy here is fail-closed: an embedder that declares no MCP
+	// allowlist gets a manager that launches nothing.
+	mcpManager := mcpRepo.NewManager(deps.cfg.MCPTransportPolicy)
 	mcpManager.SetRegistry(toolRegistry)
 
-	eventSequencer := repostream.NewRedisSequencer(deps.redis)
-	eventStore := repostream.NewRedisEventStore(deps.redis, eventSequencer)
-	activities := orchestration.NewAgentActivities(agentUC, eventStore, deps.logger).
-		WithTemplateRepo(templateRepo).
-		WithTriggerUC(triggerUC).
+	activities := orchestration.NewAgentActivities(agentUC, deps.logger).
 		WithMCPManager(mcpManager).
 		WithBilling(billingUC)
-	registerToolsOnRegistry(deps.logger, toolRegistry, triggerUC, triggerScheduler)
+
+	kit := &WorkerKit{activities: activities, runBackendResolver: deps.cfg.RunBackendResolver}
+
+	configureStreamingProjection(activities, dataPlane)
+
+	registerToolsOnRegistry(deps.logger, toolRegistry)
 
 	if deps.cfg.EnsureDefaultTemplate {
 		if err := templateUC.EnsureDefault(ctx); err != nil && deps.logger != nil {
@@ -362,13 +405,26 @@ func buildWorkerKit(ctx context.Context, deps *workerDependencies) (*WorkerKit, 
 		}
 	}
 
-	return &WorkerKit{activities: activities}, batchWriter, nil
+	return kit, nil
 }
 
-func registerToolsOnRegistry(l *logger.Logger, toolRegistry *toolkit.ToolRegistry, triggerUC *triggerpkg.UseCase, triggerScheduler *temporalrepo.TemporalTriggerScheduler) {
+// configureStreamingProjection wires the shared data plane onto the run
+// activities: the publisher mirrors the AG-UI timeline and the milestone
+// recorder makes each fact durable before its publish. The data plane is
+// assembled once by the kit entry points (Centrifugo by default, degrading to
+// the in-process memstream bus when no base URL is configured), so a worker
+// always has a live transport.
+func configureStreamingProjection(activities *orchestration.AgentActivities, dataPlane *StreamingDataPlane) {
+	if dataPlane == nil {
+		return
+	}
+
+	activities.WithStreamPublisher(dataPlane.Publisher)
+	activities.WithMilestoneRecorder(dataPlane.Facts)
+}
+
+func registerToolsOnRegistry(l *logger.Logger, toolRegistry *toolkit.ToolRegistry) {
 	registerAgentCreationTool(l, toolRegistry)
-	registerTriggerCreationTool(l, toolRegistry, triggerUC, triggerScheduler)
-	registerTriggerManagementTools(l, toolRegistry, triggerUC)
 }
 
 func registerAgentCreationTool(l *logger.Logger, toolRegistry *toolkit.ToolRegistry) {
@@ -377,60 +433,6 @@ func registerAgentCreationTool(l *logger.Logger, toolRegistry *toolkit.ToolRegis
 	}
 	if err := toolRegistry.Register(toolkit.NewAgentCreationTool(agentCreator)); err != nil && l != nil {
 		l.Warn("agentos temporal worker - register agent_creation_tool: %v", err)
-	}
-}
-
-func registerTriggerCreationTool(l *logger.Logger, toolRegistry *toolkit.ToolRegistry, triggerUC *triggerpkg.UseCase, triggerScheduler *temporalrepo.TemporalTriggerScheduler) {
-	triggerCreator := func(ctx context.Context, templateID, name, cronExpression, agentPrompt string, templateVars []string, templateVarsVals map[string]string) (string, error) {
-		t, err := triggerUC.Create(ctx, &entity.CreateTriggerRequest{
-			TemplateID:       templateID,
-			Name:             name,
-			TriggerType:      entity.TriggerSchedule,
-			CronExpression:   cronExpression,
-			AgentPrompt:      agentPrompt,
-			TemplateVars:     templateVars,
-			TemplateVarsVals: templateVarsVals,
-		})
-		if err != nil {
-			return "", err
-		}
-
-		return t.ID, nil
-	}
-
-	triggerScheduleFn := func(ctx context.Context, triggerID, _ string) error {
-		trigger, err := triggerUC.Get(ctx, triggerID)
-		if err != nil {
-			return err
-		}
-
-		return triggerScheduler.Schedule(ctx, &trigger)
-	}
-	if err := toolRegistry.Register(toolkit.NewTriggerTool(triggerCreator, triggerScheduleFn)); err != nil && l != nil {
-		l.Warn("agentos temporal worker - register create_trigger: %v", err)
-	}
-}
-
-func registerTriggerManagementTools(l *logger.Logger, toolRegistry *toolkit.ToolRegistry, triggerUC *triggerpkg.UseCase) {
-	triggerLister := func(ctx context.Context, templateID string) ([]entity.TriggerSpec, error) {
-		return triggerUC.ListByTemplate(ctx, templateID)
-	}
-	if err := toolRegistry.Register(toolkit.NewListTriggersTool(triggerLister)); err != nil && l != nil {
-		l.Warn("agentos temporal worker - register list_triggers: %v", err)
-	}
-
-	triggerToggler := func(ctx context.Context, triggerID string, isActive bool) (entity.TriggerSpec, error) {
-		return triggerUC.Toggle(ctx, triggerID, isActive)
-	}
-	if err := toolRegistry.Register(toolkit.NewToggleTriggerTool(triggerToggler)); err != nil && l != nil {
-		l.Warn("agentos temporal worker - register toggle_trigger: %v", err)
-	}
-
-	triggerDeleter := func(ctx context.Context, triggerID string) error {
-		return triggerUC.Delete(ctx, triggerID)
-	}
-	if err := toolRegistry.Register(toolkit.NewDeleteTriggerTool(triggerDeleter)); err != nil && l != nil {
-		l.Warn("agentos temporal worker - register delete_trigger: %v", err)
 	}
 }
 

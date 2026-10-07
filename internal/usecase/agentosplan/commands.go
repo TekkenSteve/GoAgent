@@ -92,6 +92,7 @@ func validatePlanCommandStatus(status PlanCommandStatus) error {
 	}
 }
 
+// ValidatePlanCommandRef validates the tenant scope and idempotency key of a durable plan command reference.
 func ValidatePlanCommandRef(ref PlanCommandRef) error {
 	if err := ValidatePlanRef(agentos.PlanRef{PlanID: ref.PlanID, AccountID: ref.AccountID, ProjectID: ref.ProjectID}); err != nil {
 		return err
@@ -127,6 +128,7 @@ func ValidatePlanCommandDeliveredAudit(command *PlanCommandRecord, audit *AuditR
 	return ValidateAuditIdempotency(audit, &record)
 }
 
+// ValidateAuditRef validates the tenant scope and idempotency key of a durable audit reference.
 func ValidateAuditRef(ref AuditRef) error {
 	if err := ValidatePlanRef(agentos.PlanRef{PlanID: ref.PlanID, AccountID: ref.AccountID, ProjectID: ref.ProjectID}); err != nil {
 		return err

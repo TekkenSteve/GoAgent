@@ -3,21 +3,29 @@ package mcp
 import (
 	"errors"
 	"fmt"
-	"os"
 )
 
 const (
-	TransportStdio          = "stdio"
-	TransportSSE            = "sse"
+	// TransportStdio selects the stdio MCP transport, which launches the server as a subprocess.
+	TransportStdio = "stdio"
+	// TransportSSE selects the SSE MCP transport.
+	TransportSSE = "sse"
+	// TransportStreamableHTTP selects the streamable HTTP MCP transport.
 	TransportStreamableHTTP = "streamable-http"
 )
 
 var (
-	ErrMCPServerNameRequired         = errors.New("mcp server name is required")
-	ErrMCPCommandRequired            = errors.New("command is required for stdio transport")
-	ErrMCPURLRequired                = errors.New("url is required for sse transport")
-	ErrMCPSHAURLRequired             = errors.New("url is required for streamable-http transport")
-	ErrMCPTransportRequired          = errors.New("transport type is required")
+	// ErrMCPServerNameRequired is returned when the MCP server name is empty.
+	ErrMCPServerNameRequired = errors.New("mcp server name is required")
+	// ErrMCPCommandRequired is returned when the command is missing for the stdio transport.
+	ErrMCPCommandRequired = errors.New("command is required for stdio transport")
+	// ErrMCPURLRequired is returned when the URL is missing for the SSE transport.
+	ErrMCPURLRequired = errors.New("url is required for sse transport")
+	// ErrMCPSHAURLRequired is returned when the URL is missing for the streamable-http transport.
+	ErrMCPSHAURLRequired = errors.New("url is required for streamable-http transport")
+	// ErrMCPTransportRequired is returned when no transport type is configured.
+	ErrMCPTransportRequired = errors.New("transport type is required")
+	// ErrMCPServerUnsupportedTransport is returned when the configured transport type is not supported.
 	ErrMCPServerUnsupportedTransport = errors.New("unsupported transport")
 )
 
@@ -68,15 +76,4 @@ func (c *ServerConfig) Validate() error {
 	}
 
 	return nil
-}
-
-// BuildEnv merges the server's Env map with the current process environment.
-// Server-specific env vars override process-level ones.
-func (c *ServerConfig) BuildEnv() []string {
-	merged := os.Environ()
-	for k, v := range c.Env {
-		merged = append(merged, fmt.Sprintf("%s=%s", k, v))
-	}
-
-	return merged
 }

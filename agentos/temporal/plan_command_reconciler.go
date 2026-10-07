@@ -14,6 +14,8 @@ import (
 type planCommandReconciler struct {
 	temporalClient planTemporalClient
 	taskQueues     *TaskQueues
+	nexusEndpoint  string
+	nexusPeers     map[string]string
 	commandStore   agentosplan.PlanCommandStore
 	auditStore     agentosplan.AuditStore
 	planIndex      agentosplan.PlanIndex
@@ -22,6 +24,8 @@ type planCommandReconciler struct {
 func newPlanCommandReconciler(
 	temporalClient planTemporalClient,
 	taskQueues *TaskQueues,
+	nexusEndpoint string,
+	nexusPeers map[string]string,
 	commandStore agentosplan.PlanCommandStore,
 	auditStore agentosplan.AuditStore,
 	planIndex agentosplan.PlanIndex,
@@ -29,6 +33,8 @@ func newPlanCommandReconciler(
 	return &planCommandReconciler{
 		temporalClient: temporalClient,
 		taskQueues:     taskQueues,
+		nexusEndpoint:  nexusEndpoint,
+		nexusPeers:     nexusPeers,
 		commandStore:   commandStore,
 		auditStore:     auditStore,
 		planIndex:      planIndex,
@@ -131,7 +137,7 @@ func (r *planCommandReconciler) deliverPlanStart(ctx context.Context, command *a
 	}
 
 	auditRecord := planStartAuditRecord(&spec)
-	if err := executePlanWorkflow(ctx, r.temporalClient, r.taskQueues.PlanControl, r.taskQueues, &spec); err != nil {
+	if err := executePlanWorkflow(ctx, r.temporalClient, r.taskQueues.PlanControl, r.taskQueues, r.nexusEndpoint, r.nexusPeers, &spec); err != nil {
 		return r.markCommandFailed(ctx, command, err)
 	}
 

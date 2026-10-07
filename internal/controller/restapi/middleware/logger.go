@@ -24,6 +24,7 @@ func buildRequestMessage(ctx *fiber.Ctx) string {
 	return result.String()
 }
 
+// Logger returns a Fiber middleware that logs each request's IP, method, URL, status code, and response size.
 func Logger(l logger.Interface) func(c *fiber.Ctx) error {
 	return func(ctx *fiber.Ctx) error {
 		err := ctx.Next()

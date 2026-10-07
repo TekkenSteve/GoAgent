@@ -131,26 +131,46 @@ func restorePlanNodeStatus(nodes map[string]agentos.PlanNodeStatus, expectedNode
 type EventKind string
 
 const (
-	EventPlanStarted         EventKind = "plan.started"
-	EventPlanBlocked         EventKind = "plan.blocked"
-	EventPlanExpanded        EventKind = "plan.expanded"
-	EventPlanApproved        EventKind = "plan.approved"
-	EventPlanRejected        EventKind = "plan.rejected"
-	EventPlanSucceeded       EventKind = "plan.succeeded"
-	EventPlanFailed          EventKind = "plan.failed"
-	EventPlanCanceled        EventKind = "plan.canceled"
-	EventNodeReady           EventKind = "node.ready"
-	EventNodeStarted         EventKind = "node.started"
-	EventNodeSucceeded       EventKind = "node.succeeded"
-	EventNodeFailed          EventKind = "node.failed"
-	EventNodeRetryScheduled  EventKind = "node.retry_scheduled"
-	EventNodeSkipped         EventKind = "node.skipped"
-	EventNodeCanceled        EventKind = "node.canceled"
-	EventNodeInputResolved   EventKind = "node.input_resolved"
-	EventCapabilitySelected  EventKind = "capability.selected"
+	// EventPlanStarted is the reducer event for a plan entering the running lifecycle.
+	EventPlanStarted EventKind = "plan.started"
+	// EventPlanBlocked is the reducer event for a plan entering the blocked lifecycle.
+	EventPlanBlocked EventKind = "plan.blocked"
+	// EventPlanExpanded is the reducer event for a plan expansion.
+	EventPlanExpanded EventKind = "plan.expanded"
+	// EventPlanApproved is the reducer event for a blocked plan receiving approval.
+	EventPlanApproved EventKind = "plan.approved"
+	// EventPlanRejected is the reducer event for a blocked plan receiving rejection.
+	EventPlanRejected EventKind = "plan.rejected"
+	// EventPlanSucceeded is the reducer event for a plan reaching the succeeded lifecycle.
+	EventPlanSucceeded EventKind = "plan.succeeded"
+	// EventPlanFailed is the reducer event for a plan reaching the failed lifecycle.
+	EventPlanFailed EventKind = "plan.failed"
+	// EventPlanCanceled is the reducer event for a plan reaching the canceled lifecycle.
+	EventPlanCanceled EventKind = "plan.canceled"
+	// EventNodeReady is the reducer event for a node entering the ready lifecycle.
+	EventNodeReady EventKind = "node.ready"
+	// EventNodeStarted is the reducer event for a node starting a backend run.
+	EventNodeStarted EventKind = "node.started"
+	// EventNodeSucceeded is the reducer event for a node completing successfully.
+	EventNodeSucceeded EventKind = "node.succeeded"
+	// EventNodeFailed is the reducer event for a node failing.
+	EventNodeFailed EventKind = "node.failed"
+	// EventNodeRetryScheduled is the reducer event for a node retry being scheduled.
+	EventNodeRetryScheduled EventKind = "node.retry_scheduled"
+	// EventNodeSkipped is the reducer event for a node being skipped.
+	EventNodeSkipped EventKind = "node.skipped"
+	// EventNodeCanceled is the reducer event for a node being canceled.
+	EventNodeCanceled EventKind = "node.canceled"
+	// EventNodeInputResolved is the reducer event for a node's inputs being resolved.
+	EventNodeInputResolved EventKind = "node.input_resolved"
+	// EventCapabilitySelected is the reducer event for a capability being selected for a node.
+	EventCapabilitySelected EventKind = "capability.selected"
+	// EventConditionsEvaluated is the reducer event for node conditions being evaluated.
 	EventConditionsEvaluated EventKind = "conditions.evaluated"
-	EventArtifactsPublished  EventKind = "artifacts.published"
-	EventBudgetReported      EventKind = "budget.reported"
+	// EventArtifactsPublished is the reducer event for node artifacts being published.
+	EventArtifactsPublished EventKind = "artifacts.published"
+	// EventBudgetReported is the reducer event for plan budget usage being reported.
+	EventBudgetReported EventKind = "budget.reported"
 )
 
 // StateEvent transitions plan state.
@@ -169,6 +189,17 @@ type StateEvent struct {
 	PreviousLifecycleState string                     `json:"previous_lifecycle_state,omitempty"`
 	NextLifecycleState     string                     `json:"next_lifecycle_state,omitempty"`
 	At                     time.Time                  `json:"at"`
+	// Approval carries the auditable approval-gate context for plan.blocked
+	// (the gate snapshot), plan.approved and plan.rejected (the decision).
+	// It is nil for events that do not touch the approval gate.
+	Approval *StateEventApproval `json:"approval,omitempty"`
+}
+
+// StateEventApproval carries the gate snapshot or decision on approval-gate
+// events. Exactly one of Gate/Decision is populated per event kind.
+type StateEventApproval struct {
+	Gate     agentos.PlanApprovalGate      `json:"gate,omitzero" schema:"optional"`
+	Decision *agentos.PlanApprovalDecision `json:"decision,omitempty"`
 }
 
 // Apply applies one deterministic state transition.
@@ -256,6 +287,90 @@ func (s *State) applyPlanEvent(lifecycle string, event *StateEvent, at time.Time
 
 	if event.Kind == EventPlanStarted && s.Status.StartedAt.IsZero() {
 		s.Status.StartedAt = at
+	}
+
+	// BlockedAt anchors the ApprovalTimeoutSeconds gate: set when entering
+	// the blocked state, cleared on any transition out of it (node lifecycle
+	// events do not pass through here, so they never advance the clock).
+	if lifecycle == agentos.PlanLifecycleBlocked {
+		s.Status.BlockedAt = at
+	} else if !s.Status.BlockedAt.IsZero() {
+		s.Status.BlockedAt = time.Time{}
+	}
+
+	s.applyApprovalGateEvent(event, lifecycle, at)
+}
+
+// applyApprovalGateEvent keeps the approval-gate projection in sync with plan
+// lifecycle events. plan.blocked opens a pending gate; plan.approved and
+// plan.rejected record a decision; any other transition out of blocked closes
+// the gate without a decision. Topology expansion (plan.expanded) is handled
+// separately in expand and marks a decided gate stale.
+func (s *State) applyApprovalGateEvent(event *StateEvent, lifecycle string, at time.Time) {
+	switch {
+	case event.Kind == EventPlanBlocked:
+		if event.Approval == nil {
+			return
+		}
+
+		s.Status.Approval = &agentos.PlanApprovalStatus{
+			LifecycleState: agentos.PlanApprovalPending,
+			Gate:           event.Approval.Gate,
+		}
+	case event.Kind == EventPlanApproved:
+		s.recordPlanApprovalDecision(true, event, at)
+	case event.Kind == EventPlanRejected:
+		s.recordPlanApprovalDecision(false, event, at)
+	case lifecycle != agentos.PlanLifecycleBlocked && s.Status.Approval != nil && s.Status.Approval.LifecycleState == agentos.PlanApprovalPending:
+		// Leaving the blocked lifecycle without approve/reject closes a pending
+		// gate (resume or terminal without a decision). A decided gate is kept
+		// in the projection for audit; only a topology replan marks it stale.
+		s.Status.Approval = nil
+	}
+}
+
+// recordPlanApprovalDecision records an approve/reject decision on a pending
+// gate. The first decision wins; an explicit actor decision takes precedence
+// over the system-synthesized one (used by the approval-timeout auto-reject).
+// When no gate exists (a plan decided before the auditable-approval feature, or
+// an operator abort of a running plan), the event carries a gate snapshot so
+// the decision is still auditable.
+func (s *State) recordPlanApprovalDecision(approved bool, event *StateEvent, at time.Time) {
+	if s.Status.Approval == nil {
+		if event.Approval == nil || event.Approval.Gate.PolicyVersion == "" {
+			return
+		}
+
+		s.Status.Approval = &agentos.PlanApprovalStatus{
+			LifecycleState: agentos.PlanApprovalPending,
+			Gate:           event.Approval.Gate,
+		}
+	}
+
+	if s.Status.Approval.LifecycleState != agentos.PlanApprovalPending {
+		return
+	}
+
+	if approved {
+		s.Status.Approval.LifecycleState = agentos.PlanApprovalApproved
+	} else {
+		s.Status.Approval.LifecycleState = agentos.PlanApprovalRejected
+	}
+
+	if event.Approval != nil && event.Approval.Decision != nil {
+		decision := *event.Approval.Decision
+		s.Status.Approval.Decision = &decision
+
+		return
+	}
+
+	// System decision without an explicit actor (e.g. approval timeout, manual
+	// node retry that unblocks the plan). The gate's policy version anchors it.
+	s.Status.Approval.Decision = &agentos.PlanApprovalDecision{
+		Approved:      approved,
+		Reason:        event.Reason,
+		PolicyVersion: s.Status.Approval.Gate.PolicyVersion,
+		DecidedAt:     at,
 	}
 }
 
@@ -403,6 +518,14 @@ func (s *State) expand(delta PlanDelta, at time.Time) error {
 			LifecycleState: agentos.PlanNodePending,
 			UpdatedAt:      at,
 		}
+	}
+
+	// Replanning (PlanDelta) changes the gated scope: the approval gate's
+	// policy version no longer describes the active topology, so any recorded
+	// decision is invalid and a fresh gate is required before the plan may
+	// pause again.
+	if s.Status.Approval != nil {
+		s.Status.Approval.LifecycleState = agentos.PlanApprovalStale
 	}
 
 	s.refresh(at)

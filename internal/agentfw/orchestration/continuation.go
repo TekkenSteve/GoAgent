@@ -37,6 +37,11 @@ type ContinuationPayload struct {
 	CarriedStep        int32
 	CarriedAt          time.Time
 	InitialRequestedAt time.Time
+	// HistoryRef is the claim-check reference to the message history snapshot
+	// (see SnapshotHistoryActivity). Empty when no snapshot was taken (no blob
+	// store configured, or the run started before the feature shipped); the
+	// continued workflow then rebuilds messages from the initial request.
+	HistoryRef string
 }
 
 func thresholdExceeded(threshold, value int) bool {

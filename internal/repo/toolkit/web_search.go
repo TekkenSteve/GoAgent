@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log"
 	"net/http"
 	"sync"
 	"time"
@@ -117,23 +118,23 @@ After answering, you MUST include a "Sources:" section listing all relevant URLs
 ### Search Query Best Practice
 Use the current year in search queries when searching for recent information.`,
 		Parameters: map[string]any{
-			"type": "object",
+			_schemaKeyType: "object",
 			"properties": map[string]any{
 				"query": map[string]any{
 					"oneOf": []map[string]any{
-						{"type": "string", "description": "A single search query."},
+						{_schemaKeyType: _schemaTypeString, _schemaKeyDescription: "A single search query."},
 						{
-							"type":        "array",
-							"items":       map[string]any{"type": "string"},
-							"description": "Multiple search queries to execute concurrently.",
+							_schemaKeyType:        "array",
+							"items":               map[string]any{_schemaKeyType: _schemaTypeString},
+							_schemaKeyDescription: "Multiple search queries to execute concurrently.",
 						},
 					},
-					"description": "**REQUIRED** - The search query. Either a single string or an array of strings for batch execution.",
+					_schemaKeyDescription: "**REQUIRED** - The search query. Either a single string or an array of strings for batch execution.",
 				},
 				"max_results": map[string]any{
-					"type":        "integer",
-					"description": "Number of search results to return per query (1-50). Default: 5.",
-					"default":     defaultSearchResults,
+					_schemaKeyType:        "integer",
+					_schemaKeyDescription: "Number of search results to return per query (1-50). Default: 5.",
+					"default":             defaultSearchResults,
 				},
 			},
 			"required": []any{"query"},
@@ -321,7 +322,12 @@ func (w *WebSearch) searchTavily(ctx context.Context, query string, maxResults i
 	if err != nil {
 		return WebSearchResult{Query: query, Success: false, Error: err.Error()}
 	}
-	defer resp.Body.Close()
+
+	defer func() {
+		if err := resp.Body.Close(); err != nil {
+			log.Printf("web search: close response body: %v", err)
+		}
+	}()
 
 	var tavilyResp tavilyResponse
 	if err := json.NewDecoder(resp.Body).Decode(&tavilyResp); err != nil {

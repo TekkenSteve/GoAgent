@@ -4,9 +4,9 @@ import (
 	"context"
 
 	agentos "github.com/TekkenSteve/GoAgent/agentos/control"
+	agentoscore "github.com/TekkenSteve/GoAgent/agentos/core"
 	agentosplatform "github.com/TekkenSteve/GoAgent/agentos/platform"
 	"github.com/TekkenSteve/GoAgent/internal/agentfw/eventing"
-	"github.com/TekkenSteve/GoAgent/internal/usecase"
 	"github.com/TekkenSteve/GoAgent/pkg/logger"
 	"github.com/go-playground/validator/v10"
 )
@@ -21,8 +21,6 @@ type SignalWorkflowFn func(ctx context.Context, workflowID, signalName string, a
 
 // V1 -.
 type V1 struct {
-	t usecase.AgentExecutor
-	o usecase.OrchestrationExecutor
 	l logger.Interface
 	v *validator.Validate
 
@@ -32,4 +30,8 @@ type V1 struct {
 	agentOSRuntime  agentos.Runtime
 	planRuntime     agentos.PlanRuntime
 	platformRuntime agentosplatform.Runtime
+	runEventReader  RunEventReader
+	// authorizer decides whether the authenticated principal may act on the
+	// object a request addresses. Never nil in an assembled router.
+	authorizer agentoscore.Authorizer
 }

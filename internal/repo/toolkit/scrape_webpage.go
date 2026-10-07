@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log"
 	"net/http"
 	"strings"
 	"time"
@@ -76,11 +77,11 @@ func (s *ScrapeWebpage) Meta() ToolMeta {
 ### Best Practice
 Always collect multiple relevant URLs from web-search results and scrape them all in a single call rather than making separate calls.`,
 		Parameters: map[string]any{
-			"type": "object",
+			_schemaKeyType: "object",
 			"properties": map[string]any{
 				"urls": map[string]any{
-					"type":        "string",
-					"description": "**REQUIRED** - URLs to scrape, separated by commas. Example: 'https://example.com/page1,https://example.com/page2'",
+					_schemaKeyType:        _schemaTypeString,
+					_schemaKeyDescription: "**REQUIRED** - URLs to scrape, separated by commas. Example: 'https://example.com/page1,https://example.com/page2'",
 				},
 			},
 			"required": []any{"urls"},
@@ -191,7 +192,12 @@ func (s *ScrapeWebpage) scrape(ctx context.Context, url string) ScrapeResult {
 	if err != nil {
 		return ScrapeResult{URL: url, Success: false, Error: err.Error()}
 	}
-	defer resp.Body.Close()
+
+	defer func() {
+		if err := resp.Body.Close(); err != nil {
+			log.Printf("scrape webpage: close response body: %v", err)
+		}
+	}()
 
 	var fcResp firecrawlResp
 	if err := json.NewDecoder(resp.Body).Decode(&fcResp); err != nil {

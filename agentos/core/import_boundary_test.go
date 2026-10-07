@@ -119,6 +119,16 @@ func TestAgentOSPublicPackagesRespectLayering(t *testing.T) {
 			},
 		},
 		{
+			dir: "agentos/stream",
+			forbiddenPrefixes: []string{
+				modulePath + "/agentos/control",
+				modulePath + "/agentos/process",
+				modulePath + "/agentos/platform",
+				modulePath + "/agentos/temporal",
+				modulePath + "/internal/",
+			},
+		},
+		{
 			dir: "agentos/control",
 			forbiddenPrefixes: []string{
 				modulePath + "/agentos/process",
@@ -155,6 +165,7 @@ func TestBackendAdaptersDoNotImportProcessLayer(t *testing.T) {
 		"internal/repo/agentos/httpbackend",
 		"internal/repo/agentos/grpcbackend",
 		"internal/repo/agentos/temporalexternal",
+		"internal/repo/agentos/streamadapter",
 	} {
 		t.Run(dir, func(t *testing.T) {
 			t.Parallel()

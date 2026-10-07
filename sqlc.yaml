@@ -1,0 +1,48 @@
+version: "2"
+sql:
+  - engine: "postgresql"
+    # The whole migration history models the schema: every new migration is
+    # automatically in scope, so a query touching a column no migration
+    # defines fails at generate time, not in production.
+    schema: "migrations"
+    queries:
+      - "internal/repo/persistent/queries/run_outbox.sql"
+      - "internal/repo/persistent/queries/conversation_outbox.sql"
+      - "internal/repo/persistent/queries/billing.sql"
+      - "internal/repo/persistent/queries/run_backend_index.sql"
+      - "internal/repo/persistent/queries/capability_catalog.sql"
+      - "internal/repo/persistent/queries/artifact_schema_catalog.sql"
+      - "internal/repo/persistent/queries/workset.sql"
+      - "internal/repo/persistent/queries/action.sql"
+      - "internal/repo/persistent/queries/ledger.sql"
+      - "internal/repo/persistent/queries/artifact.sql"
+      - "internal/repo/persistent/queries/template.sql"
+      - "internal/repo/persistent/queries/agent.sql"
+      - "internal/repo/persistent/queries/process.sql"
+      - "internal/repo/persistent/queries/plan.sql"
+    gen:
+      go:
+        package: "sqlcgen"
+        out: "internal/repo/persistent/sqlcgen"
+        sql_package: "pgx/v5"
+        emit_interface: true
+        overrides:
+          # Timestamptz scans as time.Time so generated rows drop straight
+          # into the domain event types without pgtype conversions.
+          - db_type: "pg_catalog.timestamptz"
+            go_type: "time.Time"
+          - db_type: "timestamptz"
+            go_type: "time.Time"
+          # The Go money and cost types are float64 end to end; NUMERIC binds
+          # as float64 to match instead of surfacing pgtype.Numeric.
+          - db_type: "pg_catalog.numeric"
+            go_type: "float64"
+          - db_type: "numeric"
+            go_type: "float64"
+          # Domain IDs are strings end to end and pgx's uuid codec encodes
+          # and scans them directly, so UUID columns and params surface as
+          # string instead of pgtype.UUID.
+          - db_type: "pg_catalog.uuid"
+            go_type: "string"
+          - db_type: "uuid"
+            go_type: "string"

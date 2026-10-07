@@ -1,3 +1,5 @@
+// Package process defines the public contracts for governed action, workset,
+// ledger, and trigger primitives used for durable app-owned coordination.
 package process
 
 import (
@@ -22,6 +24,8 @@ type ActionRef struct {
 // action.
 type ActionRiskLevel string
 
+// ActionRiskLevel values describing operator-facing risk classes for governed
+// actions.
 const (
 	ActionRiskLow      ActionRiskLevel = "low"
 	ActionRiskMedium   ActionRiskLevel = "medium"
@@ -127,6 +131,7 @@ type ActionScope struct {
 	Limit          int         `json:"limit,omitempty"`
 }
 
+// Governed action lifecycle and sub-state constants.
 const (
 	ActionRequested       = "requested"
 	ActionWaitingDryRun   = "waiting_dry_run"

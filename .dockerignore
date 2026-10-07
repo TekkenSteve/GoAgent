@@ -10,10 +10,33 @@ nginx
 .golangci.yml
 .gitignore
 
+# Local Go caches: the module cache is read-only and the build cache runs to
+# gigabytes, so neither belongs in a build context.
+.gopath
+.gocache
+# The local module cache belongs to this checkout, not to the image: the build
+# downloads its own. Left in, it would ship hundreds of megabytes of context.
+.gomodcache
+
 coverage.txt
 *.test
 
-docker-compose.yml
+docker-compose*.yml
+
+# Provider credentials live here; the deployment mounts its own copy. Without
+# this line every image layer would carry the development keys.
+config/llm.yaml
+
+# Build inputs and documentation, not runtime content. docs/docs.go is
+# the one exception: it is the swaggo-generated package the REST router
+# imports, so it must stay in the build context. Never collapse the
+# docs/* pattern and its exception back to a bare `docs` line - that
+# drops the package and the image build fails with
+# "no required module provides package .../docs".
+docs/*
+!docs/docs.go
+*.zip
+.test-out.txt
 
 LICENSE
 Makefile

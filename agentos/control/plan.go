@@ -34,8 +34,11 @@ type PlanRef struct {
 
 // PlanNodeSpec describes one backend-owned child run in a RunPlan.
 type PlanNodeSpec struct {
-	NodeID     string         `json:"node_id"`
-	Capability string         `json:"capability,omitempty"`
+	NodeID     string `json:"node_id"`
+	Capability string `json:"capability,omitempty"`
+	// Peer names the town this node's run happens in, resolved through the
+	// deployment's peer → Nexus endpoint map. Empty runs it here.
+	Peer       string         `json:"peer,omitempty"`
 	Run        RunSpec        `json:"run"`
 	Inputs     []InputMapping `json:"inputs,omitempty"`
 	Outputs    []ArtifactSpec `json:"outputs,omitempty"`
@@ -64,6 +67,7 @@ type PlanDeltaSpec struct {
 // EdgeTrigger selects which upstream node terminal state activates an edge.
 type EdgeTrigger string
 
+// EdgeTrigger values selecting the upstream terminal state that activates an edge.
 const (
 	EdgeOnSuccess  EdgeTrigger = "success"
 	EdgeOnError    EdgeTrigger = "error"
@@ -154,6 +158,10 @@ type PlanPolicy struct {
 	MaxParallelNodes    int32 `json:"max_parallel_nodes,omitempty"`
 	BudgetCents         int64 `json:"budget_cents,omitempty"`
 	TimeoutSeconds      int64 `json:"timeout_seconds,omitempty"`
+	// ApprovalTimeoutSeconds bounds how long a plan may stay blocked waiting
+	// for human approval (approve/reject signal). When it elapses the plan is
+	// auto-rejected. 0 disables the gate (plan waits indefinitely).
+	ApprovalTimeoutSeconds int64 `json:"approval_timeout_seconds,omitempty"`
 }
 
 // NodePolicy constrains one plan node.
@@ -166,6 +174,7 @@ type NodePolicy struct {
 // PlanJoinStrategy controls how converging dependencies unblock a node.
 type PlanJoinStrategy string
 
+// PlanJoinStrategy values controlling how converging dependencies unblock a node.
 const (
 	PlanJoinAll   PlanJoinStrategy = "all"
 	PlanJoinAny   PlanJoinStrategy = "any"
@@ -184,7 +193,68 @@ type RunPlanStatus struct {
 	Metadata       map[string]string  `json:"metadata,omitempty"`
 	StartedAt      time.Time          `json:"started_at,omitzero" schema:"optional"`
 	UpdatedAt      time.Time          `json:"updated_at,omitzero" schema:"optional"`
+	// BlockedAt records when the plan entered the blocked (awaiting-approval)
+	// lifecycle state. It is zero outside the blocked state and anchors the
+	// ApprovalTimeoutSeconds gate.
+	BlockedAt time.Time `json:"blocked_at,omitzero" schema:"optional"`
+	// Approval is the live approval-gate projection. It is nil while no gate
+	// is active: a plan that is not blocked, or a blocked plan persisted before
+	// the auditable-approval feature (the decision is then derived lazily).
+	Approval *PlanApprovalStatus `json:"approval,omitempty"`
 }
+
+// PlanApprovalGate snapshots what a plan approval gate covers when the plan
+// enters the blocked lifecycle. It is derived deterministically from the plan
+// topology and policy so a later decision can be validated against the exact
+// scope that was gated. The semantics mirror GovernedAction approval, extended
+// with the plan-level policy version and expiry.
+type PlanApprovalGate struct {
+	// Summary describes what the gate covers (gated node count and plan id).
+	Summary string `json:"summary,omitempty"`
+	// NodeIDs are the precise plan-node references the gate covers: the nodes
+	// that resume or start once the gate is approved.
+	NodeIDs []string `json:"node_ids,omitempty"`
+	// RiskReason is the rationale for requiring approval (why the plan paused).
+	RiskReason string `json:"risk_reason,omitempty"`
+	// PolicyVersion is a deterministic fingerprint of the plan policy and node
+	// set at gate creation. It changes when the topology is replanned
+	// (PlanDelta), which invalidates an existing decision.
+	PolicyVersion string `json:"policy_version,omitempty"`
+	// RequestedAt is when the gate was created (plan entered blocked).
+	RequestedAt time.Time `json:"requested_at,omitzero" schema:"optional"`
+	// ExpiresAt is when the gate auto-rejects. Zero means no expiry
+	// (ApprovalTimeoutSeconds == 0).
+	ExpiresAt time.Time `json:"expires_at,omitzero" schema:"optional"`
+}
+
+// PlanApprovalDecision records an approver's decision for one approval gate.
+// It follows the GovernedAction decision shape (approved/actor/reason/decided
+// at) and additionally records which policy version the decision validated.
+type PlanApprovalDecision struct {
+	Approved      bool      `json:"approved"`
+	ActorID       string    `json:"actor_id,omitempty"`
+	Reason        string    `json:"reason,omitempty"`
+	PolicyVersion string    `json:"policy_version,omitempty"`
+	DecidedAt     time.Time `json:"decided_at,omitzero" schema:"optional"`
+}
+
+// PlanApprovalStatus is the live projection of a plan's approval gate.
+// LifecycleState is empty only when Approval is nil (no gate active).
+type PlanApprovalStatus struct {
+	LifecycleState string                `json:"lifecycle_state,omitempty"`
+	Gate           PlanApprovalGate      `json:"gate,omitzero" schema:"optional"`
+	Decision       *PlanApprovalDecision `json:"decision,omitempty"`
+}
+
+// Plan approval gate lifecycle constants. "stale" marks a gate whose policy
+// version no longer matches the active topology (the plan was replanned), so a
+// fresh gate is required before the plan may resume.
+const (
+	PlanApprovalPending  = "pending"
+	PlanApprovalApproved = "approved"
+	PlanApprovalRejected = "rejected"
+	PlanApprovalStale    = "stale"
+)
 
 // RunPlanDescription is the public, read-oriented view of a RunPlan. Topology
 // is built from the latest durable plan snapshot, including workflow-owned
@@ -310,10 +380,20 @@ type PlanDebugTraceScope struct {
 // PlanEvent is the public event envelope for plan-level events.
 type PlanEvent struct {
 	core.Event
-	PlanID    string `json:"plan_id"`
-	AccountID string `json:"account_id"`
-	ProjectID string `json:"project_id"`
-	NodeID    string `json:"node_id,omitempty"`
+	PlanID          string `json:"plan_id"`
+	AccountID       string `json:"account_id"`
+	ProjectID       string `json:"project_id"`
+	NodeID          string `json:"node_id,omitempty"`
+	ExternalEventID string `json:"external_event_id,omitempty"`
+}
+
+// ExternalPlanEvent is an event reported by a backend that executes a plan
+// node outside the AgentOS process. Event.EventID is the backend's stable
+// delivery identity and is used as the durable idempotency key.
+type ExternalPlanEvent struct {
+	Event  core.Event `json:"event"`
+	Plan   PlanRef    `json:"plan"`
+	NodeID string     `json:"node_id"`
 }
 
 // PlanDebugTrace is a typed debug projection over durable plan events. It keeps
@@ -383,6 +463,7 @@ type PlanConditionTrace struct {
 // PlanAuditAction identifies durable control-plane actions.
 type PlanAuditAction string
 
+// PlanAuditAction values identifying durable control-plane actions.
 const (
 	PlanAuditActionStart   PlanAuditAction = "plan.start"
 	PlanAuditActionSignal  PlanAuditAction = "plan.signal"
@@ -440,6 +521,7 @@ func ArtifactSchemaCatalogSpecJSONSchema() ([]byte, error) {
 // PlanSchemaKind identifies a public RunPlan authoring schema.
 type PlanSchemaKind string
 
+// PlanSchemaKind values identifying public RunPlan authoring schemas.
 const (
 	PlanSchemaKindRunPlan               PlanSchemaKind = "run-plan"
 	PlanSchemaKindPlanDelta             PlanSchemaKind = "plan-delta"

@@ -1,25 +1,27 @@
+// Package persistent implements repository storage on PostgreSQL.
 package persistent
 
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 
-	sq "github.com/Masterminds/squirrel"
 	"github.com/TekkenSteve/GoAgent/internal/entity"
 	"github.com/TekkenSteve/GoAgent/internal/pkg/postgres"
-	"github.com/jackc/pgx/v5"
+	"github.com/TekkenSteve/GoAgent/internal/repo/persistent/sqlcgen"
 )
 
-// AgentRepo implements repo.AgentRepo with Postgres.
+// AgentRepo implements repo.AgentRepo with Postgres. Statements and bindings
+// come from queries/agent.sql.
 type AgentRepo struct {
 	*postgres.Postgres
+
+	queries *sqlcgen.Queries
 }
 
 // NewAgentRepo creates a Postgres-backed agent repository.
 func NewAgentRepo(pg *postgres.Postgres) *AgentRepo {
-	return &AgentRepo{pg}
+	return &AgentRepo{Postgres: pg, queries: sqlcgen.New(pg.Pool)}
 }
 
 // Create inserts a new agent record.
@@ -29,68 +31,35 @@ func (r *AgentRepo) Create(ctx context.Context, req *entity.CreateAgentRequest) 
 		return entity.AgentRecord{}, fmt.Errorf("AgentRepo - Create - marshal config: %w", err)
 	}
 
-	sql, args, err := r.Builder.
-		Insert("agents").
-		Columns("account_id", "name", "description", "system_prompt", "model_ref", "config", "is_default").
-		Values(req.AccountID, req.Name, req.Description, req.SystemPrompt, req.ModelRef, string(configJSON), false).
-		Suffix("RETURNING agent_id, account_id, name, description, system_prompt, model_ref, config, current_version, is_default, created_at, updated_at").
-		ToSql()
-	if err != nil {
-		return entity.AgentRecord{}, fmt.Errorf("AgentRepo - Create - builder: %w", err)
-	}
-
-	var (
-		record    entity.AgentRecord
-		configStr string
-	)
-
-	err = r.Pool.QueryRow(ctx, sql, args...).Scan(
-		&record.AgentID, &record.AccountID, &record.Name, &record.Description,
-		&record.SystemPrompt, &record.ModelRef, &configStr, &record.CurrentVersion,
-		&record.IsDefault, &record.CreatedAt, &record.UpdatedAt,
-	)
+	row, err := r.queries.InsertAgent(ctx, sqlcgen.InsertAgentParams{
+		AccountID:    req.AccountID,
+		Name:         req.Name,
+		Description:  req.Description,
+		SystemPrompt: req.SystemPrompt,
+		ModelRef:     req.ModelRef,
+		Config:       configJSON,
+	})
 	if err != nil {
 		return entity.AgentRecord{}, fmt.Errorf("AgentRepo - Create - query: %w", err)
 	}
 
-	if err := json.Unmarshal([]byte(configStr), &record.Config); err != nil {
-		return entity.AgentRecord{}, fmt.Errorf("AgentRepo - Create - unmarshal config: %w", err)
-	}
-
-	return record, nil
+	return agentRecordFromRow("Create", &row)
 }
 
 // Get retrieves an agent record by ID.
 func (r *AgentRepo) Get(ctx context.Context, agentID string) (entity.AgentRecord, bool, error) {
-	sql, args, err := r.Builder.
-		Select("agent_id", "account_id", "name", "description", "system_prompt", "model_ref", "config", "current_version", "is_default", "created_at", "updated_at").
-		From("agents").
-		Where(sq.Eq{"agent_id": agentID}).
-		ToSql()
-	if err != nil {
-		return entity.AgentRecord{}, false, fmt.Errorf("AgentRepo - Get - builder: %w", err)
+	row, err := r.queries.GetAgent(ctx, agentID)
+	if missingRow(err) {
+		return entity.AgentRecord{}, false, nil
 	}
 
-	var (
-		record    entity.AgentRecord
-		configStr string
-	)
-
-	err = r.Pool.QueryRow(ctx, sql, args...).Scan(
-		&record.AgentID, &record.AccountID, &record.Name, &record.Description,
-		&record.SystemPrompt, &record.ModelRef, &configStr, &record.CurrentVersion,
-		&record.IsDefault, &record.CreatedAt, &record.UpdatedAt,
-	)
 	if err != nil {
-		if errors.Is(err, pgx.ErrNoRows) {
-			return entity.AgentRecord{}, false, nil
-		}
-
 		return entity.AgentRecord{}, false, fmt.Errorf("AgentRepo - Get - query: %w", err)
 	}
 
-	if err := json.Unmarshal([]byte(configStr), &record.Config); err != nil {
-		return entity.AgentRecord{}, false, fmt.Errorf("AgentRepo - Get - unmarshal config: %w", err)
+	record, err := agentRecordFromRow("Get", &row)
+	if err != nil {
+		return entity.AgentRecord{}, false, err
 	}
 
 	return record, true, nil
@@ -100,91 +69,36 @@ func (r *AgentRepo) Get(ctx context.Context, agentID string) (entity.AgentRecord
 // This is a plain data update. Version management (auto-snapshotting config
 // changes) is handled by the usecase layer.
 func (r *AgentRepo) Update(ctx context.Context, agentID string, req entity.UpdateAgentRequest) (entity.AgentRecord, error) {
-	builder, err := buildUpdateQuery(r.Builder, agentID, req)
-	if err != nil {
-		return entity.AgentRecord{}, err
-	}
-
-	sql, args, err := builder.
-		Suffix("RETURNING agent_id, account_id, name, description, system_prompt, model_ref, config, current_version, is_default, created_at, updated_at").
-		ToSql()
-	if err != nil {
-		return entity.AgentRecord{}, fmt.Errorf("AgentRepo - Update - builder: %w", err)
-	}
-
-	var (
-		record    entity.AgentRecord
-		configStr string
-	)
-
-	err = r.Pool.QueryRow(ctx, sql, args...).Scan(
-		&record.AgentID, &record.AccountID, &record.Name, &record.Description,
-		&record.SystemPrompt, &record.ModelRef, &configStr, &record.CurrentVersion,
-		&record.IsDefault, &record.CreatedAt, &record.UpdatedAt,
-	)
-	if err != nil {
-		return entity.AgentRecord{}, fmt.Errorf("AgentRepo - Update - query: %w", err)
-	}
-
-	if err := json.Unmarshal([]byte(configStr), &record.Config); err != nil {
-		return entity.AgentRecord{}, fmt.Errorf("AgentRepo - Update - unmarshal config: %w", err)
-	}
-
-	return record, nil
-}
-
-// buildUpdateQuery builds the update builder with non-nil fields from req.
-func buildUpdateQuery(b sq.StatementBuilderType, agentID string, req entity.UpdateAgentRequest) (sq.UpdateBuilder, error) {
-	builder := b.Update("agents").Where(sq.Eq{"agent_id": agentID})
-
-	if req.Name != nil {
-		builder = builder.Set("name", *req.Name)
-	}
-
-	if req.Description != nil {
-		builder = builder.Set("description", *req.Description)
-	}
-
-	if req.SystemPrompt != nil {
-		builder = builder.Set("system_prompt", *req.SystemPrompt)
-	}
-
-	if req.ModelRef != nil {
-		builder = builder.Set("model_ref", *req.ModelRef)
+	params := sqlcgen.UpdateAgentParams{
+		AgentID:        agentID,
+		Name:           optionalText(req.Name),
+		Description:    optionalText(req.Description),
+		SystemPrompt:   optionalText(req.SystemPrompt),
+		ModelRef:       optionalText(req.ModelRef),
+		IsDefault:      optionalBool(req.IsDefault),
+		CurrentVersion: optionalText(req.CurrentVersion),
 	}
 
 	if req.Config != nil {
 		configJSON, err := json.Marshal(req.Config)
 		if err != nil {
-			return builder, fmt.Errorf("AgentRepo - Update - marshal config: %w", err)
+			return entity.AgentRecord{}, fmt.Errorf("AgentRepo - Update - marshal config: %w", err)
 		}
 
-		builder = builder.Set("config", string(configJSON))
+		params.Config = configJSON
 	}
 
-	if req.IsDefault != nil {
-		builder = builder.Set("is_default", *req.IsDefault)
+	row, err := r.queries.UpdateAgent(ctx, params)
+	if err != nil {
+		return entity.AgentRecord{}, fmt.Errorf("AgentRepo - Update - query: %w", err)
 	}
 
-	if req.CurrentVersion != nil {
-		builder = builder.Set("current_version", *req.CurrentVersion)
-	}
-
-	return builder, nil
+	return agentRecordFromRow("Update", &row)
 }
 
 // Delete removes an agent record by ID.
 func (r *AgentRepo) Delete(ctx context.Context, agentID string) error {
-	sql, args, err := r.Builder.
-		Delete("agents").
-		Where(sq.Eq{"agent_id": agentID}).
-		ToSql()
-	if err != nil {
-		return fmt.Errorf("AgentRepo - Delete - builder: %w", err)
-	}
-
-	_, err = r.Pool.Exec(ctx, sql, args...)
-	if err != nil {
+	if err := r.queries.DeleteAgent(ctx, agentID); err != nil {
 		return fmt.Errorf("AgentRepo - Delete - exec: %w", err)
 	}
 
@@ -193,50 +107,11 @@ func (r *AgentRepo) Delete(ctx context.Context, agentID string) error {
 
 // ListByAccount retrieves all agent records for an account.
 func (r *AgentRepo) ListByAccount(ctx context.Context, accountID string) ([]entity.AgentRecord, error) {
-	sql, args, err := r.Builder.
-		Select("agent_id", "account_id", "name", "description", "system_prompt", "model_ref", "config", "current_version", "is_default", "created_at", "updated_at").
-		From("agents").
-		Where(sq.Eq{"account_id": accountID}).
-		OrderBy("created_at DESC").
-		ToSql()
-	if err != nil {
-		return nil, fmt.Errorf("AgentRepo - ListByAccount - builder: %w", err)
-	}
+	rows, err := r.queries.ListAgentsByAccount(ctx, accountID)
 
-	rows, err := r.Pool.Query(ctx, sql, args...)
-	if err != nil {
-		return nil, fmt.Errorf("AgentRepo - ListByAccount - query: %w", err)
-	}
-	defer rows.Close()
-
-	var records []entity.AgentRecord
-
-	for rows.Next() {
-		var (
-			record    entity.AgentRecord
-			configStr string
-		)
-
-		if err := rows.Scan(
-			&record.AgentID, &record.AccountID, &record.Name, &record.Description,
-			&record.SystemPrompt, &record.ModelRef, &configStr, &record.CurrentVersion,
-			&record.IsDefault, &record.CreatedAt, &record.UpdatedAt,
-		); err != nil {
-			return nil, fmt.Errorf("AgentRepo - ListByAccount - scan: %w", err)
-		}
-
-		if err := json.Unmarshal([]byte(configStr), &record.Config); err != nil {
-			return nil, fmt.Errorf("AgentRepo - ListByAccount - unmarshal config: %w", err)
-		}
-
-		records = append(records, record)
-	}
-
-	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("AgentRepo - ListByAccount - rows: %w", err)
-	}
-
-	return records, nil
+	return listRecords("AgentRepo - ListByAccount", rows, err, func(row *sqlcgen.Agent) (entity.AgentRecord, error) {
+		return agentRecordFromRow("ListByAccount", row)
+	})
 }
 
 // CreateVersion stores a new agent version snapshot.
@@ -251,16 +126,16 @@ func (r *AgentRepo) CreateVersion(ctx context.Context, record *entity.AgentVersi
 		return fmt.Errorf("AgentRepo - CreateVersion - marshal tool_bindings: %w", err)
 	}
 
-	sql, args, err := r.Builder.
-		Insert("agent_versions").
-		Columns("version_id", "agent_id", "version_name", "system_prompt", "model_ref", "config", "tool_bindings", "change_description").
-		Values(record.VersionID, record.AgentID, record.VersionName, record.SystemPrompt, record.ModelRef, string(configJSON), string(toolBindingsJSON), record.ChangeDescription).
-		ToSql()
-	if err != nil {
-		return fmt.Errorf("AgentRepo - CreateVersion - builder: %w", err)
-	}
-
-	_, err = r.Pool.Exec(ctx, sql, args...)
+	err = r.queries.InsertAgentVersion(ctx, sqlcgen.InsertAgentVersionParams{
+		VersionID:         record.VersionID,
+		AgentID:           record.AgentID,
+		VersionName:       record.VersionName,
+		SystemPrompt:      record.SystemPrompt,
+		ModelRef:          record.ModelRef,
+		Config:            configJSON,
+		ToolBindings:      toolBindingsJSON,
+		ChangeDescription: record.ChangeDescription,
+	})
 	if err != nil {
 		return fmt.Errorf("AgentRepo - CreateVersion - exec: %w", err)
 	}
@@ -270,38 +145,18 @@ func (r *AgentRepo) CreateVersion(ctx context.Context, record *entity.AgentVersi
 
 // GetVersion retrieves a version snapshot by ID.
 func (r *AgentRepo) GetVersion(ctx context.Context, versionID string) (entity.AgentVersionRecord, bool, error) {
-	sql, args, err := r.Builder.
-		Select("version_id", "agent_id", "version_name", "system_prompt", "model_ref", "config", "tool_bindings", "change_description", "created_at").
-		From("agent_versions").
-		Where(sq.Eq{"version_id": versionID}).
-		ToSql()
-	if err != nil {
-		return entity.AgentVersionRecord{}, false, fmt.Errorf("AgentRepo - GetVersion - builder: %w", err)
+	row, err := r.queries.GetAgentVersion(ctx, versionID)
+	if missingRow(err) {
+		return entity.AgentVersionRecord{}, false, nil
 	}
 
-	var (
-		record                     entity.AgentVersionRecord
-		configStr, toolBindingsStr string
-	)
-
-	err = r.Pool.QueryRow(ctx, sql, args...).Scan(
-		&record.VersionID, &record.AgentID, &record.VersionName, &record.SystemPrompt,
-		&record.ModelRef, &configStr, &toolBindingsStr, &record.ChangeDescription, &record.CreatedAt,
-	)
 	if err != nil {
-		if errors.Is(err, pgx.ErrNoRows) {
-			return entity.AgentVersionRecord{}, false, nil
-		}
-
 		return entity.AgentVersionRecord{}, false, fmt.Errorf("AgentRepo - GetVersion - query: %w", err)
 	}
 
-	if err := json.Unmarshal([]byte(configStr), &record.Config); err != nil {
-		return entity.AgentVersionRecord{}, false, fmt.Errorf("AgentRepo - GetVersion - unmarshal config: %w", err)
-	}
-
-	if err := json.Unmarshal([]byte(toolBindingsStr), &record.ToolBindings); err != nil {
-		return entity.AgentVersionRecord{}, false, fmt.Errorf("AgentRepo - GetVersion - unmarshal tool_bindings: %w", err)
+	record, err := agentVersionFromRow("GetVersion", &row)
+	if err != nil {
+		return entity.AgentVersionRecord{}, false, err
 	}
 
 	return record, true, nil
@@ -309,51 +164,62 @@ func (r *AgentRepo) GetVersion(ctx context.Context, versionID string) (entity.Ag
 
 // ListVersions retrieves all version snapshots for an agent.
 func (r *AgentRepo) ListVersions(ctx context.Context, agentID string) ([]entity.AgentVersionRecord, error) {
-	sql, args, err := r.Builder.
-		Select("version_id", "agent_id", "version_name", "system_prompt", "model_ref", "config", "tool_bindings", "change_description", "created_at").
-		From("agent_versions").
-		Where(sq.Eq{"agent_id": agentID}).
-		OrderBy("created_at DESC").
-		ToSql()
-	if err != nil {
-		return nil, fmt.Errorf("AgentRepo - ListVersions - builder: %w", err)
+	rows, err := r.queries.ListAgentVersions(ctx, agentID)
+
+	return listRecords("AgentRepo - ListVersions", rows, err, func(row *sqlcgen.AgentVersion) (entity.AgentVersionRecord, error) {
+		return agentVersionFromRow("ListVersions", row)
+	})
+}
+
+// agentRecordFromRow shapes a generated row into the entity, decoding the
+// config JSON document.
+func agentRecordFromRow(name string, row *sqlcgen.Agent) (entity.AgentRecord, error) {
+	record := agentRecordColumns(row)
+
+	if err := decodeRecordJSON("AgentRepo - "+name, "config", row.Config, &record.Config); err != nil {
+		return entity.AgentRecord{}, err
 	}
 
-	rows, err := r.Pool.Query(ctx, sql, args...)
-	if err != nil {
-		return nil, fmt.Errorf("AgentRepo - ListVersions - query: %w", err)
+	return record, nil
+}
+
+// agentRecordColumns copies the stored columns of one agent row; the JSON
+// document column is decoded by the caller.
+func agentRecordColumns(row *sqlcgen.Agent) entity.AgentRecord {
+	return entity.AgentRecord{
+		AgentID:        row.AgentID,
+		AccountID:      row.AccountID,
+		Name:           row.Name,
+		Description:    row.Description,
+		SystemPrompt:   row.SystemPrompt,
+		ModelRef:       row.ModelRef,
+		CurrentVersion: row.CurrentVersion,
+		IsDefault:      row.IsDefault,
+		CreatedAt:      row.CreatedAt,
+		UpdatedAt:      row.UpdatedAt,
 	}
-	defer rows.Close()
+}
 
-	var records []entity.AgentVersionRecord
-
-	for rows.Next() {
-		var (
-			record                     entity.AgentVersionRecord
-			configStr, toolBindingsStr string
-		)
-
-		if err := rows.Scan(
-			&record.VersionID, &record.AgentID, &record.VersionName, &record.SystemPrompt,
-			&record.ModelRef, &configStr, &toolBindingsStr, &record.ChangeDescription, &record.CreatedAt,
-		); err != nil {
-			return nil, fmt.Errorf("AgentRepo - ListVersions - scan: %w", err)
-		}
-
-		if err := json.Unmarshal([]byte(configStr), &record.Config); err != nil {
-			return nil, fmt.Errorf("AgentRepo - ListVersions - unmarshal config: %w", err)
-		}
-
-		if err := json.Unmarshal([]byte(toolBindingsStr), &record.ToolBindings); err != nil {
-			return nil, fmt.Errorf("AgentRepo - ListVersions - unmarshal tool_bindings: %w", err)
-		}
-
-		records = append(records, record)
-	}
-
-	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("AgentRepo - ListVersions - rows: %w", err)
+// agentVersionFromRow shapes a generated row into the entity, decoding the
+// config and tool_bindings JSON documents.
+func agentVersionFromRow(name string, row *sqlcgen.AgentVersion) (entity.AgentVersionRecord, error) {
+	record := entity.AgentVersionRecord{
+		VersionID:         row.VersionID,
+		AgentID:           row.AgentID,
+		VersionName:       row.VersionName,
+		SystemPrompt:      row.SystemPrompt,
+		ModelRef:          row.ModelRef,
+		ChangeDescription: row.ChangeDescription,
+		CreatedAt:         row.CreatedAt,
 	}
 
-	return records, nil
+	if err := decodeRecordJSON("AgentRepo - "+name, "config", row.Config, &record.Config); err != nil {
+		return entity.AgentVersionRecord{}, err
+	}
+
+	if err := decodeRecordJSON("AgentRepo - "+name, "tool_bindings", row.ToolBindings, &record.ToolBindings); err != nil {
+		return entity.AgentVersionRecord{}, err
+	}
+
+	return record, nil
 }

@@ -40,7 +40,7 @@ func TestServerConfig_Validate(t *testing.T) {
 func TestManager_Definitions_Empty(t *testing.T) {
 	t.Parallel()
 
-	mgr := mcp.NewManager()
+	mgr := mcp.NewManager(nil)
 
 	defs := mgr.Definitions()
 	if len(defs) != 0 {
@@ -51,7 +51,7 @@ func TestManager_Definitions_Empty(t *testing.T) {
 func TestManager_RegisteredTools_Empty(t *testing.T) {
 	t.Parallel()
 
-	mgr := mcp.NewManager()
+	mgr := mcp.NewManager(nil)
 
 	tools := mgr.RegisteredTools()
 	if len(tools) != 0 {

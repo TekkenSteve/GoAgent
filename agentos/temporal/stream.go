@@ -2,14 +2,12 @@ package temporal
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 
 	agentoscore "github.com/TekkenSteve/GoAgent/agentos/core"
-	agentfwstream "github.com/TekkenSteve/GoAgent/internal/agentfw/stream"
-	"github.com/TekkenSteve/GoAgent/internal/entity"
-	repostream "github.com/TekkenSteve/GoAgent/internal/repo/stream"
+	agentosstream "github.com/TekkenSteve/GoAgent/agentos/stream"
+	"github.com/TekkenSteve/GoAgent/internal/repo/agentos/streamadapter"
 )
 
 type subscription struct {
@@ -29,14 +27,27 @@ func (s *subscription) Close() error {
 	return s.close()
 }
 
-func newSubscription(internalSub *agentfwstream.Subscription) agentoscore.Subscription {
+// newSubscription consumes the data-plane subscription for one run channel and
+// reduces it to the control plane's milestone event model via ProjectToCore —
+// the same reduction the run projection applies, so the subscribe API and the
+// durable timeline agree on what survives. The bus offset becomes the event's
+// Sequence and its id (run:offset), mirroring the projection sink.
+func newSubscription(handle *agentosstream.Handle, internalSub *agentosstream.Subscription) agentoscore.Subscription {
 	out := make(chan agentoscore.Event)
 
 	go func() {
 		defer close(out)
 
 		for stored := range internalSub.C {
-			out <- eventFromStored(stored)
+			core, ok := agentosstream.ProjectToCore(handle, &stored)
+			if !ok {
+				continue
+			}
+
+			core.Sequence = stored.Sequence
+			core.EventID = fmt.Sprintf("%s:%d", core.RunID, stored.Sequence)
+
+			out <- *core
 		}
 	}()
 
@@ -50,13 +61,13 @@ func newSubscription(internalSub *agentfwstream.Subscription) agentoscore.Subscr
 	}
 }
 
-var errAgentOSSubscriberNotConfigured = errors.New("agentos temporal subscriber: redis subscriber is not configured")
+var errAgentOSSubscriberNotConfigured = errors.New("agentos temporal subscriber: stream subscriber is not configured")
 
 type agentOSSubscriber struct {
-	subscriber *repostream.RedisSubscriber
+	subscriber agentosstream.Subscriber
 }
 
-func newAgentOSSubscriber(subscriber *repostream.RedisSubscriber) *agentOSSubscriber {
+func newAgentOSSubscriber(subscriber agentosstream.Subscriber) *agentOSSubscriber {
 	if subscriber == nil {
 		return nil
 	}
@@ -64,53 +75,24 @@ func newAgentOSSubscriber(subscriber *repostream.RedisSubscriber) *agentOSSubscr
 	return &agentOSSubscriber{subscriber: subscriber}
 }
 
+// SubscribeAgentOS subscribes to a run's data-plane channel. The run timeline
+// is published under streamadapter.HandleForRun; the tenant falls back to
+// "default" because the scope carries no account (matching the run projection).
 func (s *agentOSSubscriber) SubscribeAgentOS(ctx context.Context, scope agentoscore.StreamScope) (agentoscore.Subscription, error) {
 	if s == nil || s.subscriber == nil {
 		return nil, errAgentOSSubscriberNotConfigured
 	}
 
-	sessionID := scope.ThreadID
-	if sessionID == "" {
-		sessionID = scope.RunID
+	if scope.RunID == "" {
+		return nil, fmt.Errorf("%w: run id is required", agentoscore.ErrInvalidStreamScope)
 	}
 
-	if sessionID == "" {
-		return nil, fmt.Errorf("%w: run id or thread id is required", agentoscore.ErrInvalidStreamScope)
-	}
+	handle := streamadapter.HandleForRun("", scope.RunID)
 
-	sub, err := s.subscriber.Subscribe(ctx, sessionID, scope.AfterSequence)
+	sub, err := s.subscriber.Subscribe(ctx, handle, scope.AfterSequence)
 	if err != nil {
 		return nil, err
 	}
 
-	return newSubscription(sub), nil
-}
-
-func eventFromStored(stored agentfwstream.StoredEvent) agentoscore.Event {
-	base := stored.Event.Base()
-
-	return agentoscore.Event{
-		EventID:   base.EventID,
-		EventType: agentoscore.EventType(stored.Event.EventType()),
-		RunID:     base.RunID,
-		ThreadID:  base.SessionID,
-		Sequence:  stored.Sequence,
-		Timestamp: base.Timestamp,
-		Source:    string(base.Source),
-		Payload:   payloadFromStreamEvent(stored.Event),
-	}
-}
-
-func payloadFromStreamEvent(event entity.StreamEvent) map[string]any {
-	data, err := entity.MarshalEvent(event)
-	if err != nil {
-		return map[string]any{}
-	}
-
-	var payload map[string]any
-	if err := json.Unmarshal(data, &payload); err != nil {
-		return map[string]any{}
-	}
-
-	return payload
+	return newSubscription(handle, sub), nil
 }

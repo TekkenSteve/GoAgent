@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"encoding/json"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -27,9 +28,20 @@ func testSchemaCommand(t *testing.T, kind, outName string) {
 		t.Fatalf("run schema code = %d stderr = %s", code, stderr.String())
 	}
 
-	data, err := os.ReadFile(out)
+	file, err := os.OpenInRoot(dir, outName)
 	if err != nil {
-		t.Fatalf("ReadFile: %v", err)
+		t.Fatalf("OpenInRoot: %v", err)
+	}
+
+	t.Cleanup(func() {
+		if err := file.Close(); err != nil {
+			t.Errorf("close schema file: %v", err)
+		}
+	})
+
+	data, err := io.ReadAll(file)
+	if err != nil {
+		t.Fatalf("ReadAll: %v", err)
 	}
 
 	var schema map[string]any
@@ -380,7 +392,7 @@ func TestServerlessWorkflowCommandsRoundTrip(t *testing.T) {
 	}
 
 	exportServerlessWorkflow(t, planPath, capabilitiesPath, workflowPath)
-	assertWorkflowContainsAgentOSExtension(t, workflowPath)
+	assertWorkflowContainsAgentOSExtension(t, dir, "workflow.yaml")
 	output := importServerlessWorkflow(t, workflowPath, capabilitiesPath)
 
 	if output.Spec.PlanID != planCLI {
@@ -411,12 +423,23 @@ func exportServerlessWorkflow(t *testing.T, planPath, capabilitiesPath, workflow
 	}
 }
 
-func assertWorkflowContainsAgentOSExtension(t *testing.T, workflowPath string) {
+func assertWorkflowContainsAgentOSExtension(t *testing.T, dir, name string) {
 	t.Helper()
 
-	workflowData, err := os.ReadFile(workflowPath)
+	workflow, err := os.OpenInRoot(dir, name)
 	if err != nil {
-		t.Fatalf("ReadFile workflow: %v", err)
+		t.Fatalf("OpenInRoot workflow: %v", err)
+	}
+
+	t.Cleanup(func() {
+		if err := workflow.Close(); err != nil {
+			t.Errorf("close workflow file: %v", err)
+		}
+	})
+
+	workflowData, err := io.ReadAll(workflow)
+	if err != nil {
+		t.Fatalf("ReadAll workflow: %v", err)
 	}
 
 	if !strings.Contains(string(workflowData), "agentos.io/run_plan") {

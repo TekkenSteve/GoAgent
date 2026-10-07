@@ -17,6 +17,7 @@ import (
 // @Success     200 {object} map[string]any
 // @Failure     400 {object} response.Error
 // @Router      /agentos/plans/schemas/{kind} [get]
+// The schema is served as the wire contract for authoring AgentOS plans.
 func (r *V1) agentOSPlanSchema(ctx *fiber.Ctx) error {
 	schema, err := agentos.PlanJSONSchema(agentos.PlanSchemaKind(ctx.Params("kind")))
 	if err != nil {

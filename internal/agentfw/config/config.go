@@ -1,3 +1,5 @@
+// Package config provides runtime settings for the agent framework,
+// including Temporal client and task queue configuration.
 package config
 
 import (
@@ -16,6 +18,17 @@ const (
 	defaultContinueAsNewStateSizeThreshold  = 512 * 1024 // 512 KiB
 	defaultContinueAsNewWallClockThreshold  = 50 * time.Minute
 	defaultContinueAsNewMaxContinuations    = 1000
+
+	// defaultMaxDelegateDepth bounds a delegation tree when the deployment
+	// states no limit. Every level re-injects the delegate tool, so a prompt
+	// that talks an agent into delegating to itself would otherwise never
+	// stop.
+	defaultMaxDelegateDepth = 3
+	// defaultRunWorkflowTimeout bounds one root workflow execution. It must
+	// comfortably exceed the await-user-input window, or a run waiting for a
+	// person would be killed instead of answered. Each continue-as-new gets
+	// a fresh window, so a long conversation is not cut off by this bound.
+	defaultRunWorkflowTimeout = 48 * time.Hour
 )
 
 // Config contains runtime settings for the agent framework.
@@ -31,11 +44,29 @@ type Temporal struct {
 	Address    string
 	Namespace  string
 	TaskQueues TaskQueues
+	// NexusEndpoint names the deployment's Nexus endpoint: the caller-visible
+	// handle for the AgentOS run service.
+	NexusEndpoint string
+	// NexusPeers maps a peer town to the Nexus endpoint that reaches it. A plan
+	// node names its peer; a node that names none uses NexusEndpoint.
+	NexusPeers map[string]string
 
 	MaxConcurrentWorkflowTaskPollers int
 	MaxConcurrentActivityTaskPollers int
 	MaxConcurrentActivityExecution   int
+
+	// MaxDelegateDepth bounds the delegation tree a run may build.
+	MaxDelegateDepth int
+	// DelegateTokenBudget bounds what a run's whole delegation tree may
+	// spend. Zero means no token bound.
+	DelegateTokenBudget int64
+	// RunWorkflowTimeout bounds one root workflow execution.
+	RunWorkflowTimeout time.Duration
 }
+
+// DefaultNexusEndpoint is the endpoint name the deployment script creates when
+// no override is configured.
+const DefaultNexusEndpoint = "agentos"
 
 // TaskQueues names the Temporal queues used by each workload class.
 type TaskQueues struct {
@@ -47,9 +78,14 @@ type TaskQueues struct {
 	NativeLLM       string
 	NativeTool      string
 	Stream          string
-	Trigger         string
+	// Nexus is the router queue hosting the Nexus service that fronts the
+	// AgentOS run API. It is separate from the workload queues so Nexus routing
+	// scales and deploys independently of plan execution.
+	Nexus string
 }
 
+// ErrTemporalTaskQueuesInvalid reports that the Temporal task queues are
+// missing or not mutually distinct; it is returned by TaskQueues.Validate.
 var ErrTemporalTaskQueuesInvalid = errors.New("agentfw temporal task queues: invalid")
 
 // DefaultTaskQueues returns the production-oriented AgentOS queue split.
@@ -63,7 +99,7 @@ func DefaultTaskQueues() TaskQueues {
 		NativeLLM:       "agentfw-native-llm",
 		NativeTool:      "agentfw-native-tool",
 		Stream:          "agentfw-stream",
-		Trigger:         "agentfw-trigger",
+		Nexus:           "agentos-nexus",
 	}
 }
 
@@ -82,7 +118,7 @@ func (q *TaskQueues) QueueNames() []string {
 		q.NativeLLM,
 		q.NativeTool,
 		q.Stream,
-		q.Trigger,
+		q.Nexus,
 	}
 
 	seen := make(map[string]struct{}, len(ordered))
@@ -122,7 +158,7 @@ func (q *TaskQueues) Validate() error {
 		{label: "native llm", value: q.NativeLLM},
 		{label: "native tool", value: q.NativeTool},
 		{label: "stream", value: q.Stream},
-		{label: "trigger", value: q.Trigger},
+		{label: "nexus", value: q.Nexus},
 	}
 
 	seen := make(map[string]string, len(fields))
@@ -165,13 +201,17 @@ func Default() Config {
 	return Config{
 		Enabled: false,
 		Temporal: Temporal{
-			Address:    "127.0.0.1:7233",
-			Namespace:  "default",
-			TaskQueues: DefaultTaskQueues(),
+			Address:       "127.0.0.1:7233",
+			Namespace:     "default",
+			TaskQueues:    DefaultTaskQueues(),
+			NexusEndpoint: DefaultNexusEndpoint,
 
 			MaxConcurrentWorkflowTaskPollers: defaultMaxConcurrentWorkflowTaskPollers,
 			MaxConcurrentActivityTaskPollers: defaultMaxConcurrentActivityTaskPollers,
 			MaxConcurrentActivityExecution:   defaultMaxConcurrentActivityExecution,
+
+			MaxDelegateDepth:   defaultMaxDelegateDepth,
+			RunWorkflowTimeout: defaultRunWorkflowTimeout,
 		},
 		Runtime: Runtime{
 			DefaultModelRef: "gpt-4.1-mini",

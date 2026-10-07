@@ -3,6 +3,7 @@ package v1
 import (
 	"bufio"
 	"encoding/json"
+	"log"
 	"net/http"
 	"strconv"
 
@@ -30,22 +31,22 @@ const (
 // @Failure     404 {object} response.Error
 // @Failure     500 {object} response.Error
 // @Router      /agentos/plans [post]
+// The plan is started on its declared backend and tracked durably.
 func (r *V1) startAgentOSPlan(ctx *fiber.Ctx) error {
 	if r.planRuntime == nil {
 		return errorResponse(ctx, http.StatusNotFound, "agentos plan runtime is not configured")
 	}
 
-	var spec agentos.RunPlanSpec
-	if err := ctx.BodyParser(&spec); err != nil {
-		return errorResponse(ctx, http.StatusBadRequest, "invalid request body")
-	}
+	// Node runs inherit the plan's tenant when the plan executes, so deciding it
+	// here is enough.
+	return withTenantScopedBody[agentos.RunPlanSpec](r, ctx, planSpecBody{}, agentoscore.ActionPlanControl, "plan", func(spec *agentos.RunPlanSpec) error {
+		status, err := r.planRuntime.StartPlan(ctx.UserContext(), spec)
+		if err != nil {
+			return err
+		}
 
-	status, err := r.planRuntime.StartPlan(ctx.UserContext(), &spec)
-	if err != nil {
-		return agentOSError(ctx, err)
-	}
-
-	return ctx.Status(http.StatusAccepted).JSON(status)
+		return ctx.Status(http.StatusAccepted).JSON(status)
+	})
 }
 
 // @Summary     Get AgentOS plan status
@@ -55,12 +56,14 @@ func (r *V1) startAgentOSPlan(ctx *fiber.Ctx) error {
 // @Accept      json
 // @Produce     json
 // @Param       plan_id path string true "Plan ID"
+// @Param       project_id query string true "Project ID"
 // @Success     200 {object} agentos.RunPlanStatus
 // @Failure     404 {object} response.Error
 // @Failure     500 {object} response.Error
 // @Router      /agentos/plans/{plan_id}/status [get]
+// The status aggregates node outcomes, signals, and events for the plan.
 func (r *V1) statusAgentOSPlan(ctx *fiber.Ctx) error {
-	return r.withPlanRef(ctx, func(ref agentos.PlanRef) error {
+	return r.withPlanRef(ctx, agentoscore.ActionPlanRead, func(ref agentos.PlanRef) error {
 		status, err := r.planRuntime.StatusPlan(ctx.UserContext(), ref)
 		if err != nil {
 			return agentOSError(ctx, err)
@@ -77,15 +80,15 @@ func (r *V1) statusAgentOSPlan(ctx *fiber.Ctx) error {
 // @Accept      json
 // @Produce     json
 // @Param       plan_id path string true "Plan ID"
-// @Param       account_id query string true "Account ID"
 // @Param       project_id query string true "Project ID"
 // @Success     200 {object} agentos.RunPlanDescription
 // @Failure     400 {object} response.Error
 // @Failure     404 {object} response.Error
 // @Failure     500 {object} response.Error
 // @Router      /agentos/plans/{plan_id}/description [get]
+// The description exposes the plan topology and aggregate status.
 func (r *V1) describeAgentOSPlan(ctx *fiber.Ctx) error {
-	return r.withPlanRef(ctx, func(ref agentos.PlanRef) error {
+	return r.withPlanRef(ctx, agentoscore.ActionPlanRead, func(ref agentos.PlanRef) error {
 		description, err := r.planRuntime.DescribePlan(ctx.UserContext(), ref)
 		if err != nil {
 			return agentOSError(ctx, err)
@@ -95,7 +98,11 @@ func (r *V1) describeAgentOSPlan(ctx *fiber.Ctx) error {
 	})
 }
 
-func (r *V1) withPlanRef(ctx *fiber.Ctx, fn func(agentos.PlanRef) error) error {
+// withPlanRef resolves the plan reference for a query-addressed plan operation
+// and authorizes it. The account comes from the credential; the query names
+// only the project, and the pair is authorized through the port before the
+// runtime sees it.
+func (r *V1) withPlanRef(ctx *fiber.Ctx, action agentoscore.Action, fn func(agentos.PlanRef) error) error {
 	if r.planRuntime == nil {
 		return errorResponse(ctx, http.StatusNotFound, "agentos plan runtime is not configured")
 	}
@@ -113,10 +120,15 @@ func (r *V1) withPlanRef(ctx *fiber.Ctx, fn func(agentos.PlanRef) error) error {
 		return errorResponse(ctx, http.StatusBadRequest, err.Error())
 	}
 
+	scope, ok := r.tenantFromRequest(ctx, req.ProjectID, action, "plan")
+	if !ok {
+		return nil
+	}
+
 	return fn(agentos.PlanRef{
 		PlanID:    ctx.Params("plan_id"),
-		AccountID: req.AccountID,
-		ProjectID: req.ProjectID,
+		AccountID: scope.AccountID,
+		ProjectID: scope.ProjectID,
 	})
 }
 
@@ -154,8 +166,9 @@ func withPlanBody[T any](r *V1, ctx *fiber.Ctx, fn func(T) error) error {
 // @Failure     404 {object} response.Error
 // @Failure     500 {object} response.Error
 // @Router      /agentos/plans/{plan_id}/signals [post]
+// The signal is forwarded to the active plan run for business input.
 func (r *V1) signalAgentOSPlan(ctx *fiber.Ctx) error {
-	return withPlanActionBody(r, ctx, func(req request.AgentOSPlanSignal, ref agentos.PlanRef) error {
+	return withPlanActionBody(r, ctx, agentoscore.ActionPlanControl, func(req request.AgentOSPlanSignal, ref agentos.PlanRef) error {
 		signal := agentoscore.Signal{
 			Type:           req.Type,
 			IdempotencyKey: req.IdempotencyKey,
@@ -181,8 +194,9 @@ func (r *V1) signalAgentOSPlan(ctx *fiber.Ctx) error {
 // @Failure     404 {object} response.Error
 // @Failure     500 {object} response.Error
 // @Router      /agentos/plans/{plan_id}/control [post]
+// The control operation is applied to the active plan run.
 func (r *V1) controlAgentOSPlan(ctx *fiber.Ctx) error {
-	return withPlanActionBody(r, ctx, func(req request.AgentOSPlanControl, ref agentos.PlanRef) error {
+	return withPlanActionBody(r, ctx, agentoscore.ActionPlanControl, func(req request.AgentOSPlanControl, ref agentos.PlanRef) error {
 		control := agentoscore.ControlRequest{
 			Operation:      req.Operation,
 			IdempotencyKey: req.IdempotencyKey,
@@ -195,28 +209,70 @@ func (r *V1) controlAgentOSPlan(ctx *fiber.Ctx) error {
 	})
 }
 
+// planScopedBody is implemented by plan actions whose body names the project
+// they act in. The account is not part of it: it comes from the credential.
 type planScopedBody interface {
-	GetAccountID() string
 	GetProjectID() string
 }
 
 func withPlanActionBody[T any, PT interface {
 	*T
 	planScopedBody
-}](r *V1, ctx *fiber.Ctx, fn func(T, agentos.PlanRef) error) error {
+}](r *V1, ctx *fiber.Ctx, action agentoscore.Action, fn func(T, agentos.PlanRef) error) error {
 	return withPlanBody(r, ctx, func(req T) error {
 		scoped := PT(&req)
-		ref := agentos.PlanRef{
-			PlanID:    ctx.Params("plan_id"),
-			AccountID: scoped.GetAccountID(),
-			ProjectID: scoped.GetProjectID(),
+
+		scope, ok := r.tenantFromRequest(ctx, scoped.GetProjectID(), action, "plan")
+		if !ok {
+			return nil
 		}
 
-		return fn(req, ref)
+		return fn(req, agentos.PlanRef{
+			PlanID:    ctx.Params("plan_id"),
+			AccountID: scope.AccountID,
+			ProjectID: scope.ProjectID,
+		})
 	})
 }
 
-func withQueryScope[T any](r *V1, ctx *fiber.Ctx, scopeName string, fn func(T) (any, error)) error {
+// planScopeIDs names the addressing every plan read shares: the plan in the
+// path, and the authorized tenant. Stating it once keeps the read handlers
+// parallel and leaves each one only the filters it adds.
+func planScopeIDs(ctx *fiber.Ctx, tenant agentoscore.TenantScope) (planID, accountID, projectID string) {
+	return ctx.Params("plan_id"), tenant.AccountID, tenant.ProjectID
+}
+
+// planNodeWindowScope builds the node-windowed plan scope. The engine declares
+// a scope type per record family and these two have identical fields, so the
+// scope is built once and converted for the other port rather than spelled
+// twice.
+func planNodeWindowScope(
+	ctx *fiber.Ctx,
+	tenant agentoscore.TenantScope,
+	nodeID, runID string,
+	afterSequence int64,
+	limit int,
+) agentos.PlanEventScope {
+	planID, accountID, projectID := planScopeIDs(ctx, tenant)
+
+	return agentos.PlanEventScope{
+		PlanID: planID, AccountID: accountID, ProjectID: projectID,
+		NodeID: nodeID, RunID: runID, AfterSequence: afterSequence, Limit: limit,
+	}
+}
+
+// projectScoped is implemented by the query scopes that name a project.
+type projectScoped interface {
+	GetProjectID() string
+}
+
+// withQueryScope authorizes a query-addressed plan read. The account comes from
+// the credential and the query names the project, so the pair the runtime
+// receives is authorized rather than self-reported.
+func withQueryScope[T any, PT interface {
+	*T
+	projectScoped
+}](r *V1, ctx *fiber.Ctx, scopeName string, action agentoscore.Action, fn func(T, agentoscore.TenantScope) (any, error)) error {
 	if r.planRuntime == nil {
 		return errorResponse(ctx, http.StatusNotFound, "agentos plan runtime is not configured")
 	}
@@ -230,7 +286,14 @@ func withQueryScope[T any](r *V1, ctx *fiber.Ctx, scopeName string, fn func(T) (
 		return errorResponse(ctx, http.StatusBadRequest, err.Error())
 	}
 
-	result, err := fn(req)
+	scoped := PT(&req)
+
+	tenant, ok := r.tenantFromRequest(ctx, scoped.GetProjectID(), action, "plan")
+	if !ok {
+		return nil
+	}
+
+	result, err := fn(req, tenant)
 	if err != nil {
 		return agentOSError(ctx, err)
 	}
@@ -245,7 +308,6 @@ func withQueryScope[T any](r *V1, ctx *fiber.Ctx, scopeName string, fn func(T) (
 // @Accept      json
 // @Produce     json
 // @Param       plan_id path string true "Plan ID"
-// @Param       account_id query string true "Account ID"
 // @Param       project_id query string true "Project ID"
 // @Param       node_id query string false "Node ID"
 // @Param       run_id query string false "Child run ID"
@@ -256,16 +318,14 @@ func withQueryScope[T any](r *V1, ctx *fiber.Ctx, scopeName string, fn func(T) (
 // @Failure     404 {object} response.Error
 // @Failure     500 {object} response.Error
 // @Router      /agentos/plans/{plan_id}/audits [get]
+// The audit trail records plan mutations and node outcomes.
 func (r *V1) listAgentOSPlanAudits(ctx *fiber.Ctx) error {
-	return withQueryScope(r, ctx, "audit scope", func(req request.AgentOSPlanAuditScope) (any, error) {
+	return withQueryScope[request.AgentOSPlanAuditScope](r, ctx, "audit scope", agentoscore.ActionPlanRead, func(req request.AgentOSPlanAuditScope, tenant agentoscore.TenantScope) (any, error) {
+		planID, accountID, projectID := planScopeIDs(ctx, tenant)
+
 		return r.planRuntime.ListPlanAudits(ctx.UserContext(), &agentos.PlanAuditScope{
-			PlanID:    ctx.Params("plan_id"),
-			AccountID: req.AccountID,
-			ProjectID: req.ProjectID,
-			NodeID:    req.NodeID,
-			RunID:     req.RunID,
-			Action:    req.Action,
-			Limit:     req.Limit,
+			PlanID: planID, AccountID: accountID, ProjectID: projectID,
+			NodeID: req.NodeID, RunID: req.RunID, Action: req.Action, Limit: req.Limit,
 		})
 	})
 }
@@ -277,7 +337,6 @@ func (r *V1) listAgentOSPlanAudits(ctx *fiber.Ctx) error {
 // @Accept      json
 // @Produce     json
 // @Param       plan_id path string true "Plan ID"
-// @Param       account_id query string true "Account ID"
 // @Param       project_id query string true "Project ID"
 // @Param       node_id query string false "Node ID"
 // @Param       run_id query string false "Child run ID"
@@ -287,15 +346,16 @@ func (r *V1) listAgentOSPlanAudits(ctx *fiber.Ctx) error {
 // @Failure     404 {object} response.Error
 // @Failure     500 {object} response.Error
 // @Router      /agentos/plans/{plan_id}/artifacts [get]
+// The artifacts index lists refs produced by the plan's nodes.
 func (r *V1) listAgentOSPlanArtifacts(ctx *fiber.Ctx) error {
-	return withQueryScope(r, ctx, "artifact scope", func(req request.AgentOSPlanArtifactScope) (any, error) {
+	return withQueryScope[request.AgentOSPlanArtifactScope](r, ctx, "artifact scope", agentoscore.ActionPlanRead, func(req request.AgentOSPlanArtifactScope, tenant agentoscore.TenantScope) (any, error) {
+		planID, accountID, projectID := planScopeIDs(ctx, tenant)
+
 		return r.planRuntime.ListPlanArtifacts(ctx.UserContext(), &agentos.PlanArtifactScope{
-			PlanID:    ctx.Params("plan_id"),
-			AccountID: req.AccountID,
-			ProjectID: req.ProjectID,
-			NodeID:    req.NodeID,
-			RunID:     req.RunID,
-			Limit:     req.Limit,
+			PlanID: planID, AccountID: accountID, ProjectID: projectID,
+			NodeID: req.NodeID,
+			RunID:  req.RunID,
+			Limit:  req.Limit,
 		})
 	})
 }
@@ -308,19 +368,19 @@ func (r *V1) listAgentOSPlanArtifacts(ctx *fiber.Ctx) error {
 // @Produce     json
 // @Param       plan_id path string true "Plan ID"
 // @Param       artifact_id path string true "Artifact ID"
-// @Param       account_id query string true "Account ID"
 // @Param       project_id query string true "Project ID"
 // @Success     200 {object} agentoscore.Artifact
 // @Failure     400 {object} response.Error
 // @Failure     404 {object} response.Error
 // @Failure     500 {object} response.Error
 // @Router      /agentos/plans/{plan_id}/artifacts/{artifact_id} [get]
+// The artifact payload is served from the plan's artifact store.
 func (r *V1) getAgentOSPlanArtifact(ctx *fiber.Ctx) error {
-	return withQueryScope(r, ctx, "artifact scope", func(req request.AgentOSPlanScope) (any, error) {
+	return withQueryScope[request.AgentOSPlanScope](r, ctx, "artifact scope", agentoscore.ActionPlanRead, func(_ request.AgentOSPlanScope, tenant agentoscore.TenantScope) (any, error) {
 		return r.planRuntime.GetPlanArtifact(ctx.UserContext(), &agentos.PlanArtifactScope{
 			PlanID:     ctx.Params("plan_id"),
-			AccountID:  req.AccountID,
-			ProjectID:  req.ProjectID,
+			AccountID:  tenant.AccountID,
+			ProjectID:  tenant.ProjectID,
 			ArtifactID: ctx.Params("artifact_id"),
 		})
 	})
@@ -333,7 +393,6 @@ func (r *V1) getAgentOSPlanArtifact(ctx *fiber.Ctx) error {
 // @Accept      json
 // @Produce     json
 // @Param       plan_id path string true "Plan ID"
-// @Param       account_id query string true "Account ID"
 // @Param       project_id query string true "Project ID"
 // @Param       node_id query string false "Node ID"
 // @Param       run_id query string false "Child run ID"
@@ -344,17 +403,12 @@ func (r *V1) getAgentOSPlanArtifact(ctx *fiber.Ctx) error {
 // @Failure     404 {object} response.Error
 // @Failure     500 {object} response.Error
 // @Router      /agentos/plans/{plan_id}/events/history [get]
+// The history replays plan events in sequence order.
 func (r *V1) listAgentOSPlanEvents(ctx *fiber.Ctx) error {
-	return withQueryScope(r, ctx, "event scope", func(req request.AgentOSPlanEventScope) (any, error) {
-		return r.planRuntime.ListPlanEvents(ctx.UserContext(), &agentos.PlanEventScope{
-			PlanID:        ctx.Params("plan_id"),
-			AccountID:     req.AccountID,
-			ProjectID:     req.ProjectID,
-			NodeID:        req.NodeID,
-			RunID:         req.RunID,
-			AfterSequence: req.AfterSequence,
-			Limit:         req.Limit,
-		})
+	return withQueryScope[request.AgentOSPlanEventScope](r, ctx, "event scope", agentoscore.ActionPlanRead, func(req request.AgentOSPlanEventScope, tenant agentoscore.TenantScope) (any, error) {
+		scope := planNodeWindowScope(ctx, tenant, req.NodeID, req.RunID, req.AfterSequence, req.Limit)
+
+		return r.planRuntime.ListPlanEvents(ctx.UserContext(), &scope)
 	})
 }
 
@@ -365,7 +419,6 @@ func (r *V1) listAgentOSPlanEvents(ctx *fiber.Ctx) error {
 // @Accept      json
 // @Produce     json
 // @Param       plan_id path string true "Plan ID"
-// @Param       account_id query string true "Account ID"
 // @Param       project_id query string true "Project ID"
 // @Param       node_id query string false "Node ID"
 // @Param       run_id query string false "Child run ID"
@@ -376,17 +429,13 @@ func (r *V1) listAgentOSPlanEvents(ctx *fiber.Ctx) error {
 // @Failure     404 {object} response.Error
 // @Failure     500 {object} response.Error
 // @Router      /agentos/plans/{plan_id}/debug/traces [get]
+// The traces expose debug information for plan runs.
 func (r *V1) listAgentOSPlanDebugTraces(ctx *fiber.Ctx) error {
-	return withQueryScope(r, ctx, "debug trace scope", func(req request.AgentOSPlanDebugTraceScope) (any, error) {
-		return r.planRuntime.ListPlanDebugTraces(ctx.UserContext(), &agentos.PlanDebugTraceScope{
-			PlanID:        ctx.Params("plan_id"),
-			AccountID:     req.AccountID,
-			ProjectID:     req.ProjectID,
-			NodeID:        req.NodeID,
-			RunID:         req.RunID,
-			AfterSequence: req.AfterSequence,
-			Limit:         req.Limit,
-		})
+	return withQueryScope[request.AgentOSPlanDebugTraceScope](r, ctx, "debug trace scope", agentoscore.ActionPlanRead, func(req request.AgentOSPlanDebugTraceScope, tenant agentoscore.TenantScope) (any, error) {
+		scope := planNodeWindowScope(ctx, tenant, req.NodeID, req.RunID, req.AfterSequence, req.Limit)
+		traces := agentos.PlanDebugTraceScope(scope)
+
+		return r.planRuntime.ListPlanDebugTraces(ctx.UserContext(), &traces)
 	})
 }
 
@@ -397,6 +446,7 @@ func (r *V1) listAgentOSPlanDebugTraces(ctx *fiber.Ctx) error {
 // @Accept      json
 // @Produce     text/event-stream
 // @Param       plan_id path string true "Plan ID"
+// @Param       project_id query string true "Project ID"
 // @Param       node_id query string false "Node ID"
 // @Param       run_id query string false "Child run ID"
 // @Param       after_sequence query int false "Replay events after this sequence"
@@ -405,6 +455,7 @@ func (r *V1) listAgentOSPlanDebugTraces(ctx *fiber.Ctx) error {
 // @Failure     404 {object} response.Error
 // @Failure     500 {object} response.Error
 // @Router      /agentos/plans/{plan_id}/events [get]
+// The event stream replays plan events over SSE from the after_sequence cursor.
 func (r *V1) streamAgentOSPlanEvents(ctx *fiber.Ctx) error {
 	if r.planRuntime == nil {
 		return errorResponse(ctx, http.StatusNotFound, "agentos plan runtime is not configured")
@@ -419,10 +470,15 @@ func (r *V1) streamAgentOSPlanEvents(ctx *fiber.Ctx) error {
 		return errorResponse(ctx, http.StatusBadRequest, err.Error())
 	}
 
+	tenant, ok := r.tenantFromRequest(ctx, req.ProjectID, agentoscore.ActionPlanRead, "plan")
+	if !ok {
+		return nil
+	}
+
 	sub, err := r.planRuntime.SubscribePlan(ctx.UserContext(), &agentos.PlanStreamScope{
 		PlanID:        ctx.Params("plan_id"),
-		AccountID:     req.AccountID,
-		ProjectID:     req.ProjectID,
+		AccountID:     tenant.AccountID,
+		ProjectID:     tenant.ProjectID,
 		NodeID:        req.NodeID,
 		RunID:         req.RunID,
 		AfterSequence: req.AfterSequence,
@@ -435,7 +491,11 @@ func (r *V1) streamAgentOSPlanEvents(ctx *fiber.Ctx) error {
 	ctx.Set(fiber.HeaderCacheControl, "no-cache")
 	ctx.Set(fiber.HeaderConnection, "keep-alive")
 	ctx.Context().SetBodyStreamWriter(func(w *bufio.Writer) {
-		defer sub.Close()
+		defer func() {
+			if err := sub.Close(); err != nil {
+				log.Printf("agentos plan stream: close subscription: %v", err)
+			}
+		}()
 
 		for event := range sub.Events() {
 			if !writeAgentOSEventSSE(w, &event) {

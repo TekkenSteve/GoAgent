@@ -3,7 +3,7 @@ package temporal
 import (
 	"context"
 	"fmt"
-	"io"
+	"log"
 
 	agentos "github.com/TekkenSteve/GoAgent/agentos/control"
 	agentoscore "github.com/TekkenSteve/GoAgent/agentos/core"
@@ -111,6 +111,7 @@ type validatePlanInput struct {
 	Spec agentos.RunPlanSpec
 }
 
+// ValidatePlanOutput carries the validated executable plan plus per-node controls and capability traces.
 type ValidatePlanOutput struct {
 	Plan               agentosplan.ExecutablePlan
 	ControlsByNode     map[string][]agentoscore.ControlOperation
@@ -197,6 +198,7 @@ type resolvePlanNodeInputInput struct {
 	Edges  []agentos.PlanEdgeSpec
 }
 
+// ResolvePlanNodeInputOutput carries the resolved node input and its resolution trace.
 type ResolvePlanNodeInputOutput struct {
 	Input map[string]any
 	Trace agentosplan.InputResolutionTrace
@@ -227,6 +229,7 @@ type startPlanNodeInput struct {
 	Attempt   int32
 }
 
+// StartPlanNodeOutput carries the status of the started child run.
 type StartPlanNodeOutput struct {
 	Status agentos.RunStatus
 }
@@ -285,6 +288,7 @@ type persistPlanStateInput struct {
 	IdempotencyKey string
 }
 
+// PersistPlanStateOutput carries the persisted public plan event.
 type PersistPlanStateOutput struct {
 	Event agentos.PlanEvent
 }
@@ -311,7 +315,7 @@ func (a *PlanActivities) PersistPlanStateActivity(ctx context.Context, input *pe
 		// PlanTransitionStore above, so live publish failures must not block
 		// workflow progress or make Redis part of replay correctness.
 		if err := a.PlanEventPublisher.PublishPlanEvent(ctx, &event); err != nil {
-			fmt.Fprintf(io.Discard, "plan_activity: publish: %v\n", err)
+			log.Printf("plan_activity: publish plan event: %v", err)
 		}
 	}
 
@@ -324,6 +328,7 @@ type publishPlanArtifactsInput struct {
 	Status agentos.RunStatus
 }
 
+// PublishPlanArtifactsOutput carries the artifact refs idempotently stored for a node run.
 type PublishPlanArtifactsOutput struct {
 	Artifacts []agentoscore.ArtifactRef
 }
@@ -406,6 +411,7 @@ type evaluatePlanExpansionInput struct {
 	ExpansionCount int32
 }
 
+// EvaluatePlanExpansionOutput carries the expanded plan spec, executable plan, and per-node control and capability traces.
 type EvaluatePlanExpansionOutput struct {
 	Expanded           bool
 	Delta              agentosplan.PlanDelta
@@ -463,9 +469,12 @@ func (a *PlanActivities) EvaluatePlanExpansionActivity(ctx context.Context, inpu
 }
 
 type statusPlanNodeInput struct {
-	RunID string
+	RunID     string
+	AccountID string
+	ProjectID string
 }
 
+// StatusPlanNodeOutput carries the queried child run status.
 type StatusPlanNodeOutput struct {
 	Status agentos.RunStatus
 }
@@ -476,7 +485,13 @@ func (a *PlanActivities) StatusPlanNodeActivity(ctx context.Context, input statu
 		return StatusPlanNodeOutput{}, fmt.Errorf("%w: plan activity runtime is required", agentoscore.ErrInvalidRunPlan)
 	}
 
-	status, err := a.Runtime.Status(ctx, input.RunID)
+	// The plan's own tenant travels with the node run: a plan may only reach
+	// the child runs it started.
+	status, err := a.Runtime.Status(ctx, agentos.RunRef{
+		RunID:     input.RunID,
+		AccountID: input.AccountID,
+		ProjectID: input.ProjectID,
+	})
 	if err != nil {
 		return StatusPlanNodeOutput{}, err
 	}
@@ -485,8 +500,10 @@ func (a *PlanActivities) StatusPlanNodeActivity(ctx context.Context, input statu
 }
 
 type controlPlanNodeInput struct {
-	RunID   string
-	Control agentoscore.ControlRequest
+	RunID     string
+	AccountID string
+	ProjectID string
+	Control   agentoscore.ControlRequest
 }
 
 // ControlPlanNodeActivity sends lifecycle control to one child run.
@@ -495,5 +512,29 @@ func (a *PlanActivities) ControlPlanNodeActivity(ctx context.Context, input *con
 		return fmt.Errorf("%w: plan activity runtime is required", agentoscore.ErrInvalidRunPlan)
 	}
 
-	return a.Runtime.Control(ctx, input.RunID, &input.Control)
+	return a.Runtime.Control(ctx, agentos.RunRef{
+		RunID:     input.RunID,
+		AccountID: input.AccountID,
+		ProjectID: input.ProjectID,
+	}, &input.Control)
+}
+
+type signalPlanNodeInput struct {
+	RunID     string
+	AccountID string
+	ProjectID string
+	Signal    agentoscore.Signal
+}
+
+// SignalPlanNodeActivity delivers a non-control signal to one child run.
+func (a *PlanActivities) SignalPlanNodeActivity(ctx context.Context, input *signalPlanNodeInput) error {
+	if a.Runtime == nil {
+		return fmt.Errorf("%w: plan activity runtime is required", agentoscore.ErrInvalidRunPlan)
+	}
+
+	return a.Runtime.Signal(ctx, agentos.RunRef{
+		RunID:     input.RunID,
+		AccountID: input.AccountID,
+		ProjectID: input.ProjectID,
+	}, &input.Signal)
 }

@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"maps"
+	"strings"
 
 	agentos "github.com/TekkenSteve/GoAgent/agentos/control"
 	agentoscore "github.com/TekkenSteve/GoAgent/agentos/core"
@@ -328,50 +329,50 @@ func (r *Router) selectBackend(ctx context.Context, spec *agentos.RunSpec) (agen
 }
 
 // Signal sends a business signal to the backend that owns the run.
-func (r *Router) Signal(ctx context.Context, runID string, signal *agentoscore.Signal) error {
+func (r *Router) Signal(ctx context.Context, ref agentos.RunRef, signal *agentoscore.Signal) error {
 	if signal == nil {
 		return fmt.Errorf("%w: signal is required", agentoscore.ErrInvalidSignal)
 	}
 
-	backend, err := r.backendForRun(ctx, runID)
+	backend, err := r.backendForRun(ctx, ref)
 	if err != nil {
 		return err
 	}
 
 	prepared := cloneSignal(signal)
 
-	return backend.Signal(ctx, runID, &prepared)
+	return backend.Signal(ctx, ref.RunID, &prepared)
 }
 
 // Control sends a lifecycle operation to the backend that owns the run.
-func (r *Router) Control(ctx context.Context, runID string, control *agentoscore.ControlRequest) error {
+func (r *Router) Control(ctx context.Context, ref agentos.RunRef, control *agentoscore.ControlRequest) error {
 	if err := agentoscore.ValidateControlRequest(control); err != nil {
 		return err
 	}
 
-	backend, err := r.backendForRun(ctx, runID)
+	backend, err := r.backendForRun(ctx, ref)
 	if err != nil {
 		return err
 	}
 
 	prepared := cloneControlRequest(control)
 
-	return backend.Control(ctx, runID, &prepared)
+	return backend.Control(ctx, ref.RunID, &prepared)
 }
 
 // Status queries the backend that owns the run.
-func (r *Router) Status(ctx context.Context, runID string) (agentos.RunStatus, error) {
-	backend, err := r.backendForRun(ctx, runID)
+func (r *Router) Status(ctx context.Context, ref agentos.RunRef) (agentos.RunStatus, error) {
+	backend, err := r.backendForRun(ctx, ref)
 	if err != nil {
 		return agentos.RunStatus{}, err
 	}
 
-	status, err := backend.Status(ctx, runID)
+	status, err := backend.Status(ctx, ref.RunID)
 	if err != nil {
 		return agentos.RunStatus{}, err
 	}
 
-	return normalizeOwnedRunStatus(runID, &status)
+	return normalizeOwnedRunStatus(ref.RunID, &status)
 }
 
 // Subscribe opens a stream subscription through the backend selected by the scope.
@@ -389,13 +390,37 @@ func (r *Router) Subscribe(ctx context.Context, scope agentoscore.StreamScope) (
 	return backend.Subscribe(ctx, scope)
 }
 
-func (r *Router) backendForRun(ctx context.Context, runID string) (AgentBackend, error) {
-	ref, err := r.index.Resolve(ctx, runID)
+// backendForRun resolves the backend that owns a run, enforcing the caller's
+// tenant first.
+//
+// This is the single chokepoint for operations addressed by run id: a caller
+// that names an account can only reach runs that account owns, and "not found"
+// and "not yours" are answered identically because whether another account's
+// run exists is not the caller's business. Callers with no request-derived
+// identity (in-process components that already resolved ownership) leave the
+// account empty and pass through.
+func (r *Router) backendForRun(ctx context.Context, ref agentos.RunRef) (AgentBackend, error) {
+	if err := ref.Validate(); err != nil {
+		return nil, err
+	}
+
+	if strings.TrimSpace(ref.AccountID) != "" {
+		ownership, found, err := r.index.GetRunBackend(ctx, ref.RunID)
+		if err != nil {
+			return nil, err
+		}
+
+		if !found || !ref.Matches(&ownership) {
+			return nil, fmt.Errorf("%w: %s", agentoscore.ErrRunRouteNotFound, ref.RunID)
+		}
+	}
+
+	backendRef, err := r.index.Resolve(ctx, ref.RunID)
 	if err != nil {
 		return nil, err
 	}
 
-	return r.registry.Get(ref)
+	return r.registry.Get(backendRef)
 }
 
 func (r *Router) refForScope(ctx context.Context, scope agentoscore.StreamScope) (agentos.BackendRef, error) {

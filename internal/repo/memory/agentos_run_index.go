@@ -1,3 +1,5 @@
+// Package memory provides the process-local AgentOS run index: run ownership
+// and idempotency checks for in-process runtimes that have no database.
 package memory
 
 import (
@@ -91,6 +93,7 @@ func mergeRunBackendIndexRecord(existing, requested *entity.RunBackendIndexRecor
 	return merged
 }
 
+// GetRunBackend returns the backend ownership bound to the given run ID, and whether an entry exists.
 func (i *AgentOSRunIndex) GetRunBackend(_ context.Context, runID string) (agentos.RunBackendOwnership, bool, error) {
 	if runID == "" {
 		return agentos.RunBackendOwnership{}, false, fmt.Errorf("%w: run id is required", agentoscore.ErrInvalidRunSpec)

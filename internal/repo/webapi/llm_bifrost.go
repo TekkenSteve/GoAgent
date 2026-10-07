@@ -13,9 +13,12 @@ import (
 )
 
 var (
-	ErrBifrostChat  = errors.New("bifrost chat error")
+	// ErrBifrostChat is returned when the Bifrost SDK reports an error for a chat request.
+	ErrBifrostChat = errors.New("bifrost chat error")
+	// ErrNoCandidates is returned when no candidates are available for a scenario.
 	ErrNoCandidates = errors.New("no candidates")
-	ErrNoProvider   = errors.New("no configured provider")
+	// ErrNoProvider is returned when no configured provider matches a scenario.
+	ErrNoProvider = errors.New("no configured provider")
 )
 
 // ProviderEntry defines a single LLM provider configuration.

@@ -40,7 +40,6 @@ const (
 // @Accept      json
 // @Produce     html
 // @Param       plan_id path string true "Plan ID"
-// @Param       account_id query string true "Account ID"
 // @Param       project_id query string true "Project ID"
 // @Param       event_limit query int false "Maximum events"
 // @Param       audit_limit query int false "Maximum audit records"
@@ -50,6 +49,7 @@ const (
 // @Failure     404 {object} response.Error
 // @Failure     500 {object} response.Error
 // @Router      /agentos/plans/{plan_id}/console [get]
+// The console renders run state, events, audits, and artifact refs for the plan.
 func (r *V1) agentOSPlanConsole(ctx *fiber.Ctx) error {
 	if r.planRuntime == nil {
 		return errorResponse(ctx, http.StatusNotFound, "agentos plan runtime is not configured")
@@ -79,10 +79,15 @@ func (r *V1) agentOSPlanConsole(ctx *fiber.Ctx) error {
 		return errorResponse(ctx, http.StatusBadRequest, err.Error())
 	}
 
+	tenant, ok := r.tenantFromRequest(ctx, req.ProjectID, agentoscore.ActionPlanRead, "plan")
+	if !ok {
+		return nil
+	}
+
 	ref := agentos.PlanRef{
 		PlanID:    ctx.Params("plan_id"),
-		AccountID: req.AccountID,
-		ProjectID: req.ProjectID,
+		AccountID: tenant.AccountID,
+		ProjectID: tenant.ProjectID,
 	}
 
 	data, err := r.collectPlanConsoleData(ctx, ref, eventLimit, auditLimit, artifactLimit)
@@ -180,7 +185,6 @@ func agentOSPlanConsoleLimit(name string, requested, defaultValue, maxValue int)
 
 type agentOSPlanConsoleView struct {
 	PlanID              string
-	AccountID           string
 	ProjectID           string
 	Status              agentOSPlanConsoleStatusView
 	Nodes               []agentOSPlanConsoleNodeView
@@ -309,7 +313,6 @@ func newAgentOSPlanConsoleView(ref *agentos.PlanRef, description *agentos.RunPla
 
 	return agentOSPlanConsoleView{
 		PlanID:              ref.PlanID,
-		AccountID:           ref.AccountID,
 		ProjectID:           ref.ProjectID,
 		Status:              newAgentOSPlanConsoleStatusView(&status),
 		Nodes:               newAgentOSPlanConsoleNodeViews(description.Topology.Nodes),
@@ -553,9 +556,12 @@ func newAgentOSPlanConsoleAuditViews(audits []agentos.PlanAuditRecord) []agentOS
 	return views
 }
 
+// agentOSPlanConsoleScopeQuery builds the tenant scope the console's endpoint
+// links carry. It names the project only: the account is the caller's
+// credential, and a link that carried one would send a tenant the server
+// ignores.
 func agentOSPlanConsoleScopeQuery(ref *agentos.PlanRef) string {
 	values := url.Values{}
-	values.Set("account_id", ref.AccountID)
 
 	if ref.ProjectID != "" {
 		values.Set("project_id", ref.ProjectID)
@@ -639,6 +645,7 @@ func agentOSPlanConsoleBytes(size int64) string {
 }
 
 const (
+	// NEUTRAL is the CSS class name for the neutral gray visual state used by plan console controls and badges.
 	NEUTRAL                = "neutral"
 	agentOSPlanConsoleHTML = `<!doctype html>
 <html lang="en">
@@ -920,7 +927,6 @@ pre {
 </style>
 </head>
 <body
-  data-account-id="{{ .AccountID }}"
   data-project-id="{{ .ProjectID }}"
   data-control-endpoint="{{ .ControlEndpoint }}"
   data-signal-endpoint="{{ .SignalEndpoint }}"
@@ -1256,7 +1262,6 @@ pre {
 
   function scopedPayload() {
     const payload = {
-      account_id: root.accountId,
       actor_id: actorID(),
     };
     if (root.projectId) {

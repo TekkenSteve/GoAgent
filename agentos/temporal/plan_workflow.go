@@ -10,24 +10,39 @@ import (
 
 	agentos "github.com/TekkenSteve/GoAgent/agentos/control"
 	agentoscore "github.com/TekkenSteve/GoAgent/agentos/core"
+	"github.com/TekkenSteve/GoAgent/agentos/nexusapi"
 	"github.com/TekkenSteve/GoAgent/internal/usecase/agentosplan"
 	"go.temporal.io/sdk/temporal"
 	"go.temporal.io/sdk/workflow"
 )
 
 const (
-	PlanWorkflowName                  = "AgentOSPlanWorkflow"
-	PlanStatusQueryName               = "agentos.plan.status"
-	PlanSignalName                    = "agentos.plan.signal"
-	PlanControlSignalName             = "agentos.plan.control"
-	ValidatePlanActivityName          = "AgentOSValidatePlan"
-	ResolvePlanNodeInputActivityName  = "AgentOSResolvePlanNodeInput"
-	StartPlanNodeActivityName         = "AgentOSStartPlanNode"
-	StatusPlanNodeActivityName        = "AgentOSStatusPlanNode"
-	ControlPlanNodeActivityName       = "AgentOSControlPlanNode"
-	PublishPlanArtifactsActivityName  = "AgentOSPublishPlanArtifacts"
+	// PlanWorkflowName is the Temporal workflow type that executes AgentOS plans.
+	PlanWorkflowName = "AgentOSPlanWorkflow"
+	// PlanStatusQueryName is the Temporal query name that returns the plan's aggregate status.
+	PlanStatusQueryName = "agentos.plan.status"
+	// PlanSignalName is the Temporal signal name that delivers plan-level signals.
+	PlanSignalName = "agentos.plan.signal"
+	// PlanControlSignalName is the Temporal signal name that delivers plan control requests.
+	PlanControlSignalName = "agentos.plan.control"
+	// ValidatePlanActivityName is the Temporal activity name that validates a plan.
+	ValidatePlanActivityName = "AgentOSValidatePlan"
+	// ResolvePlanNodeInputActivityName is the Temporal activity name that resolves a plan node input.
+	ResolvePlanNodeInputActivityName = "AgentOSResolvePlanNodeInput"
+	// StartPlanNodeActivityName is the Temporal activity name that starts a plan node.
+	StartPlanNodeActivityName = "AgentOSStartPlanNode"
+	// StatusPlanNodeActivityName is the Temporal activity name that reads a plan node status.
+	StatusPlanNodeActivityName = "AgentOSStatusPlanNode"
+	// SignalPlanNodeActivityName is the Temporal activity name that signals a plan node.
+	SignalPlanNodeActivityName = "AgentOSSignalPlanNode"
+	// ControlPlanNodeActivityName is the Temporal activity name that sends control to a plan node.
+	ControlPlanNodeActivityName = "AgentOSControlPlanNode"
+	// PublishPlanArtifactsActivityName is the Temporal activity name that publishes plan artifacts.
+	PublishPlanArtifactsActivityName = "AgentOSPublishPlanArtifacts"
+	// EvaluatePlanExpansionActivityName is the Temporal activity name that evaluates a plan expansion.
 	EvaluatePlanExpansionActivityName = "AgentOSEvaluatePlanExpansion"
-	PersistPlanStateActivityName      = "AgentOSPersistPlanState"
+	// PersistPlanStateActivityName is the Temporal activity name that persists plan state.
+	PersistPlanStateActivityName = "AgentOSPersistPlanState"
 )
 
 const (
@@ -35,21 +50,59 @@ const (
 	defaultActivityTimeout     = 5 * time.Minute
 	defaultActivityMaxAttempts = 3
 	defaultPlanParallelism     = 32
-	FAILED                     = "failed"
-	CANCELED                   = "canceled"
+	// planSearchAttributesVersionMarker is the workflow.GetVersion marker that
+	// gates lifecycle search-attribute upserts. Upserts emit history events, so
+	// executions started before the marker replay without them; new executions
+	// keep goagent.lifecycle_state fresh on every lifecycle transition.
+	planSearchAttributesVersionMarker = "agentos-plan-search-attributes"
+	// planNexusNodeRunsVersionMarker is the workflow.GetVersion marker that
+	// gates Nexus-backed node execution. Executions started before the marker
+	// replay with the activity start + status-poll commands already in their
+	// histories and keep that path; new executions start nodes through the
+	// Nexus run operation and observe completion as a durable promise instead
+	// of per-tick status polling. Nodes without a live promise (started before
+	// a continue-as-new, or by pre-marker executions) still poll, so the two
+	// paths coexist safely while old histories drain.
+	planNexusNodeRunsVersionMarker = "agentos-plan-nexus-node-runs"
+	// planNodeNexusDefaultTimeout bounds Nexus-backed node runs whose policy
+	// sets no timeout: Nexus operations require a schedule-to-close deadline.
+	planNodeNexusDefaultTimeout = 24 * time.Hour
+	// planNodePromiseWaitSlack widens the promise-settle wait beyond one poll
+	// interval: the operation's own status poll timer is created after the
+	// settle timer, so at an identical deadline the settle timer would fire
+	// first and miss the completion it is waiting for.
+	planNodePromiseWaitSlack = time.Second
+	// planNodeNexusDrainTimeout bounds how long the plan Workflow waits for its
+	// canceled Nexus operations to resolve before returning.
+	planNodeNexusDrainTimeout = 30 * time.Second
+	// planNodeNexusCancelGrace keeps the operation's schedule-to-close deadline
+	// beyond the node timeout the plan enforces itself. If the operation
+	// deadline fired first, the caller would abandon the operation and Nexus
+	// would stop delivering the cancelation, leaving the handler running.
+	planNodeNexusCancelGrace = 30 * time.Second
+	// FAILED marks a run lifecycle state in which the run failed.
+	FAILED = "failed"
+	// CANCELED marks a run lifecycle state in which the run was canceled.
+	CANCELED = "canceled"
 )
 
 type planWorkflowInput struct {
-	Spec              agentos.RunPlanSpec   `json:"spec"`
-	Status            agentos.RunPlanStatus `json:"status"`
-	TaskQueues        agentfwTaskQueues     `json:"task_queues"`
-	WorkflowVersion   int                   `json:"workflow_version"`
-	Continued         bool                  `json:"continued,omitempty"`
-	ContinuationCount int32                 `json:"continuation_count,omitempty"`
-	IterationCount    int32                 `json:"iteration_count,omitempty"`
-	ExpansionCount    int32                 `json:"expansion_count,omitempty"`
-	ProcessedControls []string              `json:"processed_controls,omitempty"`
-	ProcessedSignals  []string              `json:"processed_signals,omitempty"`
+	Spec          agentos.RunPlanSpec   `json:"spec"`
+	Status        agentos.RunPlanStatus `json:"status"`
+	TaskQueues    agentfwTaskQueues     `json:"task_queues"`
+	NexusEndpoint string                `json:"nexus_endpoint,omitempty"`
+	// NexusPeers maps a peer town to the endpoint that reaches it, so a node
+	// naming a peer runs in that town. Part of the input rather than a global:
+	// a workflow may only read what it was given, and the mapping is deployment
+	// policy that must stay fixed for the life of the execution.
+	NexusPeers        map[string]string `json:"nexus_peers,omitempty"`
+	WorkflowVersion   int               `json:"workflow_version"`
+	Continued         bool              `json:"continued,omitempty"`
+	ContinuationCount int32             `json:"continuation_count,omitempty"`
+	IterationCount    int32             `json:"iteration_count,omitempty"`
+	ExpansionCount    int32             `json:"expansion_count,omitempty"`
+	ProcessedControls []string          `json:"processed_controls,omitempty"`
+	ProcessedSignals  []string          `json:"processed_signals,omitempty"`
 }
 
 type agentfwTaskQueues struct {
@@ -64,9 +117,17 @@ func PlanWorkflow(ctx workflow.Context, input *planWorkflowInput) (agentos.RunPl
 		return agentos.RunPlanStatus{}, err
 	}
 
-	if err := workflow.SetQueryHandler(ctx, PlanStatusQueryName, func() (agentos.RunPlanStatus, error) {
-		return setup.State.Status, nil
-	}); err != nil {
+	// Executions started before the search-attributes change replay without the
+	// upserts, so their history stays identical; new executions keep the
+	// lifecycle visible to operators on every transition.
+	searchAttributesEnabled := workflow.GetVersion(ctx, planSearchAttributesVersionMarker, workflow.DefaultVersion, 1)
+	lifecycleSync := newLifecycleSearchAttributeSync(searchAttributesEnabled, setup.Spec.PlanID)
+
+	// Executions started before the Nexus change keep polling; new executions
+	// start nodes through the Nexus run operation (durable completion promise).
+	nexusNodeRuns := workflow.GetVersion(ctx, planNexusNodeRunsVersionMarker, workflow.DefaultVersion, 1) == 1
+
+	if err := registerPlanStatusQuery(ctx, &setup.State); err != nil {
 		return setup.State.Status, err
 	}
 
@@ -81,38 +142,56 @@ func PlanWorkflow(ctx workflow.Context, input *planWorkflowInput) (agentos.RunPl
 		}
 	}
 
-	var validation ValidatePlanOutput
-	if err := workflow.ExecuteActivity(activityCtx, ValidatePlanActivityName, validatePlanInput{Spec: *setup.Spec}).Get(activityCtx, &validation); err != nil {
-		evt2 := agentosplan.StateEvent{Kind: agentosplan.EventPlanFailed, Reason: err.Error()}
-
-		return setup.State.Status, errors.Join(err, applyPlanStateEvent(activityCtx, ctx, setup.Spec, &setup.State, &evt2))
+	validation, err := validatePlanAtStart(activityCtx, ctx, &setup, lifecycleSync, input.NexusPeers)
+	if err != nil {
+		return setup.State.Status, err
 	}
 
 	compiler, err := agentosplan.NewCELCompiler()
 	if err != nil {
-		evt3 := agentosplan.StateEvent{Kind: agentosplan.EventPlanFailed, Reason: err.Error()}
-
-		return setup.State.Status, errors.Join(err, applyPlanStateEvent(activityCtx, ctx, setup.Spec, &setup.State, &evt3))
+		return failPlanWorkflowSetup(activityCtx, ctx, &setup, lifecycleSync, err.Error(), err)
 	}
 
 	expansionCount := input.ExpansionCount
 	iterationCount := input.IterationCount
 	paused := setup.State.Status.LifecycleState == agentos.PlanLifecycleBlocked
-	runtime := newPlanWorkflowRuntime(activityCtx, ctx, controlCh, signalCh, setup.Spec, input, compiler)
+	runtime := newPlanWorkflowRuntime(activityCtx, ctx, controlCh, signalCh, setup.Spec, input, compiler, nexusNodeRuns)
 
 	for {
 		iterationCount++
 		result, err := runPlanWorkflowIteration(&runtime, input, setup.Spec, &setup.State, &validation, &expansionCount, iterationCount, paused)
 		paused = result.Paused
 
+		// Sync on every lifecycle transition so a blocked/failed plan is
+		// immediately queryable; change-detection avoids per-iteration no-op
+		// upserts bloating history.
+		lifecycleSync.sync(ctx, setup.State.Status.LifecycleState)
+
 		if err != nil {
+			drainNexusNodeRuns(&runtime)
+
 			return setup.State.Status, err
 		}
 
 		if result.Done {
+			drainNexusNodeRuns(&runtime)
+
 			return setup.State.Status, nil
 		}
 	}
+}
+
+// failPlanWorkflowSetup records a setup failure (plan validation or CEL
+// compiler) as the terminal plan.failed event, syncs the visible lifecycle so
+// the failure is queryable, and returns the combined error.
+func failPlanWorkflowSetup(activityCtx, ctx workflow.Context, setup *planWorkflowSetup, lifecycleSync *lifecycleSearchAttributeSync, reason string, cause error) (agentos.RunPlanStatus, error) {
+	evt := agentosplan.StateEvent{Kind: agentosplan.EventPlanFailed, Reason: reason}
+
+	applyErr := applyPlanStateEvent(activityCtx, ctx, setup.Spec, &setup.State, &evt)
+
+	lifecycleSync.sync(ctx, setup.State.Status.LifecycleState)
+
+	return setup.State.Status, errors.Join(cause, applyErr)
 }
 
 type planWorkflowSetup struct {
@@ -164,6 +243,192 @@ type planWorkflowRuntime struct {
 	MaxParallel       int
 	ProcessedControls map[string]bool
 	ProcessedSignals  map[string]bool
+	// NexusPeers resolves a node's peer to the endpoint that reaches that town.
+	NexusPeers map[string]string
+	// NexusEndpoint names the deployment's Nexus endpoint; callers reference it
+	// to reach the AgentOS run service.
+	NexusEndpoint string
+	// NexusNodeRuns reports whether this execution starts nodes through the
+	// Nexus run operation (gated by the planNexusNodeRunsVersionMarker).
+	NexusNodeRuns bool
+	// NodeRuns tracks in-flight Nexus run promises for this execution. It is
+	// workflow-local: promises created before a continue-as-new do not survive
+	// it, and nodes without a promise fall back to status polling.
+	NodeRuns *planNodeRunRegistry
+}
+
+// planNodeRunRegistry maps run IDs to their in-flight Nexus operation
+// promises.
+type planNodeRunRegistry struct {
+	runs map[string]*planNodeRun
+}
+
+type planNodeRun struct {
+	future workflow.NexusOperationFuture
+	cancel workflow.CancelFunc
+}
+
+func newPlanNodeRunRegistry() *planNodeRunRegistry {
+	return &planNodeRunRegistry{runs: map[string]*planNodeRun{}}
+}
+
+func (r *planNodeRunRegistry) add(runID string, future workflow.NexusOperationFuture, cancel workflow.CancelFunc) {
+	r.runs[runID] = &planNodeRun{future: future, cancel: cancel}
+}
+
+func (r *planNodeRunRegistry) get(runID string) (*planNodeRun, bool) {
+	run, ok := r.runs[runID]
+
+	return run, ok
+}
+
+func (r *planNodeRunRegistry) remove(runID string) {
+	delete(r.runs, runID)
+}
+
+// cancelRun cancels one node's Nexus operation; the operation workflow then
+// best-effort cancels the underlying run. The registry entry is kept so the
+// exit drain can wait for the cancelation to actually be delivered — Nexus
+// only guarantees delivery while the caller Workflow is still running.
+func (r *planNodeRunRegistry) cancelRun(runID string) {
+	if run, ok := r.runs[runID]; ok && run.cancel != nil {
+		run.cancel()
+	}
+}
+
+// pendingRunIDs returns the run IDs with unsettled Nexus promises.
+func (r *planNodeRunRegistry) pendingRunIDs() []string {
+	ids := make([]string, 0, len(r.runs))
+	for runID, run := range r.runs {
+		if !run.future.IsReady() {
+			ids = append(ids, runID)
+		}
+	}
+
+	return ids
+}
+
+func (r *planNodeRunRegistry) len() int {
+	return len(r.runs)
+}
+
+func (r *planNodeRunRegistry) runIDs() []string {
+	ids := make([]string, 0, len(r.runs))
+	for runID := range r.runs {
+		ids = append(ids, runID)
+	}
+
+	return ids
+}
+
+// drainResolved removes every promise that has settled, discarding its result.
+// It is used on the way out of the Workflow, where results no longer matter
+// but pending operations must not block completion.
+func (r *planNodeRunRegistry) drainResolved(ctx workflow.Context) {
+	for runID, run := range r.runs {
+		if !run.future.IsReady() {
+			continue
+		}
+
+		var out nexusapi.RunOutput
+		if err := run.future.Get(ctx, &out); err != nil {
+			workflow.GetLogger(ctx).Debug("plan node nexus operation resolved on drain", "run_id", runID, "error", err)
+		}
+
+		delete(r.runs, runID)
+	}
+}
+
+// hasRunningPendingPromise reports whether any node still running in plan state
+// has an unresolved Nexus promise.
+func (r *planNodeRunRegistry) hasRunningPendingPromise(state *agentosplan.State) bool {
+	for i := range state.Status.Nodes {
+		node := &state.Status.Nodes[i]
+		if node.LifecycleState != agentos.PlanNodeRunning || node.RunID == "" {
+			continue
+		}
+
+		if run, ok := r.runs[node.RunID]; ok && !run.future.IsReady() {
+			return true
+		}
+	}
+
+	return false
+}
+
+// settleNexusNodePromises waits (bounded by one poll interval plus slack) for
+// any pending Nexus node promise to resolve, then applies every resolved
+// promise to plan state. It returns whether any node progressed and whether
+// the wait paced this iteration (pending promises existed, so the trailing
+// poll sleep is redundant). For executions without Nexus node runs it is a
+// no-op.
+func settleNexusNodePromises(runtime *planWorkflowRuntime, spec *agentos.RunPlanSpec, state *agentosplan.State, validation *ValidatePlanOutput, expansionCount *int32) (settled, paced bool, err error) {
+	if !runtime.NexusNodeRuns || !runtime.NodeRuns.hasRunningPendingPromise(state) {
+		return false, false, nil
+	}
+
+	if _, err := workflow.AwaitWithTimeout(runtime.WorkflowCtx, planNodePollInterval+planNodePromiseWaitSlack, func() bool {
+		return !runtime.NodeRuns.hasRunningPendingPromise(state)
+	}); err != nil {
+		return false, true, err
+	}
+
+	progressed, err := applySettledNexusNodePromises(runtime, spec, state, validation, expansionCount)
+
+	return progressed, true, err
+}
+
+// drainNexusNodeRuns cancels every operation this execution still has pending
+// and waits, bounded, for those cancelations to be delivered before the
+// Workflow returns. Nexus does not attempt cancelation once the caller
+// Workflow has completed, so skipping this would leave backend runs orphaned.
+func drainNexusNodeRuns(runtime *planWorkflowRuntime) {
+	if !runtime.NexusNodeRuns || runtime.NodeRuns.len() == 0 {
+		return
+	}
+
+	for _, runID := range runtime.NodeRuns.runIDs() {
+		runtime.NodeRuns.cancelRun(runID)
+	}
+
+	if _, err := workflow.AwaitWithTimeout(runtime.WorkflowCtx, planNodeNexusDrainTimeout, func() bool {
+		return len(runtime.NodeRuns.pendingRunIDs()) == 0
+	}); err != nil {
+		workflow.GetLogger(runtime.WorkflowCtx).Warn("plan nexus node runs - drain wait interrupted", "error", err)
+	}
+
+	runtime.NodeRuns.drainResolved(runtime.WorkflowCtx)
+}
+
+// applySettledNexusNodePromises applies every resolved promise to plan state.
+func applySettledNexusNodePromises(runtime *planWorkflowRuntime, spec *agentos.RunPlanSpec, state *agentosplan.State, validation *ValidatePlanOutput, expansionCount *int32) (bool, error) {
+	progressed := false
+
+	for i := range state.Status.Nodes {
+		node := &state.Status.Nodes[i]
+		if node.LifecycleState != agentos.PlanNodeRunning || node.RunID == "" {
+			continue
+		}
+
+		run, ok := runtime.NodeRuns.get(node.RunID)
+		if !ok || !run.future.IsReady() {
+			continue
+		}
+
+		nodeSpec, ok := validation.Plan.NodeByID[node.NodeID]
+		if !ok {
+			return progressed, fmt.Errorf("%w: unknown node %q", agentoscore.ErrInvalidRunPlan, node.NodeID)
+		}
+
+		nodeProgressed, err := applyNexusNodePromise(runtime, spec, state, validation, expansionCount, node, &nodeSpec, run)
+		if err != nil {
+			return progressed, err
+		}
+
+		progressed = progressed || nodeProgressed
+	}
+
+	return progressed, nil
 }
 
 type planWorkflowIterationResult struct {
@@ -176,7 +441,7 @@ type planWorkflowPreScheduleResult struct {
 	SkipSchedule bool
 }
 
-func newPlanWorkflowRuntime(activityCtx, workflowCtx workflow.Context, controlCh, signalCh workflow.ReceiveChannel, spec *agentos.RunPlanSpec, input *planWorkflowInput, compiler agentosplan.ExpressionCompiler) planWorkflowRuntime {
+func newPlanWorkflowRuntime(activityCtx, workflowCtx workflow.Context, controlCh, signalCh workflow.ReceiveChannel, spec *agentos.RunPlanSpec, input *planWorkflowInput, compiler agentosplan.ExpressionCompiler, nexusNodeRuns bool) planWorkflowRuntime {
 	return planWorkflowRuntime{
 		ActivityCtx:       activityCtx,
 		WorkflowCtx:       workflowCtx,
@@ -186,6 +451,10 @@ func newPlanWorkflowRuntime(activityCtx, workflowCtx workflow.Context, controlCh
 		MaxParallel:       normalizePlanParallelism(spec.Policy.MaxParallelNodes),
 		ProcessedControls: processedPlanWorkflowKeys(input.ProcessedControls),
 		ProcessedSignals:  processedPlanWorkflowKeys(input.ProcessedSignals),
+		NexusEndpoint:     input.NexusEndpoint,
+		NexusPeers:        input.NexusPeers,
+		NexusNodeRuns:     nexusNodeRuns,
+		NodeRuns:          newPlanNodeRunRegistry(),
 	}
 }
 
@@ -205,6 +474,15 @@ func runPlanWorkflowIteration(
 		return result, err
 	}
 
+	// Nexus-backed nodes complete asynchronously. Settle any resolved promise
+	// before controls and signals are validated against node state, and let
+	// the bounded wait double as this iteration's poll interval: signals see
+	// state at least as fresh as the legacy status-poll path provided.
+	settled, paced, err := settleNexusNodePromises(runtime, spec, state, validation, expansionCount)
+	if err != nil {
+		return result, err
+	}
+
 	if done, err := applyPlanWorkflowControls(runtime, spec, state, validation, &result); done {
 		return result, err
 	}
@@ -214,6 +492,8 @@ func runPlanWorkflowIteration(
 		return result, err
 	}
 
+	signalProgressed = signalProgressed || settled
+
 	if stop, err := applyPlanWorkflowPreSchedule(runtime, input, spec, state, validation, expansionCount, iterationCount, &result); stop {
 		return result, err
 	}
@@ -221,6 +501,12 @@ func runPlanWorkflowIteration(
 	progressed, err := applyPlanWorkflowSchedule(runtime, spec, state, validation, expansionCount, signalProgressed, &result)
 	if workflowIterationDone(&result, err) {
 		return result, err
+	}
+
+	// When the settle wait paced this iteration, skip the trailing sleep:
+	// the poll interval was already consumed by the bounded promise wait.
+	if paced {
+		return result, nil
 	}
 
 	return finishPlanWorkflowIteration(runtime, input, spec, state, expansionCount, iterationCount, progressed, &result)
@@ -316,7 +602,14 @@ func applyPlanWorkflowPreScheduleGuards(
 	iterationCount int32,
 	paused bool,
 ) (planWorkflowPreScheduleResult, error) {
-	timedOut, err := applyPlanTimeoutGuard(runtime.ActivityCtx, runtime.WorkflowCtx, spec, state, validation.ControlsByNode)
+	timedOut, err := applyPlanDeadlineGuard(runtime.ActivityCtx, runtime.WorkflowCtx, spec, state, validation.ControlsByNode, planDeadlineGuardParams{
+		expired:        agentosplan.PlanTimedOut,
+		anchor:         func(s agentos.RunPlanStatus) time.Time { return s.StartedAt },
+		idempotencyKey: agentosplan.PlanTimeoutControlIdempotencyKey,
+		seconds:        func(p agentos.PlanPolicy) int64 { return p.TimeoutSeconds },
+		reason:         agentosplan.PlanTimeoutReason,
+		eventKind:      agentosplan.EventPlanFailed,
+	})
 	if err != nil || timedOut {
 		return planWorkflowPreScheduleResult{Done: timedOut}, err
 	}
@@ -327,6 +620,19 @@ func applyPlanWorkflowPreScheduleGuards(
 
 	if !paused {
 		return planWorkflowPreScheduleResult{}, nil
+	}
+
+	if timedOut, err := applyPlanDeadlineGuard(runtime.ActivityCtx, runtime.WorkflowCtx, spec, state, validation.ControlsByNode, planDeadlineGuardParams{
+		expired:        agentosplan.PlanBlockedTimedOut,
+		anchor:         func(s agentos.RunPlanStatus) time.Time { return s.BlockedAt },
+		idempotencyKey: agentosplan.PlanBlockedTimeoutControlIdempotencyKey,
+		seconds:        func(p agentos.PlanPolicy) int64 { return p.ApprovalTimeoutSeconds },
+		reason:         agentosplan.PlanBlockedTimeoutReason,
+		eventKind:      agentosplan.EventPlanRejected,
+	}); err != nil {
+		return planWorkflowPreScheduleResult{}, err
+	} else if timedOut {
+		return planWorkflowPreScheduleResult{Done: true}, nil
 	}
 
 	if err := continuePlanWorkflowIfNeeded(runtime.WorkflowCtx, input, spec, state, *expansionCount, iterationCount, runtime.ProcessedControls, runtime.ProcessedSignals); err != nil {
@@ -353,7 +659,7 @@ func schedulePlanWorkflowNodes(
 		return progressed, false, err
 	}
 
-	pollProgressed, err := pollRunningPlanNodes(runtime.ActivityCtx, runtime.WorkflowCtx, spec, state, validation, expansionCount)
+	pollProgressed, err := pollRunningPlanNodes(runtime, spec, state, validation, expansionCount)
 	if err != nil {
 		return progressed || pollProgressed, false, failPlanWorkflowIteration(runtime, spec, state, err)
 	}
@@ -435,7 +741,7 @@ func startReadyPlanNodes(
 			continue
 		}
 
-		if err := startPlanNode(runtime.ActivityCtx, runtime.WorkflowCtx, spec, state, validation, expansionCount, &decision.Ready[i], validation.Plan.EdgesByTo[decision.Ready[i].NodeID]); err != nil {
+		if err := startPlanNode(runtime, spec, state, validation, expansionCount, &decision.Ready[i], validation.Plan.EdgesByTo[decision.Ready[i].NodeID]); err != nil {
 			evt7 := agentosplan.StateEvent{Kind: agentosplan.EventNodeFailed, NodeID: decision.Ready[i].NodeID, Reason: err.Error()}
 			if persistErr := applyPlanStateEvent(runtime.ActivityCtx, runtime.WorkflowCtx, spec, state, &evt7); persistErr != nil {
 				return errors.Join(err, persistErr)
@@ -617,7 +923,9 @@ func lifecycleForEvent(status *agentos.RunPlanStatus, event *agentosplan.StateEv
 	return ""
 }
 
-func startPlanNode(activityCtx, workflowCtx workflow.Context, spec *agentos.RunPlanSpec, state *agentosplan.State, validation *ValidatePlanOutput, expansionCount *int32, node *agentos.PlanNodeSpec, incomingEdges []agentos.PlanEdgeSpec) error {
+func startPlanNode(runtime *planWorkflowRuntime, spec *agentos.RunPlanSpec, state *agentosplan.State, validation *ValidatePlanOutput, expansionCount *int32, node *agentos.PlanNodeSpec, incomingEdges []agentos.PlanEdgeSpec) error {
+	activityCtx, workflowCtx := runtime.ActivityCtx, runtime.WorkflowCtx
+
 	if capability, ok := validation.CapabilitiesByNode[node.NodeID]; ok {
 		evt10 := agentosplan.StateEvent{Kind: agentosplan.EventCapabilitySelected, NodeID: node.NodeID, Capability: capability}
 		if err := applyPlanStateEvent(activityCtx, workflowCtx, spec, state, &evt10); err != nil {
@@ -632,31 +940,13 @@ func startPlanNode(activityCtx, workflowCtx workflow.Context, spec *agentos.RunP
 
 	attempt := nextNodeAttempt(state, node.NodeID)
 
-	attemptNode, err := nodeForAttempt(spec.PlanID, node, attempt)
-	if err != nil {
+	attemptNode, proceed, err := resolvePlanNodeAttempt(runtime, spec, state, node, incomingEdges, attempt)
+	if err != nil || !proceed {
 		return err
 	}
 
-	var resolved ResolvePlanNodeInputOutput
-	if err := workflow.ExecuteActivity(activityCtx, ResolvePlanNodeInputActivityName, resolvePlanNodeInputInput{
-		Spec:   *spec,
-		Status: state.Status,
-		Node:   attemptNode,
-		Edges:  incomingEdges,
-	}).Get(activityCtx, &resolved); err != nil {
-		return applyNodeAttemptFailure(activityCtx, workflowCtx, spec, state, node, attemptNode.Run.RunID, fmt.Sprintf("resolve input for attempt %d failed: %s", attempt, err))
-	}
-
-	attemptNode.Run.Input = resolved.Input
-	evt12 := agentosplan.StateEvent{Kind: agentosplan.EventNodeInputResolved, NodeID: node.NodeID, RunID: attemptNode.Run.RunID, InputTrace: resolved.Trace}
-
-	if err := applyPlanStateEvent(activityCtx, workflowCtx, spec, state, &evt12); err != nil {
-		return err
-	}
-
-	evt13 := agentosplan.StateEvent{Kind: agentosplan.EventNodeStarted, NodeID: node.NodeID, RunID: attemptNode.Run.RunID, Attempt: attempt}
-	if err := applyPlanStateEvent(activityCtx, workflowCtx, spec, state, &evt13); err != nil {
-		return err
+	if runtime.NexusNodeRuns {
+		return startPlanNodeViaNexus(runtime, spec, node, &attemptNode, attempt)
 	}
 
 	var started StartPlanNodeOutput
@@ -673,6 +963,182 @@ func startPlanNode(activityCtx, workflowCtx workflow.Context, spec *agentos.RunP
 	if runTerminal(started.Status.LifecycleState) {
 		return applyNodeRunTerminal(activityCtx, workflowCtx, spec, state, validation, expansionCount, node, &started.Status)
 	}
+
+	return nil
+}
+
+// resolvePlanNodeAttempt builds the attempt's run spec, resolves its input,
+// and records the input-resolved and started state events. proceed is false
+// when the attempt failure was already recorded and the caller must not start
+// the run.
+func resolvePlanNodeAttempt(runtime *planWorkflowRuntime, spec *agentos.RunPlanSpec, state *agentosplan.State, node *agentos.PlanNodeSpec, incomingEdges []agentos.PlanEdgeSpec, attempt int32) (attemptNode agentos.PlanNodeSpec, proceed bool, err error) {
+	activityCtx, workflowCtx := runtime.ActivityCtx, runtime.WorkflowCtx
+
+	attemptNode, err = nodeForAttempt(spec.PlanID, node, attempt)
+	if err != nil {
+		return agentos.PlanNodeSpec{}, false, err
+	}
+
+	var resolved ResolvePlanNodeInputOutput
+	if err := workflow.ExecuteActivity(activityCtx, ResolvePlanNodeInputActivityName, resolvePlanNodeInputInput{
+		Spec:   *spec,
+		Status: state.Status,
+		Node:   attemptNode,
+		Edges:  incomingEdges,
+	}).Get(activityCtx, &resolved); err != nil {
+		failureErr := applyNodeAttemptFailure(activityCtx, workflowCtx, spec, state, node, attemptNode.Run.RunID, fmt.Sprintf("resolve input for attempt %d failed: %s", attempt, err))
+
+		return agentos.PlanNodeSpec{}, false, failureErr
+	}
+
+	attemptNode.Run.Input = resolved.Input
+	evt12 := agentosplan.StateEvent{Kind: agentosplan.EventNodeInputResolved, NodeID: node.NodeID, RunID: attemptNode.Run.RunID, InputTrace: resolved.Trace}
+
+	if err := applyPlanStateEvent(activityCtx, workflowCtx, spec, state, &evt12); err != nil {
+		return agentos.PlanNodeSpec{}, false, err
+	}
+
+	evt13 := agentosplan.StateEvent{Kind: agentosplan.EventNodeStarted, NodeID: node.NodeID, RunID: attemptNode.Run.RunID, Attempt: attempt}
+	if err := applyPlanStateEvent(activityCtx, workflowCtx, spec, state, &evt13); err != nil {
+		return agentos.PlanNodeSpec{}, false, err
+	}
+
+	return attemptNode, true, nil
+}
+
+// failPlanAtStart records a refused plan on the plan itself and returns the
+// error, so the caller propagates it without unpacking a status it discards.
+func failPlanAtStart(
+	activityCtx workflow.Context,
+	ctx workflow.Context,
+	setup *planWorkflowSetup,
+	lifecycleSync *lifecycleSearchAttributeSync,
+	cause error,
+) error {
+	_, err := failPlanWorkflowSetup(activityCtx, ctx, setup, lifecycleSync, cause.Error(), cause)
+
+	return err
+}
+
+// validatePlanAtStart runs everything that can refuse a plan before its first
+// node starts: the plan's own validation activity, and the check that every
+// node naming a peer has an endpoint to reach it. A mapping mistake found here
+// is the difference between a plan that fails fast and one that fails halfway
+// through its work.
+func validatePlanAtStart(
+	activityCtx workflow.Context,
+	ctx workflow.Context,
+	setup *planWorkflowSetup,
+	lifecycleSync *lifecycleSearchAttributeSync,
+	peers map[string]string,
+) (ValidatePlanOutput, error) {
+	var validation ValidatePlanOutput
+
+	if err := workflow.ExecuteActivity(activityCtx, ValidatePlanActivityName, validatePlanInput{Spec: *setup.Spec}).Get(activityCtx, &validation); err != nil {
+		return ValidatePlanOutput{}, failPlanAtStart(activityCtx, ctx, setup, lifecycleSync, err)
+	}
+
+	if err := validatePlanNodePeers(setup.Spec, peers); err != nil {
+		return ValidatePlanOutput{}, failPlanAtStart(activityCtx, ctx, setup, lifecycleSync, err)
+	}
+
+	return validation, nil
+}
+
+// registerPlanStatusQuery publishes the plan's status query, so an operator can
+// read the running state without loading the workflow history.
+func registerPlanStatusQuery(ctx workflow.Context, state *agentosplan.State) error {
+	return workflow.SetQueryHandler(ctx, PlanStatusQueryName, func() (agentos.RunPlanStatus, error) {
+		return state.Status, nil
+	})
+}
+
+// validatePlanNodePeers rejects a plan whose node names a peer this deployment
+// has no endpoint for, before any node starts. Nodes added later by a plan
+// expansion are caught at dispatch instead, because the expansion happens after
+// this check.
+func validatePlanNodePeers(spec *agentos.RunPlanSpec, peers map[string]string) error {
+	for i := range spec.Nodes {
+		node := &spec.Nodes[i]
+
+		if _, err := nexusEndpointFor(peers, "", node.Peer); err != nil {
+			return fmt.Errorf("%w: node %q: %w", agentoscore.ErrInvalidRunPlan, node.NodeID, err)
+		}
+	}
+
+	return nil
+}
+
+// nexusEndpointFor resolves the endpoint a node's run operation goes to: the
+// endpoint of the town the node names, or the deployment's own endpoint when it
+// names none. A peer without a mapping is refused rather than silently run
+// locally: running a node in the wrong town is worse than not running it.
+func nexusEndpointFor(peers map[string]string, localEndpoint, peer string) (string, error) {
+	if peer == "" {
+		return localEndpoint, nil
+	}
+
+	endpoint, ok := peers[peer]
+	if !ok {
+		return "", fmt.Errorf("%w: peer %q has no Nexus endpoint in this deployment", agentoscore.ErrInvalidRunPlan, peer)
+	}
+
+	return endpoint, nil
+}
+
+// startPlanNodeViaNexus starts the node run through the AgentOS Nexus run
+// operation. The operation's activity routes the start through the plan node
+// starter (ownership bookkeeping stays atomic with the start), and the
+// returned promise resolves when the run reaches a terminal state — no status
+// polling. Start failures surface on the promise, not here.
+func startPlanNodeViaNexus(runtime *planWorkflowRuntime, spec *agentos.RunPlanSpec, node, attemptNode *agentos.PlanNodeSpec, attempt int32) error {
+	runSpec := attemptNode.Run
+	runSpec.AccountID = spec.AccountID
+	runSpec.ProjectID = spec.ProjectID
+
+	if runSpec.IdempotencyKey == "" {
+		key, err := agentosplan.NodeStartIdempotencyKey(spec.PlanID, node.NodeID, attempt)
+		if err != nil {
+			return err
+		}
+
+		runSpec.IdempotencyKey = key
+	}
+
+	runCtx, cancel := workflow.WithCancel(runtime.WorkflowCtx)
+
+	// All three Nexus timeouts are set deliberately: schedule-to-start fails
+	// fast when no handler is polling, start-to-close bounds the run once the
+	// handler owns it, and schedule-to-close stays beyond the plan's own node
+	// timeout so the plan cancels the operation itself (and Nexus keeps
+	// delivering that cancelation) instead of the deadline abandoning it.
+	timeout := planNodeNexusDefaultTimeout
+	if node.Policy.TimeoutSeconds > 0 {
+		timeout = time.Duration(node.Policy.TimeoutSeconds)*time.Second + planNodeNexusCancelGrace
+	}
+
+	options := workflow.NexusOperationOptions{
+		ScheduleToStartTimeout: nexusRunScheduleToStartTimeout,
+		StartToCloseTimeout:    timeout,
+		ScheduleToCloseTimeout: timeout + nexusRunScheduleToStartTimeout,
+	}
+
+	endpoint, err := nexusEndpointFor(runtime.NexusPeers, runtime.NexusEndpoint, node.Peer)
+	if err != nil {
+		return err
+	}
+
+	future := workflow.NewNexusClient(endpoint, nexusapi.ServiceName).ExecuteOperation(
+		runCtx,
+		nexusapi.RunOperationName,
+		nexusapi.RunRequest{
+			RequestID: runSpec.IdempotencyKey,
+			Spec:      &runSpec,
+			PlanScope: &nexusapi.RunPlanScope{PlanID: spec.PlanID, NodeID: node.NodeID},
+		},
+		options,
+	)
+	runtime.NodeRuns.add(runSpec.RunID, future, cancel)
 
 	return nil
 }
@@ -705,9 +1171,9 @@ func conditionTracesForDecision(decision agentosplan.SchedulerDecision) []agento
 	return traces
 }
 
-func pollRunningPlanNodes(activityCtx, workflowCtx workflow.Context, spec *agentos.RunPlanSpec, state *agentosplan.State, validation *ValidatePlanOutput, expansionCount *int32) (bool, error) {
+func pollRunningPlanNodes(runtime *planWorkflowRuntime, spec *agentos.RunPlanSpec, state *agentosplan.State, validation *ValidatePlanOutput, expansionCount *int32) (bool, error) {
 	progressed := false
-	now := workflow.Now(workflowCtx)
+	now := workflow.Now(runtime.WorkflowCtx)
 
 	for i := range state.Status.Nodes {
 		node := &state.Status.Nodes[i]
@@ -715,7 +1181,7 @@ func pollRunningPlanNodes(activityCtx, workflowCtx workflow.Context, spec *agent
 			continue
 		}
 
-		nodeProgressed, err := pollRunningPlanNode(activityCtx, workflowCtx, spec, state, validation, expansionCount, now, node)
+		nodeProgressed, err := pollRunningPlanNode(runtime, spec, state, validation, expansionCount, now, node)
 		if err != nil {
 			return progressed || nodeProgressed, err
 		}
@@ -726,30 +1192,35 @@ func pollRunningPlanNodes(activityCtx, workflowCtx workflow.Context, spec *agent
 	return progressed, nil
 }
 
-func pollRunningPlanNode(activityCtx, workflowCtx workflow.Context, spec *agentos.RunPlanSpec, state *agentosplan.State, validation *ValidatePlanOutput, expansionCount *int32, now time.Time, node *agentos.PlanNodeStatus) (bool, error) {
+func pollRunningPlanNode(runtime *planWorkflowRuntime, spec *agentos.RunPlanSpec, state *agentosplan.State, validation *ValidatePlanOutput, expansionCount *int32, now time.Time, node *agentos.PlanNodeStatus) (bool, error) {
 	nodeSpec, ok := validation.Plan.NodeByID[node.NodeID]
 	if !ok {
 		return false, fmt.Errorf("%w: unknown node %q", agentoscore.ErrInvalidRunPlan, node.NodeID)
 	}
 
 	if nodeTimedOut(now, node, &nodeSpec) {
-		return handleTimedOutPlanNode(activityCtx, workflowCtx, spec, state, node, &nodeSpec)
+		return handleTimedOutPlanNode(runtime, spec, state, node, &nodeSpec)
 	}
 
 	if node.RunID == "" {
-		return markRunningPlanNodeSucceeded(activityCtx, workflowCtx, spec, state, node)
+		return markRunningPlanNodeSucceeded(runtime.ActivityCtx, runtime.WorkflowCtx, spec, state, node)
 	}
 
-	return refreshRunningPlanNode(activityCtx, workflowCtx, spec, state, validation, expansionCount, node, &nodeSpec)
+	return refreshRunningPlanNode(runtime, spec, state, validation, expansionCount, node, &nodeSpec)
 }
 
-func handleTimedOutPlanNode(activityCtx, workflowCtx workflow.Context, spec *agentos.RunPlanSpec, state *agentosplan.State, node *agentos.PlanNodeStatus, nodeSpec *agentos.PlanNodeSpec) (bool, error) {
-	if err := cancelTimedOutNode(activityCtx, spec.PlanID, node); err != nil {
+func handleTimedOutPlanNode(runtime *planWorkflowRuntime, spec *agentos.RunPlanSpec, state *agentosplan.State, node *agentos.PlanNodeStatus, nodeSpec *agentos.PlanNodeSpec) (bool, error) {
+	// The plan owns run cancelation and sends it with the node-timeout
+	// idempotency key. For Nexus-backed nodes the operation is canceled too so
+	// the handler stops promptly instead of polling an abandoned run.
+	if err := cancelTimedOutNode(runtime.ActivityCtx, spec, node); err != nil {
 		return false, err
 	}
 
+	runtime.NodeRuns.cancelRun(node.RunID)
+
 	reason := fmt.Sprintf("node timed out after %d seconds", nodeSpec.Policy.TimeoutSeconds)
-	if err := applyNodeAttemptFailure(activityCtx, workflowCtx, spec, state, nodeSpec, node.RunID, reason); err != nil {
+	if err := applyNodeAttemptFailure(runtime.ActivityCtx, runtime.WorkflowCtx, spec, state, nodeSpec, node.RunID, reason); err != nil {
 		return true, err
 	}
 
@@ -765,9 +1236,29 @@ func markRunningPlanNodeSucceeded(activityCtx, workflowCtx workflow.Context, spe
 	return true, nil
 }
 
-func refreshRunningPlanNode(activityCtx, workflowCtx workflow.Context, spec *agentos.RunPlanSpec, state *agentosplan.State, validation *ValidatePlanOutput, expansionCount *int32, node *agentos.PlanNodeStatus, nodeSpec *agentos.PlanNodeSpec) (bool, error) {
+// planNodeRunRef pairs the plan's tenant with one of its node runs. The plan
+// may only reach child runs it started, so its scope travels with every
+// node-addressed operation.
+func planNodeRunRef(spec *agentos.RunPlanSpec, runID string) agentos.RunRef {
+	return agentos.RunRef{RunID: runID, AccountID: spec.AccountID, ProjectID: spec.ProjectID}
+}
+
+func refreshRunningPlanNode(runtime *planWorkflowRuntime, spec *agentos.RunPlanSpec, state *agentosplan.State, validation *ValidatePlanOutput, expansionCount *int32, node *agentos.PlanNodeStatus, nodeSpec *agentos.PlanNodeSpec) (bool, error) {
+	if run, ok := runtime.NodeRuns.get(node.RunID); ok {
+		return refreshNexusBackedPlanNode(runtime, spec, state, validation, expansionCount, node, nodeSpec, run)
+	}
+
+	activityCtx, workflowCtx := runtime.ActivityCtx, runtime.WorkflowCtx
+
 	var current StatusPlanNodeOutput
-	if err := workflow.ExecuteActivity(activityCtx, StatusPlanNodeActivityName, statusPlanNodeInput{RunID: node.RunID}).Get(activityCtx, &current); err != nil {
+
+	nodeRef := planNodeRunRef(spec, node.RunID)
+
+	if err := workflow.ExecuteActivity(activityCtx, StatusPlanNodeActivityName, statusPlanNodeInput{
+		RunID:     nodeRef.RunID,
+		AccountID: nodeRef.AccountID,
+		ProjectID: nodeRef.ProjectID,
+	}).Get(activityCtx, &current); err != nil {
 		evt15 := agentosplan.StateEvent{Kind: agentosplan.EventNodeFailed, NodeID: node.NodeID, Reason: err.Error()}
 		if persistErr := applyPlanStateEvent(activityCtx, workflowCtx, spec, state, &evt15); persistErr != nil {
 			return true, persistErr
@@ -781,6 +1272,46 @@ func refreshRunningPlanNode(activityCtx, workflowCtx workflow.Context, spec *age
 	}
 
 	if err := applyNodeRunTerminal(activityCtx, workflowCtx, spec, state, validation, expansionCount, nodeSpec, &current.Status); err != nil {
+		return false, err
+	}
+
+	return true, nil
+}
+
+// refreshNexusBackedPlanNode applies the node's Nexus run promise: a pending
+// promise is zero-cost (no backend roundtrip), a resolved one carries the
+// terminal run status directly. The promise is dropped after resolution;
+// anything non-terminal that still slips through falls back to status polling
+// on the next tick.
+func refreshNexusBackedPlanNode(runtime *planWorkflowRuntime, spec *agentos.RunPlanSpec, state *agentosplan.State, validation *ValidatePlanOutput, expansionCount *int32, node *agentos.PlanNodeStatus, nodeSpec *agentos.PlanNodeSpec, run *planNodeRun) (bool, error) {
+	if !run.future.IsReady() {
+		return false, nil
+	}
+
+	return applyNexusNodePromise(runtime, spec, state, validation, expansionCount, node, nodeSpec, run)
+}
+
+// applyNexusNodePromise drains one resolved Nexus run promise into plan
+// state: an operation failure fails the node, a terminal status flows through
+// the standard terminal handling (budget, artifacts, expansion).
+func applyNexusNodePromise(runtime *planWorkflowRuntime, spec *agentos.RunPlanSpec, state *agentosplan.State, validation *ValidatePlanOutput, expansionCount *int32, node *agentos.PlanNodeStatus, nodeSpec *agentos.PlanNodeSpec, run *planNodeRun) (bool, error) {
+	runtime.NodeRuns.remove(node.RunID)
+
+	var out nexusapi.RunOutput
+	if err := run.future.Get(runtime.WorkflowCtx, &out); err != nil {
+		evt15 := agentosplan.StateEvent{Kind: agentosplan.EventNodeFailed, NodeID: node.NodeID, RunID: node.RunID, Reason: err.Error()}
+		if persistErr := applyPlanStateEvent(runtime.ActivityCtx, runtime.WorkflowCtx, spec, state, &evt15); persistErr != nil {
+			return true, persistErr
+		}
+
+		return true, nil
+	}
+
+	if !runTerminal(out.Status.LifecycleState) {
+		return false, nil
+	}
+
+	if err := applyNodeRunTerminal(runtime.ActivityCtx, runtime.WorkflowCtx, spec, state, validation, expansionCount, nodeSpec, &out.Status); err != nil {
 		return false, err
 	}
 
@@ -939,7 +1470,9 @@ func applyNodeAttemptFailure(activityCtx, workflowCtx workflow.Context, spec *ag
 	return applyPlanStateEvent(activityCtx, workflowCtx, spec, state, &evt23)
 }
 
-func cancelTimedOutNode(activityCtx workflow.Context, planID string, node *agentos.PlanNodeStatus) error {
+func cancelTimedOutNode(activityCtx workflow.Context, spec *agentos.RunPlanSpec, node *agentos.PlanNodeStatus) error {
+	planID := spec.PlanID
+
 	if node.RunID == "" {
 		return fmt.Errorf("%w: timed out node %q has no active run id", agentoscore.ErrInvalidRunPlan, node.NodeID)
 	}
@@ -953,7 +1486,39 @@ func cancelTimedOutNode(activityCtx workflow.Context, planID string, node *agent
 		Operation:      agentoscore.ControlCancel,
 		IdempotencyKey: key,
 	}
-	if err := workflow.ExecuteActivity(activityCtx, ControlPlanNodeActivityName, controlPlanNodeInput{RunID: node.RunID, Control: control}).Get(activityCtx, nil); err != nil {
+	nodeRef := planNodeRunRef(spec, node.RunID)
+
+	if err := workflow.ExecuteActivity(activityCtx, ControlPlanNodeActivityName, controlPlanNodeInput{
+		RunID:     nodeRef.RunID,
+		AccountID: nodeRef.AccountID,
+		ProjectID: nodeRef.ProjectID,
+		Control:   control,
+	}).Get(activityCtx, nil); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+// cancelActivePlanNodesAndFail cancels every active node run and then fails
+// the plan with the given event kind and reason. Shared by the budget, timeout
+// and blocked-approval guards, so each guard differs only in its deadline
+// predicate, idempotency key and failure kind.
+func cancelActivePlanNodesAndFail(activityCtx, workflowCtx workflow.Context, spec *agentos.RunPlanSpec, state *agentosplan.State, controlsByNode map[string][]agentoscore.ControlOperation, kind agentosplan.EventKind, idempotencyKey, reason string) error {
+	control := agentoscore.ControlRequest{
+		Operation:      agentoscore.ControlCancel,
+		IdempotencyKey: idempotencyKey,
+	}
+	if err := controlActivePlanNodes(activityCtx, spec, &state.Status, &control, controlsByNode); err != nil {
+		return err
+	}
+
+	if err := markActivePlanNodesCanceled(activityCtx, workflowCtx, spec, state, reason); err != nil {
+		return err
+	}
+
+	evt := agentosplan.StateEvent{Kind: kind, Reason: reason}
+	if err := applyPlanStateEvent(activityCtx, workflowCtx, spec, state, &evt); err != nil {
 		return err
 	}
 
@@ -970,52 +1535,42 @@ func applyPlanBudgetGuard(activityCtx, workflowCtx workflow.Context, spec *agent
 		return false, err
 	}
 
-	control := agentoscore.ControlRequest{
-		Operation:      agentoscore.ControlCancel,
-		IdempotencyKey: key,
-	}
-	if err := controlActivePlanNodes(activityCtx, spec.PlanID, &state.Status, &control, controlsByNode); err != nil {
-		return false, err
-	}
-
 	reason := agentosplan.BudgetExceededReason(spec.Policy, state.Status.BudgetUsage)
-	if err := markActivePlanNodesCanceled(activityCtx, workflowCtx, spec, state, reason); err != nil {
-		return false, err
-	}
-
-	evt24 := agentosplan.StateEvent{Kind: agentosplan.EventPlanFailed, Reason: reason}
-	if err := applyPlanStateEvent(activityCtx, workflowCtx, spec, state, &evt24); err != nil {
+	if err := cancelActivePlanNodesAndFail(activityCtx, workflowCtx, spec, state, controlsByNode, agentosplan.EventPlanFailed, key, reason); err != nil {
 		return false, err
 	}
 
 	return true, nil
 }
 
-func applyPlanTimeoutGuard(activityCtx, workflowCtx workflow.Context, spec *agentos.RunPlanSpec, state *agentosplan.State, controlsByNode map[string][]agentoscore.ControlOperation) (bool, error) {
-	if !agentosplan.PlanTimedOut(spec.Policy, state.Status.StartedAt, workflow.Now(workflowCtx)) {
+// planDeadlineGuardParams supplies what differs between the wall-clock and
+// approval-timeout plan guards: which deadline predicate fires, which status
+// field anchors it, and which failure event and reason the plan receives.
+type planDeadlineGuardParams struct {
+	expired        func(agentos.PlanPolicy, time.Time, time.Time) bool
+	anchor         func(agentos.RunPlanStatus) time.Time
+	idempotencyKey func(string, time.Time, int64) (string, error)
+	seconds        func(agentos.PlanPolicy) int64
+	reason         func(agentos.PlanPolicy) string
+	eventKind      agentosplan.EventKind
+}
+
+// applyPlanDeadlineGuard trips the plan failure pipeline when a plan-level
+// deadline passes: cancel active nodes, then fail the plan under a stable
+// idempotency key so replays and retries never emit duplicate controls.
+func applyPlanDeadlineGuard(activityCtx, workflowCtx workflow.Context, spec *agentos.RunPlanSpec, state *agentosplan.State, controlsByNode map[string][]agentoscore.ControlOperation, params planDeadlineGuardParams) (bool, error) {
+	anchor := params.anchor(state.Status)
+	if !params.expired(spec.Policy, anchor, workflow.Now(workflowCtx)) {
 		return false, nil
 	}
 
-	key, err := agentosplan.PlanTimeoutControlIdempotencyKey(spec.PlanID, state.Status.StartedAt, spec.Policy.TimeoutSeconds)
+	key, err := params.idempotencyKey(spec.PlanID, anchor, params.seconds(spec.Policy))
 	if err != nil {
 		return false, err
 	}
 
-	control := agentoscore.ControlRequest{
-		Operation:      agentoscore.ControlCancel,
-		IdempotencyKey: key,
-	}
-	if err := controlActivePlanNodes(activityCtx, spec.PlanID, &state.Status, &control, controlsByNode); err != nil {
-		return false, err
-	}
-
-	reason := agentosplan.PlanTimeoutReason(spec.Policy)
-	if err := markActivePlanNodesCanceled(activityCtx, workflowCtx, spec, state, reason); err != nil {
-		return false, err
-	}
-
-	evt25 := agentosplan.StateEvent{Kind: agentosplan.EventPlanFailed, Reason: reason}
-	if err := applyPlanStateEvent(activityCtx, workflowCtx, spec, state, &evt25); err != nil {
+	reason := params.reason(spec.Policy)
+	if err := cancelActivePlanNodesAndFail(activityCtx, workflowCtx, spec, state, controlsByNode, params.eventKind, key, reason); err != nil {
 		return false, err
 	}
 
@@ -1124,7 +1679,7 @@ func applyPlanControl(activityCtx, workflowCtx workflow.Context, spec *agentos.R
 }
 
 func cancelPlanFromControl(activityCtx, workflowCtx workflow.Context, spec *agentos.RunPlanSpec, state *agentosplan.State, control *agentoscore.ControlRequest, controlsByNode map[string][]agentoscore.ControlOperation, result planControlDrainResult) (planControlDrainResult, error) {
-	if err := controlActivePlanNodes(activityCtx, spec.PlanID, &state.Status, control, controlsByNode); err != nil {
+	if err := controlActivePlanNodes(activityCtx, spec, &state.Status, control, controlsByNode); err != nil {
 		return result, err
 	}
 
@@ -1143,11 +1698,21 @@ func cancelPlanFromControl(activityCtx, workflowCtx workflow.Context, spec *agen
 }
 
 func pausePlanFromControl(activityCtx, workflowCtx workflow.Context, spec *agentos.RunPlanSpec, state *agentosplan.State, control *agentoscore.ControlRequest, controlsByNode map[string][]agentoscore.ControlOperation, result planControlDrainResult) (planControlDrainResult, error) {
-	if err := controlActivePlanNodes(activityCtx, spec.PlanID, &state.Status, control, controlsByNode); err != nil {
+	if err := controlActivePlanNodes(activityCtx, spec, &state.Status, control, controlsByNode); err != nil {
 		return blockPlanAfterControlFailure(activityCtx, workflowCtx, spec, state, err)
 	}
 
-	evt27 := agentosplan.StateEvent{Kind: agentosplan.EventPlanBlocked, Reason: "pause requested"}
+	gate, err := agentosplan.NewPlanApprovalGate(spec, &state.Status, "pause requested", workflow.Now(workflowCtx))
+	if err != nil {
+		return result, err
+	}
+
+	evt27 := agentosplan.StateEvent{
+		Kind:     agentosplan.EventPlanBlocked,
+		Reason:   "pause requested",
+		Approval: &agentosplan.StateEventApproval{Gate: gate},
+	}
+
 	if err := applyPlanStateEvent(activityCtx, workflowCtx, spec, state, &evt27); err != nil {
 		return result, err
 	}
@@ -1158,7 +1723,7 @@ func pausePlanFromControl(activityCtx, workflowCtx workflow.Context, spec *agent
 }
 
 func resumePlanFromControl(activityCtx, workflowCtx workflow.Context, spec *agentos.RunPlanSpec, state *agentosplan.State, control *agentoscore.ControlRequest, controlsByNode map[string][]agentoscore.ControlOperation, result planControlDrainResult) (planControlDrainResult, error) {
-	if err := controlActivePlanNodes(activityCtx, spec.PlanID, &state.Status, control, controlsByNode); err != nil {
+	if err := controlActivePlanNodes(activityCtx, spec, &state.Status, control, controlsByNode); err != nil {
 		return blockPlanAfterControlFailure(activityCtx, workflowCtx, spec, state, err)
 	}
 
@@ -1174,7 +1739,17 @@ func resumePlanFromControl(activityCtx, workflowCtx workflow.Context, spec *agen
 
 func blockPlanAfterControlFailure(activityCtx, workflowCtx workflow.Context, spec *agentos.RunPlanSpec, state *agentosplan.State, controlErr error) (planControlDrainResult, error) {
 	result := planControlDrainResult{Paused: true}
-	evt29 := agentosplan.StateEvent{Kind: agentosplan.EventPlanBlocked, Reason: controlErr.Error()}
+
+	gate, err := agentosplan.NewPlanApprovalGate(spec, &state.Status, controlErr.Error(), workflow.Now(workflowCtx))
+	if err != nil {
+		return result, err
+	}
+
+	evt29 := agentosplan.StateEvent{
+		Kind:     agentosplan.EventPlanBlocked,
+		Reason:   controlErr.Error(),
+		Approval: &agentosplan.StateEventApproval{Gate: gate},
+	}
 
 	if persistErr := applyPlanStateEvent(activityCtx, workflowCtx, spec, state, &evt29); persistErr != nil {
 		return result, persistErr
@@ -1210,14 +1785,14 @@ func markActivePlanNodesCanceled(activityCtx, workflowCtx workflow.Context, spec
 	return nil
 }
 
-func controlActivePlanNodes(activityCtx workflow.Context, planID string, status *agentos.RunPlanStatus, control *agentoscore.ControlRequest, controlsByNode map[string][]agentoscore.ControlOperation) error {
-	inputs, err := activePlanNodeControlInputs(planID, status, control, controlsByNode)
+func controlActivePlanNodes(activityCtx workflow.Context, spec *agentos.RunPlanSpec, status *agentos.RunPlanStatus, control *agentoscore.ControlRequest, controlsByNode map[string][]agentoscore.ControlOperation) error {
+	inputs, err := activePlanNodeControlInputs(spec, status, control, controlsByNode)
 	if err != nil {
 		return err
 	}
 
-	for _, input := range inputs {
-		if err := workflow.ExecuteActivity(activityCtx, ControlPlanNodeActivityName, input).Get(activityCtx, nil); err != nil {
+	for i := range inputs {
+		if err := workflow.ExecuteActivity(activityCtx, ControlPlanNodeActivityName, inputs[i]).Get(activityCtx, nil); err != nil {
 			return err
 		}
 	}
@@ -1225,8 +1800,11 @@ func controlActivePlanNodes(activityCtx workflow.Context, planID string, status 
 	return nil
 }
 
-func activePlanNodeControlInputs(planID string, status *agentos.RunPlanStatus, control *agentoscore.ControlRequest, controlsByNode map[string][]agentoscore.ControlOperation) ([]controlPlanNodeInput, error) {
+func activePlanNodeControlInputs(spec *agentos.RunPlanSpec, status *agentos.RunPlanStatus, control *agentoscore.ControlRequest, controlsByNode map[string][]agentoscore.ControlOperation) ([]controlPlanNodeInput, error) {
+	planID := spec.PlanID
+
 	inputs := make([]controlPlanNodeInput, 0, len(status.Nodes))
+
 	for i := range status.Nodes {
 		node := &status.Nodes[i]
 		if node.LifecycleState != agentos.PlanNodeRunning || node.RunID == "" {
@@ -1245,7 +1823,14 @@ func activePlanNodeControlInputs(planID string, status *agentos.RunPlanStatus, c
 		}
 
 		childControl.IdempotencyKey = key
-		inputs = append(inputs, controlPlanNodeInput{RunID: node.RunID, Control: childControl})
+		nodeRef := planNodeRunRef(spec, node.RunID)
+
+		inputs = append(inputs, controlPlanNodeInput{
+			RunID:     nodeRef.RunID,
+			AccountID: nodeRef.AccountID,
+			ProjectID: nodeRef.ProjectID,
+			Control:   childControl,
+		})
 	}
 
 	return inputs, nil
@@ -1303,14 +1888,45 @@ func applyPlanSignal(activityCtx, workflowCtx workflow.Context, spec *agentos.Ru
 		return approvePlanFromSignal(activityCtx, workflowCtx, spec, state, signal, result)
 	case agentoscore.SignalPlanReject:
 		return rejectPlanFromSignal(activityCtx, workflowCtx, spec, state, controlsByNode, signal, result)
-	case agentoscore.SignalControlPause, agentoscore.SignalControlResume, agentoscore.SignalControlCancel,
-		agentoscore.SignalUserMessage, agentoscore.SignalUserApproval, agentoscore.SignalUserReject,
+	case agentoscore.SignalControlPause, agentoscore.SignalControlResume, agentoscore.SignalControlCancel:
+		return result, nil
+	// Signals addressed to whatever is running inside a node are forwarded to
+	// it: the node's run may be a native step queue, which is what a queue
+	// modification or an outside event is for.
+	case agentoscore.SignalUserMessage, agentoscore.SignalUserApproval, agentoscore.SignalUserReject,
 		agentoscore.SignalToolResult, agentoscore.SignalHumanFeedback, agentoscore.SignalConfigPatch,
+		agentoscore.SignalStepModify, agentoscore.SignalExternalEvent,
 		agentoscore.SignalMemoryPatch:
+		if err := signalActivePlanNodes(activityCtx, spec, state, signal); err != nil {
+			return result, err
+		}
+
 		return result, nil
 	default:
 		return result, nil
 	}
+}
+
+func signalActivePlanNodes(activityCtx workflow.Context, spec *agentos.RunPlanSpec, state *agentosplan.State, signal *agentoscore.Signal) error {
+	for i := range state.Status.Nodes {
+		node := &state.Status.Nodes[i]
+		if node.LifecycleState != agentos.PlanNodeRunning || node.RunID == "" {
+			continue
+		}
+
+		nodeRef := planNodeRunRef(spec, node.RunID)
+
+		if err := workflow.ExecuteActivity(activityCtx, SignalPlanNodeActivityName, signalPlanNodeInput{
+			RunID:     nodeRef.RunID,
+			AccountID: nodeRef.AccountID,
+			ProjectID: nodeRef.ProjectID,
+			Signal:    *signal,
+		}).Get(activityCtx, nil); err != nil {
+			return err
+		}
+	}
+
+	return nil
 }
 
 func retryPlanNodeFromSignal(activityCtx, workflowCtx workflow.Context, spec *agentos.RunPlanSpec, state *agentosplan.State, nodes map[string]agentos.PlanNodeSpec, signal *agentoscore.Signal, result planSignalDrainResult) (planSignalDrainResult, error) {
@@ -1329,8 +1945,21 @@ func approvePlanFromSignal(activityCtx, workflowCtx workflow.Context, spec *agen
 		return result, fmt.Errorf("%w: approve requires blocked plan state", agentoscore.ErrInvalidSignal)
 	}
 
-	reason := agentosplan.PlanSignalReason(signal)
-	evt31 := agentosplan.StateEvent{Kind: agentosplan.EventPlanApproved, Reason: reason}
+	decision, err := agentosplan.PlanApprovalDecisionFromSignal(spec, &state.Status, signal, true, workflow.Now(workflowCtx))
+	if err != nil {
+		return result, err
+	}
+
+	approval, err := approvalEventForSignal(spec, &state.Status, decision.Reason, workflow.Now(workflowCtx), &decision)
+	if err != nil {
+		return result, err
+	}
+
+	evt31 := agentosplan.StateEvent{
+		Kind:     agentosplan.EventPlanApproved,
+		Reason:   decision.Reason,
+		Approval: approval,
+	}
 
 	if err := applyPlanStateEvent(activityCtx, workflowCtx, spec, state, &evt31); err != nil {
 		return result, err
@@ -1343,7 +1972,12 @@ func approvePlanFromSignal(activityCtx, workflowCtx workflow.Context, spec *agen
 }
 
 func rejectPlanFromSignal(activityCtx, workflowCtx workflow.Context, spec *agentos.RunPlanSpec, state *agentosplan.State, controlsByNode map[string][]agentoscore.ControlOperation, signal *agentoscore.Signal, result planSignalDrainResult) (planSignalDrainResult, error) {
-	reason := agentosplan.PlanSignalReason(signal)
+	decision, err := agentosplan.PlanApprovalDecisionFromSignal(spec, &state.Status, signal, false, workflow.Now(workflowCtx))
+	if err != nil {
+		return result, err
+	}
+
+	reason := decision.Reason
 	if reason == "" {
 		reason = "plan rejected"
 	}
@@ -1357,7 +1991,7 @@ func rejectPlanFromSignal(activityCtx, workflowCtx workflow.Context, spec *agent
 		Operation:      agentoscore.ControlCancel,
 		IdempotencyKey: key,
 	}
-	if err := controlActivePlanNodes(activityCtx, spec.PlanID, &state.Status, &control, controlsByNode); err != nil {
+	if err := controlActivePlanNodes(activityCtx, spec, &state.Status, &control, controlsByNode); err != nil {
 		return result, err
 	}
 
@@ -1365,7 +1999,17 @@ func rejectPlanFromSignal(activityCtx, workflowCtx workflow.Context, spec *agent
 		return result, err
 	}
 
-	evt32 := agentosplan.StateEvent{Kind: agentosplan.EventPlanRejected, Reason: reason}
+	approval, err := approvalEventForSignal(spec, &state.Status, reason, workflow.Now(workflowCtx), &decision)
+	if err != nil {
+		return result, err
+	}
+
+	evt32 := agentosplan.StateEvent{
+		Kind:     agentosplan.EventPlanRejected,
+		Reason:   reason,
+		Approval: approval,
+	}
+
 	if err := applyPlanStateEvent(activityCtx, workflowCtx, spec, state, &evt32); err != nil {
 		return result, err
 	}
@@ -1376,7 +2020,37 @@ func rejectPlanFromSignal(activityCtx, workflowCtx workflow.Context, spec *agent
 	return result, nil
 }
 
+// approvalEventForSignal builds the StateEvent approval payload for an
+// approve/reject decision. A blocked plan persisted before the
+// auditable-approval feature has no gate snapshot; a fresh gate is derived from
+// the live topology so the decision is still auditable. A reject of a
+// never-blocked plan records no gate (the decision stays in the durable event
+// ledger, where it belongs, without implying a gate existed).
+func approvalEventForSignal(spec *agentos.RunPlanSpec, status *agentos.RunPlanStatus, reason string, now time.Time, decision *agentos.PlanApprovalDecision) (*agentosplan.StateEventApproval, error) {
+	approval := &agentosplan.StateEventApproval{Decision: decision}
+
+	if status.Approval == nil && status.LifecycleState == agentos.PlanLifecycleBlocked {
+		gate, err := agentosplan.NewPlanApprovalGate(spec, status, reason, now)
+		if err != nil {
+			return nil, err
+		}
+
+		approval.Gate = gate
+	}
+
+	return approval, nil
+}
+
 func applyManualNodeRetry(activityCtx, workflowCtx workflow.Context, spec *agentos.RunPlanSpec, state *agentosplan.State, nodes map[string]agentos.PlanNodeSpec, signal *agentoscore.Signal) error {
+	// A retry signal for a node whose automatic retry is already scheduled
+	// (ready after a failed attempt) is satisfied by that pending retry.
+	// Acknowledge it instead of failing the plan over an operator/UI race —
+	// with asynchronous run completion the signal routinely lands between
+	// the attempt failure and the scheduled retry's start.
+	if manualRetryAlreadyScheduled(signal, state) {
+		return nil
+	}
+
 	retry, err := manualNodeRetry(signal, state, nodes)
 	if err != nil {
 		return err
@@ -1405,6 +2079,19 @@ type manualRetryRequest struct {
 	current     agentos.PlanNodeStatus
 	reason      string
 	nextAttempt int32
+}
+
+// manualRetryAlreadyScheduled reports whether the retry signal targets a node
+// whose retry is already scheduled: ready after at least one failed attempt.
+func manualRetryAlreadyScheduled(signal *agentoscore.Signal, state *agentosplan.State) bool {
+	nodeID, err := agentosplan.PlanSignalNodeID(signal)
+	if err != nil {
+		return false
+	}
+
+	current, ok := state.NodeStatus(nodeID)
+
+	return ok && current.LifecycleState == agentos.PlanNodeReady && current.Attempts > 0
 }
 
 func manualNodeRetry(signal *agentoscore.Signal, state *agentosplan.State, nodes map[string]agentos.PlanNodeSpec) (manualRetryRequest, error) {

@@ -8,6 +8,7 @@ import (
 	"github.com/TekkenSteve/GoAgent/internal/entity"
 )
 
+// ErrNilDefinition is returned by Registry.Register when the definition is nil.
 var ErrNilDefinition = errors.New("agent registry: cannot register nil definition")
 
 // Registry manages agent definitions and supports multiple sources:

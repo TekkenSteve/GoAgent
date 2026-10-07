@@ -1,3 +1,4 @@
+// Package agentosprojection implements AgentOS resource projections.
 package agentosprojection
 
 import (

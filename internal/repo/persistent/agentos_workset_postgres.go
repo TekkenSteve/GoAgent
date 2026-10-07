@@ -4,367 +4,317 @@ import (
 	"context"
 	"fmt"
 
-	sq "github.com/Masterminds/squirrel"
 	agentoscore "github.com/TekkenSteve/GoAgent/agentos/core"
 	agentos "github.com/TekkenSteve/GoAgent/agentos/process"
 	"github.com/TekkenSteve/GoAgent/internal/pkg/postgres"
-	"github.com/TekkenSteve/GoAgent/internal/usecase/agentosbatch"
+	"github.com/TekkenSteve/GoAgent/internal/repo/persistent/sqlcgen"
+	agentosbatch "github.com/TekkenSteve/GoAgent/internal/usecase/agentosbatch"
 	"github.com/jackc/pgx/v5"
 )
 
-// AgentOSWorksetRepo persists batch workset specs, chunk keys, and lifecycle projections.
+// worksetTable is the worksets half of the platform projection protocol: every
+// method wraps one generated statement, and nothing else. Marshaling,
+// idempotent replay, conflict resolution and transaction handling live in the
+// shared protocols, so this adapter is the only place the workset SQL surface
+// appears.
+type worksetTable struct {
+	queries *sqlcgen.Queries
+}
+
+func (t worksetTable) withTx(tx pgx.Tx) platformTable[agentos.WorksetSpec, agentos.WorksetStatus] {
+	return t.txTable(tx)
+}
+
+// txTable is withTx for callers that need workset-specific statements (the
+// chunk-result key) alongside the shared protocol surface.
+func (t worksetTable) txTable(tx pgx.Tx) worksetTable {
+	return worksetTable{queries: t.queries.WithTx(tx)}
+}
+
+func (t worksetTable) selectRecordByKey(ctx context.Context, scope platformScope) (specJSON, statusJSON []byte, queryErr error) {
+	row, err := t.queries.GetWorksetByIdempotencyKey(ctx, sqlcgen.GetWorksetByIdempotencyKeyParams{
+		AccountID:      scope.AccountID,
+		ProjectID:      scope.ProjectID,
+		IdempotencyKey: scope.IdempotencyKey,
+	})
+	if err != nil {
+		return nil, nil, err
+	}
+
+	return row.SpecJson, row.StatusJson, nil
+}
+
+func (t worksetTable) selectRecordByID(ctx context.Context, scope platformScope) (specJSON, statusJSON []byte, queryErr error) {
+	row, err := t.queries.GetWorksetByID(ctx, scope.RecordID)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	return row.SpecJson, row.StatusJson, nil
+}
+
+func (t worksetTable) insertRecord(ctx context.Context, spec *agentos.WorksetSpec, status *agentos.WorksetStatus, specJSON, statusJSON []byte) ([]byte, error) {
+	return t.queries.InsertWorkset(ctx, worksetInsertParams(spec, status, specJSON, statusJSON))
+}
+
+// worksetInsertParams builds the stored row's columns from the record's
+// identity, its denormalized filter columns and the two documents. The
+// governed-action table carries the same column set, so its binding is
+// structurally identical: sqlc generates one parameter struct per statement,
+// and Go cannot map two generated structs through one builder. The duplication
+// is the price of the tables being separate; it is not shared logic.
+//
+//nolint:dupl // one parameter binding per platform table, mirrored by actionInsertParams
+func worksetInsertParams(spec *agentos.WorksetSpec, status *agentos.WorksetStatus, specJSON, statusJSON []byte) sqlcgen.InsertWorksetParams {
+	return sqlcgen.InsertWorksetParams{
+		WorksetID:      spec.WorksetID,
+		AccountID:      spec.AccountID,
+		ProjectID:      spec.ProjectID,
+		ProcessID:      spec.ProcessID,
+		ResourceKind:   string(spec.Resource.Kind),
+		ResourceID:     spec.Resource.ResourceID,
+		Kind:           string(spec.Kind),
+		LifecycleState: status.LifecycleState,
+		IdempotencyKey: spec.IdempotencyKey,
+		SpecJson:       specJSON,
+		StatusJson:     statusJSON,
+		RequestedAt:    optionalTimestamptz(spec.RequestedAt),
+		UpdatedAt:      status.UpdatedAt,
+	}
+}
+
+func (t worksetTable) updateRecordStatus(ctx context.Context, scope platformScope, status *agentos.WorksetStatus, statusJSON []byte) (int64, error) {
+	return t.queries.UpdateWorksetProjection(ctx, sqlcgen.UpdateWorksetProjectionParams{
+		LifecycleState: status.LifecycleState,
+		StatusJson:     statusJSON,
+		UpdatedAt:      status.UpdatedAt,
+		WorksetID:      scope.RecordID,
+		AccountID:      scope.AccountID,
+		ProjectID:      scope.ProjectID,
+	})
+}
+
+func (t worksetTable) claimStatusKey(ctx context.Context, scope platformScope, statusJSON []byte) ([]byte, error) {
+	return t.queries.ClaimWorksetStatusUpdate(ctx, sqlcgen.ClaimWorksetStatusUpdateParams{
+		WorksetID:      scope.RecordID,
+		AccountID:      scope.AccountID,
+		ProjectID:      scope.ProjectID,
+		IdempotencyKey: scope.IdempotencyKey,
+		StatusJson:     statusJSON,
+	})
+}
+
+func (t worksetTable) readStatusKey(ctx context.Context, scope platformScope) (storedJSON []byte, queryErr error) {
+	return t.queries.GetWorksetStatusUpdate(ctx, sqlcgen.GetWorksetStatusUpdateParams{
+		WorksetID:      scope.RecordID,
+		AccountID:      scope.AccountID,
+		ProjectID:      scope.ProjectID,
+		IdempotencyKey: scope.IdempotencyKey,
+	})
+}
+
+func (t worksetTable) recordScope(spec *agentos.WorksetSpec) platformScope {
+	return platformScope{
+		RecordID:       spec.WorksetID,
+		AccountID:      spec.AccountID,
+		ProjectID:      spec.ProjectID,
+		IdempotencyKey: spec.IdempotencyKey,
+	}
+}
+
+func (t worksetTable) statusScope(status *agentos.WorksetStatus, idempotencyKey string) platformScope {
+	return platformScope{
+		RecordID:       status.WorksetID,
+		AccountID:      status.AccountID,
+		ProjectID:      status.ProjectID,
+		IdempotencyKey: idempotencyKey,
+	}
+}
+
+func (t worksetTable) normalizeStatus(spec *agentos.WorksetSpec, status *agentos.WorksetStatus) *agentos.WorksetStatus {
+	normalized := normalizePostgresWorksetStatus(spec, status)
+
+	return &normalized
+}
+
+func (t worksetTable) notFound(scope platformScope) error {
+	return fmt.Errorf("%w: workset %q not found", agentoscore.ErrInvalidWorksetScope, scope.RecordID)
+}
+
+func (t worksetTable) alreadyExists(scope platformScope) error {
+	return fmt.Errorf("%w: workset %q already exists", agentoscore.ErrInvalidWorkset, scope.RecordID)
+}
+
+func (t worksetTable) tenantMismatch(spec *agentos.WorksetSpec, scope platformScope) error {
+	return platformTenantMismatch(agentoscore.ErrInvalidWorksetScope, "workset", "is outside tenant scope", spec.AccountID, spec.ProjectID, scope)
+}
+
+func (t worksetTable) statusTenantMismatch(spec *agentos.WorksetSpec, scope platformScope) error {
+	return platformTenantMismatch(agentoscore.ErrInvalidWorksetScope, "workset", "status is outside tenant scope", spec.AccountID, spec.ProjectID, scope)
+}
+
+// claimChunkResult and readChunkResult are the chunk-result write's own key
+// table: its claim carries a result document as well as the status, so it sits
+// outside the shared status-key protocol.
+func (t worksetTable) claimChunkResult(ctx context.Context, ref agentos.WorksetRef, result *agentos.WorksetChunkResult, resultJSON, statusJSON []byte) ([]byte, error) {
+	return t.queries.ClaimWorksetChunkResult(ctx, sqlcgen.ClaimWorksetChunkResultParams{
+		WorksetID:      ref.WorksetID,
+		AccountID:      ref.AccountID,
+		ProjectID:      ref.ProjectID,
+		ChunkID:        result.ChunkID,
+		IdempotencyKey: result.IdempotencyKey,
+		ResultJson:     resultJSON,
+		StatusJson:     statusJSON,
+	})
+}
+
+func (t worksetTable) readChunkResult(ctx context.Context, ref agentos.WorksetRef, chunkID, idempotencyKey string) ([]byte, error) {
+	return t.queries.GetWorksetChunkStatus(ctx, sqlcgen.GetWorksetChunkStatusParams{
+		WorksetID:      ref.WorksetID,
+		AccountID:      ref.AccountID,
+		ProjectID:      ref.ProjectID,
+		ChunkID:        chunkID,
+		IdempotencyKey: idempotencyKey,
+	})
+}
+
+// AgentOSWorksetRepo persists generic AgentOS workset projections.
 type AgentOSWorksetRepo struct {
 	*postgres.Postgres
+
+	table worksetTable
 }
 
-// NewAgentOSWorksetRepo creates a Postgres-backed workset store.
+// NewAgentOSWorksetRepo creates a Postgres-backed workset repository.
 func NewAgentOSWorksetRepo(pg *postgres.Postgres) *AgentOSWorksetRepo {
-	return &AgentOSWorksetRepo{Postgres: pg}
+	return &AgentOSWorksetRepo{Postgres: pg, table: worksetTable{queries: sqlcgen.New(pg.Pool)}}
 }
 
+// CreateWorkset persists a new workset from its spec and status, returning the stored status and whether the workset was newly created.
 func (r *AgentOSWorksetRepo) CreateWorkset(ctx context.Context, spec *agentos.WorksetSpec, status *agentos.WorksetStatus) (agentos.WorksetStatus, bool, error) {
 	if err := validatePostgresCreateWorkset(spec, status); err != nil {
 		return agentos.WorksetStatus{}, false, err
 	}
 
-	existingSpec, existingStatus, exists, err := r.worksetByIdempotencyKey(ctx, spec.AccountID, spec.ProjectID, spec.IdempotencyKey)
-	if err != nil {
-		return agentos.WorksetStatus{}, false, err
-	}
-
-	if exists {
-		return existingStatus, false, agentosbatch.ValidateWorksetStartIdempotency(&existingSpec, spec)
-	}
-
-	existingSpec, existingStatus, exists, err = r.worksetByID(ctx, spec.WorksetID)
-	if err != nil {
-		return agentos.WorksetStatus{}, false, err
-	}
-
-	if exists {
-		return existingStatus, false, agentosbatch.ValidateWorksetStartIdempotency(&existingSpec, spec)
-	}
-
-	return r.insertWorkset(ctx, spec, status)
+	return createPlatformRecord(ctx, r.table, "AgentOSWorksetRepo - CreateWorkset", spec, status, agentosbatch.ValidateWorksetStartIdempotency)
 }
 
+// GetWorkset loads a workset spec and status by tenant-scoped reference.
 func (r *AgentOSWorksetRepo) GetWorkset(ctx context.Context, ref agentos.WorksetRef) (agentos.WorksetSpec, agentos.WorksetStatus, bool, error) {
 	if err := agentos.ValidateWorksetRef(ref); err != nil {
 		return agentos.WorksetSpec{}, agentos.WorksetStatus{}, false, err
 	}
 
-	return getProcessPlatformProjection[agentos.WorksetSpec, agentos.WorksetStatus](
-		ctx,
-		processPlatformTenantRef{ID: ref.WorksetID, AccountID: ref.AccountID, ProjectID: ref.ProjectID},
-		r.worksetByID,
-		validatePostgresWorksetTenant(ref),
-	)
+	scope := platformScope{RecordID: ref.WorksetID, AccountID: ref.AccountID, ProjectID: ref.ProjectID}
+
+	return getPlatformRecord[agentos.WorksetSpec, agentos.WorksetStatus](ctx, r.table, "AgentOSWorksetRepo - GetWorkset", scope)
 }
 
+// ListWorksets returns workset statuses matching the given scope filters.
 func (r *AgentOSWorksetRepo) ListWorksets(ctx context.Context, scope *agentos.WorksetScope) ([]agentos.WorksetStatus, error) {
 	if err := agentos.ValidateWorksetScope(scope); err != nil {
 		return nil, err
 	}
 
-	query := worksetStatusListQuery(scope)
+	rows, err := r.table.queries.ListWorksets(ctx, worksetListParams(scope))
 
-	return listProcessPlatformStatuses[agentos.WorksetStatus](ctx, r.Postgres, &query)
+	return listRecords("AgentOSWorksetRepo - ListWorksets", rows, err, func(row *[]byte) (agentos.WorksetStatus, error) {
+		return decodeProcessPlatformJSON[agentos.WorksetStatus]("AgentOSWorksetRepo - ListWorksets", *row)
+	})
 }
 
+// ApplyChunkResult idempotently applies a chunk result and returns the resulting workset status.
 func (r *AgentOSWorksetRepo) ApplyChunkResult(ctx context.Context, ref agentos.WorksetRef, result *agentos.WorksetChunkResult, status *agentos.WorksetStatus) (agentos.WorksetStatus, error) {
 	if err := validatePostgresApplyChunkResult(ref, result, status); err != nil {
 		return agentos.WorksetStatus{}, err
 	}
 
-	existing, exists, err := r.worksetChunkStatusByKey(ctx, ref, result.ChunkID, result.IdempotencyKey)
-	if err != nil {
-		return agentos.WorksetStatus{}, err
-	}
-
-	if exists {
-		return existing, nil
-	}
-
-	spec, _, exists, err := r.worksetByID(ctx, ref.WorksetID)
+	spec, _, exists, err := selectPlatformRecord[agentos.WorksetSpec, agentos.WorksetStatus](ctx,
+		"AgentOSWorksetRepo - ApplyChunkResult", r.table.selectRecordByID, platformScope{RecordID: ref.WorksetID})
 	if err != nil {
 		return agentos.WorksetStatus{}, err
 	}
 
 	if !exists {
-		return agentos.WorksetStatus{}, fmt.Errorf("%w: workset %q not found", agentoscore.ErrInvalidWorksetScope, ref.WorksetID)
+		return agentos.WorksetStatus{}, r.table.notFound(platformScope{RecordID: ref.WorksetID})
 	}
 
-	if spec.AccountID != ref.AccountID || spec.ProjectID != ref.ProjectID {
-		return agentos.WorksetStatus{}, fmt.Errorf("%w: workset %q is outside tenant scope", agentoscore.ErrInvalidWorksetScope, ref.WorksetID)
+	if err := r.table.tenantMismatch(&spec, platformScope{RecordID: ref.WorksetID, AccountID: ref.AccountID, ProjectID: ref.ProjectID}); err != nil {
+		return agentos.WorksetStatus{}, err
 	}
 
 	normalized := normalizePostgresWorksetStatus(&spec, status)
 
-	return r.applyWorksetChunkResult(ctx, ref, result, &normalized)
+	return r.applyChunkResult(ctx, ref, result, &normalized)
 }
 
+// UpdateWorksetStatus applies a workset status update idempotently and returns the resulting status.
 func (r *AgentOSWorksetRepo) UpdateWorksetStatus(ctx context.Context, status *agentos.WorksetStatus, idempotencyKey string) (agentos.WorksetStatus, error) {
 	if err := validatePostgresWorksetStatus(status, idempotencyKey); err != nil {
 		return agentos.WorksetStatus{}, err
 	}
 
-	existing, exists, err := r.worksetStatusByIdempotencyKey(ctx, status.WorksetID, status.AccountID, status.ProjectID, idempotencyKey)
-	if err != nil {
-		return agentos.WorksetStatus{}, err
-	}
-
-	if exists {
-		return existing, nil
-	}
-
-	spec, _, exists, err := r.worksetByID(ctx, status.WorksetID)
-	if err != nil {
-		return agentos.WorksetStatus{}, err
-	}
-
-	if !exists {
-		return agentos.WorksetStatus{}, fmt.Errorf("%w: workset %q not found", agentoscore.ErrInvalidWorksetScope, status.WorksetID)
-	}
-
-	if spec.AccountID != status.AccountID || spec.ProjectID != status.ProjectID {
-		return agentos.WorksetStatus{}, fmt.Errorf("%w: workset %q status is outside tenant scope", agentoscore.ErrInvalidWorksetScope, status.WorksetID)
-	}
-
-	normalized := normalizePostgresWorksetStatus(&spec, status)
-
-	return r.applyWorksetStatus(ctx, &normalized, idempotencyKey)
+	return updatePlatformStatus(ctx, r.Postgres, r.table, "AgentOSWorksetRepo - UpdateWorksetStatus", status, idempotencyKey)
 }
 
-func (r *AgentOSWorksetRepo) insertWorkset(ctx context.Context, spec *agentos.WorksetSpec, status *agentos.WorksetStatus) (agentos.WorksetStatus, bool, error) {
-	return createProcessPlatformProjection(ctx, r.Postgres, spec, status, processPlatformProjectionCreateConfig[agentos.WorksetSpec, agentos.WorksetStatus]{
-		SpecMarshalName:   "AgentOSWorksetRepo - CreateWorkset spec",
-		StatusMarshalName: "AgentOSWorksetRepo - CreateWorkset status",
-		Normalize:         normalizePostgresWorksetStatus,
-		BuildRow:          worksetProjectionInsertRow,
-		ResolveInsertErr:  r.resolveWorksetInsertErr,
-	})
-}
+// applyChunkResult runs the chunk-result claim and its projection write in one
+// transaction: the claim carries the result document, which is why it drives
+// the general claim protocol rather than the status-key one.
+func (r *AgentOSWorksetRepo) applyChunkResult(ctx context.Context, ref agentos.WorksetRef, result *agentos.WorksetChunkResult, status *agentos.WorksetStatus) (agentos.WorksetStatus, error) {
+	name := "AgentOSWorksetRepo - ApplyChunkResult"
 
-func (r *AgentOSWorksetRepo) applyWorksetStatus(ctx context.Context, status *agentos.WorksetStatus, idempotencyKey string) (agentos.WorksetStatus, error) {
-	statusJSON, err := marshalProcessPlatformJSON("AgentOSWorksetRepo - UpdateWorksetStatus status", status)
+	statusJSON, err := marshalProcessPlatformJSON(name+" status", status)
 	if err != nil {
 		return agentos.WorksetStatus{}, err
 	}
 
-	tx, err := r.Pool.Begin(ctx)
-	if err != nil {
-		return agentos.WorksetStatus{}, fmt.Errorf("AgentOSWorksetRepo - UpdateWorksetStatus - begin: %w", err)
-	}
-
-	defer func() {
-		errcheckIgnore(tx.Rollback(ctx))
-	}()
-
-	claimed, existing, err := claimWorksetStatusUpdate(ctx, tx, status, idempotencyKey, statusJSON)
+	resultJSON, err := marshalProcessPlatformJSON(name+" result", result)
 	if err != nil {
 		return agentos.WorksetStatus{}, err
 	}
 
-	if !claimed {
-		return existing, nil
+	scope := platformScope{
+		RecordID:       ref.WorksetID,
+		AccountID:      ref.AccountID,
+		ProjectID:      ref.ProjectID,
+		IdempotencyKey: result.IdempotencyKey,
 	}
 
-	if err := updateWorksetProjection(ctx, tx, status, statusJSON); err != nil {
-		return agentos.WorksetStatus{}, err
-	}
+	return applyPlatformClaim(ctx, r.Postgres, name,
+		func(ctx context.Context, tx pgx.Tx) (bool, agentos.WorksetStatus, error) {
+			table := r.table.txTable(tx)
 
-	if err := tx.Commit(ctx); err != nil {
-		return agentos.WorksetStatus{}, fmt.Errorf("AgentOSWorksetRepo - UpdateWorksetStatus - commit: %w", err)
-	}
+			return claimPlatformDocument[agentos.WorksetStatus](ctx, name,
+				func(ctx context.Context) ([]byte, error) {
+					return table.claimChunkResult(ctx, ref, result, resultJSON, statusJSON)
+				},
+				func(ctx context.Context) ([]byte, error) {
+					return table.readChunkResult(ctx, ref, result.ChunkID, result.IdempotencyKey)
+				},
+			)
+		},
+		func(ctx context.Context, tx pgx.Tx) error {
+			_, err := r.table.withTx(tx).updateRecordStatus(ctx, scope, status, statusJSON)
 
-	return *status, nil
-}
-
-func (r *AgentOSWorksetRepo) applyWorksetChunkResult(ctx context.Context, ref agentos.WorksetRef, result *agentos.WorksetChunkResult, status *agentos.WorksetStatus) (agentos.WorksetStatus, error) {
-	statusJSON, err := marshalProcessPlatformJSON("AgentOSWorksetRepo - ApplyChunkResult status", status)
-	if err != nil {
-		return agentos.WorksetStatus{}, err
-	}
-
-	resultJSON, err := marshalProcessPlatformJSON("AgentOSWorksetRepo - ApplyChunkResult result", result)
-	if err != nil {
-		return agentos.WorksetStatus{}, err
-	}
-
-	tx, err := r.Pool.Begin(ctx)
-	if err != nil {
-		return agentos.WorksetStatus{}, fmt.Errorf("AgentOSWorksetRepo - ApplyChunkResult - begin: %w", err)
-	}
-
-	defer func() {
-		errcheckIgnore(tx.Rollback(ctx))
-	}()
-
-	claimed, existing, err := claimWorksetChunkResult(ctx, tx, ref, result, resultJSON, statusJSON)
-	if err != nil {
-		return agentos.WorksetStatus{}, err
-	}
-
-	if !claimed {
-		return existing, nil
-	}
-
-	if err := updateWorksetProjection(ctx, tx, status, statusJSON); err != nil {
-		return agentos.WorksetStatus{}, err
-	}
-
-	if err := tx.Commit(ctx); err != nil {
-		return agentos.WorksetStatus{}, fmt.Errorf("AgentOSWorksetRepo - ApplyChunkResult - commit: %w", err)
-	}
-
-	return *status, nil
-}
-
-func updateWorksetProjection(ctx context.Context, tx pgx.Tx, status *agentos.WorksetStatus, statusJSON []byte) error {
-	tag, err := tx.Exec(
-		ctx, `
-UPDATE worksets
-SET lifecycle_state = $1, status_json = $2, updated_at = $3
-WHERE workset_id = $4 AND account_id = $5 AND project_id = $6`,
-		status.LifecycleState,
-		statusJSON,
-		status.UpdatedAt,
-		status.WorksetID,
-		status.AccountID,
-		status.ProjectID,
-	)
-	if err != nil {
-		return fmt.Errorf("AgentOSWorksetRepo - update projection: %w", err)
-	}
-
-	if tag.RowsAffected() == 0 {
-		return fmt.Errorf("%w: workset %q not found", agentoscore.ErrInvalidWorksetScope, status.WorksetID)
-	}
-
-	return nil
-}
-
-func claimWorksetStatusUpdate(ctx context.Context, tx pgx.Tx, status *agentos.WorksetStatus, idempotencyKey string, statusJSON []byte) (bool, agentos.WorksetStatus, error) {
-	return claimProcessPlatformStatus[agentos.WorksetStatus](ctx, tx, &processPlatformStatusClaim{
-		ClaimName:       "AgentOSWorksetRepo - claimWorksetStatusUpdate",
-		ExistingName:    "AgentOSWorksetRepo - existingWorksetStatusUpdate",
-		InsertErrPrefix: "AgentOSWorksetRepo - UpdateWorksetStatus - insert status key",
-		SelectErrPrefix: "AgentOSWorksetRepo - UpdateWorksetStatus - existing status key",
-		InsertSQL: `
-INSERT INTO workset_status_updates (workset_id, account_id, project_id, idempotency_key, status_json)
-VALUES ($1,$2,$3,$4,$5)
-ON CONFLICT (account_id, project_id, workset_id, idempotency_key) DO NOTHING
-RETURNING status_json`,
-		InsertArgs: []any{status.WorksetID, status.AccountID, status.ProjectID, idempotencyKey, statusJSON},
-		SelectSQL: `
-SELECT status_json
-FROM workset_status_updates
-WHERE workset_id = $1 AND account_id = $2 AND project_id = $3 AND idempotency_key = $4`,
-		SelectArgs: []any{status.WorksetID, status.AccountID, status.ProjectID, idempotencyKey},
-	})
-}
-
-func claimWorksetChunkResult(ctx context.Context, tx pgx.Tx, ref agentos.WorksetRef, result *agentos.WorksetChunkResult, resultJSON, statusJSON []byte) (bool, agentos.WorksetStatus, error) {
-	return claimProcessPlatformStatus[agentos.WorksetStatus](ctx, tx, &processPlatformStatusClaim{
-		ClaimName:       "AgentOSWorksetRepo - claimWorksetChunkResult",
-		ExistingName:    "AgentOSWorksetRepo - existingWorksetChunkResult",
-		InsertErrPrefix: "AgentOSWorksetRepo - ApplyChunkResult - insert chunk key",
-		SelectErrPrefix: "AgentOSWorksetRepo - ApplyChunkResult - existing chunk key",
-		InsertSQL: `
-INSERT INTO workset_chunk_results (workset_id, account_id, project_id, chunk_id, idempotency_key, result_json, status_json)
-VALUES ($1,$2,$3,$4,$5,$6,$7)
-ON CONFLICT (account_id, project_id, workset_id, chunk_id, idempotency_key) DO NOTHING
-RETURNING status_json`,
-		InsertArgs: []any{ref.WorksetID, ref.AccountID, ref.ProjectID, result.ChunkID, result.IdempotencyKey, resultJSON, statusJSON},
-		SelectSQL: `
-SELECT status_json
-FROM workset_chunk_results
-WHERE workset_id = $1 AND account_id = $2 AND project_id = $3 AND chunk_id = $4 AND idempotency_key = $5`,
-		SelectArgs: []any{ref.WorksetID, ref.AccountID, ref.ProjectID, result.ChunkID, result.IdempotencyKey},
-	})
-}
-
-func (r *AgentOSWorksetRepo) resolveWorksetInsertErr(ctx context.Context, insertErr error, spec *agentos.WorksetSpec) (agentos.WorksetStatus, error) {
-	return resolveProcessPlatformProjectionInsertErr(
-		ctx,
-		insertErr,
-		spec.WorksetID,
-		agentoscore.ErrInvalidWorkset,
-		"AgentOSWorksetRepo - CreateWorkset - insert",
-		"workset",
-		func(ctx context.Context) (agentos.WorksetStatus, bool, error) {
-			_, existing, exists, err := r.worksetByIdempotencyKey(ctx, spec.AccountID, spec.ProjectID, spec.IdempotencyKey)
-
-			return existing, exists, err
+			return err
 		},
 	)
 }
 
-func (r *AgentOSWorksetRepo) worksetByIdempotencyKey(ctx context.Context, accountID, projectID, idempotencyKey string) (agentos.WorksetSpec, agentos.WorksetStatus, bool, error) {
-	query, args, err := r.Builder.
-		Select("spec_json", "status_json").
-		From("worksets").
-		Where(sq.Eq{"account_id": accountID, "project_id": projectID, "idempotency_key": idempotencyKey}).
-		ToSql()
-	if err != nil {
-		return agentos.WorksetSpec{}, agentos.WorksetStatus{}, false, fmt.Errorf("AgentOSWorksetRepo - worksetByIdempotencyKey - builder: %w", err)
+// worksetListParams turns a scope into the generated list bindings: every
+// optional filter is empty-string-means-absent, and a non-positive limit
+// binds NULL, which LIMIT reads as ALL.
+func worksetListParams(scope *agentos.WorksetScope) sqlcgen.ListWorksetsParams {
+	return sqlcgen.ListWorksetsParams{
+		AccountID:      scope.AccountID,
+		ProjectID:      scope.ProjectID,
+		ProcessID:      scope.ProcessID,
+		ResourceKind:   string(scope.Resource.Kind),
+		ResourceID:     scope.Resource.ResourceID,
+		Kind:           string(scope.Kind),
+		LifecycleState: scope.LifecycleState,
+		RowLimit:       optionalInt8(scope.Limit),
 	}
-
-	return r.scanWorkset(ctx, query, args, "AgentOSWorksetRepo - worksetByIdempotencyKey")
-}
-
-func (r *AgentOSWorksetRepo) worksetByID(ctx context.Context, worksetID string) (agentos.WorksetSpec, agentos.WorksetStatus, bool, error) {
-	query, args, err := r.Builder.Select("spec_json", "status_json").From("worksets").Where(sq.Eq{"workset_id": worksetID}).ToSql()
-	if err != nil {
-		return agentos.WorksetSpec{}, agentos.WorksetStatus{}, false, fmt.Errorf("AgentOSWorksetRepo - worksetByID - builder: %w", err)
-	}
-
-	return r.scanWorkset(ctx, query, args, "AgentOSWorksetRepo - worksetByID")
-}
-
-func (r *AgentOSWorksetRepo) worksetStatusByIdempotencyKey(ctx context.Context, worksetID, accountID, projectID, idempotencyKey string) (agentos.WorksetStatus, bool, error) {
-	query, args, err := r.Builder.
-		Select("status_json").
-		From("workset_status_updates").
-		Where(sq.Eq{"workset_id": worksetID, "account_id": accountID, "project_id": projectID, "idempotency_key": idempotencyKey}).
-		ToSql()
-	if err != nil {
-		return agentos.WorksetStatus{}, false, fmt.Errorf("AgentOSWorksetRepo - worksetStatusByIdempotencyKey - builder: %w", err)
-	}
-
-	return r.scanWorksetStatus(ctx, query, args, "AgentOSWorksetRepo - worksetStatusByIdempotencyKey")
-}
-
-func (r *AgentOSWorksetRepo) worksetChunkStatusByKey(ctx context.Context, ref agentos.WorksetRef, chunkID, idempotencyKey string) (agentos.WorksetStatus, bool, error) {
-	query, args, err := r.Builder.
-		Select("status_json").
-		From("workset_chunk_results").
-		Where(sq.Eq{
-			"workset_id":      ref.WorksetID,
-			"account_id":      ref.AccountID,
-			"project_id":      ref.ProjectID,
-			"chunk_id":        chunkID,
-			"idempotency_key": idempotencyKey,
-		}).
-		ToSql()
-	if err != nil {
-		return agentos.WorksetStatus{}, false, fmt.Errorf("AgentOSWorksetRepo - worksetChunkStatusByKey - builder: %w", err)
-	}
-
-	return r.scanWorksetStatus(ctx, query, args, "AgentOSWorksetRepo - worksetChunkStatusByKey")
-}
-
-func (r *AgentOSWorksetRepo) scanWorkset(ctx context.Context, query string, args []any, name string) (agentos.WorksetSpec, agentos.WorksetStatus, bool, error) {
-	return scanSpecStatusJSON[agentos.WorksetSpec, agentos.WorksetStatus](r.Pool.QueryRow(ctx, query, args...), name)
-}
-
-func (r *AgentOSWorksetRepo) scanWorksetStatus(ctx context.Context, query string, args []any, name string) (agentos.WorksetStatus, bool, error) {
-	status, exists, err := scanOptionalJSON[agentos.WorksetStatus](r.Pool.QueryRow(ctx, query, args...), name)
-	if err != nil {
-		return agentos.WorksetStatus{}, false, err
-	}
-
-	return status, exists, nil
 }
 
 func validatePostgresCreateWorkset(spec *agentos.WorksetSpec, status *agentos.WorksetStatus) error {
@@ -416,16 +366,6 @@ func validatePostgresWorksetStatus(status *agentos.WorksetStatus, idempotencyKey
 	return nil
 }
 
-func validatePostgresWorksetTenant(ref agentos.WorksetRef) func(agentos.WorksetSpec) error {
-	return func(spec agentos.WorksetSpec) error {
-		if spec.AccountID != ref.AccountID || spec.ProjectID != ref.ProjectID {
-			return fmt.Errorf("%w: workset %q is outside tenant scope", agentoscore.ErrInvalidWorksetScope, ref.WorksetID)
-		}
-
-		return nil
-	}
-}
-
 func normalizePostgresWorksetStatus(spec *agentos.WorksetSpec, status *agentos.WorksetStatus) agentos.WorksetStatus {
 	normalized := *status
 	normalized.WorksetID = spec.WorksetID
@@ -436,44 +376,6 @@ func normalizePostgresWorksetStatus(spec *agentos.WorksetSpec, status *agentos.W
 	normalized.Kind = spec.Kind
 
 	return normalized
-}
-
-func worksetStatusListQuery(scope *agentos.WorksetScope) processPlatformStatusListQuery {
-	return processPlatformStatusListQuery{
-		Name:           "AgentOSWorksetRepo - ListWorksets",
-		Table:          "worksets",
-		OrderColumn:    "workset_id",
-		AccountID:      scope.AccountID,
-		ProjectID:      scope.ProjectID,
-		ProcessID:      scope.ProcessID,
-		ResourceKind:   string(scope.Resource.Kind),
-		ResourceID:     scope.Resource.ResourceID,
-		Kind:           string(scope.Kind),
-		LifecycleState: scope.LifecycleState,
-		Limit:          scope.Limit,
-	}
-}
-
-func worksetProjectionInsertRow(spec *agentos.WorksetSpec, status *agentos.WorksetStatus, specJSON, statusJSON []byte) processPlatformProjectionInsert {
-	return buildProcessPlatformProjectionInsert(
-		"AgentOSWorksetRepo - CreateWorkset",
-		"worksets",
-		"workset_id",
-		spec.Resource,
-		specJSON,
-		statusJSON,
-		&processPlatformProjectionValues{
-			ID:             spec.WorksetID,
-			AccountID:      spec.AccountID,
-			ProjectID:      spec.ProjectID,
-			ProcessID:      spec.ProcessID,
-			Kind:           string(spec.Kind),
-			LifecycleState: status.LifecycleState,
-			IdempotencyKey: spec.IdempotencyKey,
-			RequestedAt:    spec.RequestedAt,
-			UpdatedAt:      status.UpdatedAt,
-		},
-	)
 }
 
 var _ agentosbatch.Store = (*AgentOSWorksetRepo)(nil)

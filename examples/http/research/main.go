@@ -20,6 +20,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"log"
 	"os"
 	"time"
 
@@ -32,6 +33,13 @@ const (
 	maxSearchResult    = 5
 	reviewTimeoutNanos = 10000000000
 	childSearchResult  = 3
+)
+
+const (
+	_kID    = "id"
+	_kType  = "type"
+	_kInput = "input"
+	_kTool  = "tool"
 )
 
 func main() {
@@ -50,72 +58,94 @@ func main() {
 	c := client.New(baseURL, accountID)
 	ctx := context.Background()
 
-	fmt.Fprintf(os.Stdout, "=== Research Pattern ===\nRun ID: %s\n\n", runID)
-	fmt.Fprintln(os.Stdout, "Flow: discover → Split(impacts, solutions, policy) → Join → synthesize → review (HITL)")
-	fmt.Fprintln(os.Stdout)
+	writeStdoutf("=== Research Pattern ===\nRun ID: %s\n\n", runID)
+
+	writeStdoutLine("Flow: discover → Split(impacts, solutions, policy) → Join → synthesize → review (HITL)")
+
+	writeStdoutLine()
 
 	status, err := c.ExecuteOrchestration(ctx, &client.OrchestrationRequest{
 		RunID: runID,
 		Steps: researchSteps(),
 	})
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+		writeStderrf("Error: %v\n", err)
 		os.Exit(1)
 	}
 
-	fmt.Fprintf(os.Stdout, "Initial status: lifecycle_state=%s step=%d\n\n", status.LifecycleState, status.Step)
-	fmt.Fprintln(os.Stdout, "Polling for completion...")
-	fmt.Fprintln(os.Stdout, "(The 'review' step blocks until 'review-approved' signal or 10s timeout)")
+	writeStdoutf("Initial status: lifecycle_state=%s step=%d\n\n", status.LifecycleState, status.Step)
+
+	writeStdoutLine("Polling for completion...")
+
+	writeStdoutLine("(The 'review' step blocks until 'review-approved' signal or 10s timeout)")
 
 	status, err = c.WaitForOrchestrationCompletion(ctx, runID, pollInterval, pollTimeout)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+		writeStderrf("Error: %v\n", err)
 		os.Exit(1)
 	}
 
-	fmt.Fprintf(os.Stdout, "\nFinal status: lifecycle_state=%s step=%d\n", status.LifecycleState, status.Step)
+	writeStdoutf("\nFinal status: lifecycle_state=%s step=%d\n", status.LifecycleState, status.Step)
 }
 
 func researchSteps() []map[string]any {
 	return []map[string]any{
 		{
-			"id": "discover", "type": "tool", "tool": "web_search",
-			"input": map[string]any{"query": "climate change latest research 2026", "max_results": maxSearchResult},
+			_kID: "discover", _kType: _kTool, _kTool: "web_search",
+			_kInput: map[string]any{"query": "climate change latest research 2026", "max_results": maxSearchResult},
 		},
 		{
-			"id": "explore", "type": "split",
-			"input": map[string]any{
+			_kID: "explore", _kType: "split",
+			_kInput: map[string]any{
 				"children": []map[string]any{
 					{
-						"id": "explore-impacts", "type": "tool", "tool": "web_search",
-						"input": map[string]any{"query": "climate change impacts 2026", "max_results": childSearchResult},
+						_kID: "explore-impacts", _kType: _kTool, _kTool: "web_search",
+						_kInput: map[string]any{"query": "climate change impacts 2026", "max_results": childSearchResult},
 					},
 					{
-						"id": "explore-solutions", "type": "tool", "tool": "web_search",
-						"input": map[string]any{"query": "climate change solutions 2026", "max_results": childSearchResult},
+						_kID: "explore-solutions", _kType: _kTool, _kTool: "web_search",
+						_kInput: map[string]any{"query": "climate change solutions 2026", "max_results": childSearchResult},
 					},
 					{
-						"id": "explore-policy", "type": "tool", "tool": "web_search",
-						"input": map[string]any{"query": "climate policy 2026", "max_results": childSearchResult},
+						_kID: "explore-policy", _kType: _kTool, _kTool: "web_search",
+						_kInput: map[string]any{"query": "climate policy 2026", "max_results": childSearchResult},
 					},
 				},
 			},
 		},
 		{
-			"id": "gather", "type": "join",
-			"input": map[string]any{"_join_group": "explore"},
+			_kID: "gather", _kType: "join",
+			_kInput: map[string]any{"_join_group": "explore"},
 		},
 		{
-			"id": "synthesize", "type": "agent", "agent_id": "analyst",
-			"input": map[string]any{"message": "Synthesize all research findings into a summary report"},
+			_kID: "synthesize", _kType: "agent", "agent_id": "analyst",
+			_kInput: map[string]any{"message": "Synthesize all research findings into a summary report"},
 		},
 		{
-			"id": "review", "type": "wait",
+			_kID: "review", _kType: "wait",
 			"wait_for": map[string]any{
 				"signal_name": "review-approved",
 				"timeout":     reviewTimeoutNanos, // 10 seconds in nanoseconds
 				"on_timeout":  "skip",
 			},
 		},
+	}
+}
+
+func writeStdoutf(format string, args ...any) {
+	if _, werr := fmt.Fprintf(os.Stdout, format, args...); werr != nil {
+		log.Fatalf("write stdout: %v", werr)
+	}
+}
+
+func writeStderrf(format string, args ...any) {
+	if _, werr := fmt.Fprintf(os.Stderr, format, args...); werr != nil {
+		log.Fatalf("write stderr: %v", werr)
+	}
+}
+
+func writeStdoutLine(args ...any) {
+	if _, werr := fmt.Fprintln(os.Stdout, args...); werr != nil {
+		log.Fatalf("write stdout: %v", werr)
 	}
 }

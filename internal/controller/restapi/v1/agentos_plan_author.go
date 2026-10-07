@@ -18,6 +18,7 @@ import (
 // @Success     200 {string} string "HTML authoring surface"
 // @Failure     500 {object} response.Error
 // @Router      /agentos/plans/author [get]
+// The authoring surface is rendered from the public AgentOS schema.
 func (r *V1) agentOSPlanAuthor(ctx *fiber.Ctx) error {
 	view := agentOSPlanAuthorView{
 		SchemaEndpoint: "/v1/agentos/plans/schemas/run-plan",
@@ -28,6 +29,7 @@ func (r *V1) agentOSPlanAuthor(ctx *fiber.Ctx) error {
 			agentos.BackendKindTemporalExternal,
 			agentos.BackendKindHTTP,
 			agentos.BackendKindGRPC,
+			agentos.BackendKindDSH,
 		},
 		EdgeTriggers: []agentos.EdgeTrigger{
 			agentos.EdgeOnSuccess,

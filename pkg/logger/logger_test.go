@@ -2,6 +2,7 @@ package logger
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"os"
 	"os/exec"
@@ -27,7 +28,12 @@ func newBufferedLogger(level string) (*Logger, *bytes.Buffer) {
 	return l, buf
 }
 
-func TestNewSetsGlobalLevel(t *testing.T) {
+// TestParseLevel covers the level-string mapping. It asserts the pure
+// parseLevel function rather than zerolog.GlobalLevel: New sets that
+// process-wide global, and asserting it from a parallel test races with every
+// other test that calls New (the race is logical, not a data race, so the
+// race detector stays quiet while the assertion still flakes).
+func TestParseLevel(t *testing.T) {
 	t.Parallel()
 
 	cases := []struct {
@@ -42,14 +48,8 @@ func TestNewSetsGlobalLevel(t *testing.T) {
 	}
 
 	for _, tc := range cases {
-		l := New(tc.in)
-
-		if l == nil || l.logger == nil {
-			t.Fatalf("New(%q) returned nil logger", tc.in)
-		}
-
-		if got := zerolog.GlobalLevel(); got != tc.want {
-			t.Fatalf("New(%q) global level = %v, want %v", tc.in, got, tc.want)
+		if got := parseLevel(tc.in); got != tc.want {
+			t.Fatalf("parseLevel(%q) = %v, want %v", tc.in, got, tc.want)
 		}
 	}
 }
@@ -187,12 +187,7 @@ func TestFatal_ExitsAndLogs(t *testing.T) {
 		t.Fatalf("executable path is not absolute: %q", execPath)
 	}
 
-	testName := t.Name()
-	cmd := exec.CommandContext(t.Context(), execPath, "-test.run", testName)
-
-	cmd.Env = append(os.Environ(), "LOGGER_FATAL_SUBPROC=1")
-
-	out, err := cmd.CombinedOutput()
+	out, err := runFatalSubprocess(execPath)
 	if err == nil {
 		t.Fatalf("expected non-nil error due to os.Exit in Fatal, got nil; output: %s", string(out))
 	}
@@ -205,4 +200,15 @@ func TestFatal_ExitsAndLogs(t *testing.T) {
 	} else {
 		t.Fatalf("expected ExitError, got %T: %v; output: %s", err, err, string(out))
 	}
+}
+
+// runFatalSubprocess reruns the test binary in a child process with
+// LOGGER_FATAL_SUBPROC set, so the child hits the Fatal path and exits non-zero.
+// The child runs only TestFatal_ExitsAndLogs; keep the test name in sync if it is renamed.
+func runFatalSubprocess(execPath string) ([]byte, error) {
+	cmd := exec.CommandContext(context.Background(), execPath, "-test.run", "TestFatal_ExitsAndLogs")
+
+	cmd.Env = append(os.Environ(), "LOGGER_FATAL_SUBPROC=1")
+
+	return cmd.CombinedOutput()
 }

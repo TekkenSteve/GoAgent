@@ -1,3 +1,4 @@
+// Package agentosruntimetest provides conformance helpers for AgentOS runtime implementations.
 package agentosruntimetest
 
 import (
@@ -116,7 +117,12 @@ func assertBackendSubscribe(ctx context.Context, t *testing.T, tc *BackendConfor
 	if err != nil {
 		t.Fatalf("Subscribe: %v", err)
 	}
-	defer subscription.Close()
+
+	t.Cleanup(func() {
+		if err := subscription.Close(); err != nil {
+			t.Errorf("close subscription: %v", err)
+		}
+	})
 
 	if got := tc.SubscriberProbe.LastScope(); got.RunID != tc.RunID || got.AfterSequence != conformanceAfterSequence {
 		t.Fatalf("Subscribe scope = %#v", got)
@@ -126,6 +132,53 @@ func assertBackendSubscribe(ctx context.Context, t *testing.T, tc *BackendConfor
 // SubscriberProbe records SubscribeAgentOS calls for backend conformance tests.
 type SubscriberProbe struct {
 	scope agentoscore.StreamScope
+}
+
+// LifecycleProbe records LifecyclePublisher calls for backend wiring tests —
+// the write-side twin of SubscriberProbe. It captures what a backend forwards
+// to its data-plane lifecycle adapter (Start → PublishStarted, Status →
+// PublishStatus), so a test can verify the wiring without a real bus.
+type LifecycleProbe struct {
+	startedSpec   agentos.RunSpec
+	startedStatus agentos.RunStatus
+	statuses      []agentos.RunStatus
+}
+
+// PublishStarted implements LifecyclePublisher.
+func (p *LifecycleProbe) PublishStarted(_ context.Context, spec *agentos.RunSpec, status *agentos.RunStatus) error {
+	if spec != nil {
+		p.startedSpec = *spec
+	}
+
+	if status != nil {
+		p.startedStatus = *status
+	}
+
+	return nil
+}
+
+// PublishStatus implements LifecyclePublisher.
+func (p *LifecycleProbe) PublishStatus(_ context.Context, _ string, status *agentos.RunStatus) error {
+	if status != nil {
+		p.statuses = append(p.statuses, *status)
+	}
+
+	return nil
+}
+
+// LastStartedSpec returns the run spec of the last PublishStarted call.
+func (p *LifecycleProbe) LastStartedSpec() agentos.RunSpec {
+	return p.startedSpec
+}
+
+// LastStartedStatus returns the status of the last PublishStarted call.
+func (p *LifecycleProbe) LastStartedStatus() agentos.RunStatus {
+	return p.startedStatus
+}
+
+// Statuses returns every status forwarded by PublishStatus calls, in order.
+func (p *LifecycleProbe) Statuses() []agentos.RunStatus {
+	return p.statuses
 }
 
 // SubscribeAgentOS implements EventSubscriber.

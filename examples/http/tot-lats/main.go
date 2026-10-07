@@ -21,6 +21,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"log"
 	"os"
 	"time"
 
@@ -30,6 +31,15 @@ import (
 const (
 	pollInterval = 2 * time.Second
 	pollTimeout  = 4 * time.Minute
+	_kAgentID    = "agent_id"
+	_kMessage    = "message"
+)
+
+const (
+	_kID    = "id"
+	_kType  = "type"
+	_kInput = "input"
+	_kAgent = "agent"
 )
 
 func main() {
@@ -48,69 +58,90 @@ func main() {
 	c := client.New(baseURL, accountID)
 	ctx := context.Background()
 
-	fmt.Fprintf(os.Stdout, "=== Tree-of-Thoughts / LATS Pattern ===\nRun ID: %s\n\n", runID)
-	fmt.Fprintln(os.Stdout, "Flow: Split(reasoning paths) → Join → evaluate-best → synthesize")
-	fmt.Fprintln(os.Stdout)
+	writeStdoutf("=== Tree-of-Thoughts / LATS Pattern ===\nRun ID: %s\n\n", runID)
+
+	writeStdoutLine("Flow: Split(reasoning paths) → Join → evaluate-best → synthesize")
+
+	writeStdoutLine()
 
 	status, err := c.ExecuteOrchestration(ctx, &client.OrchestrationRequest{
 		RunID: runID,
 		Steps: totLatsSteps(),
 	})
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+		writeStderrf("Error: %v\n", err)
 		os.Exit(1)
 	}
 
-	fmt.Fprintf(os.Stdout, "Initial status: lifecycle_state=%s step=%d\n\n", status.LifecycleState, status.Step)
-	fmt.Fprintln(os.Stdout, "Polling for completion...")
+	writeStdoutf("Initial status: lifecycle_state=%s step=%d\n\n", status.LifecycleState, status.Step)
+
+	writeStdoutLine("Polling for completion...")
 
 	status, err = c.WaitForOrchestrationCompletion(ctx, runID, pollInterval, pollTimeout)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+		writeStderrf("Error: %v\n", err)
 		os.Exit(1)
 	}
 
-	fmt.Fprintf(os.Stdout, "\nFinal status: lifecycle_state=%s step=%d\n", status.LifecycleState, status.Step)
+	writeStdoutf("\nFinal status: lifecycle_state=%s step=%d\n", status.LifecycleState, status.Step)
 }
 
 func totLatsSteps() []map[string]any {
 	return []map[string]any{
 		{
-			"id": "explore", "type": "split",
-			"input": map[string]any{
+			_kID: "explore", _kType: "split",
+			_kInput: map[string]any{
 				"children": []map[string]any{
 					{
-						"id": "reasoning-optimistic", "type": "agent", "agent_id": "thinker",
-						"input": map[string]any{"message": "Solve this problem with an optimistic approach: 'How should a startup decide whether to build or buy their core technology?' Assume rapid iteration."},
+						_kID: "reasoning-optimistic", _kType: _kAgent, _kAgentID: "thinker",
+						_kInput: map[string]any{_kMessage: "Solve this problem with an optimistic approach: 'How should a startup decide whether to build or buy their core technology?' Assume rapid iteration."},
 					},
 					{
-						"id": "reasoning-pessimistic", "type": "agent", "agent_id": "thinker",
-						"input": map[string]any{"message": "Solve this problem with a conservative approach: 'How should a startup decide whether to build or buy their core technology?' Focus on risk mitigation."},
+						_kID: "reasoning-pessimistic", _kType: _kAgent, _kAgentID: "thinker",
+						_kInput: map[string]any{_kMessage: "Solve this problem with a conservative approach: 'How should a startup decide whether to build or buy their core technology?' Focus on risk mitigation."},
 					},
 					{
-						"id": "reasoning-hybrid", "type": "agent", "agent_id": "thinker",
-						"input": map[string]any{"message": "Solve this problem with a balanced approach: 'How should a startup decide whether to build or buy their core technology?' Consider both speed and risk."},
+						_kID: "reasoning-hybrid", _kType: _kAgent, _kAgentID: "thinker",
+						_kInput: map[string]any{_kMessage: "Solve this problem with a balanced approach: 'How should a startup decide whether to build or buy their core technology?' Consider both speed and risk."},
 					},
 				},
 			},
 		},
 		{
-			"id": "gather", "type": "join",
-			"input": map[string]any{"_join_group": "explore"},
+			_kID: "gather", _kType: "join",
+			_kInput: map[string]any{"_join_group": "explore"},
 		},
 		{
-			"id": "evaluate-best", "type": "eval",
-			"input": map[string]any{"condition": "select_best_reasoning"},
+			_kID: "evaluate-best", _kType: "eval",
+			_kInput: map[string]any{"condition": "select_best_reasoning"},
 			"on_result": map[string]any{
 				"append_after": "evaluate-best",
 				"insert_steps": []map[string]any{
 					{
-						"id": "synthesize-final", "type": "agent", "agent_id": "thinker",
-						"input":      map[string]any{"message": "Synthesize the best reasoning path into a final recommendation with actionable steps"},
+						_kID: "synthesize-final", _kType: _kAgent, _kAgentID: "thinker",
+						_kInput:      map[string]any{_kMessage: "Synthesize the best reasoning path into a final recommendation with actionable steps"},
 						"depends_on": []string{"evaluate-best"},
 					},
 				},
 			},
 		},
+	}
+}
+
+func writeStdoutf(format string, args ...any) {
+	if _, werr := fmt.Fprintf(os.Stdout, format, args...); werr != nil {
+		log.Fatalf("write stdout: %v", werr)
+	}
+}
+
+func writeStderrf(format string, args ...any) {
+	if _, werr := fmt.Fprintf(os.Stderr, format, args...); werr != nil {
+		log.Fatalf("write stderr: %v", werr)
+	}
+}
+
+func writeStdoutLine(args ...any) {
+	if _, werr := fmt.Fprintln(os.Stdout, args...); werr != nil {
+		log.Fatalf("write stdout: %v", werr)
 	}
 }

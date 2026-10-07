@@ -20,6 +20,7 @@ func logPanic(l logger.Interface) func(c *fiber.Ctx, err any) {
 	}
 }
 
+// Recovery returns a Fiber middleware that recovers panics and logs them, with stack traces, via the given logger.
 func Recovery(l logger.Interface) func(c *fiber.Ctx) error {
 	return fiberRecover.New(fiberRecover.Config{
 		EnableStackTrace:  true,

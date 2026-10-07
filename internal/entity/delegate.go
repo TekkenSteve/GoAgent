@@ -2,6 +2,7 @@ package entity
 
 import "encoding/json"
 
+// DelegateToolName is the name of the tool call that delegates a task to a sub-agent.
 const DelegateToolName = "delegate_to_agent"
 
 // DelegateTaskInput defines the input for a delegate_to_agent tool call.

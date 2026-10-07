@@ -9,7 +9,9 @@ import (
 )
 
 const (
+	// COMPLETED marks a run lifecycle state in which the run finished successfully.
 	COMPLETED = "completed"
+	// SUCCEEDED marks a run lifecycle state in which the run finished successfully.
 	SUCCEEDED = "succeeded"
 )
 

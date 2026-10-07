@@ -1,3 +1,4 @@
+// Package httpbackend implements an AgentOS backend over HTTP.
 package httpbackend
 
 import (
@@ -23,11 +24,12 @@ var (
 type Backend struct {
 	client     *http.Client
 	subscriber agentosruntime.EventSubscriber
+	lifecycle  agentosruntime.LifecyclePublisher
 	config     Config
 }
 
 // NewBackend creates an HTTP backend.
-func NewBackend(client *http.Client, subscriber agentosruntime.EventSubscriber, config Config) (*Backend, error) {
+func NewBackend(client *http.Client, subscriber agentosruntime.EventSubscriber, lifecycle agentosruntime.LifecyclePublisher, config Config) (*Backend, error) {
 	if err := config.validate(); err != nil {
 		return nil, err
 	}
@@ -39,6 +41,7 @@ func NewBackend(client *http.Client, subscriber agentosruntime.EventSubscriber, 
 	return &Backend{
 		client:     client,
 		subscriber: subscriber,
+		lifecycle:  lifecycle,
 		config:     config,
 	}, nil
 }
@@ -71,6 +74,10 @@ func (b *Backend) Start(ctx context.Context, spec *agentos.RunSpec) (agentos.Run
 
 	if status.RunID == "" {
 		status.RunID = spec.RunID
+	}
+
+	if err := b.publishStarted(ctx, spec, &status); err != nil {
+		return agentos.RunStatus{}, err
 	}
 
 	return status, nil
@@ -129,6 +136,10 @@ func (b *Backend) Status(ctx context.Context, runID string) (agentos.RunStatus, 
 		status.RunID = runID
 	}
 
+	if err := b.publishStatus(ctx, runID, &status); err != nil {
+		return agentos.RunStatus{}, err
+	}
+
 	return status, nil
 }
 
@@ -153,6 +164,28 @@ func (b *Backend) Capabilities() agentosruntime.BackendCapabilities {
 	}
 }
 
+// publishStarted mirrors a successful Start onto the data plane. A nil
+// lifecycle adapter (unwired backend) degrades to a no-op. The error means the
+// RUN_STARTED milestone could not be made durable and the caller must fail.
+func (b *Backend) publishStarted(ctx context.Context, spec *agentos.RunSpec, status *agentos.RunStatus) error {
+	if b.lifecycle == nil {
+		return nil
+	}
+
+	return b.lifecycle.PublishStarted(ctx, spec, status)
+}
+
+// publishStatus mirrors a Status observation onto the data plane, publishing
+// the run's terminal milestone once the remote reports one. The error
+// semantics match publishStarted.
+func (b *Backend) publishStatus(ctx context.Context, runID string, status *agentos.RunStatus) error {
+	if b.lifecycle == nil {
+		return nil
+	}
+
+	return b.lifecycle.PublishStatus(ctx, runID, status)
+}
+
 const maxResponseBodySize = 4096
 
 func checkHTTPResponse(resp *http.Response) error {
@@ -168,7 +201,7 @@ func checkHTTPResponse(resp *http.Response) error {
 	return fmt.Errorf("%w: status %d: %s", errHTTPBackendUnexpectedStatus, resp.StatusCode, string(data))
 }
 
-func (b *Backend) doJSON(ctx context.Context, method, path string, input, output any) error {
+func (b *Backend) doJSON(ctx context.Context, method, path string, input, output any) (err error) {
 	body, err := jsonBody(input)
 	if err != nil {
 		return err
@@ -185,7 +218,12 @@ func (b *Backend) doJSON(ctx context.Context, method, path string, input, output
 	if err != nil {
 		return err
 	}
-	defer resp.Body.Close()
+
+	defer func() {
+		if closeErr := resp.Body.Close(); closeErr != nil {
+			err = errors.Join(err, closeErr)
+		}
+	}()
 
 	if err := checkHTTPResponse(resp); err != nil {
 		return err

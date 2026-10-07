@@ -18,14 +18,18 @@ const waitingInput = "waiting_input"
 type runStatus struct {
 	RunID          string `json:"run_id"`
 	LifecycleState string `json:"lifecycle_state"`
-	Step           int    `json:"step,omitempty"`
+	Progress       struct {
+		Current int `json:"current"`
+	} `json:"progress"`
 }
 
-// executeAgentRun creates an agent run and returns the run status.
-func executeAgentRun(t *testing.T, runID, accountID string) runStatus {
+// executeAgentRun creates an agent run and returns the run status. The account
+// the run belongs to is the token's subject (see integration_test.go), not a
+// request field.
+func executeAgentRun(t *testing.T, runID string) runStatus {
 	t.Helper()
 
-	body := agentOSStartBody(runID, accountID, "Hello, this is a test message")
+	body := agentOSStartBody(runID, "Hello, this is a test message")
 
 	ctx, cancel := context.WithTimeout(t.Context(), requestTimeout)
 	defer cancel()
@@ -34,7 +38,12 @@ func executeAgentRun(t *testing.T, runID, accountID string) runStatus {
 	if err != nil {
 		t.Fatalf("executeAgentRun: request failed: %v", err)
 	}
-	defer resp.Body.Close()
+
+	t.Cleanup(func() {
+		if err := resp.Body.Close(); err != nil {
+			t.Errorf("close response body: %v", err)
+		}
+	})
 
 	if resp.StatusCode != http.StatusAccepted {
 		t.Fatalf("executeAgentRun: expected 202, got %d", resp.StatusCode)
@@ -66,16 +75,21 @@ func waitForRunCompletion(t *testing.T, runID string) runStatus {
 
 		var status runStatus
 		if err := json.NewDecoder(resp.Body).Decode(&status); err != nil {
-			resp.Body.Close()
+			if closeErr := resp.Body.Close(); closeErr != nil {
+				t.Errorf("close response body: %v", closeErr)
+			}
+
 			t.Fatalf("waitForRunCompletion: decode failed: %v", err)
 		}
 
-		resp.Body.Close()
+		if err := resp.Body.Close(); err != nil {
+			t.Errorf("close response body: %v", err)
+		}
 
 		if status.LifecycleState == waitingInput ||
 			status.LifecycleState == string(entity.LifecycleCompleted) ||
 			status.LifecycleState == string(entity.LifecycleFailed) ||
-			status.LifecycleState == string(entity.LifecycleCancelled) {
+			status.LifecycleState == string(entity.LifecycleCanceled) {
 			return status
 		}
 
@@ -96,35 +110,24 @@ func TestHTTPAgentOSStartV1(t *testing.T) {
 	tests := []struct {
 		description string
 		runID       string
-		accountID   string
 		message     string
 		expected    int
 	}{
 		{
 			description: "success",
 			runID:       runID,
-			accountID:   "e2e-test-account",
 			message:     "Hello, this is a test message",
 			expected:    http.StatusAccepted,
 		},
 		{
 			description: "empty run_id",
 			runID:       "",
-			accountID:   "e2e-test-account",
-			message:     "Hello",
-			expected:    http.StatusAccepted,
-		},
-		{
-			description: "empty account_id",
-			runID:       runID + "_noaccount",
-			accountID:   "",
 			message:     "Hello",
 			expected:    http.StatusBadRequest,
 		},
 		{
 			description: "empty message",
 			runID:       runID + "_nomsg",
-			accountID:   "e2e-test-account",
 			message:     "",
 			expected:    http.StatusBadRequest,
 		},
@@ -133,17 +136,17 @@ func TestHTTPAgentOSStartV1(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.description, func(t *testing.T) {
 			t.Parallel()
-			testExecuteAgentRequest(t, tt.runID, tt.accountID, tt.message, tt.expected)
+			testExecuteAgentRequest(t, tt.runID, tt.message, tt.expected)
 		})
 	}
 }
 
 // testExecuteAgentRequest sends an AgentOS start request and asserts the
 // response status code and (for successful requests) the run status body.
-func testExecuteAgentRequest(t *testing.T, runID, accountID, message string, expectedStatus int) {
+func testExecuteAgentRequest(t *testing.T, runID, message string, expectedStatus int) {
 	t.Helper()
 
-	body := agentOSStartBody(runID, accountID, message)
+	body := agentOSStartBody(runID, message)
 
 	ctx, cancel := context.WithTimeout(t.Context(), requestTimeout)
 	defer cancel()
@@ -152,7 +155,12 @@ func testExecuteAgentRequest(t *testing.T, runID, accountID, message string, exp
 	if err != nil {
 		t.Fatalf("Failed to send request: %v", err)
 	}
-	defer resp.Body.Close()
+
+	t.Cleanup(func() {
+		if err := resp.Body.Close(); err != nil {
+			t.Errorf("close response body: %v", err)
+		}
+	})
 
 	if resp.StatusCode != expectedStatus {
 		t.Errorf("Expected status %d, got %d", expectedStatus, resp.StatusCode)
@@ -176,7 +184,7 @@ func TestHTTPAgentOSStatusV1(t *testing.T) {
 
 	runID := fmt.Sprintf("e2e-status-%d", time.Now().UnixNano())
 
-	status := executeAgentRun(t, runID, "e2e-test-account")
+	status := executeAgentRun(t, runID)
 	if status.RunID != runID {
 		t.Fatalf("Expected run_id %q, got %q", runID, status.RunID)
 	}
@@ -187,7 +195,7 @@ func TestHTTPAgentOSStatusV1(t *testing.T) {
 		t.Errorf("Expected lifecycle_state waiting_input, got %q", status.LifecycleState)
 	}
 
-	if status.Step == 0 {
+	if status.Progress.Current == 0 {
 		t.Error("Expected non-zero step count")
 	}
 
@@ -195,16 +203,20 @@ func TestHTTPAgentOSStatusV1(t *testing.T) {
 	controlAgentOSRun(t, runID, "cancel")
 }
 
-func agentOSStartBody(runID, accountID, message string) string {
+// agentOSStartBody builds a start request. The tenant is deliberately absent:
+// the credential supplies the account, and a request DTO that carried one would
+// be a self-reported identity (guarded by the request package's tenant test).
+func agentOSStartBody(runID, message string) string {
 	return fmt.Sprintf(`{
 		"run_id": "%s",
-		"account_id": "%s",
+		"project_id": "e2e-test-project",
+		"idempotency_key": "%s-start",
 		"user_message": "%s",
 		"backend": {
 			"kind": "native",
 			"name": "goagent-native"
 		}
-	}`, runID, accountID, message)
+	}`, runID, runID, message)
 }
 
 func signalAgentOSUserMessage(t *testing.T, runID, content string) {
@@ -225,7 +237,12 @@ func signalAgentOSUserMessage(t *testing.T, runID, content string) {
 	if err != nil {
 		t.Fatalf("signalAgentOSUserMessage: request failed: %v", err)
 	}
-	defer resp.Body.Close()
+
+	t.Cleanup(func() {
+		if err := resp.Body.Close(); err != nil {
+			t.Errorf("close response body: %v", err)
+		}
+	})
 
 	if resp.StatusCode != http.StatusAccepted {
 		t.Fatalf("signalAgentOSUserMessage: expected 202, got %d", resp.StatusCode)
@@ -244,7 +261,12 @@ func controlAgentOSRun(t *testing.T, runID, operation string) {
 	if err != nil {
 		t.Fatalf("controlAgentOSRun: request failed: %v", err)
 	}
-	defer resp.Body.Close()
+
+	t.Cleanup(func() {
+		if err := resp.Body.Close(); err != nil {
+			t.Errorf("close response body: %v", err)
+		}
+	})
 
 	if resp.StatusCode != http.StatusAccepted {
 		t.Fatalf("controlAgentOSRun: expected 202, got %d", resp.StatusCode)

@@ -6,24 +6,29 @@ import (
 	"errors"
 	"fmt"
 
-	sq "github.com/Masterminds/squirrel"
 	agentos "github.com/TekkenSteve/GoAgent/agentos/control"
 	agentoscore "github.com/TekkenSteve/GoAgent/agentos/core"
 	"github.com/TekkenSteve/GoAgent/internal/pkg/postgres"
+	"github.com/TekkenSteve/GoAgent/internal/repo/persistent/sqlcgen"
 	"github.com/TekkenSteve/GoAgent/internal/usecase/agentosplan"
 	"github.com/jackc/pgx/v5"
 )
 
 // AgentOSCapabilityCatalogRepo persists backend capability declarations.
+// Statements and bindings come from queries/capability_catalog.sql; this file
+// owns the registration idempotency protocol around them.
 type AgentOSCapabilityCatalogRepo struct {
 	*postgres.Postgres
+
+	queries *sqlcgen.Queries
 }
 
 // NewAgentOSCapabilityCatalogRepo creates a Postgres-backed capability catalog.
 func NewAgentOSCapabilityCatalogRepo(pg *postgres.Postgres) *AgentOSCapabilityCatalogRepo {
-	return &AgentOSCapabilityCatalogRepo{Postgres: pg}
+	return &AgentOSCapabilityCatalogRepo{Postgres: pg, queries: sqlcgen.New(pg.Pool)}
 }
 
+// RegisterCapability upserts a backend capability declaration, returning the stored capability and whether it was newly registered.
 func (r *AgentOSCapabilityCatalogRepo) RegisterCapability(ctx context.Context, capability *agentos.Capability, idempotencyKey string) (agentos.Capability, bool, error) {
 	existing, exists, err := r.existingCapabilityByIdempotencyKey(ctx, capability, idempotencyKey)
 	if err != nil {
@@ -44,12 +49,19 @@ func (r *AgentOSCapabilityCatalogRepo) RegisterCapability(ctx context.Context, c
 		return agentos.Capability{}, false, err
 	}
 
-	capabilityJSON, err = r.insertCapabilityRow(ctx, capability, capabilityJSON, idempotencyKey)
+	row, err := r.queries.UpsertCapability(ctx, sqlcgen.UpsertCapabilityParams{
+		BackendKind:    string(capability.Backend.Kind),
+		BackendName:    capability.Backend.Name,
+		CapabilityName: capability.Name,
+		Description:    capability.Description,
+		CapabilityJson: capabilityJSON,
+		IdempotencyKey: idempotencyKey,
+	})
 	if err != nil {
-		return r.handleCapabilityScanErr(ctx, err, capability, idempotencyKey)
+		return r.handleCapabilityUpsertErr(ctx, err, capability, idempotencyKey)
 	}
 
-	registered, err := unmarshalCapability(capabilityJSON)
+	registered, err := unmarshalCapability(row)
 	if err != nil {
 		return agentos.Capability{}, false, err
 	}
@@ -62,8 +74,17 @@ func (r *AgentOSCapabilityCatalogRepo) existingCapabilityByIdempotencyKey(ctx co
 		return agentos.Capability{}, false, err
 	}
 
-	existing, exists, err := r.capabilityByIdempotencyKey(ctx, idempotencyKey)
-	if err != nil || !exists {
+	row, err := r.queries.GetCapabilityByIdempotencyKey(ctx, idempotencyKey)
+	if missingRow(err) {
+		return agentos.Capability{}, false, nil
+	}
+
+	if err != nil {
+		return agentos.Capability{}, false, fmt.Errorf("AgentOSCapabilityCatalogRepo - existingCapabilityByIdempotencyKey - query: %w", err)
+	}
+
+	existing, err := unmarshalCapability(row)
+	if err != nil {
 		return agentos.Capability{}, false, err
 	}
 
@@ -104,100 +125,45 @@ func (r *AgentOSCapabilityCatalogRepo) existingCapabilityByName(ctx context.Cont
 	return existing, true, nil
 }
 
-func (r *AgentOSCapabilityCatalogRepo) insertCapabilityRow(ctx context.Context, capability *agentos.Capability, capabilityJSON []byte, idempotencyKey string) ([]byte, error) {
-	row := r.Pool.QueryRow(
-		ctx, `
-INSERT INTO agentos_capabilities (
-    backend_kind,
-    backend_name,
-    capability_name,
-    description,
-    capability_json,
-    idempotency_key
-) VALUES ($1,$2,$3,$4,$5,$6)
-ON CONFLICT (backend_kind, backend_name, capability_name) DO UPDATE SET
-    description = EXCLUDED.description,
-    capability_json = EXCLUDED.capability_json,
-    idempotency_key = EXCLUDED.idempotency_key,
-    updated_at = NOW()
-WHERE agentos_capabilities.idempotency_key = EXCLUDED.idempotency_key
-RETURNING capability_json`,
-		string(capability.Backend.Kind),
-		capability.Backend.Name,
-		capability.Name,
-		capability.Description,
-		capabilityJSON,
-		idempotencyKey,
-	)
-	if err := row.Scan(&capabilityJSON); err != nil {
-		return nil, err
-	}
-
-	return capabilityJSON, nil
-}
-
-func (r *AgentOSCapabilityCatalogRepo) handleCapabilityScanErr(ctx context.Context, scanErr error, capability *agentos.Capability, idempotencyKey string) (agentos.Capability, bool, error) {
-	if errors.Is(scanErr, pgx.ErrNoRows) {
+func (r *AgentOSCapabilityCatalogRepo) handleCapabilityUpsertErr(ctx context.Context, upsertErr error, capability *agentos.Capability, idempotencyKey string) (agentos.Capability, bool, error) {
+	// The conditional upsert reports a conflicting declaration by updating
+	// nothing: no RETURNING row is the conflict, named for the caller.
+	if errors.Is(upsertErr, pgx.ErrNoRows) {
 		return agentos.Capability{}, false, fmt.Errorf("%w: capability %s/%s/%s already exists with a different declaration", agentoscore.ErrInvalidRunPlan, capability.Backend.Kind, capability.Backend.Name, capability.Name)
 	}
 
-	if isPostgresUniqueViolation(scanErr) {
-		return r.resolveCapabilityUniqueViolation(ctx, capability, idempotencyKey, scanErr)
+	if isPostgresUniqueViolation(upsertErr) {
+		return r.resolveCapabilityUniqueViolation(ctx, capability, idempotencyKey, upsertErr)
 	}
 
-	return agentos.Capability{}, false, fmt.Errorf("AgentOSCapabilityCatalogRepo - RegisterCapability - upsert: %w", scanErr)
+	return agentos.Capability{}, false, fmt.Errorf("AgentOSCapabilityCatalogRepo - RegisterCapability - upsert: %w", upsertErr)
 }
 
-func (r *AgentOSCapabilityCatalogRepo) resolveCapabilityUniqueViolation(ctx context.Context, capability *agentos.Capability, idempotencyKey string, scanErr error) (agentos.Capability, bool, error) {
+func (r *AgentOSCapabilityCatalogRepo) resolveCapabilityUniqueViolation(ctx context.Context, capability *agentos.Capability, idempotencyKey string, upsertErr error) (agentos.Capability, bool, error) {
 	existing, exists, err := r.existingCapabilityByIdempotencyKey(ctx, capability, idempotencyKey)
 	if err != nil || exists {
 		return existing, false, err
 	}
 
-	return agentos.Capability{}, false, fmt.Errorf("AgentOSCapabilityCatalogRepo - RegisterCapability - upsert: %w", scanErr)
+	return agentos.Capability{}, false, fmt.Errorf("AgentOSCapabilityCatalogRepo - RegisterCapability - upsert: %w", upsertErr)
 }
 
+// GetCapability loads the capability registered for the given backend and name.
 func (r *AgentOSCapabilityCatalogRepo) GetCapability(ctx context.Context, backend agentos.BackendRef, name string) (agentos.Capability, bool, error) {
-	sql, args, err := r.Builder.
-		Select("capability_json").
-		From("agentos_capabilities").
-		Where(sq.Eq{
-			"backend_kind":    string(backend.Kind),
-			"backend_name":    backend.Name,
-			"capability_name": name,
-		}).
-		ToSql()
-	if err != nil {
-		return agentos.Capability{}, false, fmt.Errorf("AgentOSCapabilityCatalogRepo - GetCapability - builder: %w", err)
-	}
-
-	return r.scanCapability(ctx, sql, args...)
-}
-
-func (r *AgentOSCapabilityCatalogRepo) capabilityByIdempotencyKey(ctx context.Context, idempotencyKey string) (agentos.Capability, bool, error) {
-	sql, args, err := r.Builder.
-		Select("capability_json").
-		From("agentos_capabilities").
-		Where(sq.Eq{"idempotency_key": idempotencyKey}).
-		ToSql()
-	if err != nil {
-		return agentos.Capability{}, false, fmt.Errorf("AgentOSCapabilityCatalogRepo - capabilityByIdempotencyKey - builder: %w", err)
-	}
-
-	return r.scanCapability(ctx, sql, args...)
-}
-
-func (r *AgentOSCapabilityCatalogRepo) scanCapability(ctx context.Context, sql string, args ...any) (agentos.Capability, bool, error) {
-	capabilityJSON, found, err := scanJSONQueryRow(ctx, r.Pool, sql, args...)
-	if err != nil {
-		return agentos.Capability{}, false, fmt.Errorf("AgentOSCapabilityCatalogRepo - scanCapability - query: %w", err)
-	}
-
-	if !found {
+	row, err := r.queries.GetCapabilityByName(ctx, sqlcgen.GetCapabilityByNameParams{
+		BackendKind:    string(backend.Kind),
+		BackendName:    backend.Name,
+		CapabilityName: name,
+	})
+	if missingRow(err) {
 		return agentos.Capability{}, false, nil
 	}
 
-	capability, err := unmarshalCapability(capabilityJSON)
+	if err != nil {
+		return agentos.Capability{}, false, fmt.Errorf("AgentOSCapabilityCatalogRepo - GetCapability - query: %w", err)
+	}
+
+	capability, err := unmarshalCapability(row)
 	if err != nil {
 		return agentos.Capability{}, false, err
 	}

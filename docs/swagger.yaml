@@ -19,12 +19,14 @@ definitions:
     - temporal_external
     - http
     - grpc
+    - dsh
     type: string
     x-enum-varnames:
     - BackendKindNative
     - BackendKindTemporalExternal
     - BackendKindHTTP
     - BackendKindGRPC
+    - BackendKindDSH
   control.BackendRef:
     properties:
       kind:
@@ -68,6 +70,60 @@ definitions:
       timeout_seconds:
         type: integer
     type: object
+  control.PlanApprovalDecision:
+    properties:
+      actor_id:
+        type: string
+      approved:
+        type: boolean
+      decided_at:
+        type: string
+      policy_version:
+        type: string
+      reason:
+        type: string
+    type: object
+  control.PlanApprovalGate:
+    properties:
+      expires_at:
+        description: |-
+          ExpiresAt is when the gate auto-rejects. Zero means no expiry
+          (ApprovalTimeoutSeconds == 0).
+        type: string
+      node_ids:
+        description: |-
+          NodeIDs are the precise plan-node references the gate covers: the nodes
+          that resume or start once the gate is approved.
+        items:
+          type: string
+        type: array
+      policy_version:
+        description: |-
+          PolicyVersion is a deterministic fingerprint of the plan policy and node
+          set at gate creation. It changes when the topology is replanned
+          (PlanDelta), which invalidates an existing decision.
+        type: string
+      requested_at:
+        description: RequestedAt is when the gate was created (plan entered blocked).
+        type: string
+      risk_reason:
+        description: RiskReason is the rationale for requiring approval (why the plan
+          paused).
+        type: string
+      summary:
+        description: Summary describes what the gate covers (gated node count and
+          plan id).
+        type: string
+    type: object
+  control.PlanApprovalStatus:
+    properties:
+      decision:
+        $ref: '#/definitions/control.PlanApprovalDecision'
+      gate:
+        $ref: '#/definitions/control.PlanApprovalGate'
+      lifecycle_state:
+        type: string
+    type: object
   control.PlanAuditAction:
     enum:
     - plan.start
@@ -78,6 +134,32 @@ definitions:
     - PlanAuditActionStart
     - PlanAuditActionSignal
     - PlanAuditActionControl
+  control.PlanAuditRecord:
+    properties:
+      account_id:
+        type: string
+      action:
+        $ref: '#/definitions/control.PlanAuditAction'
+      actor_id:
+        type: string
+      audit_id:
+        type: string
+      created_at:
+        type: string
+      idempotency_key:
+        type: string
+      node_id:
+        type: string
+      payload:
+        additionalProperties: {}
+        type: object
+      plan_id:
+        type: string
+      project_id:
+        type: string
+      run_id:
+        type: string
+    type: object
   control.PlanBudgetUsage:
     properties:
       spent_cents:
@@ -123,6 +205,35 @@ definitions:
       to:
         type: string
     type: object
+  control.PlanDebugTrace:
+    properties:
+      capability:
+        $ref: '#/definitions/control.PlanCapabilityTrace'
+      conditions:
+        items:
+          $ref: '#/definitions/control.PlanConditionTrace'
+        type: array
+      event_id:
+        type: string
+      event_type:
+        $ref: '#/definitions/core.EventType'
+      input_resolution:
+        $ref: '#/definitions/control.PlanInputResolutionTrace'
+      node_id:
+        type: string
+      plan_id:
+        type: string
+      run_id:
+        type: string
+      sequence:
+        type: integer
+      thread_id:
+        type: string
+      timestamp:
+        type: string
+      transition:
+        $ref: '#/definitions/control.PlanStateTransition'
+    type: object
   control.PlanEdgeSpec:
     properties:
       condition:
@@ -138,6 +249,38 @@ definitions:
       "on":
         $ref: '#/definitions/control.EdgeTrigger'
       to:
+        type: string
+    type: object
+  control.PlanEvent:
+    properties:
+      account_id:
+        type: string
+      event_id:
+        type: string
+      event_type:
+        $ref: '#/definitions/core.EventType'
+      external_event_id:
+        type: string
+      node_id:
+        type: string
+      payload:
+        additionalProperties: {}
+        type: object
+      plan_id:
+        type: string
+      process_id:
+        type: string
+      project_id:
+        type: string
+      run_id:
+        type: string
+      sequence:
+        type: integer
+      source:
+        type: string
+      thread_id:
+        type: string
+      timestamp:
         type: string
     type: object
   control.PlanInputMappingTrace:
@@ -198,6 +341,11 @@ definitions:
         items:
           $ref: '#/definitions/control.ArtifactSpec'
         type: array
+      peer:
+        description: |-
+          Peer names the town this node's run happens in, resolved through the
+          deployment's peer → Nexus endpoint map. Empty runs it here.
+        type: string
       policy:
         $ref: '#/definitions/control.NodePolicy'
       run:
@@ -232,6 +380,12 @@ definitions:
     type: object
   control.PlanPolicy:
     properties:
+      approval_timeout_seconds:
+        description: |-
+          ApprovalTimeoutSeconds bounds how long a plan may stay blocked waiting
+          for human approval (approve/reject signal). When it elapses the plan is
+          auto-rejected. 0 disables the gate (plan waits indefinitely).
+        type: integer
       budget_cents:
         type: integer
       continue_as_new_events:
@@ -317,16 +471,84 @@ definitions:
       status:
         $ref: '#/definitions/control.PlanNodeStatus'
     type: object
+  control.RunPlanDescription:
+    properties:
+      account_id:
+        type: string
+      metadata:
+        additionalProperties:
+          type: string
+        type: object
+      plan_id:
+        type: string
+      policy:
+        $ref: '#/definitions/control.PlanPolicy'
+      project_id:
+        type: string
+      status:
+        $ref: '#/definitions/control.RunPlanStatus'
+      thread_id:
+        type: string
+      topology:
+        $ref: '#/definitions/control.PlanTopology'
+      updated_at:
+        type: string
+    type: object
+  control.RunPlanSpec:
+    properties:
+      account_id:
+        type: string
+      edges:
+        items:
+          $ref: '#/definitions/control.PlanEdgeSpec'
+        type: array
+      idempotency_key:
+        type: string
+      inputs:
+        additionalProperties: {}
+        type: object
+      metadata:
+        additionalProperties:
+          type: string
+        type: object
+      nodes:
+        items:
+          $ref: '#/definitions/control.PlanNodeSpec'
+        type: array
+      plan_id:
+        type: string
+      policy:
+        $ref: '#/definitions/control.PlanPolicy'
+      project_id:
+        type: string
+      requested_at:
+        type: string
+      thread_id:
+        type: string
+    type: object
   control.RunPlanStatus:
     properties:
       active_run_ids:
         items:
           type: string
         type: array
+      approval:
+        allOf:
+        - $ref: '#/definitions/control.PlanApprovalStatus'
+        description: |-
+          Approval is the live approval-gate projection. It is nil while no gate
+          is active: a plan that is not blocked, or a blocked plan persisted before
+          the auditable-approval feature (the decision is then derived lazily).
       artifacts:
         items:
           $ref: '#/definitions/core.ArtifactRef'
         type: array
+      blocked_at:
+        description: |-
+          BlockedAt records when the plan entered the blocked (awaiting-approval)
+          lifecycle state. It is zero outside the blocked state and anchors the
+          ApprovalTimeoutSeconds gate.
+        type: string
       budget_usage:
         $ref: '#/definitions/control.PlanBudgetUsage'
       lifecycle_state:
@@ -360,6 +582,10 @@ definitions:
         type: string
       input:
         additionalProperties: {}
+        description: |-
+          Input is backend-owned and carried opaquely: each backend reads the key
+          it owns (the native backend reads "native") and ignores the rest, so a
+          caller may keep its own metadata here without a backend tripping over it.
         type: object
       metadata:
         additionalProperties:
@@ -379,6 +605,31 @@ definitions:
         type: string
       user_message:
         type: string
+    type: object
+  control.RunStatus:
+    properties:
+      artifacts:
+        items:
+          $ref: '#/definitions/core.ArtifactRef'
+        type: array
+      budget_usage:
+        $ref: '#/definitions/control.PlanBudgetUsage'
+      lifecycle_state:
+        type: string
+      progress:
+        $ref: '#/definitions/core.RunProgress'
+      reason:
+        type: string
+      run_id:
+        type: string
+      updated_at:
+        type: string
+    type: object
+  core.Artifact:
+    properties:
+      payload: {}
+      ref:
+        $ref: '#/definitions/core.ArtifactRef'
     type: object
   core.ArtifactKind:
     enum:
@@ -442,7 +693,7 @@ definitions:
     - run.started
     - run.completed
     - run.failed
-    - run.cancelled
+    - run.canceled
     - run.paused
     - run.resumed
     - agent.step.started
@@ -493,7 +744,7 @@ definitions:
     - EventRunStarted
     - EventRunCompleted
     - EventRunFailed
-    - EventRunCancelled
+    - EventRunCanceled
     - EventRunPaused
     - EventRunResumed
     - EventAgentStepStarted
@@ -562,6 +813,8 @@ definitions:
     - tool.result
     - human.feedback
     - config.patch
+    - step.modify
+    - event.external
     - memory.patch
     type: string
     x-enum-varnames:
@@ -577,87 +830,19 @@ definitions:
     - SignalToolResult
     - SignalHumanFeedback
     - SignalConfigPatch
+    - SignalStepModify
+    - SignalExternalEvent
     - SignalMemoryPatch
-  github_com_TekkenSteve_GoAgent_agentos_control.BackendRef:
+  github_com_TekkenSteve_GoAgent_agentos_core.Event:
     properties:
-      kind:
-        $ref: '#/definitions/control.BackendKind'
-      name:
-        type: string
-    type: object
-  github_com_TekkenSteve_GoAgent_agentos_control.PlanAuditRecord:
-    properties:
-      account_id:
-        type: string
-      action:
-        $ref: '#/definitions/control.PlanAuditAction'
-      actor_id:
-        type: string
-      audit_id:
-        type: string
-      created_at:
-        type: string
-      idempotency_key:
-        type: string
-      node_id:
-        type: string
-      payload:
-        additionalProperties: {}
-        type: object
-      plan_id:
-        type: string
-      project_id:
-        type: string
-      run_id:
-        type: string
-    type: object
-  github_com_TekkenSteve_GoAgent_agentos_control.PlanDebugTrace:
-    properties:
-      capability:
-        $ref: '#/definitions/control.PlanCapabilityTrace'
-      conditions:
-        items:
-          $ref: '#/definitions/control.PlanConditionTrace'
-        type: array
       event_id:
         type: string
       event_type:
         $ref: '#/definitions/core.EventType'
-      input_resolution:
-        $ref: '#/definitions/control.PlanInputResolutionTrace'
-      node_id:
-        type: string
-      plan_id:
-        type: string
-      run_id:
-        type: string
-      sequence:
-        type: integer
-      thread_id:
-        type: string
-      timestamp:
-        type: string
-      transition:
-        $ref: '#/definitions/control.PlanStateTransition'
-    type: object
-  github_com_TekkenSteve_GoAgent_agentos_control.PlanEvent:
-    properties:
-      account_id:
-        type: string
-      event_id:
-        type: string
-      event_type:
-        $ref: '#/definitions/core.EventType'
-      node_id:
-        type: string
       payload:
         additionalProperties: {}
         type: object
-      plan_id:
-        type: string
       process_id:
-        type: string
-      project_id:
         type: string
       run_id:
         type: string
@@ -670,289 +855,7 @@ definitions:
       timestamp:
         type: string
     type: object
-  github_com_TekkenSteve_GoAgent_agentos_control.RunPlanDescription:
-    properties:
-      account_id:
-        type: string
-      metadata:
-        additionalProperties:
-          type: string
-        type: object
-      plan_id:
-        type: string
-      policy:
-        $ref: '#/definitions/control.PlanPolicy'
-      project_id:
-        type: string
-      status:
-        $ref: '#/definitions/control.RunPlanStatus'
-      thread_id:
-        type: string
-      topology:
-        $ref: '#/definitions/control.PlanTopology'
-      updated_at:
-        type: string
-    type: object
-  github_com_TekkenSteve_GoAgent_agentos_control.RunPlanSpec:
-    properties:
-      account_id:
-        type: string
-      edges:
-        items:
-          $ref: '#/definitions/control.PlanEdgeSpec'
-        type: array
-      idempotency_key:
-        type: string
-      inputs:
-        additionalProperties: {}
-        type: object
-      metadata:
-        additionalProperties:
-          type: string
-        type: object
-      nodes:
-        items:
-          $ref: '#/definitions/control.PlanNodeSpec'
-        type: array
-      plan_id:
-        type: string
-      policy:
-        $ref: '#/definitions/control.PlanPolicy'
-      project_id:
-        type: string
-      requested_at:
-        type: string
-      thread_id:
-        type: string
-    type: object
-  github_com_TekkenSteve_GoAgent_agentos_control.RunPlanStatus:
-    properties:
-      active_run_ids:
-        items:
-          type: string
-        type: array
-      artifacts:
-        items:
-          $ref: '#/definitions/core.ArtifactRef'
-        type: array
-      budget_usage:
-        $ref: '#/definitions/control.PlanBudgetUsage'
-      lifecycle_state:
-        type: string
-      metadata:
-        additionalProperties:
-          type: string
-        type: object
-      nodes:
-        items:
-          $ref: '#/definitions/control.PlanNodeStatus'
-        type: array
-      plan_id:
-        type: string
-      reason:
-        type: string
-      started_at:
-        type: string
-      updated_at:
-        type: string
-    type: object
-  github_com_TekkenSteve_GoAgent_agentos_control.RunStatus:
-    properties:
-      artifacts:
-        items:
-          $ref: '#/definitions/core.ArtifactRef'
-        type: array
-      budget_usage:
-        $ref: '#/definitions/control.PlanBudgetUsage'
-      lifecycle_state:
-        type: string
-      progress:
-        $ref: '#/definitions/core.RunProgress'
-      reason:
-        type: string
-      run_id:
-        type: string
-      updated_at:
-        type: string
-    type: object
-  github_com_TekkenSteve_GoAgent_agentos_core.Artifact:
-    properties:
-      payload: {}
-      ref:
-        $ref: '#/definitions/core.ArtifactRef'
-    type: object
-  github_com_TekkenSteve_GoAgent_agentos_core.ArtifactRef:
-    properties:
-      artifact_id:
-        type: string
-      created_at:
-        type: string
-      digest:
-        type: string
-      kind:
-        $ref: '#/definitions/core.ArtifactKind'
-      media_type:
-        type: string
-      metadata:
-        additionalProperties:
-          type: string
-        type: object
-      name:
-        type: string
-      node_id:
-        type: string
-      plan_id:
-        type: string
-      run_id:
-        type: string
-      size_bytes:
-        type: integer
-      uri:
-        type: string
-    type: object
-  github_com_TekkenSteve_GoAgent_agentos_core.ControlOperation:
-    enum:
-    - pause
-    - resume
-    - cancel
-    type: string
-    x-enum-varnames:
-    - ControlPause
-    - ControlResume
-    - ControlCancel
-  github_com_TekkenSteve_GoAgent_agentos_core.EventType:
-    enum:
-    - run.started
-    - run.completed
-    - run.failed
-    - run.cancelled
-    - run.paused
-    - run.resumed
-    - agent.step.started
-    - agent.step.completed
-    - agent.step.failed
-    - agent.message.delta
-    - agent.message.completed
-    - tool.call.started
-    - tool.call.delta
-    - tool.call.completed
-    - tool.call.failed
-    - approval.requested
-    - approval.resolved
-    - usage.reported
-    - checkpoint.created
-    - artifact.created
-    - node.input.resolved
-    - node.output.published
-    - capability.selected
-    - condition.evaluated
-    - plan.started
-    - plan.blocked
-    - plan.expanded
-    - plan.approved
-    - plan.rejected
-    - plan.succeeded
-    - plan.failed
-    - plan.canceled
-    - plan.node.ready
-    - plan.node.started
-    - plan.node.succeeded
-    - plan.node.failed
-    - plan.node.retry_scheduled
-    - plan.node.skipped
-    - plan.node.canceled
-    - process.started
-    - process.waiting
-    - process.blocked
-    - process.succeeded
-    - process.failed
-    - process.canceled
-    - process.timer.scheduled
-    - process.timer.fired
-    - process.signal.received
-    - process.control.received
-    type: string
-    x-enum-varnames:
-    - EventRunStarted
-    - EventRunCompleted
-    - EventRunFailed
-    - EventRunCancelled
-    - EventRunPaused
-    - EventRunResumed
-    - EventAgentStepStarted
-    - EventAgentStepCompleted
-    - EventAgentStepFailed
-    - EventAgentMessageDelta
-    - EventAgentMessageCompleted
-    - EventToolCallStarted
-    - EventToolCallDelta
-    - EventToolCallCompleted
-    - EventToolCallFailed
-    - EventApprovalRequested
-    - EventApprovalResolved
-    - EventUsageReported
-    - EventCheckpointCreated
-    - EventArtifactCreated
-    - EventNodeInputResolved
-    - EventNodeOutputPublished
-    - EventCapabilitySelected
-    - EventConditionEvaluated
-    - EventPlanStarted
-    - EventPlanBlocked
-    - EventPlanExpanded
-    - EventPlanApproved
-    - EventPlanRejected
-    - EventPlanSucceeded
-    - EventPlanFailed
-    - EventPlanCanceled
-    - EventPlanNodeReady
-    - EventPlanNodeStarted
-    - EventPlanNodeSucceeded
-    - EventPlanNodeFailed
-    - EventPlanNodeRetryScheduled
-    - EventPlanNodeSkipped
-    - EventPlanNodeCanceled
-    - EventProcessStarted
-    - EventProcessWaiting
-    - EventProcessBlocked
-    - EventProcessSucceeded
-    - EventProcessFailed
-    - EventProcessCanceled
-    - EventProcessTimerScheduled
-    - EventProcessTimerFired
-    - EventProcessSignalReceived
-    - EventProcessControlReceived
-  github_com_TekkenSteve_GoAgent_agentos_core.SignalType:
-    enum:
-    - control.pause
-    - control.resume
-    - control.cancel
-    - plan.node.retry
-    - plan.approve
-    - plan.reject
-    - user.message
-    - user.approval
-    - user.reject
-    - tool.result
-    - human.feedback
-    - config.patch
-    - memory.patch
-    type: string
-    x-enum-varnames:
-    - SignalControlPause
-    - SignalControlResume
-    - SignalControlCancel
-    - SignalPlanNodeRetry
-    - SignalPlanApprove
-    - SignalPlanReject
-    - SignalUserMessage
-    - SignalUserApproval
-    - SignalUserReject
-    - SignalToolResult
-    - SignalHumanFeedback
-    - SignalConfigPatch
-    - SignalMemoryPatch
-  github_com_TekkenSteve_GoAgent_agentos_process.ActionApprovalDecision:
+  process.ActionApprovalDecision:
     properties:
       actor:
         $ref: '#/definitions/process.ActorRef'
@@ -965,7 +868,7 @@ definitions:
       reason:
         type: string
     type: object
-  github_com_TekkenSteve_GoAgent_agentos_process.ActionCancelRequest:
+  process.ActionCancelRequest:
     properties:
       actor:
         $ref: '#/definitions/process.ActorRef'
@@ -976,7 +879,7 @@ definitions:
       requested_at:
         type: string
     type: object
-  github_com_TekkenSteve_GoAgent_agentos_process.ActionDryRunResult:
+  process.ActionDryRunResult:
     properties:
       idempotency_key:
         type: string
@@ -993,7 +896,7 @@ definitions:
       summary:
         type: string
     type: object
-  github_com_TekkenSteve_GoAgent_agentos_process.ActionExecutionResult:
+  process.ActionExecutionResult:
     properties:
       artifact_refs:
         items:
@@ -1012,7 +915,39 @@ definitions:
       summary:
         type: string
     type: object
-  github_com_TekkenSteve_GoAgent_agentos_process.Description:
+  process.ActionRiskAssessment:
+    properties:
+      assessed_at:
+        type: string
+      evidence_refs:
+        items:
+          $ref: '#/definitions/process.LedgerDataRef'
+        type: array
+      level:
+        $ref: '#/definitions/process.ActionRiskLevel'
+      reason:
+        type: string
+    type: object
+  process.ActionRiskLevel:
+    enum:
+    - low
+    - medium
+    - high
+    - critical
+    type: string
+    x-enum-varnames:
+    - ActionRiskLow
+    - ActionRiskMedium
+    - ActionRiskHigh
+    - ActionRiskCritical
+  process.ActorRef:
+    properties:
+      actor_id:
+        type: string
+      kind:
+        type: string
+    type: object
+  process.Description:
     properties:
       account_id:
         type: string
@@ -1039,7 +974,7 @@ definitions:
       updated_at:
         type: string
     type: object
-  github_com_TekkenSteve_GoAgent_agentos_process.GovernedActionSpec:
+  process.GovernedActionSpec:
     properties:
       account_id:
         type: string
@@ -1077,293 +1012,6 @@ definitions:
         $ref: '#/definitions/process.ResourceRef'
       risk:
         $ref: '#/definitions/process.ActionRiskAssessment'
-    type: object
-  github_com_TekkenSteve_GoAgent_agentos_process.GovernedActionStatus:
-    properties:
-      account_id:
-        type: string
-      action_id:
-        type: string
-      approval_state:
-        type: string
-      dry_run_state:
-        type: string
-      execution_state:
-        type: string
-      kind:
-        type: string
-      lifecycle_state:
-        type: string
-      process_id:
-        type: string
-      project_id:
-        type: string
-      reason:
-        type: string
-      resource:
-        $ref: '#/definitions/process.ResourceRef'
-      risk:
-        $ref: '#/definitions/process.ActionRiskAssessment'
-      updated_at:
-        type: string
-    type: object
-  github_com_TekkenSteve_GoAgent_agentos_process.LedgerEntry:
-    properties:
-      account_id:
-        type: string
-      actor:
-        $ref: '#/definitions/process.ActorRef'
-      artifact_refs:
-        items:
-          $ref: '#/definitions/core.ArtifactRef'
-        type: array
-      created_at:
-        type: string
-      data_refs:
-        items:
-          $ref: '#/definitions/process.LedgerDataRef'
-        type: array
-      entry_id:
-        type: string
-      idempotency_key:
-        type: string
-      kind:
-        $ref: '#/definitions/process.LedgerEntryKind'
-      metadata:
-        additionalProperties:
-          type: string
-        type: object
-      occurred_at:
-        type: string
-      process_id:
-        type: string
-      project_id:
-        type: string
-      rationale:
-        type: string
-      resource:
-        $ref: '#/definitions/process.ResourceRef'
-      sequence:
-        type: integer
-      summary:
-        type: string
-    type: object
-  github_com_TekkenSteve_GoAgent_agentos_process.LedgerEntrySpec:
-    properties:
-      account_id:
-        type: string
-      actor:
-        $ref: '#/definitions/process.ActorRef'
-      artifact_refs:
-        items:
-          $ref: '#/definitions/core.ArtifactRef'
-        type: array
-      data_refs:
-        items:
-          $ref: '#/definitions/process.LedgerDataRef'
-        type: array
-      entry_id:
-        type: string
-      idempotency_key:
-        type: string
-      kind:
-        $ref: '#/definitions/process.LedgerEntryKind'
-      metadata:
-        additionalProperties:
-          type: string
-        type: object
-      occurred_at:
-        type: string
-      process_id:
-        type: string
-      project_id:
-        type: string
-      rationale:
-        type: string
-      resource:
-        $ref: '#/definitions/process.ResourceRef'
-      summary:
-        type: string
-    type: object
-  github_com_TekkenSteve_GoAgent_agentos_process.ResourceProjection:
-    properties:
-      actions:
-        items:
-          $ref: '#/definitions/process.GovernedActionStatus'
-        type: array
-      artifacts:
-        items:
-          $ref: '#/definitions/core.ArtifactRef'
-        type: array
-      ledger:
-        items:
-          $ref: '#/definitions/process.LedgerEntry'
-        type: array
-      metadata:
-        additionalProperties:
-          type: string
-        type: object
-      processes:
-        items:
-          $ref: '#/definitions/process.Status'
-        type: array
-      resource:
-        $ref: '#/definitions/process.ResourceRef'
-      updated_at:
-        type: string
-      worksets:
-        items:
-          $ref: '#/definitions/process.WorksetStatus'
-        type: array
-    type: object
-  github_com_TekkenSteve_GoAgent_agentos_process.Spec:
-    properties:
-      account_id:
-        type: string
-      idempotency_key:
-        type: string
-      inputs:
-        additionalProperties: {}
-        type: object
-      kind:
-        type: string
-      metadata:
-        additionalProperties:
-          type: string
-        type: object
-      policy:
-        $ref: '#/definitions/process.Policy'
-      process_id:
-        type: string
-      project_id:
-        type: string
-      requested_at:
-        type: string
-      resource:
-        $ref: '#/definitions/process.ResourceRef'
-      timers:
-        items:
-          $ref: '#/definitions/process.TimerSpec'
-        type: array
-    type: object
-  github_com_TekkenSteve_GoAgent_agentos_process.Status:
-    properties:
-      account_id:
-        type: string
-      kind:
-        type: string
-      lifecycle_state:
-        type: string
-      metadata:
-        additionalProperties:
-          type: string
-        type: object
-      process_id:
-        type: string
-      progress:
-        $ref: '#/definitions/core.RunProgress'
-      project_id:
-        type: string
-      reason:
-        type: string
-      resource:
-        $ref: '#/definitions/process.ResourceRef'
-      started_at:
-        type: string
-      updated_at:
-        type: string
-    type: object
-  github_com_TekkenSteve_GoAgent_agentos_process.WorksetSpec:
-    properties:
-      account_id:
-        type: string
-      chunks:
-        items:
-          $ref: '#/definitions/process.WorksetChunkSpec'
-        type: array
-      idempotency_key:
-        type: string
-      items_ref:
-        $ref: '#/definitions/process.WorksetItemsRef'
-      kind:
-        type: string
-      metadata:
-        additionalProperties:
-          type: string
-        type: object
-      policy:
-        $ref: '#/definitions/process.WorksetPolicy'
-      process_id:
-        type: string
-      project_id:
-        type: string
-      requested_at:
-        type: string
-      requested_by:
-        $ref: '#/definitions/process.ActorRef'
-      resource:
-        $ref: '#/definitions/process.ResourceRef'
-      workset_id:
-        type: string
-    type: object
-  github_com_TekkenSteve_GoAgent_agentos_process.WorksetStatus:
-    properties:
-      account_id:
-        type: string
-      kind:
-        type: string
-      lifecycle_state:
-        type: string
-      metadata:
-        additionalProperties:
-          type: string
-        type: object
-      process_id:
-        type: string
-      progress:
-        $ref: '#/definitions/process.WorksetProgress'
-      project_id:
-        type: string
-      reason:
-        type: string
-      resource:
-        $ref: '#/definitions/process.ResourceRef'
-      updated_at:
-        type: string
-      workset_id:
-        type: string
-    type: object
-  process.ActionRiskAssessment:
-    properties:
-      assessed_at:
-        type: string
-      evidence_refs:
-        items:
-          $ref: '#/definitions/process.LedgerDataRef'
-        type: array
-      level:
-        $ref: '#/definitions/process.ActionRiskLevel'
-      reason:
-        type: string
-    type: object
-  process.ActionRiskLevel:
-    enum:
-    - low
-    - medium
-    - high
-    - critical
-    type: string
-    x-enum-varnames:
-    - ActionRiskLow
-    - ActionRiskMedium
-    - ActionRiskHigh
-    - ActionRiskCritical
-  process.ActorRef:
-    properties:
-      actor_id:
-        type: string
-      kind:
-        type: string
     type: object
   process.GovernedActionStatus:
     properties:
@@ -1472,6 +1120,43 @@ definitions:
     - LedgerEntryResponse
     - LedgerEntryToolIO
     - LedgerEntryRationale
+  process.LedgerEntrySpec:
+    properties:
+      account_id:
+        type: string
+      actor:
+        $ref: '#/definitions/process.ActorRef'
+      artifact_refs:
+        items:
+          $ref: '#/definitions/core.ArtifactRef'
+        type: array
+      data_refs:
+        items:
+          $ref: '#/definitions/process.LedgerDataRef'
+        type: array
+      entry_id:
+        type: string
+      idempotency_key:
+        type: string
+      kind:
+        $ref: '#/definitions/process.LedgerEntryKind'
+      metadata:
+        additionalProperties:
+          type: string
+        type: object
+      occurred_at:
+        type: string
+      process_id:
+        type: string
+      project_id:
+        type: string
+      rationale:
+        type: string
+      resource:
+        $ref: '#/definitions/process.ResourceRef'
+      summary:
+        type: string
+    type: object
   process.Policy:
     properties:
       continue_as_new_events:
@@ -1480,6 +1165,37 @@ definitions:
         type: integer
       timeout_seconds:
         type: integer
+    type: object
+  process.ResourceProjection:
+    properties:
+      actions:
+        items:
+          $ref: '#/definitions/process.GovernedActionStatus'
+        type: array
+      artifacts:
+        items:
+          $ref: '#/definitions/core.ArtifactRef'
+        type: array
+      ledger:
+        items:
+          $ref: '#/definitions/process.LedgerEntry'
+        type: array
+      metadata:
+        additionalProperties:
+          type: string
+        type: object
+      processes:
+        items:
+          $ref: '#/definitions/process.Status'
+        type: array
+      resource:
+        $ref: '#/definitions/process.ResourceRef'
+      updated_at:
+        type: string
+      worksets:
+        items:
+          $ref: '#/definitions/process.WorksetStatus'
+        type: array
     type: object
   process.ResourceRef:
     properties:
@@ -1491,6 +1207,36 @@ definitions:
         type: string
       resource_id:
         type: string
+    type: object
+  process.Spec:
+    properties:
+      account_id:
+        type: string
+      idempotency_key:
+        type: string
+      inputs:
+        additionalProperties: {}
+        type: object
+      kind:
+        type: string
+      metadata:
+        additionalProperties:
+          type: string
+        type: object
+      policy:
+        $ref: '#/definitions/process.Policy'
+      process_id:
+        type: string
+      project_id:
+        type: string
+      requested_at:
+        type: string
+      resource:
+        $ref: '#/definitions/process.ResourceRef'
+      timers:
+        items:
+          $ref: '#/definitions/process.TimerSpec'
+        type: array
     type: object
   process.Status:
     properties:
@@ -1589,6 +1335,39 @@ definitions:
       total_items:
         type: integer
     type: object
+  process.WorksetSpec:
+    properties:
+      account_id:
+        type: string
+      chunks:
+        items:
+          $ref: '#/definitions/process.WorksetChunkSpec'
+        type: array
+      idempotency_key:
+        type: string
+      items_ref:
+        $ref: '#/definitions/process.WorksetItemsRef'
+      kind:
+        type: string
+      metadata:
+        additionalProperties:
+          type: string
+        type: object
+      policy:
+        $ref: '#/definitions/process.WorksetPolicy'
+      process_id:
+        type: string
+      project_id:
+        type: string
+      requested_at:
+        type: string
+      requested_by:
+        $ref: '#/definitions/process.ActorRef'
+      resource:
+        $ref: '#/definitions/process.ResourceRef'
+      workset_id:
+        type: string
+    type: object
   process.WorksetStatus:
     properties:
       account_id:
@@ -1618,8 +1397,6 @@ definitions:
     type: object
   request.AgentOSControl:
     properties:
-      actor_id:
-        type: string
       idempotency_key:
         type: string
       metadata:
@@ -1627,7 +1404,7 @@ definitions:
           type: string
         type: object
       operation:
-        $ref: '#/definitions/github_com_TekkenSteve_GoAgent_agentos_core.ControlOperation'
+        $ref: '#/definitions/core.ControlOperation'
       requested_at:
         type: string
     required:
@@ -1638,7 +1415,7 @@ definitions:
       event_id:
         type: string
       event_type:
-        $ref: '#/definitions/github_com_TekkenSteve_GoAgent_agentos_core.EventType'
+        $ref: '#/definitions/core.EventType'
       payload:
         additionalProperties: {}
         type: object
@@ -1665,8 +1442,6 @@ definitions:
     type: object
   request.AgentOSPlanControl:
     properties:
-      account_id:
-        type: string
       actor_id:
         type: string
       idempotency_key:
@@ -1676,20 +1451,17 @@ definitions:
           type: string
         type: object
       operation:
-        $ref: '#/definitions/github_com_TekkenSteve_GoAgent_agentos_core.ControlOperation'
+        $ref: '#/definitions/core.ControlOperation'
       project_id:
         type: string
       requested_at:
         type: string
     required:
-    - account_id
     - operation
     - project_id
     type: object
   request.AgentOSPlanSignal:
     properties:
-      account_id:
-        type: string
       actor_id:
         type: string
       idempotency_key:
@@ -1702,16 +1474,13 @@ definitions:
       sent_at:
         type: string
       type:
-        $ref: '#/definitions/github_com_TekkenSteve_GoAgent_agentos_core.SignalType'
+        $ref: '#/definitions/core.SignalType'
     required:
-    - account_id
     - project_id
     - type
     type: object
   request.AgentOSSignal:
     properties:
-      actor_id:
-        type: string
       idempotency_key:
         type: string
       payload:
@@ -1720,18 +1489,16 @@ definitions:
       sent_at:
         type: string
       type:
-        $ref: '#/definitions/github_com_TekkenSteve_GoAgent_agentos_core.SignalType'
+        $ref: '#/definitions/core.SignalType'
     required:
     - type
     type: object
   request.AgentOSStart:
     properties:
-      account_id:
-        type: string
       agent_id:
         type: string
       backend:
-        $ref: '#/definitions/github_com_TekkenSteve_GoAgent_agentos_control.BackendRef'
+        $ref: '#/definitions/control.BackendRef'
       idempotency_key:
         type: string
       input:
@@ -1756,34 +1523,8 @@ definitions:
       user_message:
         type: string
     required:
-    - account_id
     - backend
-    - run_id
-    type: object
-  request.Orchestrate:
-    properties:
-      account_id:
-        example: acct-001
-        type: string
-      continue_policy:
-        type: object
-      max_depth:
-        type: integer
-      message:
-        type: string
-      run_id:
-        example: run-550e8400-e29b-41d4-a716-446655440000
-        type: string
-      steps:
-        items:
-          type: object
-        type: array
-      system_prompt:
-        type: string
-      team_spec:
-        type: object
-    required:
-    - account_id
+    - project_id
     - run_id
     type: object
   response.Error:
@@ -1791,19 +1532,6 @@ definitions:
       error:
         example: message
         type: string
-    type: object
-  response.RunStatus:
-    properties:
-      lifecycle_state:
-        type: string
-      reason:
-        type: string
-      run_id:
-        type: string
-      step:
-        type: integer
-      updated_at:
-        type: integer
     type: object
   v1.ingestAgentOSEventResponse:
     properties:
@@ -1831,11 +1559,6 @@ paths:
         kind, or lifecycle state.
       operationId: agentos-list-actions
       parameters:
-      - description: Account ID
-        in: query
-        name: account_id
-        required: true
-        type: string
       - description: Project ID
         in: query
         name: project_id
@@ -1872,7 +1595,7 @@ paths:
           description: OK
           schema:
             items:
-              $ref: '#/definitions/github_com_TekkenSteve_GoAgent_agentos_process.GovernedActionStatus'
+              $ref: '#/definitions/process.GovernedActionStatus'
             type: array
         "400":
           description: Bad Request
@@ -1901,14 +1624,14 @@ paths:
         name: request
         required: true
         schema:
-          $ref: '#/definitions/github_com_TekkenSteve_GoAgent_agentos_process.GovernedActionSpec'
+          $ref: '#/definitions/process.GovernedActionSpec'
       produces:
       - application/json
       responses:
         "202":
           description: Accepted
           schema:
-            $ref: '#/definitions/github_com_TekkenSteve_GoAgent_agentos_process.GovernedActionStatus'
+            $ref: '#/definitions/process.GovernedActionStatus'
         "400":
           description: Bad Request
           schema:
@@ -1936,11 +1659,6 @@ paths:
         name: action_id
         required: true
         type: string
-      - description: Account ID
-        in: query
-        name: account_id
-        required: true
-        type: string
       - description: Project ID
         in: query
         name: project_id
@@ -1952,7 +1670,7 @@ paths:
         "200":
           description: OK
           schema:
-            $ref: '#/definitions/github_com_TekkenSteve_GoAgent_agentos_process.GovernedActionStatus'
+            $ref: '#/definitions/process.GovernedActionStatus'
         "400":
           description: Bad Request
           schema:
@@ -1980,11 +1698,6 @@ paths:
         name: action_id
         required: true
         type: string
-      - description: Account ID
-        in: query
-        name: account_id
-        required: true
-        type: string
       - description: Project ID
         in: query
         name: project_id
@@ -1995,14 +1708,14 @@ paths:
         name: request
         required: true
         schema:
-          $ref: '#/definitions/github_com_TekkenSteve_GoAgent_agentos_process.ActionApprovalDecision'
+          $ref: '#/definitions/process.ActionApprovalDecision'
       produces:
       - application/json
       responses:
         "200":
           description: OK
           schema:
-            $ref: '#/definitions/github_com_TekkenSteve_GoAgent_agentos_process.GovernedActionStatus'
+            $ref: '#/definitions/process.GovernedActionStatus'
         "400":
           description: Bad Request
           schema:
@@ -2030,11 +1743,6 @@ paths:
         name: action_id
         required: true
         type: string
-      - description: Account ID
-        in: query
-        name: account_id
-        required: true
-        type: string
       - description: Project ID
         in: query
         name: project_id
@@ -2045,14 +1753,14 @@ paths:
         name: request
         required: true
         schema:
-          $ref: '#/definitions/github_com_TekkenSteve_GoAgent_agentos_process.ActionCancelRequest'
+          $ref: '#/definitions/process.ActionCancelRequest'
       produces:
       - application/json
       responses:
         "200":
           description: OK
           schema:
-            $ref: '#/definitions/github_com_TekkenSteve_GoAgent_agentos_process.GovernedActionStatus'
+            $ref: '#/definitions/process.GovernedActionStatus'
         "400":
           description: Bad Request
           schema:
@@ -2080,11 +1788,6 @@ paths:
         name: action_id
         required: true
         type: string
-      - description: Account ID
-        in: query
-        name: account_id
-        required: true
-        type: string
       - description: Project ID
         in: query
         name: project_id
@@ -2095,14 +1798,14 @@ paths:
         name: request
         required: true
         schema:
-          $ref: '#/definitions/github_com_TekkenSteve_GoAgent_agentos_process.ActionDryRunResult'
+          $ref: '#/definitions/process.ActionDryRunResult'
       produces:
       - application/json
       responses:
         "200":
           description: OK
           schema:
-            $ref: '#/definitions/github_com_TekkenSteve_GoAgent_agentos_process.GovernedActionStatus'
+            $ref: '#/definitions/process.GovernedActionStatus'
         "400":
           description: Bad Request
           schema:
@@ -2130,11 +1833,6 @@ paths:
         name: action_id
         required: true
         type: string
-      - description: Account ID
-        in: query
-        name: account_id
-        required: true
-        type: string
       - description: Project ID
         in: query
         name: project_id
@@ -2145,14 +1843,14 @@ paths:
         name: request
         required: true
         schema:
-          $ref: '#/definitions/github_com_TekkenSteve_GoAgent_agentos_process.ActionExecutionResult'
+          $ref: '#/definitions/process.ActionExecutionResult'
       produces:
       - application/json
       responses:
         "200":
           description: OK
           schema:
-            $ref: '#/definitions/github_com_TekkenSteve_GoAgent_agentos_process.GovernedActionStatus'
+            $ref: '#/definitions/process.GovernedActionStatus'
         "400":
           description: Bad Request
           schema:
@@ -2176,11 +1874,6 @@ paths:
         kind.
       operationId: agentos-list-ledger-entries
       parameters:
-      - description: Account ID
-        in: query
-        name: account_id
-        required: true
-        type: string
       - description: Project ID
         in: query
         name: project_id
@@ -2217,7 +1910,7 @@ paths:
           description: OK
           schema:
             items:
-              $ref: '#/definitions/github_com_TekkenSteve_GoAgent_agentos_process.LedgerEntry'
+              $ref: '#/definitions/process.LedgerEntry'
             type: array
         "400":
           description: Bad Request
@@ -2245,14 +1938,14 @@ paths:
         name: request
         required: true
         schema:
-          $ref: '#/definitions/github_com_TekkenSteve_GoAgent_agentos_process.LedgerEntrySpec'
+          $ref: '#/definitions/process.LedgerEntrySpec'
       produces:
       - application/json
       responses:
         "201":
           description: Created
           schema:
-            $ref: '#/definitions/github_com_TekkenSteve_GoAgent_agentos_process.LedgerEntry'
+            $ref: '#/definitions/process.LedgerEntry'
         "400":
           description: Bad Request
           schema:
@@ -2280,14 +1973,14 @@ paths:
         name: request
         required: true
         schema:
-          $ref: '#/definitions/github_com_TekkenSteve_GoAgent_agentos_control.RunPlanSpec'
+          $ref: '#/definitions/control.RunPlanSpec'
       produces:
       - application/json
       responses:
         "202":
           description: Accepted
           schema:
-            $ref: '#/definitions/github_com_TekkenSteve_GoAgent_agentos_control.RunPlanStatus'
+            $ref: '#/definitions/control.RunPlanStatus'
         "400":
           description: Bad Request
           schema:
@@ -2315,11 +2008,6 @@ paths:
         name: plan_id
         required: true
         type: string
-      - description: Account ID
-        in: query
-        name: account_id
-        required: true
-        type: string
       - description: Project ID
         in: query
         name: project_id
@@ -2344,7 +2032,7 @@ paths:
           description: OK
           schema:
             items:
-              $ref: '#/definitions/github_com_TekkenSteve_GoAgent_agentos_core.ArtifactRef'
+              $ref: '#/definitions/core.ArtifactRef'
             type: array
         "400":
           description: Bad Request
@@ -2378,11 +2066,6 @@ paths:
         name: artifact_id
         required: true
         type: string
-      - description: Account ID
-        in: query
-        name: account_id
-        required: true
-        type: string
       - description: Project ID
         in: query
         name: project_id
@@ -2394,7 +2077,7 @@ paths:
         "200":
           description: OK
           schema:
-            $ref: '#/definitions/github_com_TekkenSteve_GoAgent_agentos_core.Artifact'
+            $ref: '#/definitions/core.Artifact'
         "400":
           description: Bad Request
           schema:
@@ -2420,11 +2103,6 @@ paths:
       - description: Plan ID
         in: path
         name: plan_id
-        required: true
-        type: string
-      - description: Account ID
-        in: query
-        name: account_id
         required: true
         type: string
       - description: Project ID
@@ -2455,7 +2133,7 @@ paths:
           description: OK
           schema:
             items:
-              $ref: '#/definitions/github_com_TekkenSteve_GoAgent_agentos_control.PlanAuditRecord'
+              $ref: '#/definitions/control.PlanAuditRecord'
             type: array
         "400":
           description: Bad Request
@@ -2482,11 +2160,6 @@ paths:
       - description: Plan ID
         in: path
         name: plan_id
-        required: true
-        type: string
-      - description: Account ID
-        in: query
-        name: account_id
         required: true
         type: string
       - description: Project ID
@@ -2579,11 +2252,6 @@ paths:
         name: plan_id
         required: true
         type: string
-      - description: Account ID
-        in: query
-        name: account_id
-        required: true
-        type: string
       - description: Project ID
         in: query
         name: project_id
@@ -2612,7 +2280,7 @@ paths:
           description: OK
           schema:
             items:
-              $ref: '#/definitions/github_com_TekkenSteve_GoAgent_agentos_control.PlanDebugTrace'
+              $ref: '#/definitions/control.PlanDebugTrace'
             type: array
         "400":
           description: Bad Request
@@ -2642,11 +2310,6 @@ paths:
         name: plan_id
         required: true
         type: string
-      - description: Account ID
-        in: query
-        name: account_id
-        required: true
-        type: string
       - description: Project ID
         in: query
         name: project_id
@@ -2658,7 +2321,7 @@ paths:
         "200":
           description: OK
           schema:
-            $ref: '#/definitions/github_com_TekkenSteve_GoAgent_agentos_control.RunPlanDescription'
+            $ref: '#/definitions/control.RunPlanDescription'
         "400":
           description: Bad Request
           schema:
@@ -2684,6 +2347,11 @@ paths:
       - description: Plan ID
         in: path
         name: plan_id
+        required: true
+        type: string
+      - description: Project ID
+        in: query
+        name: project_id
         required: true
         type: string
       - description: Node ID
@@ -2732,11 +2400,6 @@ paths:
         name: plan_id
         required: true
         type: string
-      - description: Account ID
-        in: query
-        name: account_id
-        required: true
-        type: string
       - description: Project ID
         in: query
         name: project_id
@@ -2765,7 +2428,7 @@ paths:
           description: OK
           schema:
             items:
-              $ref: '#/definitions/github_com_TekkenSteve_GoAgent_agentos_control.PlanEvent'
+              $ref: '#/definitions/control.PlanEvent'
             type: array
         "400":
           description: Bad Request
@@ -2832,13 +2495,18 @@ paths:
         name: plan_id
         required: true
         type: string
+      - description: Project ID
+        in: query
+        name: project_id
+        required: true
+        type: string
       produces:
       - application/json
       responses:
         "200":
           description: OK
           schema:
-            $ref: '#/definitions/github_com_TekkenSteve_GoAgent_agentos_control.RunPlanStatus'
+            $ref: '#/definitions/control.RunPlanStatus'
         "404":
           description: Not Found
           schema:
@@ -2905,11 +2573,6 @@ paths:
         or lifecycle state.
       operationId: agentos-list-processes
       parameters:
-      - description: Account ID
-        in: query
-        name: account_id
-        required: true
-        type: string
       - description: Project ID
         in: query
         name: project_id
@@ -2942,7 +2605,7 @@ paths:
           description: OK
           schema:
             items:
-              $ref: '#/definitions/github_com_TekkenSteve_GoAgent_agentos_process.Status'
+              $ref: '#/definitions/process.Status'
             type: array
         "400":
           description: Bad Request
@@ -2970,14 +2633,14 @@ paths:
         name: request
         required: true
         schema:
-          $ref: '#/definitions/github_com_TekkenSteve_GoAgent_agentos_process.Spec'
+          $ref: '#/definitions/process.Spec'
       produces:
       - application/json
       responses:
         "202":
           description: Accepted
           schema:
-            $ref: '#/definitions/github_com_TekkenSteve_GoAgent_agentos_process.Status'
+            $ref: '#/definitions/process.Status'
         "400":
           description: Bad Request
           schema:
@@ -3005,11 +2668,6 @@ paths:
         name: process_id
         required: true
         type: string
-      - description: Account ID
-        in: query
-        name: account_id
-        required: true
-        type: string
       - description: Project ID
         in: query
         name: project_id
@@ -3021,7 +2679,7 @@ paths:
         "200":
           description: OK
           schema:
-            $ref: '#/definitions/github_com_TekkenSteve_GoAgent_agentos_process.Description'
+            $ref: '#/definitions/process.Description'
         "400":
           description: Bad Request
           schema:
@@ -3049,11 +2707,6 @@ paths:
         name: process_id
         required: true
         type: string
-      - description: Account ID
-        in: query
-        name: account_id
-        required: true
-        type: string
       - description: Project ID
         in: query
         name: project_id
@@ -3065,7 +2718,7 @@ paths:
         "200":
           description: OK
           schema:
-            $ref: '#/definitions/github_com_TekkenSteve_GoAgent_agentos_process.Status'
+            $ref: '#/definitions/process.Status'
         "400":
           description: Bad Request
           schema:
@@ -3089,11 +2742,6 @@ paths:
         resources.
       operationId: agentos-resources
       parameters:
-      - description: Account ID
-        in: query
-        name: account_id
-        required: true
-        type: string
       - description: Project ID
         in: query
         name: project_id
@@ -3121,7 +2769,7 @@ paths:
         "200":
           description: OK
           schema:
-            $ref: '#/definitions/github_com_TekkenSteve_GoAgent_agentos_process.ResourceProjection'
+            $ref: '#/definitions/process.ResourceProjection'
         "400":
           description: Bad Request
           schema:
@@ -3156,7 +2804,7 @@ paths:
         "202":
           description: Accepted
           schema:
-            $ref: '#/definitions/github_com_TekkenSteve_GoAgent_agentos_control.RunStatus'
+            $ref: '#/definitions/control.RunStatus'
         "400":
           description: Bad Request
           schema:
@@ -3251,6 +2899,50 @@ paths:
       summary: Ingest AgentOS event
       tags:
       - agentos
+  /agentos/runs/{run_id}/events/history:
+    get:
+      consumes:
+      - application/json
+      description: Query the durable projected milestone timeline of an AgentOS run.
+      operationId: agentos-list-run-events
+      parameters:
+      - description: Run ID
+        in: path
+        name: run_id
+        required: true
+        type: string
+      - description: Only return events after this sequence
+        in: query
+        name: after_sequence
+        type: integer
+      - description: Maximum events
+        in: query
+        name: limit
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            items:
+              $ref: '#/definitions/github_com_TekkenSteve_GoAgent_agentos_core.Event'
+            type: array
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/response.Error'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/response.Error'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/response.Error'
+      summary: List AgentOS run event history
+      tags:
+      - agentos
   /agentos/runs/{run_id}/signals:
     post:
       consumes:
@@ -3307,7 +2999,7 @@ paths:
         "200":
           description: OK
           schema:
-            $ref: '#/definitions/github_com_TekkenSteve_GoAgent_agentos_control.RunStatus'
+            $ref: '#/definitions/control.RunStatus'
         "404":
           description: Not Found
           schema:
@@ -3327,11 +3019,6 @@ paths:
         kind, or lifecycle state.
       operationId: agentos-list-worksets
       parameters:
-      - description: Account ID
-        in: query
-        name: account_id
-        required: true
-        type: string
       - description: Project ID
         in: query
         name: project_id
@@ -3368,7 +3055,7 @@ paths:
           description: OK
           schema:
             items:
-              $ref: '#/definitions/github_com_TekkenSteve_GoAgent_agentos_process.WorksetStatus'
+              $ref: '#/definitions/process.WorksetStatus'
             type: array
         "400":
           description: Bad Request
@@ -3396,14 +3083,14 @@ paths:
         name: request
         required: true
         schema:
-          $ref: '#/definitions/github_com_TekkenSteve_GoAgent_agentos_process.WorksetSpec'
+          $ref: '#/definitions/process.WorksetSpec'
       produces:
       - application/json
       responses:
         "202":
           description: Accepted
           schema:
-            $ref: '#/definitions/github_com_TekkenSteve_GoAgent_agentos_process.WorksetStatus'
+            $ref: '#/definitions/process.WorksetStatus'
         "400":
           description: Bad Request
           schema:
@@ -3431,11 +3118,6 @@ paths:
         name: workset_id
         required: true
         type: string
-      - description: Account ID
-        in: query
-        name: account_id
-        required: true
-        type: string
       - description: Project ID
         in: query
         name: project_id
@@ -3447,7 +3129,7 @@ paths:
         "200":
           description: OK
           schema:
-            $ref: '#/definitions/github_com_TekkenSteve_GoAgent_agentos_process.WorksetStatus'
+            $ref: '#/definitions/process.WorksetStatus'
         "400":
           description: Bad Request
           schema:
@@ -3463,60 +3145,4 @@ paths:
       summary: Get AgentOS workset status
       tags:
       - agentos
-  /orchestration/execute:
-    post:
-      consumes:
-      - application/json
-      description: Start a multi-step orchestration workflow from a TeamSpec or step
-        queue
-      operationId: orchestrate
-      parameters:
-      - description: Orchestration request
-        in: body
-        name: request
-        required: true
-        schema:
-          $ref: '#/definitions/request.Orchestrate'
-      produces:
-      - application/json
-      responses:
-        "200":
-          description: OK
-          schema:
-            $ref: '#/definitions/response.RunStatus'
-        "400":
-          description: Bad Request
-          schema:
-            $ref: '#/definitions/response.Error'
-        "500":
-          description: Internal Server Error
-          schema:
-            $ref: '#/definitions/response.Error'
-      summary: Execute orchestration workflow
-      tags:
-      - orchestration
-  /orchestration/status/{run_id}:
-    get:
-      description: Query the current status of an orchestration workflow
-      operationId: orchestration-status
-      parameters:
-      - description: Run ID
-        in: path
-        name: run_id
-        required: true
-        type: string
-      produces:
-      - application/json
-      responses:
-        "200":
-          description: OK
-          schema:
-            $ref: '#/definitions/response.RunStatus'
-        "500":
-          description: Internal Server Error
-          schema:
-            $ref: '#/definitions/response.Error'
-      summary: Get orchestration workflow status
-      tags:
-      - orchestration
 swagger: "2.0"

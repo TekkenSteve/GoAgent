@@ -18,7 +18,7 @@ type mockToolExec struct {
 	err    error
 }
 
-func (m *mockToolExec) fn(_ context.Context, _ ToolInput) (*ToolOutput, error) {
+func (m *mockToolExec) fn(_ context.Context, _ *ToolInput) (*ToolOutput, error) {
 	if m.err != nil {
 		return nil, m.err
 	}
@@ -305,4 +305,60 @@ func (m *mockLLMStepNoTool) fn(_ context.Context, input *LLMStepInput) (*LLMStep
 		Usage:        entity.Usage{PromptTokens: 10, CompletionTokens: 5, TotalTokens: 15},
 		FinishReason: "stop",
 	}, nil
+}
+
+// ——— test: the tenant reaches every child the queue starts ———
+
+// childIdentitySpy stands in for the child agent workflow and records the
+// input each child was started with. What it records is the contract the child
+// runs under: its account and project are the orchestration run's, which is
+// what makes its tool calls authorizable.
+type childIdentitySpy struct{ inputs []AgentWorkflowInput }
+
+func (s *childIdentitySpy) fn(_ workflow.Context, input *AgentWorkflowInput) (WorkflowResult, error) {
+	s.inputs = append(s.inputs, *input)
+
+	return WorkflowResult{RunID: input.RunID, LifecycleState: LifecycleStateCompleted}, nil
+}
+
+// toolIdentitySpy records the tenant each tool step activity was handed.
+type toolIdentitySpy struct{ inputs []ToolInput }
+
+func (s *toolIdentitySpy) fn(_ context.Context, input *ToolInput) (*ToolOutput, error) {
+	s.inputs = append(s.inputs, *input)
+
+	return &ToolOutput{Output: "ok"}, nil
+}
+
+func TestOrchestrationWorkflowChildrenInheritTheRunTenant(t *testing.T) {
+	t.Parallel()
+
+	env := (&testsuite.WorkflowTestSuite{}).NewTestWorkflowEnvironment()
+
+	child := &childIdentitySpy{}
+	env.RegisterWorkflowWithOptions(child.fn, workflow.RegisterOptions{Name: AgentWorkflowName})
+
+	tool := &toolIdentitySpy{}
+	env.RegisterActivityWithOptions(tool.fn, activity.RegisterOptions{Name: ToolExecActivityName})
+
+	env.ExecuteWorkflow(Workflow, testWorkflowInput(&entity.OrchestrationInput{
+		RunID:     "tenant-run",
+		AccountID: "acct-1",
+		ProjectID: "proj-1",
+		Steps: []entity.Step{
+			{ID: "agent-step", Type: entity.StepAgent, Input: map[string]any{"message": "hello"}},
+			{ID: "tool-step", Type: entity.StepTool, Tool: "web_search", Input: map[string]any{"query": "x"}},
+		},
+	}))
+
+	require.True(t, env.IsWorkflowCompleted())
+	require.NoError(t, env.GetWorkflowError())
+
+	require.Len(t, child.inputs, 1)
+	require.Equal(t, "acct-1", child.inputs[0].AccountID)
+	require.Equal(t, "proj-1", child.inputs[0].ProjectID)
+
+	require.Len(t, tool.inputs, 1)
+	require.Equal(t, "acct-1", tool.inputs[0].AccountID)
+	require.Equal(t, "proj-1", tool.inputs[0].ProjectID)
 }

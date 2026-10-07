@@ -3,8 +3,14 @@ package stream
 import (
 	"context"
 	"fmt"
+	"time"
 
 	"github.com/TekkenSteve/GoAgent/internal/pkg/redis"
+)
+
+const (
+	// DefaultEventStoreTTL is the TTL for event dedupe keys.
+	DefaultEventStoreTTL = 2 * time.Hour
 )
 
 // EventDedupeStore stores event idempotency keys for external AgentOS event ingest.

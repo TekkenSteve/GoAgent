@@ -1,0 +1,347 @@
+# Development stack — DEV ONLY.
+#
+# Nothing here is a production posture, and the file is written so that it
+# cannot be mistaken for one:
+#   - every published port binds to 127.0.0.1, so the stack is reachable from
+#     this machine and not from the network it sits on;
+#   - the stateful services run without credentials because they are reachable
+#     only on the loopback interface and the compose network. Postgres uses
+#     trust authentication for the same reason — there is no password here to
+#     leak, rotate, or accidentally promote to production. The NATS broker is
+#     the one that does ask, with guest:guest, its own dev default: a shutter
+#     on a published port, not a secret. Clients present it too — the init
+#     container, the app, and the nats scripts all carry the same pair;
+#   - the Centrifugo API key and admin credentials come from the environment.
+#     Set them in .env (see .env.example); the stack refuses to start without
+#     them.
+#
+# The production manifest is docker-compose.prod.yml: the application tier
+# only, with every credential required from the environment and a single
+# published port.
+x-db-environment: &x-db-environment
+  POSTGRES_SSL_MODE: "disable"
+  POSTGRES_HOST: "db"
+  POSTGRES_PORT: "5432"
+  POSTGRES_DB: "db"
+  # Dev only: the database is reachable from the loopback interface and the
+  # compose network alone, so authentication is trust. A deployment sets a real
+  # password (see docker-compose.prod.yml) rather than inheriting this.
+  POSTGRES_HOST_AUTH_METHOD: "trust"
+  POSTGRES_USER: "user"
+
+x-temporal-db-environment: &x-temporal-db-environment
+  DB: "postgres12"
+  DB_PORT: "5432"
+  POSTGRES_USER: "user"
+  POSTGRES_SEEDS: "db"
+
+x-backend-app-environment: &x-backend-app-environment
+  GOMAXPROCS: "1"
+  # App
+  APP_NAME: "goagent"
+  APP_VERSION: "1.0.0"
+  # HTTP settings
+  HTTP_PORT: "8080"
+  HTTP_USE_PREFORK_MODE: "false"
+  # Logger
+  LOG_LEVEL: "info"
+  # PG
+  PG_POOL_MAX: "2"
+  PG_URL: "postgres://user@db:5432/db"
+  # Redis
+  REDIS_URL: "redis://redis:6379/0"
+  # AgentOS
+  AGENTOS_ARTIFACT_STORE_BACKEND: "local"
+  AGENTOS_ARTIFACT_STORE_LOCAL_ROOT: "/var/lib/goagent/artifacts"
+  AGENTOS_ARTIFACT_STORE_S3_BUCKET: ""
+  AGENTOS_ARTIFACT_STORE_S3_REGION: ""
+  AGENTOS_ARTIFACT_STORE_S3_ENDPOINT: ""
+  AGENTOS_ARTIFACT_STORE_S3_ACCESS_KEY_ID: ""
+  AGENTOS_ARTIFACT_STORE_S3_SECRET_ACCESS_KEY: ""
+  AGENTOS_ARTIFACT_STORE_S3_SESSION_TOKEN: ""
+  AGENTOS_ARTIFACT_STORE_S3_FORCE_PATH_STYLE: "false"
+  AGENTOS_CAPABILITIES_JSON: "[]"
+  # Streaming data plane (Centrifugo is the default transport)
+  CENTRIFUGO_BASE_URL: "http://centrifugo:8000"
+  CENTRIFUGO_API_KEY: "${CENTRIFUGO_API_KEY:?set CENTRIFUGO_API_KEY in .env}"
+  # Event backbone (NATS JetStream). An empty URL disables it, which is how a
+  # host-side `make run` behaves; the stack below always has the broker.
+  # The credentials match the broker's -user/-pass flags: the broker publishes
+  # its port to the host loopback, and guest:guest keeps that publish from
+  # being an open door. Dev only.
+  AGENTFW_NATS_URL: "nats://guest:guest@nats:4222"
+  # Auth — development posture. Tokens are signed with a shared secret because
+  # the stack has no identity provider; a real deployment sets AUTH_JWKS_URL to
+  # its issuer (or to the gateway that terminates authentication) and leaves
+  # AUTH_HMAC_SECRET empty. The service refuses to start without one of them.
+  AUTH_HMAC_SECRET: "dev-only-shared-secret-not-for-production"
+  # MCP transport policy: dev runs no MCP servers, so everything stays closed.
+  MCP_ALLOWED_COMMANDS: ""
+  MCP_INHERITED_ENV: "PATH,HOME"
+  MCP_CONFIG_ENV: ""
+  MCP_ALLOWED_HTTP_HOSTS: ""
+  AUTH_ISSUER: "goagent-dev"
+  AUTH_AUDIENCE: "goagent"
+  # Probes must stay reachable; the API docs are public in development only.
+  AUTH_PUBLIC_PATHS: "/healthz,/metrics,/swagger/*"
+  # Metrics
+  METRICS_ENABLED: "true"
+  # Swagger
+  SWAGGER_ENABLED: "true"
+
+
+services:
+  db:
+    container_name: db
+    image: postgres:18.3-alpine
+    environment:
+      <<: *x-db-environment
+    volumes:
+      - db_data:/var/lib/postgresql/18/data
+    ports:
+      - "127.0.0.1:5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U user -d db"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+      start_period: 30s
+    networks:
+      app_network:
+        aliases:
+          - db.lvh.me
+
+  redis:
+    container_name: redis
+    image: redis:7-alpine
+    ports:
+      - "127.0.0.1:6379:6379"
+    networks:
+      app_network:
+        aliases:
+          - redis.lvh.me
+
+  centrifugo:
+    container_name: centrifugo
+    # v6: v5 is no longer maintained. The v5→v6 upgrade is a configuration
+    # rewrite (`engine`/`admin` became objects, namespaces moved under
+    # `channel`), already applied in configs/centrifugo/config.json and
+    # validated with `centrifugo checkconfig` from this image.
+    image: centrifugo/centrifugo:v6
+    restart: on-failure:5
+    command: ["centrifugo", "-c", "/centrifugo/config.json"]
+    # Centrifugo v6 does not expand ${VAR} in its config file — a placeholder
+    # there would be accepted verbatim as the real key. Secrets are therefore
+    # supplied through the server's own environment overrides, and the file
+    # keeps only the non-secret posture (anonymous access refused).
+    environment:
+      CENTRIFUGO_HTTP_API_KEY: "${CENTRIFUGO_API_KEY:?set CENTRIFUGO_API_KEY in .env}"
+      CENTRIFUGO_ADMIN_PASSWORD: "${CENTRIFUGO_ADMIN_PASSWORD:?set CENTRIFUGO_ADMIN_PASSWORD in .env}"
+      CENTRIFUGO_ADMIN_SECRET: "${CENTRIFUGO_ADMIN_SECRET:?set CENTRIFUGO_ADMIN_SECRET in .env}"
+    volumes:
+      - ./configs/centrifugo/config.json:/centrifugo/config.json:ro
+    ports:
+      - "127.0.0.1:8000:8000"
+    depends_on:
+      - redis
+    networks:
+      app_network:
+        aliases:
+          - centrifugo.lvh.me
+
+  temporal-admin-tools:
+    container_name: temporal-admin-tools
+    image: temporalio/admin-tools:1.32.0
+    restart: on-failure:6
+    depends_on:
+      db:
+        condition: service_started
+    environment:
+      <<: *x-temporal-db-environment
+      SQL_PASSWORD: ""
+    volumes:
+      - ./scripts/temporal/setup-postgres.sh:/scripts/setup.sh:ro
+    entrypoint: ["/bin/sh"]
+    command: /scripts/setup.sh
+    networks:
+      app_network:
+        aliases:
+          - temporal-setup.lvh.me
+
+  temporal:
+    container_name: temporal
+    image: temporalio/server:1.32.0
+    restart: always
+    depends_on:
+      db:
+        condition: service_started
+      temporal-admin-tools:
+        condition: service_completed_successfully
+    environment:
+      <<: *x-temporal-db-environment
+      BIND_ON_IP: "0.0.0.0"
+      DYNAMIC_CONFIG_FILE_PATH: "config/dynamicconfig/development-sql.yaml"
+    volumes:
+      - ./temporal/dynamicconfig:/etc/temporal/config/dynamicconfig
+    healthcheck:
+      test: ["CMD", "nc", "-z", "localhost", "7233"]
+      interval: 5s
+      timeout: 3s
+      retries: 30
+      start_period: 30s
+    ports:
+      - "127.0.0.1:7233:7233"
+      - "127.0.0.1:8233:8233"
+    networks:
+      app_network:
+        aliases:
+          - temporal.lvh.me
+
+  # Event backbone (highway). Part of the default stack: the log is a first
+  # class component of the architecture, and the app connects to it eagerly.
+  # JetStream is not the system of record; Postgres stays authoritative. It
+  # carries this role because it matches the heavier alternatives on what the
+  # backbone needs — durable storage, time-window retention, per-consumer
+  # replay — at a fraction of the operational weight.
+  nats:
+    container_name: nats
+    image: nats:2.15-alpine
+    restart: on-failure:5
+    # -js enables JetStream; -sd keeps its file store on the volume; -m exposes
+    # monitoring (/healthz, /varz, /jsz), which is where stream lag is read.
+    # The credentials keep a broker whose port is published from being open.
+    command: ["-js", "-sd", "/nats-data", "-m", "8222", "-user", "guest", "-pass", "guest"]
+    ports:
+      - "127.0.0.1:4222:4222"
+      - "127.0.0.1:8222:8222"
+    volumes:
+      - nats_data:/nats-data
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O-", "http://127.0.0.1:8222/healthz"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+      start_period: 5s
+    networks:
+      app_network:
+        aliases:
+          - nats.lvh.me
+
+  # Provisions the event-backbone streams, as an init container: it waits for the
+  # broker to be healthy, creates what is missing and exits. Idempotent, so it is
+  # safe to run on every start.
+  nats-create-streams:
+    container_name: nats-create-streams
+    image: natsio/nats-box:0.20.0
+    restart: "no"
+    depends_on:
+      nats:
+        condition: service_healthy
+    environment:
+      - AGENTFW_NATS_URL=${AGENTFW_NATS_URL:-nats://guest:guest@nats:4222}
+      - AGENTFW_NATS_SUBJECT_PREFIX=${AGENTFW_NATS_SUBJECT_PREFIX:-agentos}
+    volumes:
+      - ./scripts/nats/create-streams.sh:/scripts/create-streams.sh:ro
+    entrypoint: ["/bin/sh"]
+    command: /scripts/create-streams.sh
+    networks:
+      app_network:
+        aliases:
+          - nats-create-streams.lvh.me
+
+  temporal-create-namespace:
+    container_name: temporal-create-namespace
+    image: temporalio/admin-tools:1.32.0
+    restart: on-failure:5
+    depends_on:
+      temporal:
+        condition: service_healthy
+    environment:
+      - TEMPORAL_ADDRESS=temporal:7233
+      - DEFAULT_NAMESPACE=${AGENTFW_TEMPORAL_NAMESPACE:-default}
+      - AGENTFW_TEMPORAL_NEXUS_ENDPOINT=${AGENTFW_TEMPORAL_NEXUS_ENDPOINT:-agentos}
+      - AGENTFW_TEMPORAL_NEXUS_TASK_QUEUE=${AGENTFW_TEMPORAL_NEXUS_TASK_QUEUE:-agentos-nexus}
+    volumes:
+      - ./scripts/temporal/create-namespace.sh:/scripts/create-namespace.sh:ro
+    entrypoint: ["/bin/sh"]
+    command: /scripts/create-namespace.sh
+    networks:
+      app_network:
+        aliases:
+          - temporal-create-namespace.lvh.me
+
+  #  container_name: temporal-ui
+  #   depends_on:
+  #     temporal:
+  #       condition: service_healthy
+  #   environment:
+  #     - TEMPORAL_ADDRESS=temporal:7233
+  #     - TEMPORAL_CORS_ORIGINS=http://localhost:3000
+  #   image: temporalio/ui::2.49.1
+  #   networks:
+  #     app_network:
+  #       aliases:
+  #         - temporal-ui.lvh.me
+  #   ports:
+  #     - "8083:8083"
+
+  app:
+    container_name: app
+    platform: linux/amd64
+    pid: "host"
+    build:
+      context: .
+    environment:
+      <<: *x-backend-app-environment
+    ports:
+      - "127.0.0.1:8080:8080"
+      - "127.0.0.1:8081:8081"
+    volumes:
+      - agentos_artifacts:/var/lib/goagent/artifacts
+    depends_on:
+      db:
+        condition: service_healthy
+      centrifugo:
+        condition: service_started
+      nats:
+        condition: service_healthy
+      nats-create-streams:
+        condition: service_completed_successfully
+    deploy:
+      resources:
+        limits:
+          cpus: '1.00'
+          memory: '2Gb'
+        reservations:
+          cpus: '0.60'
+          memory: '1Gb'
+    networks:
+      app_network:
+        aliases:
+          - app.lvh.me
+
+  nginx:
+    container_name: nginx
+    image: nginx:1.29.7-alpine
+    restart: on-failure:5
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf
+    ports:
+      - "127.0.0.1:80:80"
+    depends_on:
+      - app
+    networks:
+      app_network:
+        aliases:
+          - nginx.lvh.me
+
+
+networks:
+  app_network:
+    external: false
+
+
+volumes:
+  db_data:
+  agentos_artifacts:
+  nats_data:

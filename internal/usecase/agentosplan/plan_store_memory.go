@@ -106,6 +106,8 @@ func (s *MemoryPlanStore) lookupExistingPlanIDLocked(spec *agentos.RunPlanSpec) 
 	return cloneRunPlanStatus(&existingStatus), true, nil
 }
 
+// CreatePlan persists a new plan identity with its initial state snapshot,
+// deduplicating on the plan idempotency key.
 func (s *MemoryPlanStore) CreatePlan(_ context.Context, spec *agentos.RunPlanSpec, status *agentos.RunPlanStatus) (agentos.RunPlanStatus, bool, error) {
 	if err := validateMemoryCreatePlanInput(spec); err != nil {
 		return agentos.RunPlanStatus{}, false, err
@@ -185,6 +187,7 @@ func validateMemoryCreatePlanInput(spec *agentos.RunPlanSpec) error {
 	return nil
 }
 
+// GetPlan returns the stored spec and latest status for a plan id.
 func (s *MemoryPlanStore) GetPlan(_ context.Context, planID string) (agentos.RunPlanSpec, agentos.RunPlanStatus, bool, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
@@ -199,6 +202,7 @@ func (s *MemoryPlanStore) GetPlan(_ context.Context, planID string) (agentos.Run
 	return cloneRunPlanSpec(&spec), cloneRunPlanStatus(&status), true, nil
 }
 
+// GetPlanByRef returns the stored spec and latest status for a tenant-scoped plan reference.
 func (s *MemoryPlanStore) GetPlanByRef(_ context.Context, ref agentos.PlanRef) (agentos.RunPlanSpec, agentos.RunPlanStatus, bool, error) {
 	if err := ValidatePlanRef(ref); err != nil {
 		return agentos.RunPlanSpec{}, agentos.RunPlanStatus{}, false, err
@@ -221,6 +225,8 @@ func (s *MemoryPlanStore) GetPlanByRef(_ context.Context, ref agentos.PlanRef) (
 	return cloneRunPlanSpec(&spec), cloneRunPlanStatus(&status), true, nil
 }
 
+// ListPlanRefs returns plan references matching the given scope, sorted by
+// last update and limited to scope.Limit.
 func (s *MemoryPlanStore) ListPlanRefs(_ context.Context, scope *PlanRefScope) ([]agentos.PlanRef, error) {
 	if scope == nil {
 		scope = &PlanRefScope{}
@@ -307,6 +313,7 @@ func sortMemoryPlanRefs(refs []agentos.PlanRef, statuses map[string]agentos.RunP
 	})
 }
 
+// SavePlanState persists the latest reducer snapshot for an existing plan.
 func (s *MemoryPlanStore) SavePlanState(_ context.Context, snapshot *PlanStateSnapshot) error {
 	normalized, err := normalizeMemoryPlanStateSnapshot(snapshot)
 	if err != nil {
@@ -370,6 +377,8 @@ func (s *MemoryPlanStore) savePlanStateLocked(snapshot *PlanStateSnapshot, allow
 	return nil
 }
 
+// PersistPlanTransition atomically persists one reducer snapshot with its durable
+// public event, replaying idempotently when the same key is retried.
 func (s *MemoryPlanStore) PersistPlanTransition(_ context.Context, snapshot *PlanStateSnapshot, event *agentos.PlanEvent, idempotencyKey string) (agentos.PlanEvent, error) {
 	normalizedSnapshot, err := normalizeMemoryPlanStateSnapshot(snapshot)
 	if err != nil {
@@ -446,6 +455,7 @@ func validateMemoryPlanTransitionReplay(existing, requested *agentos.PlanEvent, 
 	return ValidatePlanTransitionIdempotency(existingDigest, requestedIdentity)
 }
 
+// LoadPlanState returns the latest persisted reducer snapshot for a plan id.
 func (s *MemoryPlanStore) LoadPlanState(_ context.Context, planID string) (PlanStateSnapshot, bool, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
@@ -461,6 +471,8 @@ func (s *MemoryPlanStore) LoadPlanState(_ context.Context, planID string) (PlanS
 	}), true, nil
 }
 
+// AppendPlanEvent appends one durable plan event, assigning its sequence and
+// event id and deduplicating on the idempotency key.
 func (s *MemoryPlanStore) AppendPlanEvent(_ context.Context, event *agentos.PlanEvent, idempotencyKey string) (agentos.PlanEvent, error) {
 	if event == nil {
 		return agentos.PlanEvent{}, fmt.Errorf("%w: plan event is required", agentoscore.ErrInvalidPlanEvent)
@@ -517,6 +529,8 @@ func (s *MemoryPlanStore) appendPlanEventLocked(event *agentos.PlanEvent, idempo
 	return clonePlanEvent(&stored), nil
 }
 
+// ListPlanEvents returns the durable events of a plan matching the stream scope,
+// ordered by sequence and limited to limit.
 func (s *MemoryPlanStore) ListPlanEvents(_ context.Context, scope *agentos.PlanStreamScope, limit int) ([]agentos.PlanEvent, error) {
 	if err := ValidatePlanStreamScope(scope); err != nil {
 		return nil, err
@@ -572,6 +586,7 @@ func memoryPlanEventMatchesScope(event *agentos.PlanEvent, scope *agentos.PlanSt
 	return scope.RunID == "" || event.RunID == scope.RunID
 }
 
+// GetPlanMetricCheckpoint returns the stored metric checkpoint for an exporter and plan reference.
 func (s *MemoryPlanStore) GetPlanMetricCheckpoint(_ context.Context, exporterID string, ref agentos.PlanRef) (PlanMetricCheckpoint, bool, error) {
 	if exporterID == "" {
 		return PlanMetricCheckpoint{}, false, fmt.Errorf("%w: metrics exporter id is required", agentoscore.ErrInvalidRunPlan)
@@ -589,6 +604,7 @@ func (s *MemoryPlanStore) GetPlanMetricCheckpoint(_ context.Context, exporterID 
 	return checkpoint, ok, nil
 }
 
+// SavePlanMetricCheckpoint persists a metric checkpoint, rejecting backward sequence moves.
 func (s *MemoryPlanStore) SavePlanMetricCheckpoint(_ context.Context, checkpoint *PlanMetricCheckpoint) error {
 	if checkpoint == nil {
 		return fmt.Errorf("%w: metrics checkpoint is required", agentoscore.ErrInvalidRunPlan)
@@ -632,6 +648,7 @@ func (s *MemoryPlanStore) SavePlanMetricCheckpoint(_ context.Context, checkpoint
 	return nil
 }
 
+// RecordAudit stores an idempotent audit record for a plan, validating the actor against plan nodes.
 func (s *MemoryPlanStore) RecordAudit(_ context.Context, record *AuditRecord) (AuditRecord, bool, error) {
 	if err := validateMemoryAuditRecord(record); err != nil {
 		return AuditRecord{}, false, err
@@ -709,6 +726,7 @@ func prepareMemoryAuditRecord(record *AuditRecord, ref AuditRef) {
 	}
 }
 
+// RecordPlanCommand stores an idempotent outbox command for a plan.
 func (s *MemoryPlanStore) RecordPlanCommand(_ context.Context, command *PlanCommandRecord) (PlanCommandRecord, bool, error) {
 	if err := validateMemoryPlanCommandRecord(command); err != nil {
 		return PlanCommandRecord{}, false, err
@@ -795,6 +813,7 @@ func prepareMemoryPlanCommandRecord(command *PlanCommandRecord, ref PlanCommandR
 	return nil
 }
 
+// GetPlanCommand returns the stored command for a plan command reference.
 func (s *MemoryPlanStore) GetPlanCommand(_ context.Context, ref PlanCommandRef) (PlanCommandRecord, bool, error) {
 	if err := ValidatePlanCommandRef(ref); err != nil {
 		return PlanCommandRecord{}, false, err
@@ -808,6 +827,7 @@ func (s *MemoryPlanStore) GetPlanCommand(_ context.Context, ref PlanCommandRef) 
 	return clonePlanCommandRecord(&command), ok, nil
 }
 
+// ListRecoverablePlanCommands returns recoverable commands matching the given scope, sorted and limited.
 func (s *MemoryPlanStore) ListRecoverablePlanCommands(_ context.Context, scope *PlanCommandScope) ([]PlanCommandRecord, error) {
 	statuses, err := RecoverablePlanCommandStatuses(scope)
 	if err != nil {
@@ -875,10 +895,12 @@ func sortPlanCommandRecords(commands []PlanCommandRecord) {
 	})
 }
 
+// MarkPlanCommandDelivered transitions a command to delivered, requiring its durable audit record.
 func (s *MemoryPlanStore) MarkPlanCommandDelivered(_ context.Context, ref PlanCommandRef) (PlanCommandRecord, error) {
 	return s.updatePlanCommandStatus(ref, PlanCommandDelivered, "")
 }
 
+// MarkPlanCommandFailed transitions a command to failed with the given reason.
 func (s *MemoryPlanStore) MarkPlanCommandFailed(_ context.Context, ref PlanCommandRef, reason string) (PlanCommandRecord, error) {
 	return s.updatePlanCommandStatus(ref, PlanCommandFailed, reason)
 }
@@ -922,6 +944,7 @@ func (s *MemoryPlanStore) updatePlanCommandStatus(ref PlanCommandRef, status Pla
 	return clonePlanCommandRecord(&command), nil
 }
 
+// GetAuditRecord returns the stored audit record for an audit reference.
 func (s *MemoryPlanStore) GetAuditRecord(_ context.Context, ref AuditRef) (AuditRecord, bool, error) {
 	if err := ValidateAuditRef(ref); err != nil {
 		return AuditRecord{}, false, err
@@ -935,6 +958,7 @@ func (s *MemoryPlanStore) GetAuditRecord(_ context.Context, ref AuditRef) (Audit
 	return cloneAuditRecord(&record), ok, nil
 }
 
+// ListAuditRecords returns the audit records of a plan matching the audit scope, sorted and limited.
 func (s *MemoryPlanStore) ListAuditRecords(_ context.Context, scope *agentos.PlanAuditScope) ([]agentos.PlanAuditRecord, error) {
 	if err := ValidatePlanAuditScope(scope); err != nil {
 		return nil, err

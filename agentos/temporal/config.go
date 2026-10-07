@@ -5,21 +5,55 @@ import (
 
 	agentos "github.com/TekkenSteve/GoAgent/agentos/control"
 	agentoscore "github.com/TekkenSteve/GoAgent/agentos/core"
+	agentosstream "github.com/TekkenSteve/GoAgent/agentos/stream"
+	"github.com/TekkenSteve/GoAgent/internal/repo/agentos/streamadapter"
+	mcp "github.com/TekkenSteve/GoAgent/internal/repo/mcp"
+	"github.com/TekkenSteve/GoAgent/internal/usecase/agentosplan"
 	agentosruntime "github.com/TekkenSteve/GoAgent/internal/usecase/agentosruntime"
+	"github.com/TekkenSteve/GoAgent/pkg/logger"
 )
 
-// RuntimeConfig configures the default Temporal/Redis runtime implementation.
+// RuntimeConfig configures the default Temporal runtime implementation.
 type RuntimeConfig struct {
-	TemporalAddress          string
-	TemporalNamespace        string
-	TemporalTaskQueues       TaskQueues
-	PostgresURL              string
-	PostgresPoolMax          int
-	RedisURL                 string
+	TemporalAddress    string
+	TemporalNamespace  string
+	TemporalTaskQueues TaskQueues
+	// NexusEndpoint overrides the default Nexus endpoint name callers use to
+	// reach the AgentOS run service. Empty keeps the framework default.
+	NexusEndpoint string
+	// NexusPeers maps a peer town to the Nexus endpoint that reaches it, so a
+	// plan node can run in another town. Empty keeps every node local.
+	NexusPeers map[string]string
+	// RunBackendResolver lets the worker supervise external-backend runs
+	// (HTTP, gRPC, DSH): their signal/control/status then run through a
+	// Temporal workflow instead of backend I/O. Optional — embedders that do
+	// not expose their run backends keep the direct control path.
+	RunBackendResolver BackendResolver
+	PostgresURL        string
+	PostgresPoolMax    int
+	Subscriber         agentosstream.Subscriber
+	// Publisher is the data-plane write side one-shot external backends (HTTP /
+	// gRPC / temporal_external) mirror their observable lifecycle onto: Start
+	// success → RUN_STARTED, a terminal Status → RUN_FINISHED / RUN_ERROR /
+	// RUN_CANCELED. Nil degrades external backends to no-op lifecycle
+	// publishing — the run still works, its milestones just never reach the bus.
+	Publisher agentosstream.Publisher
+	// Facts optionally makes every external-backend lifecycle milestone durable
+	// at the writer (RUN_STARTED and the terminal event, each with its fact-log
+	// publication intent) before it reaches the bus. A persist failure fails
+	// the enclosing operation so the platform retries it. Nil leaves
+	// external-run milestones on the bus live tail only.
+	Facts *streamadapter.MilestoneRecorder
+	// Logger reports data-plane publish failures from the external-backend
+	// lifecycle adapters. Nil drops those diagnostics.
+	Logger                   logger.Interface
+	PlanEventPublisher       agentosplan.PlanEventPublisher
+	PlanEventSubscriber      agentosplan.PlanEventSubscriber
 	ArtifactStore            ArtifactStoreConfig
 	TemporalExternalBackends []ExternalBackendConfig
 	HTTPBackends             []HTTPBackendConfig
 	GRPCBackends             []GRPCBackendConfig
+	DSHBackends              []DSHBackendConfig
 }
 
 // ExternalBackendConfig configures a temporal_external AgentOS backend.
@@ -46,6 +80,16 @@ type HTTPBackendConfig struct {
 	Headers  map[string]string
 }
 
+// DSHBackendConfig configures a DeepSeek Harness SDK AgentOS backend.
+type DSHBackendConfig struct {
+	Name       string
+	Command    string
+	Profile    string
+	Args       []string
+	Env        []string
+	WorkingDir string
+}
+
 // GRPCBackendConfig configures a gRPC AgentOS backend.
 type GRPCBackendConfig struct {
 	Name      string
@@ -64,11 +108,14 @@ type GRPCMethodNames struct {
 	Status  string
 }
 
+// ArtifactStoreBackend selects the blob store implementation used for large plan artifacts.
 type ArtifactStoreBackend string
 
 const (
+	// ArtifactStoreBackendLocal stores artifacts on the local filesystem.
 	ArtifactStoreBackendLocal ArtifactStoreBackend = "local"
-	ArtifactStoreBackendS3    ArtifactStoreBackend = "s3"
+	// ArtifactStoreBackendS3 stores artifacts in an S3-compatible bucket.
+	ArtifactStoreBackendS3 ArtifactStoreBackend = "s3"
 )
 
 // ArtifactStoreConfig selects the blob store used for large AgentOS plan
@@ -79,10 +126,12 @@ type ArtifactStoreConfig struct {
 	S3      S3ArtifactStoreConfig
 }
 
+// LocalArtifactStoreConfig configures the local filesystem artifact backend.
 type LocalArtifactStoreConfig struct {
 	Root string
 }
 
+// S3ArtifactStoreConfig configures the S3-compatible artifact backend.
 type S3ArtifactStoreConfig struct {
 	Bucket          string
 	Region          string
@@ -130,9 +179,19 @@ type WorkerConfig struct {
 	TemporalAddress    string
 	TemporalNamespace  string
 	TemporalTaskQueues TaskQueues
+	// NexusEndpoint overrides the default Nexus endpoint name callers use to
+	// reach the AgentOS run service. Empty keeps the framework default.
+	NexusEndpoint string
+	// NexusPeers maps a peer town to the Nexus endpoint that reaches it, so a
+	// plan node can run in another town. Empty keeps every node local.
+	NexusPeers map[string]string
+	// RunBackendResolver lets the worker supervise external-backend runs
+	// (HTTP, gRPC, DSH): their signal/control/status then run through a
+	// Temporal workflow instead of backend I/O. Optional — embedders that do
+	// not expose their run backends keep the direct control path.
+	RunBackendResolver BackendResolver
 	PostgresURL        string
 	PostgresPoolMax    int
-	RedisURL           string
 	LLMConfigPath      string
 	LogLevel           string
 	ArtifactStore      ArtifactStoreConfig
@@ -140,9 +199,37 @@ type WorkerConfig struct {
 	TemporalExternalBackends []ExternalBackendConfig
 	HTTPBackends             []HTTPBackendConfig
 	GRPCBackends             []GRPCBackendConfig
+	DSHBackends              []DSHBackendConfig
 	Capabilities             []agentos.Capability
 	ArtifactSchemas          []agentos.ArtifactSchema
 
 	RegisterEnvTools      bool
 	EnsureDefaultTemplate bool
+	// MCPTransportPolicy governs what an MCP server configuration may make
+	// this host do: which executables launch, which environment keys a
+	// subprocess receives, and which hosts a network transport may reach.
+	// Nil is fail-closed — nothing launches, nothing dials anywhere private.
+	MCPTransportPolicy *mcp.TransportPolicy
+
+	// StreamCentrifugo configures the Centrifugo data-plane bus the streaming
+	// activities mirror their AG-UI timeline onto — the default transport. Leave
+	// empty to degrade the data plane to the in-process memstream bus (fine for
+	// a single-machine run, not a production transport). Requires an `agentos`
+	// namespace (covering agentos:run:* / agentos:plan:* channels) with
+	// history_size/history_ttl on the server so publications carry replayable
+	// offsets; the dev default also needs anonymous subscribe + history access.
+	StreamCentrifugo StreamCentrifugoConfig
+}
+
+// StreamCentrifugoConfig is the data-plane transport for the AG-UI timeline.
+// An empty BaseURL degrades the data plane to the in-process memstream bus.
+type StreamCentrifugoConfig struct {
+	BaseURL string
+	APIKey  string
+	// EventOutbox enqueues every milestone the projector persists for
+	// publication to the run.timeline domain of the fact log — the log-first
+	// half of the data plane. It sits with the transport config because the
+	// projector store is part of the data plane; enable it exactly when the
+	// deployment runs a backbone drainer, otherwise rows pile up undrained.
+	EventOutbox bool
 }

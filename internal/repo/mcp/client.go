@@ -1,3 +1,4 @@
+// Package mcp manages Model Context Protocol tool servers.
 package mcp
 
 import (
@@ -8,28 +9,38 @@ import (
 
 	"github.com/TekkenSteve/GoAgent/internal/entity"
 	mcpclient "github.com/mark3labs/mcp-go/client"
+	"github.com/mark3labs/mcp-go/client/transport"
 	"github.com/mark3labs/mcp-go/mcp"
 )
 
 var (
+	// ErrMCPUnsupportedTransport is returned when the configured MCP transport is not supported.
 	ErrMCPUnsupportedTransport = errors.New("unsupported transport")
-	ErrMCPNotStarted           = errors.New("mcp client not started")
-	ErrMCPToolError            = errors.New("mcp tool returned error")
+	// ErrMCPNotStarted is returned when an operation requires a client that has not been started.
+	ErrMCPNotStarted = errors.New("mcp client not started")
+	// ErrMCPToolError is returned when the MCP server reports an error while executing a tool.
+	ErrMCPToolError = errors.New("mcp tool returned error")
 )
 
 // Client connects to a single MCP server via the mcp-go library and provides
-// tool discovery + execution.
+// tool discovery + execution. The policy decides what the configuration may
+// make the host do; a client without one refuses to start.
 type Client struct {
 	name   string
 	cfg    *ServerConfig
+	policy *TransportPolicy
 	client *mcpclient.Client
 }
 
+// ErrMCPNoPolicy is returned when a client is created without a transport policy.
+var ErrMCPNoPolicy = errors.New("mcp client requires a transport policy")
+
 // NewClient creates a new MCP client from a server configuration.
-func NewClient(cfg *ServerConfig) *Client {
+func NewClient(cfg *ServerConfig, policy *TransportPolicy) *Client {
 	return &Client{
-		name: cfg.Name,
-		cfg:  cfg,
+		name:   cfg.Name,
+		cfg:    cfg,
+		policy: policy,
 	}
 }
 
@@ -56,59 +67,73 @@ func (c *Client) Start(ctx context.Context) error {
 		},
 	}
 	if _, err := cl.Initialize(ctx, initReq); err != nil {
-		cl.Close()
-
-		return fmt.Errorf("initialize: %w", err)
+		return errors.Join(fmt.Errorf("initialize: %w", err), cl.Close())
 	}
 
 	return nil
 }
 
 func (c *Client) createClient(ctx context.Context) (*mcpclient.Client, error) {
+	if c.policy == nil {
+		return nil, ErrMCPNoPolicy
+	}
+
 	switch c.cfg.Transport {
-	case "stdio":
-		cl, err := mcpclient.NewStdioMCPClient(
-			c.cfg.Command,
-			c.cfg.BuildEnv(),
-			c.cfg.Args...,
-		)
-		if err != nil {
-			return nil, fmt.Errorf("stdio: %w", err)
-		}
-
-		return cl, nil
-
-	case "sse":
-		cl, err := mcpclient.NewSSEMCPClient(c.cfg.URL)
-		if err != nil {
-			return nil, fmt.Errorf("sse create: %w", err)
-		}
-
-		if err := cl.Start(ctx); err != nil {
-			cl.Close()
-
-			return nil, fmt.Errorf("sse start: %w", err)
-		}
-
-		return cl, nil
-
-	case "streamable-http":
-		cl, err := mcpclient.NewStreamableHttpClient(c.cfg.URL)
-		if err != nil {
-			return nil, fmt.Errorf("streamable-http create: %w", err)
-		}
-
-		if err := cl.Start(ctx); err != nil {
-			cl.Close()
-
-			return nil, fmt.Errorf("streamable-http start: %w", err)
-		}
-
-		return cl, nil
-
+	case TransportStdio:
+		return c.newStdioClient()
+	case TransportSSE:
+		return c.newSSEClient(ctx)
+	case TransportStreamableHTTP:
+		return c.newStreamableHTTPClient(ctx)
 	default:
 		return nil, fmt.Errorf("%w: %q", ErrMCPUnsupportedTransport, c.cfg.Transport)
 	}
+}
+
+// newStdioClient launches the subprocess. The policy built its environment:
+// the host keys the operator listed plus the keys this config may set.
+func (c *Client) newStdioClient() (*mcpclient.Client, error) {
+	cl, err := mcpclient.NewStdioMCPClient(
+		c.cfg.Command,
+		c.policy.BuildEnv(c.cfg),
+		c.cfg.Args...,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("stdio: %w", err)
+	}
+
+	return cl, nil
+}
+
+// newSSEClient connects over server-sent events, dials guarded by the policy.
+func (c *Client) newSSEClient(ctx context.Context) (*mcpclient.Client, error) {
+	cl, err := mcpclient.NewSSEMCPClient(c.cfg.URL, mcpclient.WithHTTPClient(c.policy.httpClient()))
+	if err != nil {
+		return nil, fmt.Errorf("sse create: %w", err)
+	}
+
+	if err := cl.Start(ctx); err != nil {
+		return nil, errors.Join(fmt.Errorf("sse start: %w", err), cl.Close())
+	}
+
+	return cl, nil
+}
+
+// newStreamableHTTPClient connects over streamable HTTP, dials guarded by the policy.
+func (c *Client) newStreamableHTTPClient(ctx context.Context) (*mcpclient.Client, error) {
+	cl, err := mcpclient.NewStreamableHttpClient(
+		c.cfg.URL,
+		transport.WithHTTPBasicClient(c.policy.httpClient()),
+	)
+	if err != nil {
+		return nil, fmt.Errorf("streamable-http create: %w", err)
+	}
+
+	if err := cl.Start(ctx); err != nil {
+		return nil, errors.Join(fmt.Errorf("streamable-http start: %w", err), cl.Close())
+	}
+
+	return cl, nil
 }
 
 // ListTools discovers all tools available from this MCP server.

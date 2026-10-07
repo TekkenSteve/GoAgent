@@ -4,14 +4,19 @@ set -euo pipefail
 ROOT="${1:-.}"
 cd "$ROOT"
 
+# Workflow code only. Tests are drivers: they hand wall-clock values to a
+# workflow as inputs, which history makes deterministic, and Temporal's test
+# environment enforces replay determinism at run time — a grep over tests would
+# only produce failures that say nothing about determinism.
 if command -v rg >/dev/null 2>&1; then
-  WORKFLOW_FILES="$(rg --files internal/agentfw | rg '/workflow(_test)?\.go$' || true)"
+  WORKFLOW_FILES="$(rg --files internal/agentfw | rg '/workflow\.go$' || true)"
 else
-  WORKFLOW_FILES="$(find internal/agentfw -type f | grep -E '/workflow(_test)?\.go$' || true)"
+  WORKFLOW_FILES="$(find internal/agentfw -type f | grep -E '/workflow\.go$' || true)"
 fi
 if [ -z "$WORKFLOW_FILES" ]; then
-  echo "determinism-check: no workflow files found"
-  exit 0
+  # Silently passing here would retire the guard the moment the layout changed.
+  echo "determinism-check: no workflow files found under internal/agentfw" >&2
+  exit 1
 fi
 
 # Forbidden imports in workflow files.

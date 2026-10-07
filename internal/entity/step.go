@@ -4,24 +4,36 @@ package entity
 type StepType string
 
 const (
+	// StepAgent starts a child AgentWorkflow and waits for it.
 	StepAgent StepType = "agent" // Start child AgentWorkflow and wait
-	StepTool  StepType = "tool"  // Execute tool directly
-	StepWait  StepType = "wait"  // Wait for Temporal Signal or Timer
+	// StepTool executes a tool directly.
+	StepTool StepType = "tool" // Execute tool directly
+	// StepWait waits for a Temporal signal or timer.
+	StepWait StepType = "wait" // Wait for Temporal Signal or Timer
+	// StepSplit fans out into parallel sub-steps.
 	StepSplit StepType = "split" // Fan-out into parallel sub-steps
-	StepJoin  StepType = "join"  // Fan-in from parallel sub-steps
-	StepEval  StepType = "eval"  // Conditional branch based on prior result
+	// StepJoin fans in from parallel sub-steps.
+	StepJoin StepType = "join" // Fan-in from parallel sub-steps
+	// StepEval branches conditionally based on a prior result.
+	StepEval StepType = "eval" // Conditional branch based on prior result
 )
 
 // StepStatus is the lifecycle status of a single step.
 type StepStatus string
 
 const (
-	StepPending   StepStatus = "pending"
-	StepRunning   StepStatus = "running"
+	// StepPending is the initial status of a step before execution.
+	StepPending StepStatus = "pending"
+	// StepRunning marks a step currently being executed.
+	StepRunning StepStatus = "running"
+	// StepCompleted marks a step that finished successfully.
 	StepCompleted StepStatus = "completed"
-	StepFailed    StepStatus = "failed"
-	StepWaiting   StepStatus = "waiting" // blocked on signal/timer
-	StepBlocked   StepStatus = "blocked" // blocked on dependency
+	// StepFailed marks a step that failed.
+	StepFailed StepStatus = "failed"
+	// StepWaiting marks a step blocked on a signal or timer.
+	StepWaiting StepStatus = "waiting" // blocked on signal/timer
+	// StepBlocked marks a step blocked on a dependency.
+	StepBlocked StepStatus = "blocked" // blocked on dependency
 )
 
 // Step is a single orchestration unit in the step queue.

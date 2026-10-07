@@ -6,25 +6,29 @@ import (
 	"errors"
 	"fmt"
 
-	sq "github.com/Masterminds/squirrel"
 	agentos "github.com/TekkenSteve/GoAgent/agentos/control"
 	agentoscore "github.com/TekkenSteve/GoAgent/agentos/core"
 	"github.com/TekkenSteve/GoAgent/internal/pkg/postgres"
+	"github.com/TekkenSteve/GoAgent/internal/repo/persistent/sqlcgen"
 	"github.com/TekkenSteve/GoAgent/internal/usecase/agentosplan"
 	"github.com/jackc/pgx/v5"
-	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 // AgentOSArtifactSchemaCatalogRepo persists artifact JSON Schema declarations.
+// Statements and bindings come from queries/artifact_schema_catalog.sql; this
+// file owns the registration idempotency protocol around them.
 type AgentOSArtifactSchemaCatalogRepo struct {
 	*postgres.Postgres
+
+	queries *sqlcgen.Queries
 }
 
 // NewAgentOSArtifactSchemaCatalogRepo creates a Postgres-backed artifact schema catalog.
 func NewAgentOSArtifactSchemaCatalogRepo(pg *postgres.Postgres) *AgentOSArtifactSchemaCatalogRepo {
-	return &AgentOSArtifactSchemaCatalogRepo{Postgres: pg}
+	return &AgentOSArtifactSchemaCatalogRepo{Postgres: pg, queries: sqlcgen.New(pg.Pool)}
 }
 
+// RegisterArtifactSchema upserts an artifact JSON Schema declaration, returning the stored schema and whether it was newly registered.
 func (r *AgentOSArtifactSchemaCatalogRepo) RegisterArtifactSchema(ctx context.Context, schema agentos.ArtifactSchema, idempotencyKey string) (agentos.ArtifactSchema, bool, error) {
 	normalized, err := agentosplan.NormalizeArtifactSchema(schema)
 	if err != nil {
@@ -59,7 +63,7 @@ func (r *AgentOSArtifactSchemaCatalogRepo) RegisterArtifactSchema(ctx context.Co
 		}
 	}
 
-	registered, err := r.insertSchemaWithRetry(ctx, normalized, idempotencyKey)
+	registered, err := r.insertSchemaRow(ctx, normalized, idempotencyKey)
 	if err != nil {
 		return agentos.ArtifactSchema{}, false, err
 	}
@@ -67,63 +71,40 @@ func (r *AgentOSArtifactSchemaCatalogRepo) RegisterArtifactSchema(ctx context.Co
 	return registered, !exists, nil
 }
 
-func (r *AgentOSArtifactSchemaCatalogRepo) insertSchemaWithRetry(ctx context.Context, normalized agentos.ArtifactSchema, idempotencyKey string) (agentos.ArtifactSchema, error) {
+func (r *AgentOSArtifactSchemaCatalogRepo) insertSchemaRow(ctx context.Context, normalized agentos.ArtifactSchema, idempotencyKey string) (agentos.ArtifactSchema, error) {
 	schemaJSON, err := json.Marshal(normalized.Schema)
 	if err != nil {
 		return agentos.ArtifactSchema{}, fmt.Errorf("AgentOSArtifactSchemaCatalogRepo - RegisterArtifactSchema - marshal schema: %w", err)
 	}
 
-	declarationJSON, errM := json.Marshal(normalized)
-	if errM != nil {
-		return agentos.ArtifactSchema{}, fmt.Errorf("AgentOSArtifactSchemaCatalogRepo - RegisterArtifactSchema - marshal declaration: %w", errM)
+	declarationJSON, err := json.Marshal(normalized)
+	if err != nil {
+		return agentos.ArtifactSchema{}, fmt.Errorf("AgentOSArtifactSchemaCatalogRepo - RegisterArtifactSchema - marshal declaration: %w", err)
 	}
 
-	return r.execSchemaInsert(ctx, normalized, idempotencyKey, schemaJSON, declarationJSON)
-}
-
-func (r *AgentOSArtifactSchemaCatalogRepo) execSchemaInsert(ctx context.Context, normalized agentos.ArtifactSchema, idempotencyKey string, schemaJSON, declarationJSON []byte) (agentos.ArtifactSchema, error) {
-	row := r.Pool.QueryRow(
-		ctx, `
-INSERT INTO agentos_artifact_schemas (
-    schema_ref,
-    description,
-    schema_json,
-    schema_decl_json,
-    idempotency_key
-) VALUES ($1,$2,$3,$4,$5)
-ON CONFLICT (schema_ref) DO UPDATE SET
-    description = EXCLUDED.description,
-    schema_json = EXCLUDED.schema_json,
-    schema_decl_json = EXCLUDED.schema_decl_json,
-    idempotency_key = EXCLUDED.idempotency_key,
-    updated_at = NOW()
-WHERE agentos_artifact_schemas.idempotency_key = EXCLUDED.idempotency_key
-RETURNING schema_decl_json`,
-		normalized.Ref,
-		normalized.Description,
-		schemaJSON,
-		declarationJSON,
-		idempotencyKey,
-	)
-	if err := row.Scan(&declarationJSON); err != nil {
+	row, err := r.queries.UpsertArtifactSchema(ctx, sqlcgen.UpsertArtifactSchemaParams{
+		SchemaRef:      normalized.Ref,
+		Description:    normalized.Description,
+		SchemaJson:     schemaJSON,
+		SchemaDeclJson: declarationJSON,
+		IdempotencyKey: idempotencyKey,
+	})
+	if err != nil {
 		return r.handleSchemaInsertErr(ctx, err, normalized, idempotencyKey)
 	}
 
-	registered, err := unmarshalArtifactSchema(declarationJSON)
-	if err != nil {
-		return agentos.ArtifactSchema{}, err
-	}
-
-	return registered, nil
+	return unmarshalArtifactSchema(row)
 }
 
-func (r *AgentOSArtifactSchemaCatalogRepo) handleSchemaInsertErr(ctx context.Context, scanErr error, normalized agentos.ArtifactSchema, idempotencyKey string) (agentos.ArtifactSchema, error) {
-	if errors.Is(scanErr, pgx.ErrNoRows) {
+func (r *AgentOSArtifactSchemaCatalogRepo) handleSchemaInsertErr(ctx context.Context, insertErr error, normalized agentos.ArtifactSchema, idempotencyKey string) (agentos.ArtifactSchema, error) {
+	// The conditional upsert reports a conflicting declaration by updating
+	// nothing: no RETURNING row is the conflict, named for the caller.
+	if errors.Is(insertErr, pgx.ErrNoRows) {
 		return agentos.ArtifactSchema{}, fmt.Errorf("%w: artifact schema %q already exists with a different declaration", agentoscore.ErrInvalidArtifact, normalized.Ref)
 	}
 
-	if !isPostgresUniqueViolation(scanErr) {
-		return agentos.ArtifactSchema{}, fmt.Errorf("AgentOSArtifactSchemaCatalogRepo - RegisterArtifactSchema - upsert: %w", scanErr)
+	if !isPostgresUniqueViolation(insertErr) {
+		return agentos.ArtifactSchema{}, fmt.Errorf("AgentOSArtifactSchemaCatalogRepo - RegisterArtifactSchema - upsert: %w", insertErr)
 	}
 
 	existing, exists, lookupErr := r.schemaByIdempotencyKey(ctx, idempotencyKey)
@@ -132,7 +113,7 @@ func (r *AgentOSArtifactSchemaCatalogRepo) handleSchemaInsertErr(ctx context.Con
 	}
 
 	if !exists {
-		return agentos.ArtifactSchema{}, fmt.Errorf("AgentOSArtifactSchemaCatalogRepo - RegisterArtifactSchema - upsert: %w", scanErr)
+		return agentos.ArtifactSchema{}, fmt.Errorf("AgentOSArtifactSchemaCatalogRepo - RegisterArtifactSchema - upsert: %w", insertErr)
 	}
 
 	if err := agentosplan.ValidateArtifactSchemaRegistrationIdempotency(existing, normalized); err != nil {
@@ -155,77 +136,48 @@ func validateArtifactSchemaIdempotencyKey(normalized agentos.ArtifactSchema, ide
 	return nil
 }
 
+// GetArtifactSchema loads the raw JSON Schema registered under the given schema reference.
 func (r *AgentOSArtifactSchemaCatalogRepo) GetArtifactSchema(ctx context.Context, schemaRef string) (json.RawMessage, bool, error) {
-	sql, args, err := r.Builder.
-		Select("schema_json").
-		From("agentos_artifact_schemas").
-		Where(sq.Eq{"schema_ref": schemaRef}).
-		ToSql()
-	if err != nil {
-		return nil, false, fmt.Errorf("AgentOSArtifactSchemaCatalogRepo - GetArtifactSchema - builder: %w", err)
+	schemaJSON, err := r.queries.GetArtifactSchemaJSON(ctx, schemaRef)
+	if missingRow(err) {
+		return nil, false, nil
 	}
 
-	var schemaJSON []byte
-
-	err = r.Pool.QueryRow(ctx, sql, args...).Scan(&schemaJSON)
 	if err != nil {
-		if errors.Is(err, pgx.ErrNoRows) {
-			return nil, false, nil
-		}
-
 		return nil, false, fmt.Errorf("AgentOSArtifactSchemaCatalogRepo - GetArtifactSchema - query: %w", err)
 	}
 
+	// The raw message is copied out of the binding's buffer so the caller
+	// owns bytes no later query can reuse.
 	return append(json.RawMessage(nil), schemaJSON...), true, nil
 }
 
 func (r *AgentOSArtifactSchemaCatalogRepo) schemaByRef(ctx context.Context, schemaRef string) (agentos.ArtifactSchema, bool, error) {
-	sql, args, err := r.Builder.
-		Select("schema_decl_json").
-		From("agentos_artifact_schemas").
-		Where(sq.Eq{"schema_ref": schemaRef}).
-		ToSql()
-	if err != nil {
-		return agentos.ArtifactSchema{}, false, fmt.Errorf("AgentOSArtifactSchemaCatalogRepo - schemaByRef - builder: %w", err)
+	declarationJSON, err := r.queries.GetArtifactSchemaByRef(ctx, schemaRef)
+	if missingRow(err) {
+		return agentos.ArtifactSchema{}, false, nil
 	}
 
-	return r.scanArtifactSchema(ctx, sql, args...)
+	if err != nil {
+		return agentos.ArtifactSchema{}, false, fmt.Errorf("AgentOSArtifactSchemaCatalogRepo - schemaByRef - query: %w", err)
+	}
+
+	schema, err := unmarshalArtifactSchema(declarationJSON)
+	if err != nil {
+		return agentos.ArtifactSchema{}, false, err
+	}
+
+	return schema, true, nil
 }
 
 func (r *AgentOSArtifactSchemaCatalogRepo) schemaByIdempotencyKey(ctx context.Context, idempotencyKey string) (agentos.ArtifactSchema, bool, error) {
-	sql, args, err := r.Builder.
-		Select("schema_decl_json").
-		From("agentos_artifact_schemas").
-		Where(sq.Eq{"idempotency_key": idempotencyKey}).
-		ToSql()
-	if err != nil {
-		return agentos.ArtifactSchema{}, false, fmt.Errorf("AgentOSArtifactSchemaCatalogRepo - schemaByIdempotencyKey - builder: %w", err)
-	}
-
-	return r.scanArtifactSchema(ctx, sql, args...)
-}
-
-func scanJSONQueryRow(ctx context.Context, pool *pgxpool.Pool, sql string, args ...any) (data []byte, found bool, err error) {
-	err = pool.QueryRow(ctx, sql, args...).Scan(&data)
-	if err != nil {
-		if errors.Is(err, pgx.ErrNoRows) {
-			return nil, false, nil
-		}
-
-		return nil, false, err
-	}
-
-	return data, true, nil
-}
-
-func (r *AgentOSArtifactSchemaCatalogRepo) scanArtifactSchema(ctx context.Context, sql string, args ...any) (agentos.ArtifactSchema, bool, error) {
-	declarationJSON, found, err := scanJSONQueryRow(ctx, r.Pool, sql, args...)
-	if err != nil {
-		return agentos.ArtifactSchema{}, false, fmt.Errorf("AgentOSArtifactSchemaCatalogRepo - scanArtifactSchema - query: %w", err)
-	}
-
-	if !found {
+	declarationJSON, err := r.queries.GetArtifactSchemaByIdempotencyKey(ctx, idempotencyKey)
+	if missingRow(err) {
 		return agentos.ArtifactSchema{}, false, nil
+	}
+
+	if err != nil {
+		return agentos.ArtifactSchema{}, false, fmt.Errorf("AgentOSArtifactSchemaCatalogRepo - schemaByIdempotencyKey - query: %w", err)
 	}
 
 	schema, err := unmarshalArtifactSchema(declarationJSON)

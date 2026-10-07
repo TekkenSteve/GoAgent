@@ -43,8 +43,15 @@ type StepTemplate struct {
 }
 
 // OrchestrationInput is the input for OrchestrationWorkflow.
+//
+// The tenant travels with the queue: an orchestration run starts child agent
+// runs and tool calls, and each of them is authorized as this account and
+// project. A queue without an identity would start children that cannot name
+// theirs, which is the one thing the platform will not authorize.
 type OrchestrationInput struct {
 	RunID          string         `json:"run_id"`
+	AccountID      string         `json:"account_id"`
+	ProjectID      string         `json:"project_id"`
 	TeamSpec       *TeamSpec      `json:"team_spec,omitempty"` // from team definition
 	Steps          []Step         `json:"steps,omitempty"`     // direct step array
 	SystemPrompt   string         `json:"system_prompt,omitempty"`

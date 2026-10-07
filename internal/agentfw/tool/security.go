@@ -4,89 +4,148 @@ import (
 	"strings"
 )
 
-// ExecutionIsolation indicates where a tool should be executed.
-type ExecutionIsolation string
-
-const (
-	ExecutionIsolationShared   ExecutionIsolation = "shared"   // Execute in shared worker pool
-	ExecutionIsolationIsolated ExecutionIsolation = "isolated" // Execute in isolated sandbox
-)
-
-// IsolationPolicy resolves execution isolation boundary for a request.
-type IsolationPolicy interface {
-	Resolve(req *Request) ExecutionIsolation
-}
-
-// SideEffectIsolationPolicy routes side-effecting tools to isolated execution boundaries.
-type SideEffectIsolationPolicy struct{}
-
-// Resolve returns isolated boundary for side-effecting tools, shared otherwise.
-func (SideEffectIsolationPolicy) Resolve(req *Request) ExecutionIsolation {
-	if req.SideEffecting {
-		return ExecutionIsolationIsolated
-	}
-
-	return ExecutionIsolationShared
-}
-
-// SecretRedactor masks sensitive values before persistence/telemetry.
+// SecretRedactor masks sensitive values before a tool's output is recorded —
+// in the conversation, in run events, and in logs. A tool's output is authored
+// elsewhere and routinely contains the credential it used.
 type SecretRedactor interface {
 	Redact(input map[string]any) map[string]any
 }
 
-// DefaultSecretRedactor masks sensitive keys.
-type DefaultSecretRedactor struct{}
-
-// Redact masks known sensitive keys in output payload.
-func (DefaultSecretRedactor) Redact(input map[string]any) map[string]any {
-	return redactMap(input)
+// RedactionKeys is the set of payload keys whose values are masked. Matching is
+// exact (case-insensitive) plus the listed suffixes, rather than a search for
+// suspicious substrings: "token_count" is a number a tool legitimately returns,
+// while "access_token" is a credential, and only the operator's list can tell
+// the difference.
+type RedactionKeys struct {
+	// Exact names, compared case-insensitively.
+	Exact []string
+	// Suffixes, compared case-insensitively to the end of a key.
+	Suffixes []string
 }
 
-func isSensitiveKey(k string) bool {
-	lk := strings.ToLower(k)
-
-	return strings.Contains(lk, "secret") ||
-		strings.Contains(lk, "token") ||
-		strings.Contains(lk, "password") ||
-		strings.Contains(lk, "api_key") ||
-		strings.Contains(lk, "apikey") ||
-		strings.Contains(lk, "credential")
+// DefaultRedactionKeys are the credential-shaped keys the framework masks when
+// a deployment configures nothing.
+func DefaultRedactionKeys() RedactionKeys {
+	return RedactionKeys{
+		Exact: []string{
+			"authorization",
+			"api_key",
+			"apikey",
+			"password",
+			"secret",
+			"private_key",
+			"credentials",
+			"client_secret",
+			"token",
+			"access_token",
+			"refresh_token",
+			"id_token",
+			"secret_key",
+		},
+		Suffixes: []string{
+			"_secret",
+			"_password",
+			"_token",
+			"_api_key",
+			"_private_key",
+		},
+	}
 }
 
-func redactMap(input map[string]any) map[string]any {
+// Redactor masks sensitive values using the operator's key list.
+type Redactor struct {
+	keys RedactionKeys
+}
+
+// NewRedactor builds a redactor. A nil key set takes the defaults; pass an
+// explicitly empty RedactionKeys to mask nothing, which is a deployment's
+// decision rather than a silent default.
+func NewRedactor(keys *RedactionKeys) *Redactor {
+	if keys == nil {
+		defaults := DefaultRedactionKeys()
+		keys = &defaults
+	}
+
+	lowered := RedactionKeys{
+		Exact:    make([]string, 0, len(keys.Exact)),
+		Suffixes: make([]string, 0, len(keys.Suffixes)),
+	}
+
+	for _, key := range keys.Exact {
+		lowered.Exact = append(lowered.Exact, strings.ToLower(key))
+	}
+
+	for _, suffix := range keys.Suffixes {
+		lowered.Suffixes = append(lowered.Suffixes, strings.ToLower(suffix))
+	}
+
+	return &Redactor{keys: lowered}
+}
+
+// Redact returns a copy of the payload with sensitive values masked, walking
+// nested objects and arrays.
+func (r *Redactor) Redact(input map[string]any) map[string]any {
+	if r == nil {
+		return input
+	}
+
+	return r.redactMap(input)
+}
+
+func (r *Redactor) redactMap(input map[string]any) map[string]any {
 	out := make(map[string]any, len(input))
-	for k, v := range input {
-		if isSensitiveKey(k) {
-			out[k] = "[REDACTED]"
+
+	for key, value := range input {
+		if r.sensitive(key) {
+			out[key] = "[REDACTED]"
 
 			continue
 		}
 
-		switch val := v.(type) {
+		switch typed := value.(type) {
 		case map[string]any:
-			out[k] = redactMap(val)
+			out[key] = r.redactMap(typed)
 		case []any:
-			out[k] = redactSlice(val)
+			out[key] = r.redactSlice(typed)
 		default:
-			out[k] = v
+			out[key] = value
 		}
 	}
 
 	return out
 }
 
-func redactSlice(input []any) []any {
+func (r *Redactor) redactSlice(input []any) []any {
 	out := make([]any, len(input))
-	for i, v := range input {
-		switch val := v.(type) {
+
+	for i, value := range input {
+		switch typed := value.(type) {
 		case map[string]any:
-			out[i] = redactMap(val)
+			out[i] = r.redactMap(typed)
 		case []any:
-			out[i] = redactSlice(val)
+			out[i] = r.redactSlice(typed)
 		default:
-			out[i] = v
+			out[i] = value
 		}
 	}
 
 	return out
+}
+
+func (r *Redactor) sensitive(key string) bool {
+	lowered := strings.ToLower(key)
+
+	for _, exact := range r.keys.Exact {
+		if lowered == exact {
+			return true
+		}
+	}
+
+	for _, suffix := range r.keys.Suffixes {
+		if strings.HasSuffix(lowered, suffix) {
+			return true
+		}
+	}
+
+	return false
 }

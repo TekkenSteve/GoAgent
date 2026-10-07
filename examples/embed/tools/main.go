@@ -24,14 +24,18 @@ func main() {
 		TemporalNamespace:  env("AGENTFW_TEMPORAL_NAMESPACE", "default"),
 		TemporalTaskQueues: agentostemporal.DefaultTaskQueues(),
 		PostgresURL:        os.Getenv("PG_URL"),
-		RedisURL:           os.Getenv("REDIS_URL"),
 	}
 
 	rt, err := agentostemporal.NewRuntime(ctx, &cfg)
 	if err != nil {
 		log.Fatalf("new runtime: %v", err)
 	}
-	defer rt.Close()
+
+	defer func() {
+		if err := rt.Close(); err != nil {
+			log.Printf("close runtime: %v", err)
+		}
+	}()
 
 	runID := fmt.Sprintf("embed-tools-%d", time.Now().UnixMilli())
 
@@ -53,7 +57,11 @@ func main() {
 		return
 	}
 
-	fmt.Fprintf(os.Stdout, "run started: id=%s state=%s\n", status.RunID, status.LifecycleState)
+	if _, werr := fmt.Fprintf(os.Stdout, "run started: id=%s state=%s\n", status.RunID, status.LifecycleState); werr != nil {
+		log.Printf("write stdout: %v", werr)
+
+		return
+	}
 }
 
 func env(key, fallback string) string {

@@ -9,7 +9,7 @@ endif
 
 GO ?= go
 
-BASE_STACK = docker compose -f docker-compose.yml
+BASE_STACK = docker compose -f docker-compose.dev.yml
 INTEGRATION_TEST_STACK = $(BASE_STACK) -f docker-compose-integration-test.yml
 ALL_STACK = $(INTEGRATION_TEST_STACK)
 
@@ -21,8 +21,22 @@ ALL_STACK = $(INTEGRATION_TEST_STACK)
 help: ## Display this help screen
 	@awk 'BEGIN {FS = ":.*##"; printf "\nUsage:\n  make \033[36m<target>\033[0m\n"} /^[a-zA-Z_-]+:.*?##/ { printf "  \033[36m%-15s\033[0m %s\n", $$1, $$2 } /^##@/ { printf "\n\033[1m%s\033[0m\n", substr($$0, 5) } ' $(MAKEFILE_LIST)
 
+dev-secrets: ### create .env with freshly generated development credentials (run once)
+	@if [ -f .env ]; then \
+		echo ".env already exists; leaving it alone"; \
+	else \
+		cp .env.example .env; \
+		{ \
+			echo "CENTRIFUGO_API_KEY=$$(openssl rand -hex 16)"; \
+			echo "CENTRIFUGO_ADMIN_PASSWORD=$$(openssl rand -hex 16)"; \
+			echo "CENTRIFUGO_ADMIN_SECRET=$$(openssl rand -hex 16)"; \
+		} >> .env; \
+		echo "created .env with generated development credentials"; \
+	fi
+.PHONY: dev-secrets
+
 compose-up: ### Run docker compose (without backend and reverse proxy)
-	$(BASE_STACK) up --build -d db rabbitmq nats && docker compose logs -f
+	$(BASE_STACK) up --build -d db redis centrifugo temporal temporal-create-namespace && docker compose logs -f
 .PHONY: compose-up
 
 compose-up-all: ### Run docker compose (with backend and reverse proxy)
@@ -32,7 +46,7 @@ compose-up-all: ### Run docker compose (with backend and reverse proxy)
 compose-up-integration-test: ### Run docker compose with integration test
 	exit_code=0; \
 	trap '$(ALL_STACK) down --remove-orphans' EXIT; \
-	$(INTEGRATION_TEST_STACK) up --build integration-test || exit_code=$$?; \
+	$(INTEGRATION_TEST_STACK) up --build --exit-code-from integration-test integration-test || exit_code=$$?; \
 	exit $$exit_code
 .PHONY: compose-up-integration-test
 
@@ -41,7 +55,7 @@ compose-up-mixed-backend-integration-test: ### Run docker compose mixed AgentOS 
 	trap '$(ALL_STACK) down --remove-orphans' EXIT; \
 	GO_TEST_FLAGS="-v -run TestHTTPAgentOSRunPlanMixedBackendsV1 -count=1" \
 	GO_TEST_PACKAGES="./integration-test" \
-	$(INTEGRATION_TEST_STACK) up --build integration-test || exit_code=$$?; \
+	$(INTEGRATION_TEST_STACK) up --build --exit-code-from integration-test integration-test || exit_code=$$?; \
 	exit $$exit_code
 .PHONY: compose-up-mixed-backend-integration-test
 
@@ -59,7 +73,7 @@ deps: ### deps tidy + verify
 .PHONY: deps
 
 deps-audit: ### check dependencies vulnerabilities
-	govulncheck ./...
+	$(GO) tool govulncheck ./...
 .PHONY: deps-audit
 
 fix-diff: ### Show code changes by `go fix`
@@ -68,8 +82,8 @@ fix-diff: ### Show code changes by `go fix`
 
 format: ### Run code formatter
 	$(GO) fix ./...
-	gofumpt -l -w .
-	gci write . --skip-generated -s standard -s default
+	$(GO) tool gofumpt -l -w .
+	$(GO) tool gci write . --skip-generated -s standard -s default
 .PHONY: format
 
 run: deps swag-v1 ### swag run for API v1
@@ -82,7 +96,7 @@ docker-rm-volume: ### remove docker volume
 .PHONY: docker-rm-volume
 
 linter-golangci: ### check by golangci linter
-	golangci-lint run
+	$(GO) tool golangci-lint run --timeout=15m
 .PHONY: linter-golangci
 
 linter-hadolint: ### check by hadolint linter
@@ -135,9 +149,18 @@ postgres-integration-test: ### run Postgres-backed AgentOS persistence integrati
 .PHONY: postgres-integration-test
 
 mock: ### run mockgen
-	mockgen -source ./internal/repo/contracts.go -package usecase_test > ./internal/usecase/mocks_repo_test.go
-	mockgen -source ./internal/usecase/contracts.go -package usecase_test > ./internal/usecase/mocks_usecase_test.go
+	$(GO) tool mockgen -source ./internal/repo/contracts.go -package usecase_test > ./internal/usecase/mocks_repo_test.go
+	$(GO) tool mockgen -source ./internal/usecase/contracts.go -package usecase_test > ./internal/usecase/mocks_usecase_test.go
 .PHONY: mock
+
+sqlc: ### generate type-safe SQL bindings from queries/*.sql
+	$(GO) tool sqlc generate
+.PHONY: sqlc
+
+sqlc-check: ### fail when generated SQL bindings are stale
+	$(GO) tool sqlc generate
+	@git diff --exit-code -- internal/repo/persistent/sqlcgen || (echo "sqlcgen is stale: run 'make sqlc' and commit the result" >&2; exit 1)
+.PHONY: sqlc-check
 
 migrate-create:  ### create new migration
 	migrate create -ext sql -dir migrations '$(word 2,$(MAKECMDGOALS))'
@@ -147,10 +170,23 @@ migrate-up: ### migration up
 	migrate -path migrations -database '$(PG_URL)?sslmode=disable' up
 .PHONY: migrate-up
 
+# The drill needs a database it may empty, so it reads its own variable rather
+# than the .env PG_URL a developer points at their working data. It falls back
+# to PG_URL for local convenience. A URL may carry its own parameters.
+MIGRATION_DRILL_URL ?= $(PG_URL)
+MIGRATION_DRILL_DSN = $(if $(findstring ?,$(MIGRATION_DRILL_URL)),$(MIGRATION_DRILL_URL),$(MIGRATION_DRILL_URL)?sslmode=disable)
+
+migration-drill: ### roll every migration back and re-apply it (MIGRATION_DRILL_URL)
+	@test -n "$(MIGRATION_DRILL_URL)" || (echo "MIGRATION_DRILL_URL is required" >&2; exit 1)
+	$(GO) run -tags postgres github.com/golang-migrate/migrate/v4/cmd/migrate -path migrations -database '$(MIGRATION_DRILL_DSN)' up
+	$(GO) run -tags postgres github.com/golang-migrate/migrate/v4/cmd/migrate -path migrations -database '$(MIGRATION_DRILL_DSN)' down -all
+	$(GO) run -tags postgres github.com/golang-migrate/migrate/v4/cmd/migrate -path migrations -database '$(MIGRATION_DRILL_DSN)' up
+.PHONY: migration-drill
+
 bin-deps: ### install tools
 	$(GO) install tool
 	$(GO) install -tags 'postgres' github.com/golang-migrate/migrate/v4/cmd/migrate
 .PHONY: bin-deps
 
-pre-commit: swag-v1 mock format linter-golangci test ### run pre-commit
+pre-commit: swag-v1 mock sqlc-check format linter-golangci test ### run pre-commit
 .PHONY: pre-commit

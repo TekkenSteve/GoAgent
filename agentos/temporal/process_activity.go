@@ -28,6 +28,7 @@ type startProcessActivityInput struct {
 	Spec agentosproc.Spec
 }
 
+// StartProcessActivity starts a durable process from the given spec.
 func (a *ProcessActivities) StartProcessActivity(ctx context.Context, input *startProcessActivityInput) (agentosproc.Status, error) {
 	if a == nil || a.Runtime == nil {
 		return agentosproc.Status{}, fmt.Errorf("%w: process activity runtime is required", agentoscore.ErrInvalidProcess)
@@ -41,6 +42,7 @@ type signalProcessActivityInput struct {
 	Signal agentoscore.Signal
 }
 
+// SignalProcessActivity delivers a signal to a process and returns its refreshed status.
 func (a *ProcessActivities) SignalProcessActivity(ctx context.Context, input *signalProcessActivityInput) (agentosproc.Status, error) {
 	if a == nil || a.Runtime == nil {
 		return agentosproc.Status{}, fmt.Errorf("%w: process activity runtime is required", agentoscore.ErrInvalidProcess)
@@ -58,6 +60,7 @@ type controlProcessActivityInput struct {
 	Control agentoscore.ControlRequest
 }
 
+// ControlProcessActivity delivers a lifecycle control to a process and returns its refreshed status.
 func (a *ProcessActivities) ControlProcessActivity(ctx context.Context, input *controlProcessActivityInput) (agentosproc.Status, error) {
 	if a == nil || a.Runtime == nil {
 		return agentosproc.Status{}, fmt.Errorf("%w: process activity runtime is required", agentoscore.ErrInvalidProcess)
@@ -76,6 +79,7 @@ type fireProcessTimerActivityInput struct {
 	At    string
 }
 
+// FireProcessTimerActivity fires a scheduled timer as a signal to a process and returns its refreshed status.
 func (a *ProcessActivities) FireProcessTimerActivity(ctx context.Context, input *fireProcessTimerActivityInput) (agentosproc.Status, error) {
 	if a == nil || a.Runtime == nil {
 		return agentosproc.Status{}, fmt.Errorf("%w: process activity runtime is required", agentoscore.ErrInvalidProcess)

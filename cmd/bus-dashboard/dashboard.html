@@ -1,0 +1,225 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>AgentOS Data-Plane Dashboard</title>
+<style>
+  :root {
+    --bg: #0d1117;
+    --panel: #161b22;
+    --panel-2: #1c2330;
+    --border: #2d333b;
+    --fg: #e6edf3;
+    --muted: #8b949e;
+    --accent: #4493f8;
+    --ok: #3fb950;
+    --warn: #d29922;
+    --bad: #f85149;
+    --mono: ui-monospace, "SF Mono", SFMono-Regular, Menlo, Consolas, monospace;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    background: var(--bg); color: var(--fg);
+    font: 14px/1.5 -apple-system, "Segoe UI", Roboto, sans-serif;
+    padding: 24px; max-width: 1280px; margin: 0 auto;
+  }
+  header { display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap; margin-bottom: 8px; }
+  h1 { font-size: 20px; letter-spacing: 0.3px; }
+  .sub { color: var(--muted); font-size: 13px; }
+  .chips { margin-left: auto; display: flex; gap: 8px; }
+  .chip {
+    font-size: 12px; font-family: var(--mono); padding: 3px 10px;
+    border: 1px solid var(--border); border-radius: 999px; color: var(--muted);
+  }
+  .chip.hot { color: var(--accent); border-color: var(--accent); }
+  .banner {
+    margin: 12px 0; padding: 12px 16px; border-radius: 8px;
+    font-size: 15px; font-weight: 600; display: flex; align-items: center; gap: 8px;
+  }
+  .banner.pass { background: rgba(63,185,80,0.12); color: var(--ok); border: 1px solid rgba(63,185,80,0.4); }
+  .banner.fail { background: rgba(248,81,73,0.12); color: var(--bad); border: 1px solid rgba(248,81,73,0.4); }
+  .stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px; margin-bottom: 16px; }
+  .stat {
+    background: var(--panel); border: 1px solid var(--border); border-radius: 8px;
+    padding: 12px 14px;
+  }
+  .stat .n { font-size: 24px; font-weight: 700; font-variant-numeric: tabular-nums; }
+  .stat .k { font-size: 12px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.6px; }
+  .stat .n.ok { color: var(--ok); }
+  .stat .n.bad { color: var(--bad); }
+  .assertions { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 10px; margin-bottom: 16px; }
+  .assertion {
+    background: var(--panel); border: 1px solid var(--border); border-radius: 8px; padding: 10px 14px;
+    display: flex; align-items: center; gap: 10px;
+  }
+  .assertion .mark { font-size: 16px; width: 18px; text-align: center; }
+  .assertion .name { font-size: 13px; }
+  .assertion .count { margin-left: auto; font-size: 12px; color: var(--muted); font-variant-numeric: tabular-nums; }
+  .toolbar { display: flex; gap: 10px; margin-bottom: 12px; align-items: center; }
+  button {
+    background: var(--accent); color: #fff; border: 0; border-radius: 6px;
+    padding: 7px 16px; font-size: 13px; font-weight: 600; cursor: pointer;
+  }
+  button:hover { filter: brightness(1.1); }
+  .toolbar .hint { color: var(--muted); font-size: 12px; }
+  table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  th, td { text-align: left; padding: 7px 10px; border-bottom: 1px solid var(--border); white-space: nowrap; }
+  th { color: var(--muted); font-size: 11px; text-transform: uppercase; letter-spacing: 0.6px; }
+  td.mono, .mono { font-family: var(--mono); }
+  .state { display: inline-block; padding: 2px 8px; border-radius: 999px; font-size: 11px; font-weight: 600; }
+  .state.open, .state.running { background: rgba(68,147,248,0.15); color: var(--accent); }
+  .state.finished { background: rgba(63,185,80,0.15); color: var(--ok); }
+  .state.error { background: rgba(248,81,73,0.15); color: var(--bad); }
+  .state.cancelled { background: rgba(210,153,34,0.15); color: var(--warn); }
+  .check { font-weight: 700; }
+  .check.ok { color: var(--ok); }
+  .check.bad { color: var(--bad); }
+  .check.pending { color: var(--muted); }
+  .viol {
+    color: var(--bad); font-size: 12px; font-family: var(--mono);
+    max-width: 420px; white-space: normal;
+  }
+  .empty { color: var(--muted); text-align: center; padding: 40px 0; }
+  .foot { margin-top: 16px; color: var(--muted); font-size: 12px; }
+</style>
+</head>
+<body>
+<header>
+  <h1>AgentOS Data-Plane Dashboard</h1>
+  <span class="sub">live verification of the AG-UI message bus</span>
+  <div class="chips">
+    <span class="chip" id="transport">transport: –</span>
+    <span class="chip" id="projection">projection: off</span>
+    <span class="chip" id="uptime">uptime: 0s</span>
+  </div>
+</header>
+
+<div class="banner pass" id="banner">✓ All data-plane assertions passing</div>
+
+<div class="stats" id="stats"></div>
+
+<div class="assertions" id="assertions"></div>
+
+<div class="toolbar">
+  <button id="start" onclick="startRun()">▶ Start a run</button>
+  <span class="hint">pushes a synthetic run through the real PublishWriter / RunLifecycle code paths</span>
+</div>
+
+<table id="runs">
+  <thead>
+    <tr>
+      <th>Run</th><th>Tenant</th><th>Path</th><th>State</th>
+      <th>Events</th><th>Tokens</th><th>Last event</th><th>Seq</th>
+      <th>Seq</th><th>Msgs</th><th>Terminal</th><th>Projection</th>
+      <th>Violations</th>
+    </tr>
+  </thead>
+  <tbody></tbody>
+</table>
+<div class="empty" id="empty">no runs yet — traffic is starting…</div>
+
+<div class="foot">
+  Publisher: <span class="mono">streamadapter.PublishWriter / RunLifecycle</span> ·
+  Subscriber: <span class="mono">agentos/stream.Subscriber</span> ·
+  Transport: <span class="mono" id="foot-transport">–</span>
+</div>
+
+<script>
+const runsTbody = document.querySelector('#runs tbody');
+const banner = document.getElementById('banner');
+let queued = null;
+
+function ok(v, pending) { return pending ? 'pending' : v ? 'ok' : 'bad'; }
+function mark(v, pending) { return `<span class="check ${ok(v, pending)}">${pending ? '…' : v ? '✓' : '✗'}</span>`; }
+
+function fmt(n) { return Number(n).toLocaleString('en-US'); }
+
+function stateClass(s) { return s || 'open'; }
+
+function assertionAggregate(label, key, runs) {
+  const done = runs.filter(r => r[key] !== undefined);
+  const pass = done.filter(r => r[key] === true).length;
+  const fail = done.length - pass;
+  return `<div class="assertion">
+    <span class="mark">${fail > 0 ? '✗' : done.length ? '✓' : '…'}</span>
+    <span class="name">${label}</span>
+    <span class="count">${pass}/${done.length} runs${fail ? ' · ' + fail + ' failed' : ''}</span>
+  </div>`;
+}
+
+function render(state) {
+  const runs = state.runs || [];
+  const stats = state.stats || {};
+
+  document.getElementById('transport').textContent = `transport: ${state.transport}`;
+  document.getElementById('projection').textContent = `projection: ${state.projectionEnabled ? 'pg' : 'off'}`;
+  document.getElementById('uptime').textContent = `uptime: ${fmt(state.uptimeSeconds)}s`;
+  document.getElementById('foot-transport').textContent = state.transport;
+
+  const violCount = stats.violations || 0;
+  banner.className = 'banner ' + (violCount ? 'fail' : 'pass');
+  banner.textContent = violCount
+    ? `✗ ${violCount} data-plane violation(s) detected — inspect the affected runs below`
+    : '✓ All data-plane assertions passing';
+
+  document.getElementById('stats').innerHTML = `
+    <div class="stat"><div class="n">${fmt(stats.total)}</div><div class="k">Runs started</div></div>
+    <div class="stat"><div class="n">${fmt(stats.terminated)}</div><div class="k">Terminated</div></div>
+    <div class="stat"><div class="n">${fmt(stats.events)}</div><div class="k">Events on bus</div></div>
+    <div class="stat"><div class="n">${fmt(stats.tokens)}</div><div class="k">Tokens streamed</div></div>
+    <div class="stat"><div class="n ${violCount ? 'bad' : 'ok'}">${fmt(violCount)}</div><div class="k">Violations</div></div>`;
+
+  document.getElementById('assertions').innerHTML =
+    assertionAggregate('Sequence monotonic', 'seqOk', runs) +
+    assertionAggregate('Message pairing', 'msgOk', runs) +
+    assertionAggregate('Terminal closure', 'terminalOk', runs) +
+    assertionAggregate('Bus ↔ PG projection', 'projectedOk', runs);
+
+  const empty = document.getElementById('empty');
+  empty.style.display = runs.length ? 'none' : 'block';
+
+  runsTbody.innerHTML = runs.map(r => {
+    const viol = (r.violations || []).length
+      ? `<span class="viol">${r.violations.join('; ')}</span>` : '';
+    return `<tr>
+      <td class="mono">${r.runId}</td>
+      <td class="mono">${r.tenant}</td>
+      <td class="mono">${r.path}</td>
+      <td><span class="state ${stateClass(r.state)}">${r.state}</span></td>
+      <td class="mono">${fmt(r.eventCount)}</td>
+      <td class="mono">${fmt(r.tokenCount)}</td>
+      <td class="mono">${r.lastEvent || '–'}</td>
+      <td class="mono">${r.lastSeq || 0}</td>
+      <td>${mark(r.seqOk)}</td>
+      <td>${mark(r.msgOk)}</td>
+      <td>${mark(r.terminalOk)}</td>
+      <td>${mark(r.projectedOk, state.projectionEnabled && r.terminalOk && r.projectedOk === undefined)}</td>
+      <td>${viol}</td>
+    </tr>`;
+  }).join('');
+}
+
+// Coalesce high-frequency SSE bursts into one render per animation frame.
+function scheduleRender(state) {
+  queued = state;
+  if (queued._scheduled) return;
+  queued._scheduled = true;
+  requestAnimationFrame(() => { queued._scheduled = false; render(queued); });
+}
+
+function startRun() {
+  fetch('/api/run', { method: 'POST' }).catch(err => console.error('start run', err));
+}
+
+const es = new EventSource('/events');
+es.onmessage = e => { try { scheduleRender(JSON.parse(e.data)); } catch (err) { console.error('bad frame', err); } };
+es.onerror = () => {
+  // Fall back to polling so the page still lives if SSE drops.
+  setInterval(() => fetch('/api/state').then(r => r.json()).then(scheduleRender).catch(() => {}), 2000);
+};
+
+fetch('/api/state').then(r => r.json()).then(render).catch(() => {});
+</script>
+</body>
+</html>

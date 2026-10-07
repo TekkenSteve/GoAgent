@@ -4,9 +4,10 @@ import (
 	"context"
 	"errors"
 
+	agentos "github.com/TekkenSteve/GoAgent/agentos/control"
 	"github.com/TekkenSteve/GoAgent/internal/agentfw/orchestration"
+	"github.com/nexus-rpc/sdk-go/nexus"
 	"go.temporal.io/sdk/activity"
-	"go.temporal.io/sdk/worker"
 	"go.temporal.io/sdk/workflow"
 )
 
@@ -16,7 +17,25 @@ type WorkerKit struct {
 	planActivities        *PlanActivities
 	processActivities     *ProcessActivities
 	planCommandReconciler *planCommandReconciler
+	// runBackendResolver is optional: when set, process workers also host the
+	// run supervisor that owns external-backend runs.
+	runBackendResolver BackendResolver
+	closeFns           []func() error
+}
+
+// PlanWorkerKit owns only the durable RunPlan workload. Applications that use
+// external backends do not need to construct unrelated native-agent or process
+// workers merely to run AgentOS PlanControl.
+type PlanWorkerKit struct {
+	planActivities        *PlanActivities
+	planCommandReconciler *planCommandReconciler
 	closeFns              []func() error
+}
+
+// PlanWorkerSet identifies the two Temporal workers required by RunPlan.
+type PlanWorkerSet struct {
+	Control  WorkloadRegistrar
+	Activity WorkloadRegistrar
 }
 
 var (
@@ -27,21 +46,118 @@ var (
 	errWorkerKitPlanCommandReconcilerNotConfigured = errors.New("agentos temporal workerkit: plan command reconciler is not configured")
 )
 
-// WorkerSet contains one Temporal worker per workload class.
+// WorkloadRegistrar is the smallest Temporal worker capability AgentOS needs
+// to install its workloads. Hosts retain ownership of worker construction and
+// lifecycle, so registration does not depend on unrelated SDK worker methods.
+type WorkloadRegistrar interface {
+	RegisterWorkflowWithOptions(any, workflow.RegisterOptions)
+	RegisterActivityWithOptions(any, activity.RegisterOptions)
+}
+
+// WorkerSet contains one workload registrar per Temporal workload class.
 type WorkerSet struct {
-	PlanControl     worker.Worker
-	PlanActivity    worker.Worker
-	ProcessControl  worker.Worker
-	ProcessActivity worker.Worker
-	NativeControl   worker.Worker
-	NativeLLM       worker.Worker
-	NativeTool      worker.Worker
-	Stream          worker.Worker
-	Trigger         worker.Worker
+	PlanControl     WorkloadRegistrar
+	PlanActivity    WorkloadRegistrar
+	ProcessControl  WorkloadRegistrar
+	ProcessActivity WorkloadRegistrar
+	NativeControl   WorkloadRegistrar
+	NativeLLM       WorkloadRegistrar
+	NativeTool      WorkloadRegistrar
+	Stream          WorkloadRegistrar
+}
+
+// NexusWorkloadRegistrar installs a Nexus service into a worker. The Temporal
+// worker.Worker satisfies it; test fakes implement it as a no-op.
+type NexusWorkloadRegistrar interface {
+	RegisterNexusService(*nexus.Service)
+}
+
+// NexusControlRegistrar is the plan-control worker capability the Nexus run
+// bridge needs: it hosts the service, the run-operation workflow, and nothing
+// else. worker.Worker satisfies it.
+type NexusControlRegistrar interface {
+	WorkloadRegistrar
+	NexusWorkloadRegistrar
+}
+
+// RegisterNexusRunService installs the AgentOS Nexus service and its backing
+// run-operation workflow onto the router worker. The deployment's Nexus
+// endpoint must target that worker's task queue.
+func RegisterNexusRunService(control NexusControlRegistrar, runtime agentos.Runtime, activityTaskQueue string) error {
+	if control == nil {
+		return errWorkerKitNilWorker
+	}
+
+	service, err := NewNexusRunService(runtime, activityTaskQueue)
+	if err != nil {
+		return err
+	}
+
+	control.RegisterNexusService(service)
+	control.RegisterWorkflowWithOptions(NexusRunOperationWorkflow, workflow.RegisterOptions{
+		Name: NexusRunOperationWorkflowName,
+	})
+
+	return nil
+}
+
+// RegisterRunSupervisor installs the run supervisor workflow and its
+// activities onto one worker. Supervisors live beside the process plane they
+// own, and their activities reach backends through resolver — the undecorated
+// view, so applying a control cannot re-enter the supervisor that issued it.
+func RegisterRunSupervisor(worker WorkloadRegistrar, resolver BackendResolver) error {
+	if worker == nil {
+		return errWorkerKitNilWorker
+	}
+
+	activities, err := NewRunSupervisorActivities(resolver.ResolveBackend)
+	if err != nil {
+		return err
+	}
+
+	worker.RegisterWorkflowWithOptions(RunSupervisorWorkflow, workflow.RegisterOptions{
+		Name: RunSupervisorWorkflowName,
+	})
+	worker.RegisterActivityWithOptions(activities.ReadStatusActivity, activity.RegisterOptions{
+		Name: RunSupervisorStatusActivityName,
+	})
+	worker.RegisterActivityWithOptions(activities.ApplySignalActivity, activity.RegisterOptions{
+		Name: RunSupervisorSignalActivityName,
+	})
+	worker.RegisterActivityWithOptions(activities.ApplyControlActivity, activity.RegisterOptions{
+		Name: RunSupervisorControlActivityName,
+	})
+
+	return nil
+}
+
+// RegisterNexusRunActivities installs the Nexus run activities onto the
+// plan-activity worker. planStarter may be nil for a bridge-only deployment.
+func RegisterNexusRunActivities(activityWorker WorkloadRegistrar, runtime agentos.Runtime, planStarter PlanNodeStarter) error {
+	if activityWorker == nil {
+		return errWorkerKitNilWorker
+	}
+
+	runActivities, err := NewNexusRunActivities(runtime, planStarter)
+	if err != nil {
+		return err
+	}
+
+	activityWorker.RegisterActivityWithOptions(runActivities.StartRunActivity, activity.RegisterOptions{
+		Name: NexusStartRunActivityName,
+	})
+	activityWorker.RegisterActivityWithOptions(runActivities.StatusRunActivity, activity.RegisterOptions{
+		Name: NexusStatusRunActivityName,
+	})
+	activityWorker.RegisterActivityWithOptions(runActivities.CancelRunActivity, activity.RegisterOptions{
+		Name: NexusCancelRunActivityName,
+	})
+
+	return nil
 }
 
 // RegisterPlanWorkflow installs the AgentOS RunPlan workflow into an existing worker.
-func RegisterPlanWorkflow(w worker.Worker) error {
+func RegisterPlanWorkflow(w WorkloadRegistrar) error {
 	if w == nil {
 		return errWorkerKitNilWorker
 	}
@@ -54,7 +170,7 @@ func RegisterPlanWorkflow(w worker.Worker) error {
 }
 
 // RegisterPlanActivities installs AgentOS RunPlan activities into an existing worker.
-func RegisterPlanActivities(w worker.Worker, activities *PlanActivities) error {
+func RegisterPlanActivities(w WorkloadRegistrar, activities *PlanActivities) error {
 	if w == nil {
 		return errWorkerKitNilWorker
 	}
@@ -71,6 +187,9 @@ func RegisterPlanActivities(w worker.Worker, activities *PlanActivities) error {
 	})
 	w.RegisterActivityWithOptions(activities.StartPlanNodeActivity, activity.RegisterOptions{
 		Name: StartPlanNodeActivityName,
+	})
+	w.RegisterActivityWithOptions(activities.SignalPlanNodeActivity, activity.RegisterOptions{
+		Name: SignalPlanNodeActivityName,
 	})
 	w.RegisterActivityWithOptions(activities.StatusPlanNodeActivity, activity.RegisterOptions{
 		Name: StatusPlanNodeActivityName,
@@ -92,7 +211,7 @@ func RegisterPlanActivities(w worker.Worker, activities *PlanActivities) error {
 }
 
 // RegisterProcessWorkflow installs the AgentOS process workflow into an existing worker.
-func RegisterProcessWorkflow(w worker.Worker) error {
+func RegisterProcessWorkflow(w WorkloadRegistrar) error {
 	if w == nil {
 		return errWorkerKitNilWorker
 	}
@@ -105,7 +224,7 @@ func RegisterProcessWorkflow(w worker.Worker) error {
 }
 
 // RegisterProcessActivities installs AgentOS process activities into an existing worker.
-func RegisterProcessActivities(w worker.Worker, activities *ProcessActivities) error {
+func RegisterProcessActivities(w WorkloadRegistrar, activities *ProcessActivities) error {
 	if w == nil {
 		return errWorkerKitNilWorker
 	}
@@ -153,6 +272,38 @@ func (k *WorkerKit) Register(workers *WorkerSet) error {
 	return k.registerNativeWorkloads(workers)
 }
 
+// Register installs only the RunPlan workflow and activities.
+func (k *PlanWorkerKit) Register(workers *PlanWorkerSet) error {
+	if k == nil || workers == nil || workers.Control == nil || workers.Activity == nil {
+		return errWorkerKitWorkersRequired
+	}
+
+	if err := RegisterPlanWorkflow(workers.Control); err != nil {
+		return err
+	}
+
+	return RegisterPlanActivities(workers.Activity, k.planActivities)
+}
+
+// RecoverPlanCommands redelivers pending RunPlan commands without requiring
+// process or native-agent workers.
+func (k *PlanWorkerKit) RecoverPlanCommands(ctx context.Context, limit int) (PlanCommandRecoveryResult, error) {
+	if k == nil || k.planCommandReconciler == nil {
+		return PlanCommandRecoveryResult{}, errWorkerKitPlanCommandReconcilerNotConfigured
+	}
+
+	return k.planCommandReconciler.Recover(ctx, limit)
+}
+
+// StartPlanCommandRecovery starts periodic recovery for this plan-only kit.
+func (k *PlanWorkerKit) StartPlanCommandRecovery(ctx context.Context, cfg PlanCommandRecoveryLoopConfig, observer PlanCommandRecoveryObserver) (*PlanCommandRecoveryLoop, error) {
+	if k == nil {
+		return nil, errWorkerKitPlanCommandReconcilerNotConfigured
+	}
+
+	return StartPlanCommandRecovery(ctx, k, cfg, observer)
+}
+
 func (k *WorkerKit) registerProcessWorkloads(workers *WorkerSet) error {
 	if workers == nil || workers.ProcessControl == nil || workers.ProcessActivity == nil {
 		return errWorkerKitWorkersRequired
@@ -160,6 +311,12 @@ func (k *WorkerKit) registerProcessWorkloads(workers *WorkerSet) error {
 
 	if err := RegisterProcessWorkflow(workers.ProcessControl); err != nil {
 		return err
+	}
+
+	if k.runBackendResolver != nil {
+		if err := RegisterRunSupervisor(workers.ProcessControl, k.runBackendResolver); err != nil {
+			return err
+		}
 	}
 
 	return RegisterProcessActivities(workers.ProcessActivity, k.processActivities)
@@ -178,19 +335,18 @@ func (k *WorkerKit) registerPlanWorkloads(workers *WorkerSet) error {
 }
 
 func (k *WorkerKit) registerNativeWorkloads(workers *WorkerSet) error {
-	if workers.NativeControl == nil || workers.NativeLLM == nil || workers.NativeTool == nil || workers.Stream == nil || workers.Trigger == nil {
+	if workers.NativeControl == nil || workers.NativeLLM == nil || workers.NativeTool == nil || workers.Stream == nil {
 		return errWorkerKitWorkersRequired
 	}
 
 	k.registerNativeControlWorkloads(workers.NativeControl)
 	k.registerNativeActivityWorkloads(workers.NativeLLM, workers.NativeTool)
 	k.registerStreamWorkloads(workers.Stream)
-	k.registerTriggerWorkloads(workers.Trigger)
 
 	return nil
 }
 
-func (k *WorkerKit) registerNativeControlWorkloads(w worker.Worker) {
+func (k *WorkerKit) registerNativeControlWorkloads(w WorkloadRegistrar) {
 	w.RegisterWorkflowWithOptions(orchestration.AgentWorkflow, workflow.RegisterOptions{
 		Name: orchestration.AgentWorkflowName,
 	})
@@ -200,9 +356,15 @@ func (k *WorkerKit) registerNativeControlWorkloads(w worker.Worker) {
 	w.RegisterActivityWithOptions(k.activities.PrepareActivity, activity.RegisterOptions{
 		Name: orchestration.PrepareActivityName,
 	})
+	w.RegisterActivityWithOptions(k.activities.SnapshotHistoryActivity, activity.RegisterOptions{
+		Name: orchestration.SnapshotHistoryActivityName,
+	})
+	w.RegisterActivityWithOptions(k.activities.LoadHistoryActivity, activity.RegisterOptions{
+		Name: orchestration.LoadHistoryActivityName,
+	})
 }
 
-func (k *WorkerKit) registerNativeActivityWorkloads(llmWorker, toolWorker worker.Worker) {
+func (k *WorkerKit) registerNativeActivityWorkloads(llmWorker, toolWorker WorkloadRegistrar) {
 	llmWorker.RegisterActivityWithOptions(k.activities.LLMStepActivity, activity.RegisterOptions{
 		Name: orchestration.LLMStepActivityName,
 	})
@@ -211,7 +373,7 @@ func (k *WorkerKit) registerNativeActivityWorkloads(llmWorker, toolWorker worker
 	})
 }
 
-func (k *WorkerKit) registerStreamWorkloads(w worker.Worker) {
+func (k *WorkerKit) registerStreamWorkloads(w WorkloadRegistrar) {
 	w.RegisterWorkflowWithOptions(orchestration.StreamAgentWorkflow, workflow.RegisterOptions{
 		Name: orchestration.StreamWorkflowName,
 	})
@@ -226,15 +388,6 @@ func (k *WorkerKit) registerStreamWorkloads(w worker.Worker) {
 	})
 	w.RegisterActivityWithOptions(k.activities.FinishStreamActivity, activity.RegisterOptions{
 		Name: orchestration.FinishStreamActivityName,
-	})
-}
-
-func (k *WorkerKit) registerTriggerWorkloads(w worker.Worker) {
-	w.RegisterWorkflowWithOptions(orchestration.TriggerFireWorkflow, workflow.RegisterOptions{
-		Name: orchestration.TriggerFireWorkflowName,
-	})
-	w.RegisterActivityWithOptions(k.activities.FireTriggerActivity, activity.RegisterOptions{
-		Name: orchestration.FireTriggerActivityName,
 	})
 }
 
@@ -271,6 +424,20 @@ func (k *WorkerKit) StartPlanCommandRecovery(ctx context.Context, cfg PlanComman
 
 // Close releases resources owned by the kit.
 func (k *WorkerKit) Close() error {
+	if k == nil {
+		return nil
+	}
+
+	var err error
+	for _, closeFn := range k.closeFns {
+		err = errors.Join(err, closeFn())
+	}
+
+	return err
+}
+
+// Close releases resources owned by the plan-only kit.
+func (k *PlanWorkerKit) Close() error {
 	if k == nil {
 		return nil
 	}

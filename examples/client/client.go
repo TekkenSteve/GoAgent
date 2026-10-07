@@ -23,12 +23,17 @@ import (
 )
 
 const (
-	LifecycleStateCompleted    = "completed"
-	LifecycleStateFailed       = "failed"
-	LifecycleStateCanceled     = "canceled"
+	// LifecycleStateCompleted is the lifecycle state of a run that finished successfully.
+	LifecycleStateCompleted = "completed"
+	// LifecycleStateFailed is the lifecycle state of a run that failed.
+	LifecycleStateFailed = "failed"
+	// LifecycleStateCanceled is the lifecycle state of a run canceled before completion.
+	LifecycleStateCanceled = "canceled"
+	// LifecycleStateWaitingInput is the lifecycle state of a run waiting for business input.
 	LifecycleStateWaitingInput = "waiting_input"
 )
 
+// ErrWaitTimeout is returned when polling for a run status exceeds the caller-provided timeout.
 var ErrWaitTimeout = errors.New("wait timeout")
 
 const defaultHTTPTimeout = 30 * time.Second
@@ -38,22 +43,37 @@ const defaultHTTPTimeout = 30 * time.Second
 type Client struct {
 	baseURL   string
 	accountID string
+	projectID string
 	http      *http.Client
 }
 
+// defaultProjectID is the project runs are started in when a caller names none.
+// A project is part of a run's identity, so one is always sent; the environment
+// overrides it for a deployment that names its projects.
+const defaultProjectID = "default"
+
 // New creates a Client targeting the given base URL.
-// accountID is the default account sent with every request.
+//
+// accountID is the default account sent with every request, and PROJECT_ID (or
+// defaultProjectID) the default project: both are needed to start a run,
+// because a run's work is authorized as its tenant.
 func New(baseURL, accountID string) *Client {
+	projectID := os.Getenv("PROJECT_ID")
+	if projectID == "" {
+		projectID = defaultProjectID
+	}
+
 	return &Client{
 		baseURL:   strings.TrimRight(baseURL, "/"),
 		accountID: accountID,
+		projectID: projectID,
 		http:      &http.Client{Timeout: defaultHTTPTimeout},
 	}
 }
 
 // Do sends a JSON request and decodes the response into result (if non-nil).
 // path is a URL path like "/v1/agentos/runs".
-func (c *Client) Do(ctx context.Context, method, path string, body, result any) error {
+func (c *Client) Do(ctx context.Context, method, path string, body, result any) (err error) {
 	var bodyReader io.Reader
 
 	if body != nil {
@@ -76,9 +96,14 @@ func (c *Client) Do(ctx context.Context, method, path string, body, result any) 
 	if err != nil {
 		return fmt.Errorf("http request: %w", err)
 	}
-	defer resp.Body.Close()
 
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+	defer func() {
+		if closeErr := resp.Body.Close(); closeErr != nil {
+			err = errors.Join(err, closeErr)
+		}
+	}()
+
+	if !is2xx(resp.StatusCode) {
 		respBody, readErr := io.ReadAll(resp.Body)
 		if readErr != nil {
 			return &APIError{Code: resp.StatusCode, Body: fmt.Sprintf("failed to read body: %v", readErr)}
@@ -96,6 +121,42 @@ func (c *Client) Do(ctx context.Context, method, path string, body, result any) 
 	return nil
 }
 
+func is2xx(code int) bool {
+	return code >= 200 && code < 300
+}
+
+func writePollError(err error) error {
+	if _, werr := fmt.Fprintf(os.Stderr, "  poll error: %v\n", err); werr != nil {
+		return fmt.Errorf("write poll error: %w", werr)
+	}
+
+	return nil
+}
+
+func pollOnce(status *RunStatus, err error) (stable bool, werr error) {
+	if err != nil {
+		if werr := writePollError(err); werr != nil {
+			return false, werr
+		}
+
+		return false, nil
+	}
+
+	if werr := writePollStatus(status); werr != nil {
+		return false, werr
+	}
+
+	return isStableRunState(status.LifecycleState), nil
+}
+
+func writePollStatus(status *RunStatus) error {
+	if _, werr := fmt.Fprintf(os.Stdout, "  lifecycle_state=%s step=%d\n", status.LifecycleState, status.Step); werr != nil {
+		return fmt.Errorf("write poll status: %w", werr)
+	}
+
+	return nil
+}
+
 // APIError represents a non-2xx HTTP response.
 type APIError struct {
 	Code int
@@ -106,39 +167,11 @@ func (e *APIError) Error() string {
 	return fmt.Sprintf("API error %d: %s", e.Code, e.Body)
 }
 
-func (c *Client) pollStatus(ctx context.Context, runID, pathPrefix, desc string, interval, timeout time.Duration) (*RunStatus, error) {
-	deadline := time.Now().Add(timeout)
-
-	for {
-		var status RunStatus
-
-		err := c.Do(ctx, http.MethodGet, pathPrefix+runID, nil, &status)
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "  poll error: %v\n", err)
-		} else {
-			fmt.Fprintf(os.Stdout, "  lifecycle_state=%s step=%d\n", status.LifecycleState, status.Step)
-
-			if isStableRunState(status.LifecycleState) {
-				return &status, nil
-			}
-		}
-
-		if time.Now().After(deadline) {
-			return nil, fmt.Errorf("%w: %s %s after %v", ErrWaitTimeout, desc, runID, timeout)
-		}
-
-		select {
-		case <-ctx.Done():
-			return nil, ctx.Err()
-		case <-time.After(interval):
-		}
-	}
-}
-
-// WaitForOrchestrationCompletion polls GET /v1/orchestration/status/{runID} until a
-// terminal state (completed, failed, canceled) is reached.
+// WaitForOrchestrationCompletion polls a run started by
+// ExecuteOrchestration until it reaches a terminal state. It is the control
+// plane's run wait: the step queue is a run like any other.
 func (c *Client) WaitForOrchestrationCompletion(ctx context.Context, runID string, interval, timeout time.Duration) (*RunStatus, error) {
-	return c.pollStatus(ctx, runID, "/v1/orchestration/status/", "orchestration run", interval, timeout)
+	return c.WaitForCompletion(ctx, runID, interval, timeout)
 }
 
 // WaitForCompletion polls GET /v1/agentos/runs/{runID}/status until the run reaches
@@ -148,14 +181,14 @@ func (c *Client) WaitForCompletion(ctx context.Context, runID string, interval, 
 
 	for {
 		status, err := c.GetStatus(ctx, runID)
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "  poll error: %v\n", err)
-		} else {
-			fmt.Fprintf(os.Stdout, "  lifecycle_state=%s step=%d\n", status.LifecycleState, status.Step)
 
-			if isStableRunState(status.LifecycleState) {
-				return status, nil
-			}
+		stable, werr := pollOnce(status, err)
+		if werr != nil {
+			return nil, werr
+		}
+
+		if stable {
+			return status, nil
 		}
 
 		if time.Now().After(deadline) {

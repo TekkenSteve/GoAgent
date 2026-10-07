@@ -19,6 +19,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"log"
 	"os"
 	"time"
 
@@ -29,6 +30,16 @@ const (
 	pollInterval       = 2 * time.Second
 	pollTimeout        = 4 * time.Minute
 	reviewTimeoutNanos = 604800000000000
+	_kAgentID          = "agent_id"
+	_kMessage          = "message"
+)
+
+const (
+	_kID        = "id"
+	_kType      = "type"
+	_kInput     = "input"
+	_kDependsOn = "depends_on"
+	_kAgent     = "agent"
 )
 
 func main() {
@@ -47,69 +58,93 @@ func main() {
 	c := client.New(baseURL, accountID)
 	ctx := context.Background()
 
-	fmt.Fprintf(os.Stdout, "=== Scientific Method Pattern ===\nRun ID: %s\n\n", runID)
-	fmt.Fprintln(os.Stdout, "Flow: hypothesis → design → review(HITL) → experiment → analyze → conclude")
-	fmt.Fprintln(os.Stdout, "The 'review' step blocks until 'expert-approval' signal or 7-day timeout.")
-	fmt.Fprintln(os.Stdout)
+	writeStdoutf("=== Scientific Method Pattern ===\nRun ID: %s\n\n", runID)
+
+	writeStdoutLine("Flow: hypothesis → design → review(HITL) → experiment → analyze → conclude")
+
+	writeStdoutLine("The 'review' step blocks until 'expert-approval' signal or 7-day timeout.")
+
+	writeStdoutLine()
 
 	status, err := c.ExecuteOrchestration(ctx, &client.OrchestrationRequest{
 		RunID: runID,
 		Steps: scientificSteps(),
 	})
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+		writeStderrf("Error: %v\n", err)
 		os.Exit(1)
 	}
 
-	fmt.Fprintf(os.Stdout, "Initial status: lifecycle_state=%s step=%d\n\n", status.LifecycleState, status.Step)
-	fmt.Fprintln(os.Stdout, "Polling for completion...")
-	fmt.Fprintln(os.Stdout, "(The 'review' step blocks until 'expert-approval' signal arrives)")
-	fmt.Fprintln(os.Stdout, "Send it via: tctl workflow signal --name expert-approval --run_id", runID)
+	writeStdoutf("Initial status: lifecycle_state=%s step=%d\n\n", status.LifecycleState, status.Step)
+
+	writeStdoutLine("Polling for completion...")
+
+	writeStdoutLine("(The 'review' step blocks until 'expert-approval' signal arrives)")
+
+	writeStdoutLine("Send it via: tctl workflow signal --name expert-approval --run_id", runID)
 
 	status, err = c.WaitForOrchestrationCompletion(ctx, runID, pollInterval, pollTimeout)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+		writeStderrf("Error: %v\n", err)
 		os.Exit(1)
 	}
 
-	fmt.Fprintf(os.Stdout, "\nFinal status: lifecycle_state=%s step=%d\n", status.LifecycleState, status.Step)
+	writeStdoutf("\nFinal status: lifecycle_state=%s step=%d\n", status.LifecycleState, status.Step)
 }
 
 func scientificSteps() []map[string]any {
 	return []map[string]any{
 		{
-			"id": "hypothesis", "type": "agent", "agent_id": "scientist",
-			"input": map[string]any{"message": "Formulate a hypothesis about the relationship between temperature and CPU performance"},
+			_kID: "hypothesis", _kType: _kAgent, _kAgentID: "scientist",
+			_kInput: map[string]any{_kMessage: "Formulate a hypothesis about the relationship between temperature and CPU performance"},
 		},
 		{
-			"id": "design", "type": "agent", "agent_id": "scientist",
-			"input":      map[string]any{"message": "Design an experiment to test the hypothesis"},
-			"depends_on": []string{"hypothesis"},
+			_kID: "design", _kType: _kAgent, _kAgentID: "scientist",
+			_kInput:     map[string]any{_kMessage: "Design an experiment to test the hypothesis"},
+			_kDependsOn: []string{"hypothesis"},
 		},
 		{
-			"id": "review", "type": "wait",
+			_kID: "review", _kType: "wait",
 			"wait_for": map[string]any{
 				"signal_name": "expert-approval",
 				// 604800000000000 = 7 days in nanoseconds
 				"timeout":    reviewTimeoutNanos,
 				"on_timeout": "fail",
 			},
-			"depends_on": []string{"design"},
+			_kDependsOn: []string{"design"},
 		},
 		{
-			"id": "run-experiment", "type": "tool", "tool": "calculator",
-			"input":      map[string]any{"expression": "85 * 1.5 + 12"},
-			"depends_on": []string{"review"},
+			_kID: "run-experiment", _kType: "tool", "tool": "calculator",
+			_kInput:     map[string]any{"expression": "85 * 1.5 + 12"},
+			_kDependsOn: []string{"review"},
 		},
 		{
-			"id": "analyze", "type": "agent", "agent_id": "scientist",
-			"input":      map[string]any{"message": "Analyze the experimental results and draw conclusions"},
-			"depends_on": []string{"run-experiment"},
+			_kID: "analyze", _kType: _kAgent, _kAgentID: "scientist",
+			_kInput:     map[string]any{_kMessage: "Analyze the experimental results and draw conclusions"},
+			_kDependsOn: []string{"run-experiment"},
 		},
 		{
-			"id": "conclude", "type": "eval",
-			"input":      map[string]any{"condition": "hypothesis_supported"},
-			"depends_on": []string{"analyze"},
+			_kID: "conclude", _kType: "eval",
+			_kInput:     map[string]any{"condition": "hypothesis_supported"},
+			_kDependsOn: []string{"analyze"},
 		},
+	}
+}
+
+func writeStdoutf(format string, args ...any) {
+	if _, werr := fmt.Fprintf(os.Stdout, format, args...); werr != nil {
+		log.Fatalf("write stdout: %v", werr)
+	}
+}
+
+func writeStderrf(format string, args ...any) {
+	if _, werr := fmt.Fprintf(os.Stderr, format, args...); werr != nil {
+		log.Fatalf("write stderr: %v", werr)
+	}
+}
+
+func writeStdoutLine(args ...any) {
+	if _, werr := fmt.Fprintln(os.Stdout, args...); werr != nil {
+		log.Fatalf("write stdout: %v", werr)
 	}
 }

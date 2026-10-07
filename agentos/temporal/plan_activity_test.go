@@ -951,15 +951,15 @@ func (r *fakePlanRuntime) StartPlanNode(ctx context.Context, _, _ string, spec *
 	return r.Start(ctx, spec)
 }
 
-func (r *fakePlanRuntime) Signal(context.Context, string, *agentoscore.Signal) error {
+func (r *fakePlanRuntime) Signal(context.Context, agentos.RunRef, *agentoscore.Signal) error {
 	return nil
 }
 
-func (r *fakePlanRuntime) Status(context.Context, string) (agentos.RunStatus, error) {
+func (r *fakePlanRuntime) Status(context.Context, agentos.RunRef) (agentos.RunStatus, error) {
 	return agentos.RunStatus{RunID: "run-1", LifecycleState: "completed", UpdatedAt: time.Now()}, nil
 }
 
-func (r *fakePlanRuntime) Control(_ context.Context, _ string, control *agentoscore.ControlRequest) error {
+func (r *fakePlanRuntime) Control(_ context.Context, _ agentos.RunRef, control *agentoscore.ControlRequest) error {
 	r.control = control.Operation
 
 	return nil

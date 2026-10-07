@@ -102,6 +102,15 @@ func NewAgentRunFinishEvent(finishReason string, usage *Usage) *AgentRunFinishEv
 	}
 }
 
+// NewAgentRunCanceledEvent create an Agent run cancellation event. It is a
+// finish-phase lifecycle event, so the data plane projects it as a terminal
+// milestone that closes the run's timeline.
+func NewAgentRunCanceledEvent() *AgentRunCanceledEvent {
+	return &AgentRunCanceledEvent{
+		BaseEvent: NewBase(SourceSystem, PhaseFinish, ContentStatus, "agent.run.canceled"),
+	}
+}
+
 // NewPrepStageEvent create an initialization phase progress event.
 func NewPrepStageEvent(stage string, progress int) *PrepStageEvent {
 	return &PrepStageEvent{

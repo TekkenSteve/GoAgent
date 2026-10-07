@@ -11,6 +11,7 @@ import (
 // business domain.
 type LedgerEntryKind string
 
+// LedgerEntryKind values identifying durable audit facts.
 const (
 	LedgerEntryDecision  LedgerEntryKind = "decision"
 	LedgerEntryEvidence  LedgerEntryKind = "evidence"

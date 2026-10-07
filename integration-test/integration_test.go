@@ -8,19 +8,75 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"strings"
 	"testing"
 	"time"
 
+	"github.com/golang-jwt/jwt/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 const (
-	// Base settings
+	// Base settings.
 	attempts = 60
 
-	// Attempts connection
+	// Attempts connection.
 	requestTimeout = 5 * time.Second
+
+	// testAccountID is the tenant the suite acts as: the funded account
+	// seedTestAccount upserts, and the subject of every token it mints. The
+	// account a request runs in comes from the credential, never from the body
+	// (see internal/controller/restapi/v1/tenant.go), so these must agree.
+	testAccountID = "e2e-test-account"
 )
+
+// The variables the suite reads its authentication settings from. It is one
+// more client of the contract the app enforces: in development the app trusts
+// HS256 tokens signed with AUTH_HMAC_SECRET, so the suite mints one per
+// request. Compose passes these to the test container; they must match the
+// app's, and a drift shows up as a 401 on every protected route rather than as
+// a skipped check.
+//
+// The constants hold variable names, not values — hence the "Name" suffix,
+// which is also what keeps a credential scanner from reading the identifier as
+// a hardcoded secret.
+const (
+	envAuthHMACName     = "AUTH_HMAC_SECRET"
+	envAuthIssuerName   = "AUTH_ISSUER"
+	envAuthAudienceName = "AUTH_AUDIENCE"
+)
+
+var errAuthConfigMissing = errors.New("auth configuration is missing")
+
+// authToken mints the bearer token the stack accepts: the test account as the
+// subject, an expiry the verifier requires, and the issuer and audience the app
+// is configured to check when they are set.
+func authToken() (string, error) {
+	secret := strings.TrimSpace(os.Getenv(envAuthHMACName))
+	if secret == "" {
+		return "", fmt.Errorf("%w: set %s", errAuthConfigMissing, envAuthHMACName)
+	}
+
+	claims := jwt.MapClaims{
+		"sub": testAccountID,
+		"exp": time.Now().Add(time.Hour).Unix(),
+	}
+
+	if issuer := strings.TrimSpace(os.Getenv(envAuthIssuerName)); issuer != "" {
+		claims["iss"] = issuer
+	}
+
+	if audience := strings.TrimSpace(os.Getenv(envAuthAudienceName)); audience != "" {
+		claims["aud"] = audience
+	}
+
+	signed, err := jwt.NewWithClaims(jwt.SigningMethodHS256, claims).SignedString([]byte(secret))
+	if err != nil {
+		return "", fmt.Errorf("sign integration token: %w", err)
+	}
+
+	return signed, nil
+}
 
 // host returns the integration test target host.
 // Override via INTEGRATION_TEST_HOST env var (e.g. "localhost" when running from host).
@@ -74,6 +130,13 @@ func doWebRequestWithTimeout(ctx context.Context, method, url string, body io.Re
 
 	req.Header.Set("Content-Type", "application/json")
 
+	token, err := authToken()
+	if err != nil {
+		return nil, err
+	}
+
+	req.Header.Set("Authorization", "Bearer "+token)
+
 	return http.DefaultClient.Do(req)
 }
 
@@ -87,7 +150,11 @@ func getHealthCheck(url string) (int, error) {
 		return -1, err
 	}
 
-	defer resp.Body.Close()
+	defer func() {
+		if closeErr := resp.Body.Close(); closeErr != nil {
+			err = errors.Join(err, fmt.Errorf("health check: close response body: %w", closeErr))
+		}
+	}()
 
 	return resp.StatusCode, nil
 }
@@ -148,20 +215,24 @@ func seedTestAccount() error {
 	// Upsert the test account with a $100 balance
 	_, err = pool.Exec(ctx, `
 		INSERT INTO credit_accounts (account_id, balance, currency)
-		VALUES ('e2e-test-account', 100, 'USD')
+		VALUES ($1, 100, 'USD')
 		ON CONFLICT (account_id)
 		DO UPDATE SET balance = 100, version = credit_accounts.version + 1, updated_at = NOW()
-	`)
+	`, testAccountID)
 	if err != nil {
 		return fmt.Errorf("seed credit_account: %w", err)
 	}
 
-	log.Printf("Integration tests: seeded e2e-test-account with $100")
+	log.Printf("Integration tests: seeded %s with $100", testAccountID)
 
 	return nil
 }
 
 func TestMain(m *testing.M) {
+	if _, err := authToken(); err != nil {
+		log.Fatalf("Integration tests: %v", err)
+	}
+
 	err := healthCheck(attempts)
 	if err != nil {
 		log.Fatalf("Integration tests: httpURL %s is not available: %s", httpURL(), err)

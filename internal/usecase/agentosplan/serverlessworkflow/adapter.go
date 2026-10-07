@@ -1,3 +1,4 @@
+// Package serverlessworkflow adapts AgentOS plans to Serverless Workflow documents.
 package serverlessworkflow
 
 import (
@@ -12,9 +13,13 @@ import (
 )
 
 const (
-	DSLVersion            = "1.0.3"
-	AgentOSRunPlanKey     = "agentos.io/run_plan"
-	AgentOSPlanNodeKey    = "agentos.io/plan_node"
+	// DSLVersion is the Serverless Workflow DSL version emitted and accepted by this adapter.
+	DSLVersion = "1.0.3"
+	// AgentOSRunPlanKey is the extension key carrying the embedded RunPlanSpec.
+	AgentOSRunPlanKey = "agentos.io/run_plan"
+	// AgentOSPlanNodeKey is the extension key carrying an embedded PlanNodeSpec.
+	AgentOSPlanNodeKey = "agentos.io/plan_node"
+	// AgentOSRunCall is the call name of the AgentOS run task.
 	AgentOSRunCall        = "agentos.run"
 	defaultExportVersion  = "1.0.0"
 	defaultExportName     = "agentos-run-plan"
@@ -188,6 +193,7 @@ func UnmarshalYAML(data []byte) (Workflow, error) {
 	return workflow, nil
 }
 
+// MarshalJSON encodes the task list as the Serverless Workflow do-array of one-key task objects.
 func (tasks TaskList) MarshalJSON() ([]byte, error) {
 	rawTasks := make([]map[string]TaskDefinition, 0, len(tasks))
 	for i := range tasks {
@@ -202,6 +208,7 @@ func (tasks TaskList) MarshalJSON() ([]byte, error) {
 	return json.Marshal(rawTasks)
 }
 
+// UnmarshalJSON decodes the Serverless Workflow do-array of one-key task objects into a task list.
 func (tasks *TaskList) UnmarshalJSON(data []byte) error {
 	rawTasks, err := agentosplan.DecodeWireJSON[[]map[string]TaskDefinition](data)
 	if err != nil {

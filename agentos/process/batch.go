@@ -114,6 +114,7 @@ type WorksetScope struct {
 	Limit          int         `json:"limit,omitempty"`
 }
 
+// Workset lifecycle state constants.
 const (
 	WorksetPending   = "pending"
 	WorksetRunning   = "running"

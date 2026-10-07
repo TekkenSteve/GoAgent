@@ -47,6 +47,8 @@ func TestPlanWorkflowRunsThroughMixedBackendAdapters(t *testing.T) {
 	env.RegisterActivityWithOptions(adapter.activities.ControlPlanNodeActivity, activity.RegisterOptions{Name: ControlPlanNodeActivityName})
 	env.RegisterActivityWithOptions(adapter.activities.PublishPlanArtifactsActivity, activity.RegisterOptions{Name: PublishPlanArtifactsActivityName})
 
+	registerNexusRunChain(t, env, adapter.activities.Runtime, adapter.activities.PlanNodeStarter)
+
 	createPlanForWorkflowTest(t, adapter.planStore, &adapter.spec)
 	env.ExecuteWorkflow(PlanWorkflow, planWorkflowInputForTest(&adapter.spec))
 
@@ -102,17 +104,21 @@ func newMixedBackendAdapter(t *testing.T, planID, httpNodeID, summaryArtifact st
 	nativeBackend := &mixedAdapterNativeBackend{}
 	temporalClient := &mixedAdapterTemporalClient{runID: "temporal-run-id", queryValue: &mixedAdapterEncodedStatus{status: agentos.RunStatus{RunID: "run-temporal", LifecycleState: "completed", UpdatedAt: time.Date(2026, 6, 19, 12, 0, 0, 0, time.UTC)}}}
 	temporalConfig := temporalexternal.Config{Name: temporalRef.Name, TaskQueue: "langgraph-task-queue", WorkflowType: "langgraph.agent.v1", QueryType: "agentos_status", Signals: temporalexternal.SignalNames{Cancel: "cancel", Defaults: map[agentoscore.SignalType]string{agentoscore.SignalUserMessage: "user_input"}}}
-	temporalBackend, err := temporalexternal.NewBackend(temporalClient, nil, &temporalConfig)
+	temporalBackend, err := temporalexternal.NewBackend(temporalClient, nil, nil, &temporalConfig)
 	require.NoError(t, err)
 
 	artifactStore := agentosplan.NewMemoryArtifactStore()
 	httpServer := newMixedAdapterHTTPServer(t, artifactStore, &mixedAdapterArtifactOutput{PlanID: planID, NodeID: httpNodeID, ArtifactName: summaryArtifact, ArtifactID: "artifact-http-summary", Payload: map[string]any{"body": map[string]any{"title": "mixed backend artifact"}}})
-	httpBackend, err := httpbackend.NewBackend(httpServer.Client(), nil, httpbackend.Config{Name: httpRef.Name, Endpoint: httpServer.URL})
+	httpBackend, err := httpbackend.NewBackend(httpServer.Client(), nil, nil, httpbackend.Config{Name: httpRef.Name, Endpoint: httpServer.URL})
 	require.NoError(t, err)
 	grpcServer := newMixedAdapterGRPCServer(t)
-	grpcBackend, err := grpcbackend.NewBackend(nil, &grpcbackend.Config{Name: grpcRef.Name, Target: grpcServer.target, Insecure: true})
+	grpcBackend, err := grpcbackend.NewBackend(nil, nil, &grpcbackend.Config{Name: grpcRef.Name, Target: grpcServer.target, Insecure: true})
 	require.NoError(t, err)
-	t.Cleanup(func() { _ = grpcBackend.Close() })
+	t.Cleanup(func() {
+		if err := grpcBackend.Close(); err != nil {
+			t.Errorf("close grpc backend: %v", err)
+		}
+	})
 
 	registry := agentosruntime.NewRegistry()
 	require.NoError(t, registry.Register(nativeRef, nativeBackend))
@@ -175,16 +181,16 @@ func (r routerRuntime) StartPlanNode(ctx context.Context, planID, nodeID string,
 	return r.router.StartPlanNode(ctx, planID, nodeID, spec)
 }
 
-func (r routerRuntime) Signal(ctx context.Context, runID string, signal *agentoscore.Signal) error {
-	return r.router.Signal(ctx, runID, signal)
+func (r routerRuntime) Signal(ctx context.Context, ref agentos.RunRef, signal *agentoscore.Signal) error {
+	return r.router.Signal(ctx, ref, signal)
 }
 
-func (r routerRuntime) Status(ctx context.Context, runID string) (agentos.RunStatus, error) {
-	return r.router.Status(ctx, runID)
+func (r routerRuntime) Status(ctx context.Context, ref agentos.RunRef) (agentos.RunStatus, error) {
+	return r.router.Status(ctx, ref)
 }
 
-func (r routerRuntime) Control(ctx context.Context, runID string, control *agentoscore.ControlRequest) error {
-	return r.router.Control(ctx, runID, control)
+func (r routerRuntime) Control(ctx context.Context, ref agentos.RunRef, control *agentoscore.ControlRequest) error {
+	return r.router.Control(ctx, ref, control)
 }
 
 func (r routerRuntime) Subscribe(ctx context.Context, scope agentoscore.StreamScope) (agentoscore.Subscription, error) {
@@ -472,6 +478,12 @@ func (r mixedAdapterWorkflowRun) GetID() string {
 }
 
 func (r mixedAdapterWorkflowRun) GetRunID() string {
+	return r.runID
+}
+
+// GetFirstExecutionRunID satisfies the SDK's WorkflowRun contract; these fakes
+// model a single execution, so it matches GetRunID.
+func (r mixedAdapterWorkflowRun) GetFirstExecutionRunID() string {
 	return r.runID
 }
 

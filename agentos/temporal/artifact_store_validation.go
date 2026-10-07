@@ -1,3 +1,4 @@
+// Package temporal implements AgentOS workflows and activities on Temporal.
 package temporal
 
 import (

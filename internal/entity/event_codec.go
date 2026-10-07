@@ -9,8 +9,11 @@ import (
 )
 
 var (
-	ErrMissingEventType    = errors.New("event_codec: missing event_type discriminator")
-	ErrUnknownEventType    = errors.New("event_codec: unknown event type")
+	// ErrMissingEventType is returned when the event payload has no event_type discriminator.
+	ErrMissingEventType = errors.New("event_codec: missing event_type discriminator")
+	// ErrUnknownEventType is returned when event_type is not registered with the codec.
+	ErrUnknownEventType = errors.New("event_codec: unknown event type")
+	// ErrUnexpectedEventType is returned when the type registered for event_type does not implement StreamEvent.
 	ErrUnexpectedEventType = errors.New("event_codec: unexpected event type")
 )
 

@@ -11,9 +11,12 @@ import (
 )
 
 var (
+	// ErrMCPNotRegistered is returned when a server name is not registered with the manager.
 	ErrMCPNotRegistered = errors.New("mcp server not registered")
-	ErrMCPToolNotFound  = errors.New("mcp tool not found")
-	ErrMCPNotConnected  = errors.New("mcp server not connected")
+	// ErrMCPToolNotFound is returned when an MCP tool is not among the discovered tools.
+	ErrMCPToolNotFound = errors.New("mcp tool not found")
+	// ErrMCPNotConnected is returned when the MCP server hosting a tool is not connected.
+	ErrMCPNotConnected = errors.New("mcp server not connected")
 )
 
 // mcpToolEntry tracks a tool discovered from an MCP server.
@@ -32,15 +35,23 @@ type mcpToolEntry struct {
 // wrappers registered with the toolkit registry.
 type Manager struct {
 	mu       sync.RWMutex
+	policy   *TransportPolicy         // what a server config may make the host do
 	cfgs     map[string]*ServerConfig // registered server configs (not connected)
 	servers  map[string]*Client       // active connections (JIT established)
 	toolMap  map[string]mcpToolEntry
 	registry *toolkit.ToolRegistry // optional: auto-register tools on connect → server binding
 }
 
-// NewManager creates an empty MCP manager with no connections.
-func NewManager() *Manager {
+// NewManager creates an MCP manager governed by the transport policy. A nil
+// policy is treated as the zero declarations — nothing runs, nothing dials
+// anywhere private — so an omission in wiring fails closed, not open.
+func NewManager(policy *TransportPolicy) *Manager {
+	if policy == nil {
+		policy = NewTransportPolicy(nil)
+	}
+
 	return &Manager{
+		policy:  policy,
 		cfgs:    make(map[string]*ServerConfig),
 		servers: make(map[string]*Client),
 		toolMap: make(map[string]mcpToolEntry),
@@ -71,7 +82,13 @@ func (m *Manager) SetRegistry(registry *toolkit.ToolRegistry) {
 // RegisterServer stores a server configuration for later JIT connection.
 // No connection is made until Connect() or ConnectDynamic() is called.
 func (m *Manager) RegisterServer(cfg *ServerConfig) error {
+	// Shape first, privilege second: an unshaped config has nothing to
+	// authorize yet.
 	if err := cfg.Validate(); err != nil {
+		return err
+	}
+
+	if err := m.policy.Authorize(cfg); err != nil {
 		return err
 	}
 
@@ -112,6 +129,10 @@ func (m *Manager) ConnectDynamic(ctx context.Context, cfg *ServerConfig) ([]enti
 		return nil, err
 	}
 
+	if err := m.policy.Authorize(cfg); err != nil {
+		return nil, err
+	}
+
 	m.mu.RLock()
 	_, hasClient := m.servers[cfg.Name]
 	m.mu.RUnlock()
@@ -130,16 +151,14 @@ func (m *Manager) ConnectDynamic(ctx context.Context, cfg *ServerConfig) ([]enti
 
 // connectLocked performs the actual JIT connection (caller must NOT hold write lock).
 func (m *Manager) connectLocked(ctx context.Context, cfg *ServerConfig) ([]entity.ToolDef, error) {
-	client := NewClient(cfg)
+	client := NewClient(cfg, m.policy)
 	if err := client.Start(ctx); err != nil {
 		return nil, fmt.Errorf("connect mcp server %q: %w", cfg.Name, err)
 	}
 
 	tools, err := client.ListTools(ctx)
 	if err != nil {
-		client.Close()
-
-		return nil, fmt.Errorf("discover tools from %q: %w", cfg.Name, err)
+		return nil, errors.Join(fmt.Errorf("discover tools from %q: %w", cfg.Name, err), client.Close())
 	}
 
 	m.mu.Lock()

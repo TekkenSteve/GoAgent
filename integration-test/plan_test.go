@@ -278,7 +278,12 @@ func startAgentOSPlanSpec(t *testing.T, spec *agentos.RunPlanSpec) planStatus {
 	if err != nil {
 		t.Fatalf("startAgentOSPlan: request failed: %v", err)
 	}
-	defer resp.Body.Close()
+
+	t.Cleanup(func() {
+		if err := resp.Body.Close(); err != nil {
+			t.Errorf("close response body: %v", err)
+		}
+	})
 
 	if resp.StatusCode != http.StatusAccepted {
 		t.Fatalf("startAgentOSPlan: expected 202, got %d: %s", resp.StatusCode, readResponseBody(t, resp.Body))
@@ -412,7 +417,12 @@ func requireAgentOSPlanConsole(t *testing.T, planID string) {
 	if err != nil {
 		t.Fatalf("requireAgentOSPlanConsole: request failed: %v", err)
 	}
-	defer resp.Body.Close()
+
+	t.Cleanup(func() {
+		if err := resp.Body.Close(); err != nil {
+			t.Errorf("close response body: %v", err)
+		}
+	})
 
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("requireAgentOSPlanConsole: expected 200, got %d: %s", resp.StatusCode, readResponseBody(t, resp.Body))
@@ -424,7 +434,6 @@ func controlAgentOSPlan(t *testing.T, planID string, operation agentoscore.Contr
 
 	body, err := json.Marshal(map[string]any{
 		"operation":       operation,
-		"account_id":      agentOSPlanAccountID,
 		"project_id":      agentOSPlanProjectID,
 		"idempotency_key": idempotencyKey,
 		"actor_id":        "integration-test",
@@ -441,7 +450,12 @@ func controlAgentOSPlan(t *testing.T, planID string, operation agentoscore.Contr
 	if err != nil {
 		t.Fatalf("controlAgentOSPlan: request failed: %v", err)
 	}
-	defer resp.Body.Close()
+
+	t.Cleanup(func() {
+		if err := resp.Body.Close(); err != nil {
+			t.Errorf("close response body: %v", err)
+		}
+	})
 
 	if resp.StatusCode != http.StatusAccepted {
 		t.Fatalf("controlAgentOSPlan: expected 202, got %d: %s", resp.StatusCode, readResponseBody(t, resp.Body))
@@ -458,7 +472,12 @@ func getAgentOSPlanJSON(t *testing.T, endpoint string, out any) {
 	if err != nil {
 		t.Fatalf("getAgentOSPlanJSON: request failed: %v", err)
 	}
-	defer resp.Body.Close()
+
+	t.Cleanup(func() {
+		if err := resp.Body.Close(); err != nil {
+			t.Errorf("close response body: %v", err)
+		}
+	})
 
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("getAgentOSPlanJSON: expected 200, got %d: %s", resp.StatusCode, readResponseBody(t, resp.Body))
@@ -469,9 +488,11 @@ func getAgentOSPlanJSON(t *testing.T, endpoint string, out any) {
 	}
 }
 
+// planScopedPath addresses a plan sub-resource inside a tenant scope. Only the
+// project is named: the account comes from the credential, and a request that
+// carried one would be a self-reported identity.
 func planScopedPath(planID, suffix string) string {
 	values := url.Values{}
-	values.Set("account_id", agentOSPlanAccountID)
 	values.Set("project_id", agentOSPlanProjectID)
 
 	return fmt.Sprintf("%s/agentos/plans/%s/%s?%s", basePathV1(), planID, suffix, values.Encode())

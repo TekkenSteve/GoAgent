@@ -1,3 +1,4 @@
+// Package main is a mock LLM endpoint used by integration tests.
 package main
 
 import (

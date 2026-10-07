@@ -1,3 +1,4 @@
+// Package grpcbackend implements an AgentOS backend over gRPC.
 package grpcbackend
 
 import (
@@ -20,11 +21,12 @@ var errGRPCBackendSubscriberNotConfigured = errors.New("grpc backend: event subs
 type Backend struct {
 	conn       *grpc.ClientConn
 	subscriber agentosruntime.EventSubscriber
+	lifecycle  agentosruntime.LifecyclePublisher
 	config     Config
 }
 
 // NewBackend creates a gRPC backend.
-func NewBackend(subscriber agentosruntime.EventSubscriber, config *Config) (*Backend, error) {
+func NewBackend(subscriber agentosruntime.EventSubscriber, lifecycle agentosruntime.LifecyclePublisher, config *Config) (*Backend, error) {
 	if err := config.normalize(); err != nil {
 		return nil, err
 	}
@@ -50,6 +52,7 @@ func NewBackend(subscriber agentosruntime.EventSubscriber, config *Config) (*Bac
 	return &Backend{
 		conn:       conn,
 		subscriber: subscriber,
+		lifecycle:  lifecycle,
 		config:     *config,
 	}, nil
 }
@@ -82,6 +85,10 @@ func (b *Backend) Start(ctx context.Context, spec *agentos.RunSpec) (agentos.Run
 
 	if status.RunID == "" {
 		status.RunID = spec.RunID
+	}
+
+	if err := b.publishStarted(ctx, spec, &status); err != nil {
+		return agentos.RunStatus{}, err
 	}
 
 	return status, nil
@@ -142,6 +149,10 @@ func (b *Backend) Status(ctx context.Context, runID string) (agentos.RunStatus, 
 		status.RunID = runID
 	}
 
+	if err := b.publishStatus(ctx, runID, &status); err != nil {
+		return agentos.RunStatus{}, err
+	}
+
 	return status, nil
 }
 
@@ -164,6 +175,28 @@ func (b *Backend) Capabilities() agentosruntime.BackendCapabilities {
 		SupportsCancel:            true,
 		SupportsStreaming:         b.subscriber != nil,
 	}
+}
+
+// publishStarted mirrors a successful Start onto the data plane. A nil
+// lifecycle adapter (unwired backend) degrades to a no-op. The error means the
+// RUN_STARTED milestone could not be made durable and the caller must fail.
+func (b *Backend) publishStarted(ctx context.Context, spec *agentos.RunSpec, status *agentos.RunStatus) error {
+	if b.lifecycle == nil {
+		return nil
+	}
+
+	return b.lifecycle.PublishStarted(ctx, spec, status)
+}
+
+// publishStatus mirrors a Status observation onto the data plane, publishing
+// the run's terminal milestone once the remote reports one. The error
+// semantics match publishStarted.
+func (b *Backend) publishStatus(ctx context.Context, runID string, status *agentos.RunStatus) error {
+	if b.lifecycle == nil {
+		return nil
+	}
+
+	return b.lifecycle.PublishStatus(ctx, runID, status)
 }
 
 // Close closes the underlying gRPC client connection.

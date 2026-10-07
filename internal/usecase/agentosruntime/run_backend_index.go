@@ -9,8 +9,10 @@ import (
 )
 
 const (
+	// RunBackendLifecycleClaiming is the lifecycle state of a run that has been claimed but not yet created.
 	RunBackendLifecycleClaiming = "claiming"
-	RunBackendLifecycleCreated  = "created"
+	// RunBackendLifecycleCreated is the lifecycle state of a run after it has been created.
+	RunBackendLifecycleCreated = "created"
 )
 
 // RunBackendIndexRecordFromRunSpec builds the ownership record for a

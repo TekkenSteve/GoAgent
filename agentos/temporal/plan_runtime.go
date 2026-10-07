@@ -9,9 +9,8 @@ import (
 
 	agentos "github.com/TekkenSteve/GoAgent/agentos/control"
 	agentoscore "github.com/TekkenSteve/GoAgent/agentos/core"
+	"github.com/TekkenSteve/GoAgent/internal/agentfw/orchestration"
 	"github.com/TekkenSteve/GoAgent/internal/pkg/postgres"
-	goredis "github.com/TekkenSteve/GoAgent/internal/pkg/redis"
-	"github.com/TekkenSteve/GoAgent/internal/repo/agentos/planstream"
 	artifactrepo "github.com/TekkenSteve/GoAgent/internal/repo/artifact"
 	temporalrepo "github.com/TekkenSteve/GoAgent/internal/repo/persistent"
 	"github.com/TekkenSteve/GoAgent/internal/usecase/agentosplan"
@@ -22,32 +21,43 @@ import (
 type planRuntime struct {
 	temporalClient planTemporalClient
 	closeTemporal  bool
-	redis          *goredis.Redis
 	postgres       *postgres.Postgres
 	planEvents     agentosplan.PlanEventStore
 	planLiveEvents agentosplan.PlanEventSubscriber
+	planPublisher  agentosplan.PlanEventPublisher
 	planIndex      agentosplan.PlanIndex
 	artifactStore  agentosplan.ArtifactStore
 	commandStore   agentosplan.PlanCommandStore
 	auditStore     agentosplan.AuditStore
 	taskQueue      string
 	taskQueues     *TaskQueues
+	nexusEndpoint  string
+	nexusPeers     map[string]string
 }
 
 var (
 	errPlanRuntimePlanIndexRequired      = errors.New("agentos temporal plan runtime: plan index is not configured")
 	errPlanRuntimePlanEventStoreRequired = errors.New("agentos temporal plan runtime: plan event store is not configured")
+	errPlanRuntimePlanPublisherRequired  = errors.New("agentos temporal plan runtime: plan event publisher is not configured")
 	errPlanRuntimeArtifactStoreRequired  = errors.New("agentos temporal plan runtime: artifact store is not configured")
 	errPlanRuntimeCommandStoreRequired   = errors.New("agentos temporal plan runtime: plan command store is not configured")
 	errPlanRuntimeAuditStoreRequired     = errors.New("agentos temporal plan runtime: audit store is not configured")
 
-	ErrPlanRuntimePostgresURLRequired              = errors.New("agentos temporal plan runtime: postgres url is required")
-	ErrPlanRuntimeArtifactStoreBackendRequired     = errors.New("agentos temporal plan runtime: artifact store backend is required")
-	ErrPlanRuntimeArtifactStoreBackendUnknown      = errors.New("agentos temporal plan runtime: artifact store backend is unknown")
-	ErrPlanRuntimeArtifactStoreLocalRootRequired   = errors.New("agentos temporal plan runtime: artifact local root is required")
-	ErrPlanRuntimeArtifactStoreS3BucketRequired    = errors.New("agentos temporal plan runtime: artifact s3 bucket is required")
-	ErrPlanRuntimeArtifactStoreS3RegionRequired    = errors.New("agentos temporal plan runtime: artifact s3 region is required")
+	// ErrPlanRuntimePostgresURLRequired reports a missing Postgres URL in the plan runtime config.
+	ErrPlanRuntimePostgresURLRequired = errors.New("agentos temporal plan runtime: postgres url is required")
+	// ErrPlanRuntimeArtifactStoreBackendRequired reports a missing artifact store backend in the plan runtime config.
+	ErrPlanRuntimeArtifactStoreBackendRequired = errors.New("agentos temporal plan runtime: artifact store backend is required")
+	// ErrPlanRuntimeArtifactStoreBackendUnknown reports an unknown artifact store backend in the plan runtime config.
+	ErrPlanRuntimeArtifactStoreBackendUnknown = errors.New("agentos temporal plan runtime: artifact store backend is unknown")
+	// ErrPlanRuntimeArtifactStoreLocalRootRequired reports a missing artifact local root in the plan runtime config.
+	ErrPlanRuntimeArtifactStoreLocalRootRequired = errors.New("agentos temporal plan runtime: artifact local root is required")
+	// ErrPlanRuntimeArtifactStoreS3BucketRequired reports a missing artifact S3 bucket in the plan runtime config.
+	ErrPlanRuntimeArtifactStoreS3BucketRequired = errors.New("agentos temporal plan runtime: artifact s3 bucket is required")
+	// ErrPlanRuntimeArtifactStoreS3RegionRequired reports a missing artifact S3 region in the plan runtime config.
+	ErrPlanRuntimeArtifactStoreS3RegionRequired = errors.New("agentos temporal plan runtime: artifact s3 region is required")
+	// ErrPlanRuntimeArtifactStoreS3AccessKeyRequired reports a missing artifact S3 access key ID in the plan runtime config.
 	ErrPlanRuntimeArtifactStoreS3AccessKeyRequired = errors.New("agentos temporal plan runtime: artifact s3 access key id is required")
+	// ErrPlanRuntimeArtifactStoreS3SecretKeyRequired reports a missing artifact S3 secret access key in the plan runtime config.
 	ErrPlanRuntimeArtifactStoreS3SecretKeyRequired = errors.New("agentos temporal plan runtime: artifact s3 secret access key is required")
 )
 
@@ -140,23 +150,18 @@ func newPlanRuntimeWithClient(ctx context.Context, cfg *RuntimeConfig, c planTem
 		closeTemporal:  closeTemporal,
 		taskQueue:      fwTemporal.TaskQueues.PlanControl,
 		taskQueues:     &cfg.TemporalTaskQueues,
+		nexusEndpoint:  fwTemporal.NexusEndpoint,
+		nexusPeers:     fwTemporal.NexusPeers,
 	}
 
-	if cfg.RedisURL != "" {
-		rdb, err := goredis.New(ctx, cfg.RedisURL)
-		if err != nil {
-			return nil, fmt.Errorf("agentos temporal plan runtime redis: %w", err)
-		}
-
-		rt.redis = rdb
-		rt.planLiveEvents = planstream.NewRedisPlanEventStream(rdb)
-	}
+	// The live plan event tail rides the assembled data-plane bus (planbus).
+	// nil subscriber degrades SubscribePlan to pure Postgres replay below.
+	rt.planLiveEvents = cfg.PlanEventSubscriber
+	rt.planPublisher = cfg.PlanEventPublisher
 
 	pg, err := newRuntimePostgres(cfg)
 	if err != nil {
-		_ = rt.Close()
-
-		return nil, fmt.Errorf("agentos temporal plan runtime postgres: %w", err)
+		return nil, errors.Join(fmt.Errorf("agentos temporal plan runtime postgres: %w", err), rt.Close())
 	}
 
 	rt.postgres = pg
@@ -170,9 +175,7 @@ func newPlanRuntimeWithClient(ctx context.Context, cfg *RuntimeConfig, c planTem
 
 	blobStore, err := artifactrepo.NewBlobStore(ctx, &artifactConfig)
 	if err != nil {
-		_ = rt.Close()
-
-		return nil, fmt.Errorf("agentos temporal plan runtime artifact store: %w", err)
+		return nil, errors.Join(fmt.Errorf("agentos temporal plan runtime artifact store: %w", err), rt.Close())
 	}
 
 	rt.artifactStore = temporalrepo.NewAgentOSArtifactRepo(pg, blobStore)
@@ -389,6 +392,118 @@ func (r *planRuntime) ControlPlan(ctx context.Context, ref agentos.PlanRef, cont
 	return nil
 }
 
+// IngestExternalPlanEvent records a backend-originated node event in the
+// durable AgentOS plan stream, then publishes the persisted event to live
+// subscribers. The backend event ID is scoped to the plan as its idempotency
+// key; AgentOS assigns the canonical event sequence and event ID.
+func (r *planRuntime) IngestExternalPlanEvent(ctx context.Context, incoming *agentos.ExternalPlanEvent) (agentos.PlanEvent, error) {
+	if r == nil {
+		return agentos.PlanEvent{}, errPlanRuntimeNotConfigured
+	}
+
+	if r.planEvents == nil {
+		return agentos.PlanEvent{}, errPlanRuntimePlanEventStoreRequired
+	}
+
+	if r.planPublisher == nil {
+		return agentos.PlanEvent{}, errPlanRuntimePlanPublisherRequired
+	}
+
+	if err := validateExternalPlanEvent(incoming); err != nil {
+		return agentos.PlanEvent{}, err
+	}
+
+	spec, _, err := r.authorizePlan(ctx, incoming.Plan)
+	if err != nil {
+		return agentos.PlanEvent{}, err
+	}
+
+	if err := validateExternalPlanNode(&spec, incoming); err != nil {
+		return agentos.PlanEvent{}, err
+	}
+
+	event := agentos.PlanEvent{
+		Event:           incoming.Event,
+		PlanID:          incoming.Plan.PlanID,
+		AccountID:       incoming.Plan.AccountID,
+		ProjectID:       incoming.Plan.ProjectID,
+		NodeID:          incoming.NodeID,
+		ExternalEventID: incoming.Event.EventID,
+	}
+	// The durable event store owns this identity. The external identity remains
+	// available through ExternalEventID and is used for idempotency.
+	event.EventID = ""
+	event.Sequence = 0
+
+	stored, err := r.planEvents.AppendPlanEvent(ctx, &event, incoming.Event.EventID)
+	if err != nil {
+		return agentos.PlanEvent{}, err
+	}
+
+	if err := r.planPublisher.PublishPlanEvent(ctx, &stored); err != nil {
+		return agentos.PlanEvent{}, fmt.Errorf("agentos temporal plan runtime: publish ingested event: %w", err)
+	}
+
+	return stored, nil
+}
+
+func validateExternalPlanEvent(incoming *agentos.ExternalPlanEvent) error {
+	if incoming == nil {
+		return fmt.Errorf("%w: external plan event is required", agentoscore.ErrInvalidPlanEvent)
+	}
+
+	if err := agentosplan.ValidatePlanRef(incoming.Plan); err != nil {
+		return err
+	}
+
+	if incoming.NodeID == "" {
+		return fmt.Errorf("%w: external plan event node id is required", agentoscore.ErrInvalidPlanEvent)
+	}
+
+	if incoming.Event.EventID == "" {
+		return fmt.Errorf("%w: external plan event id is required", agentoscore.ErrInvalidPlanEvent)
+	}
+
+	if incoming.Event.EventType == "" {
+		return fmt.Errorf("%w: external plan event type is required", agentoscore.ErrInvalidPlanEvent)
+	}
+
+	if incoming.Event.RunID == "" {
+		return fmt.Errorf("%w: external plan event run id is required", agentoscore.ErrInvalidPlanEvent)
+	}
+
+	if incoming.Event.Source == "" {
+		return fmt.Errorf("%w: external plan event source is required", agentoscore.ErrInvalidPlanEvent)
+	}
+
+	if incoming.Event.Timestamp.IsZero() {
+		return fmt.Errorf("%w: external plan event timestamp is required", agentoscore.ErrInvalidPlanEvent)
+	}
+
+	if incoming.Event.Sequence <= 0 {
+		return fmt.Errorf("%w: external plan event sequence must be positive", agentoscore.ErrInvalidPlanEvent)
+	}
+
+	return nil
+}
+
+func validateExternalPlanNode(spec *agentos.RunPlanSpec, incoming *agentos.ExternalPlanEvent) error {
+	for i := range spec.Nodes {
+		node := &spec.Nodes[i]
+		if node.NodeID != incoming.NodeID {
+			continue
+		}
+
+		if node.Run.RunID != incoming.Event.RunID {
+			return fmt.Errorf("%w: external event run %q does not match node %q run %q", agentoscore.ErrInvalidPlanEvent, incoming.Event.RunID, incoming.NodeID, node.Run.RunID)
+		}
+
+		return nil
+	}
+
+	return fmt.Errorf("%w: external event node %q is not in plan %q", agentoscore.ErrInvalidPlanEvent, incoming.NodeID, spec.PlanID)
+}
+
 func (r *planRuntime) validateControlPlanRequest(ctx context.Context, ref agentos.PlanRef, control *agentoscore.ControlRequest) error {
 	if err := agentosplan.ValidatePlanRef(ref); err != nil {
 		return err
@@ -469,9 +584,7 @@ func (r *planRuntime) SubscribePlan(ctx context.Context, scope *agentos.PlanStre
 
 	catchUpEvents, err := r.planEvents.ListPlanEvents(ctx, &catchUpScope, 0)
 	if err != nil {
-		_ = live.Close()
-
-		return nil, err
+		return nil, errors.Join(err, live.Close())
 	}
 
 	replayEvents := append(append([]agentos.PlanEvent(nil), events...), catchUpEvents...)
@@ -632,7 +745,7 @@ func (r *planRuntime) RecoverPlanCommands(ctx context.Context, limit int) (PlanC
 		return PlanCommandRecoveryResult{}, errPlanRuntimeNotConfigured
 	}
 
-	reconciler := newPlanCommandReconciler(r.temporalClient, r.taskQueues, r.commandStore, r.auditStore, r.planIndex)
+	reconciler := newPlanCommandReconciler(r.temporalClient, r.taskQueues, r.nexusEndpoint, r.nexusPeers, r.commandStore, r.auditStore, r.planIndex)
 
 	return reconciler.Recover(ctx, limit)
 }
@@ -642,10 +755,6 @@ func (r *planRuntime) Close() error {
 
 	if r.closeTemporal && r.temporalClient != nil {
 		r.temporalClient.Close()
-	}
-
-	if r.redis != nil {
-		errs = append(errs, r.redis.Close())
 	}
 
 	if r.postgres != nil {
@@ -700,10 +809,18 @@ func planWorkflowID(planID string) string {
 }
 
 func (r *planRuntime) executePlanWorkflow(ctx context.Context, spec *agentos.RunPlanSpec) error {
-	return executePlanWorkflow(ctx, r.temporalClient, r.taskQueue, r.taskQueues, spec)
+	return executePlanWorkflow(ctx, r.temporalClient, r.taskQueue, r.taskQueues, r.nexusEndpoint, r.nexusPeers, spec)
 }
 
-func executePlanWorkflow(ctx context.Context, temporalClient planTemporalClient, taskQueue string, taskQueues *TaskQueues, spec *agentos.RunPlanSpec) error {
+func executePlanWorkflow(
+	ctx context.Context,
+	temporalClient planTemporalClient,
+	taskQueue string,
+	taskQueues *TaskQueues,
+	nexusEndpoint string,
+	nexusPeers map[string]string,
+	spec *agentos.RunPlanSpec,
+) error {
 	if temporalClient == nil {
 		return errPlanRuntimeTemporalClientNotConfigured
 	}
@@ -713,8 +830,9 @@ func executePlanWorkflow(ctx context.Context, temporalClient planTemporalClient,
 	}
 
 	options := client.StartWorkflowOptions{
-		ID:        planWorkflowID(spec.PlanID),
-		TaskQueue: taskQueue,
+		ID:                    planWorkflowID(spec.PlanID),
+		TaskQueue:             taskQueue,
+		TypedSearchAttributes: orchestration.SearchAttributesForRun(spec.PlanID, "running"),
 	}
 
 	_, err := temporalClient.ExecuteWorkflow(ctx, &options, PlanWorkflowName, &planWorkflowInput{
@@ -723,6 +841,8 @@ func executePlanWorkflow(ctx context.Context, temporalClient planTemporalClient,
 		TaskQueues: agentfwTaskQueues{
 			PlanActivity: taskQueues.PlanActivity,
 		},
+		NexusEndpoint: nexusEndpoint,
+		NexusPeers:    nexusPeers,
 	})
 	if err != nil && !sdktemporal.IsWorkflowExecutionAlreadyStartedError(err) {
 		return fmt.Errorf("agentos temporal plan runtime - start plan workflow: %w", err)
