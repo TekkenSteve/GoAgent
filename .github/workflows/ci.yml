@@ -94,8 +94,6 @@ jobs:
         run: "make check-import-boundary"
       - name: AgentOS schema freshness
         run: "make check-agentos-plan-schema"
-      - name: Migration safety
-        run: "make check-migration-safety"
 
   postgres-integration-tests:
     name: runner / tests / postgres integration

@@ -15,7 +15,6 @@ import (
 // value overwrites it.
 func TestWorkflowTemplatePostgresPartialUpdate(t *testing.T) {
 	ctx, pg, _ := newAgentOSPlanPostgresIntegrationDB(t)
-	applyIntegrationMigration(t, pg, "20260510000001_create_workflow_templates.up.sql")
 
 	repo := NewWorkflowTemplateRepo(pg)
 
@@ -73,7 +72,6 @@ func TestWorkflowTemplatePostgresPartialUpdate(t *testing.T) {
 // gone.
 func TestWorkflowTemplatePostgresRoundTrip(t *testing.T) {
 	ctx, pg, _ := newAgentOSPlanPostgresIntegrationDB(t)
-	applyIntegrationMigration(t, pg, "20260510000001_create_workflow_templates.up.sql")
 
 	repo := NewWorkflowTemplateRepo(pg)
 	accountID := "22222222-2222-2222-2222-222222222222"
@@ -130,7 +128,6 @@ func TestWorkflowTemplatePostgresRoundTrip(t *testing.T) {
 // discover that it does.
 func TestWorkflowTemplatePostgresReadIsScopedToItsAccount(t *testing.T) {
 	ctx, pg, _ := newAgentOSPlanPostgresIntegrationDB(t)
-	applyIntegrationMigration(t, pg, "20260510000001_create_workflow_templates.up.sql")
 
 	repo := NewWorkflowTemplateRepo(pg)
 
@@ -170,7 +167,6 @@ func TestWorkflowTemplatePostgresReadIsScopedToItsAccount(t *testing.T) {
 
 func TestWorkflowTemplatePostgresDeleteIsScopedToItsAccount(t *testing.T) {
 	ctx, pg, _ := newAgentOSPlanPostgresIntegrationDB(t)
-	applyIntegrationMigration(t, pg, "20260510000001_create_workflow_templates.up.sql")
 
 	repo := NewWorkflowTemplateRepo(pg)
 

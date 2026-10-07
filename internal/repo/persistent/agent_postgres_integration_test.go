@@ -18,7 +18,6 @@ const (
 // omitted fields, and delete removes the record.
 func TestAgentPostgresRoundTrip(t *testing.T) {
 	ctx, pg, _ := newAgentOSPlanPostgresIntegrationDB(t)
-	applyIntegrationMigration(t, pg, "20260823000001_create_agents.up.sql")
 
 	repo := NewAgentRepo(pg)
 
@@ -93,7 +92,6 @@ func TestAgentPostgresRoundTrip(t *testing.T) {
 // including the JSON tool bindings document.
 func TestAgentVersionPostgresRoundTrip(t *testing.T) {
 	ctx, pg, _ := newAgentOSPlanPostgresIntegrationDB(t)
-	applyIntegrationMigration(t, pg, "20260823000001_create_agents.up.sql")
 
 	repo := NewAgentRepo(pg)
 

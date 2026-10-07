@@ -268,16 +268,12 @@ func newAgentOSRunEventPostgresIntegrationDB(t *testing.T) (context.Context, *po
 func applyAgentOSRunEventMigrations(t *testing.T, pg *postgres.Postgres) {
 	t.Helper()
 
-	for _, migration := range []string{
-		"20260815000001_create_agentos_run_events.up.sql",
-	} {
-		path := filepath.Join("..", "..", "..", "migrations", migration)
-		data, err := os.ReadFile(path)
-		if err != nil {
-			t.Fatalf("read migration %s: %v", migration, err)
-		}
-		if _, err := pg.Pool.Exec(t.Context(), string(data)); err != nil {
-			t.Fatalf("apply migration %s: %v", migration, err)
-		}
+	data, err := os.ReadFile(filepath.Join("..", "..", "..", "migrations", "20261010000001_baseline.up.sql"))
+	if err != nil {
+		t.Fatalf("read baseline schema: %v", err)
+	}
+
+	if _, err := pg.Pool.Exec(t.Context(), string(data)); err != nil {
+		t.Fatalf("apply baseline schema: %v", err)
 	}
 }

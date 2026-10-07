@@ -634,25 +634,16 @@ func newAgentOSConversationOutboxPostgresIntegrationDB(t *testing.T) (context.Co
 	return t.Context(), pg, suffix
 }
 
-// applyAgentOSConversationOutboxMigrations applies the conversation schema in
-// dependency order: the outbox row references the event row it publishes.
+// applyAgentOSConversationOutboxMigrations applies the baseline schema.
 func applyAgentOSConversationOutboxMigrations(t *testing.T, pg *postgres.Postgres) {
 	t.Helper()
 
-	for _, migration := range []string{
-		"20260507000001_create_messages.up.sql",
-		"20260725000001_create_agentos_conversations.up.sql",
-		"20260726000001_create_agentos_conversation_event_outbox.up.sql",
-	} {
-		path := filepath.Join("..", "..", "..", "migrations", migration)
+	data, err := os.ReadFile(filepath.Join("..", "..", "..", "migrations", "20261010000001_baseline.up.sql"))
+	if err != nil {
+		t.Fatalf("read baseline schema: %v", err)
+	}
 
-		data, err := os.ReadFile(path)
-		if err != nil {
-			t.Fatalf("read migration %s: %v", migration, err)
-		}
-
-		if _, err := pg.Pool.Exec(t.Context(), string(data)); err != nil {
-			t.Fatalf("apply migration %s: %v", migration, err)
-		}
+	if _, err := pg.Pool.Exec(t.Context(), string(data)); err != nil {
+		t.Fatalf("apply baseline schema: %v", err)
 	}
 }

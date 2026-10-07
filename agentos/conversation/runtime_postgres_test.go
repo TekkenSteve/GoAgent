@@ -575,21 +575,13 @@ func applyConversationMigrations(t *testing.T, isolatedURL string) {
 	ctx, cancel := context.WithTimeout(t.Context(), 15*time.Second)
 	defer cancel()
 
-	for _, migration := range []string{
-		"20260507000001_create_messages.up.sql",
-		"20260725000001_create_agentos_conversations.up.sql",
-		"20260726000001_create_agentos_conversation_event_outbox.up.sql",
-		"20261006000001_narrow_agentos_conversation_runs_open_index.up.sql",
-		"20261008000001_conversation_run_lease.up.sql",
-	} {
-		data, err := os.ReadFile(filepath.Join("..", "..", "migrations", migration))
-		if err != nil {
-			t.Fatalf("read migration %s: %v", migration, err)
-		}
+	data, err := os.ReadFile(filepath.Join("..", "..", "migrations", "20261010000001_baseline.up.sql"))
+	if err != nil {
+		t.Fatalf("read baseline schema: %v", err)
+	}
 
-		if _, err := pool.Exec(ctx, string(data)); err != nil {
-			t.Fatalf("apply migration %s: %v", migration, err)
-		}
+	if _, err := pool.Exec(ctx, string(data)); err != nil {
+		t.Fatalf("apply baseline schema: %v", err)
 	}
 }
 

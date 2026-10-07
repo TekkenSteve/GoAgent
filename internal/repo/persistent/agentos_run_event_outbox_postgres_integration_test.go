@@ -216,8 +216,8 @@ func registerRunBackend(t *testing.T, pg *postgres.Postgres, runID, accountID, p
 	t.Helper()
 
 	if _, err := pg.Pool.Exec(t.Context(), `
-INSERT INTO run_backend_index (run_id, account_id, project_id, backend_kind, backend_name)
-VALUES ($1, $2, $3, 'native', 'goagent-native')`, runID, accountID, projectID); err != nil {
+INSERT INTO run_backend_index (run_id, account_id, project_id, backend_kind, backend_name, idempotency_key)
+VALUES ($1, $2, $3, 'native', 'goagent-native', $1||':bind')`, runID, accountID, projectID); err != nil {
 		t.Fatalf("seed run backend index: %v", err)
 	}
 }
@@ -298,26 +298,16 @@ func newAgentOSRunOutboxIntegrationDB(t *testing.T) (context.Context, *postgres.
 	return t.Context(), pg, suffix
 }
 
-// applyAgentOSRunOutboxMigrations applies the run timeline schema in
-// dependency order: the outbox row references the event row it publishes, and
-// the claim reads the run's registration from the router's index.
+// applyAgentOSRunOutboxMigrations applies the baseline schema.
 func applyAgentOSRunOutboxMigrations(t *testing.T, pg *postgres.Postgres) {
 	t.Helper()
 
-	for _, migration := range []string{
-		"20260617000001_create_agentos_plan_persistence.up.sql",
-		"20260815000001_create_agentos_run_events.up.sql",
-		"20260821000001_create_agentos_run_event_outbox.up.sql",
-	} {
-		path := filepath.Join("..", "..", "..", "migrations", migration)
+	data, err := os.ReadFile(filepath.Join("..", "..", "..", "migrations", "20261010000001_baseline.up.sql"))
+	if err != nil {
+		t.Fatalf("read baseline schema: %v", err)
+	}
 
-		data, err := os.ReadFile(path)
-		if err != nil {
-			t.Fatalf("read migration %s: %v", migration, err)
-		}
-
-		if _, err := pg.Pool.Exec(t.Context(), string(data)); err != nil {
-			t.Fatalf("apply migration %s: %v", migration, err)
-		}
+	if _, err := pg.Pool.Exec(t.Context(), string(data)); err != nil {
+		t.Fatalf("apply baseline schema: %v", err)
 	}
 }

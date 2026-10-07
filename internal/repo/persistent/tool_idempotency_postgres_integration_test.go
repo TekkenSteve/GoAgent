@@ -41,15 +41,13 @@ func newToolIdempotencyPostgresIntegrationStore(t *testing.T) (context.Context, 
 
 	waitForPostgres(t, pg)
 
-	migration := filepath.Join("..", "..", "..", "migrations", "20261007000001_create_tool_idempotency.up.sql")
-
-	data, err := os.ReadFile(migration)
+	data, err := os.ReadFile(filepath.Join("..", "..", "..", "migrations", "20261010000001_baseline.up.sql"))
 	if err != nil {
-		t.Fatalf("read migration %s: %v", migration, err)
+		t.Fatalf("read baseline schema: %v", err)
 	}
 
 	if _, err := pg.Pool.Exec(t.Context(), string(data)); err != nil {
-		t.Fatalf("apply migration: %v", err)
+		t.Fatalf("apply baseline schema: %v", err)
 	}
 
 	return t.Context(), NewToolIdempotencyStore(pg)

@@ -244,14 +244,6 @@ type GovernedActionStatusUpdate struct {
 	CreatedAt      time.Time
 }
 
-type History struct {
-	ID          int32
-	Source      pgtype.Text
-	Destination pgtype.Text
-	Original    pgtype.Text
-	Translation pgtype.Text
-}
-
 type LedgerEntry struct {
 	EntryID        string
 	AccountID      string

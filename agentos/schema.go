@@ -23,7 +23,7 @@ import (
 // the database is a version behind until a query fails in production. The value
 // is kept honest by TestMinSchemaVersionMatchesNewestMigration, which reads the
 // migrations directory.
-const MinSchemaVersion int64 = 20261009000001
+const MinSchemaVersion int64 = 20261010000001
 
 var (
 	// ErrSchemaTooOld reports a database migrated to an older version than

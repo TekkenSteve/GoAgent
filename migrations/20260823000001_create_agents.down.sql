@@ -1,2 +1,0 @@
-DROP TABLE IF EXISTS agent_versions;
-DROP TABLE IF EXISTS agents;

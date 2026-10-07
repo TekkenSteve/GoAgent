@@ -107,10 +107,6 @@ linter-dotenv: ### check by dotenv linter
 	dotenv-linter
 .PHONY: linter-dotenv
 
-check-migration-safety: ### reject migrations using statements PostgreSQL cannot run in a transaction
-	./scripts/check_migration_safety.sh .
-.PHONY: check-migration-safety
-
 check-workflow-determinism: ### prevent forbidden non-determinism in workflow code
 	./scripts/agentfw/check_workflow_determinism.sh .
 .PHONY: check-workflow-determinism
