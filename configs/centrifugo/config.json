@@ -1,20 +1,34 @@
 {
-  "engine": "redis",
-  "redis_address": "redis://redis:6379",
-  "api_key": "dev-api-key",
-  "allow_anonymous_connect_without_token": true,
-  "namespaces": [
-    {
-      "name": "agentos",
-      "history_size": 100,
-      "history_ttl": "300s",
-      "allow_subscribe_for_client": true,
-      "allow_subscribe_for_anonymous": true,
-      "allow_history_for_client": true,
-      "allow_history_for_anonymous": true
+  "broker": {
+    "enabled": true,
+    "type": "redis",
+    "redis": {
+      "address": ["redis://redis:6379"]
     }
-  ],
-  "admin": true,
-  "admin_password": "password",
-  "admin_secret": "secret"
+  },
+  "engine": {
+    "type": "redis",
+    "redis": {
+      "address": ["redis://redis:6379"]
+    }
+  },
+  "client": {
+    "allow_anonymous_connect_without_token": false
+  },
+  "channel": {
+    "namespaces": [
+      {
+        "name": "agentos",
+        "history_size": 100,
+        "history_ttl": "300s",
+        "allow_subscribe_for_client": true,
+        "allow_subscribe_for_anonymous": false,
+        "allow_history_for_client": true,
+        "allow_history_for_anonymous": false
+      }
+    ]
+  },
+  "admin": {
+    "enabled": true
+  }
 }

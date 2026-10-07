@@ -1,0 +1,33 @@
+# YAML rules for this repository.
+#
+# The defaults are kept, with three exceptions that say something true about
+# the files here rather than making the gate easier to pass:
+#
+#   - line-length: compose files carry URLs, and the integration overlay
+#     carries JSON. A column limit on a machine-generated value measures
+#     nothing about its correctness, which is what the remaining rules are for.
+#   - document-start: a marker that a file holds one document adds nothing to
+#     files that hold one document.
+#   - truthy: `yes`/`no` as booleans is a convention some tools rely on; the
+#     values in this repository are quoted where they matter.
+#
+# Everything else — indentation, duplicate keys, syntax, trailing spaces, the
+# final newline — is enforced, and CI reads this file rather than passing its
+# own rule set.
+extends: default
+
+ignore: |
+  # Vendored copies of other projects, kept for reference. Their YAML is not
+  # this repository's to lint.
+  archive/
+  # Generated API documentation (make swag-v1).
+  docs/swagger.yaml
+  .gomodcache/
+  .gocache/
+  bin/
+
+rules:
+  line-length:
+    max: 400
+  document-start: disable
+  truthy: disable

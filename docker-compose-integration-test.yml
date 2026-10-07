@@ -43,6 +43,24 @@ services:
         aliases:
           - mock-agent-backends.lvh.me
 
+  migrate:
+    container_name: migrate
+    platform: linux/amd64
+    build:
+      context: .
+      args:
+        TARGET: agentos-migrate
+    environment:
+      PG_URL: "postgres://user@db:5432/db"
+      AGENTOS_MIGRATIONS_URL: "file://migrations"
+    depends_on:
+      db:
+        condition: service_healthy
+    networks:
+      app_network:
+        aliases:
+          - migrate.lvh.me
+
   app:
     restart: always
     environment:
@@ -57,7 +75,14 @@ services:
       AGENTFW_TEMPORAL_NATIVE_LLM_TASK_QUEUE: "agentfw-native-llm"
       AGENTFW_TEMPORAL_NATIVE_TOOL_TASK_QUEUE: "agentfw-native-tool"
       AGENTFW_TEMPORAL_STREAM_TASK_QUEUE: "agentfw-stream"
+      AGENTFW_TEMPORAL_NEXUS_TASK_QUEUE: "agentos-nexus"
       AGENTFW_LLM_CONFIG_PATH: "/config/llm.yaml"
+      # Cross-town ingress: one probe route so the suite can lock the bridge end
+      # to end (integration-test/ingress_test.go). The workflow type is
+      # deliberately unstaffed — what the bridge owes is the delivery into
+      # Temporal, and a started execution is that delivery.
+      AGENTFW_INGRESS_ROUTES_JSON: '[{"domain":"run.timeline","type":"cross.city.probe","workflow_type":"crossCityIngressProbe","signal_name":"fact"}]'
+      AGENTFW_INGRESS_TASK_QUEUE: "cross-city-probe"
       AGENTFW_TEMPORAL_EXTERNAL_BACKENDS_JSON: '[{"name":"mock-temporal","task_queue":"mock-agent-backends","workflow_type":"MockAgentWorkflow","query_type":"agentos.run.status","signals":{"cancel":"agentos.control.cancel"}}]'
       AGENTFW_HTTP_BACKENDS_JSON: '[{"name":"mock-http","endpoint":"http://mock-agent-backends:8080"}]'
       AGENTFW_GRPC_BACKENDS_JSON: '[{"name":"mock-grpc","target":"mock-agent-backends:9090","insecure":true}]'
@@ -65,14 +90,14 @@ services:
     volumes:
       - "./integration-test/mock-llm/llm-config.yaml:/config/llm.yaml"
     depends_on:
-      db:
-        condition: service_started
-      rabbitmq:
-        condition: service_started
+      migrate:
+        condition: service_completed_successfully
       redis:
         condition: service_started
       nats:
-        condition: service_started
+        condition: service_healthy
+      nats-create-streams:
+        condition: service_completed_successfully
       temporal:
         condition: service_healthy
       temporal-create-namespace:
@@ -94,7 +119,7 @@ services:
       context: .
       dockerfile: integration-test/Dockerfile
     environment:
-      PG_URL: "postgres://user:myAwEsOm3pa55@w0rd@db:5432/db"
+      PG_URL: "postgres://user@db:5432/db"
       GO_TEST_FLAGS: "${GO_TEST_FLAGS:--v}"
       GO_TEST_PACKAGES: "${GO_TEST_PACKAGES:-./integration-test/...}"
     depends_on:

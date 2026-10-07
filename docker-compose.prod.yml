@@ -1,0 +1,125 @@
+# Production manifest — the application tier only.
+#
+# What is deliberately absent is the point of this file:
+#   - no database, cache, broker, or Temporal server. Those are managed
+#     services in a deployment, reached over the network and configured with
+#     their own credentials; starting a second copy of them next to the
+#     application is how a development stack becomes a production incident.
+#   - no published port for anything internal. Only the gateway has one, so
+#     there is no path from outside to Postgres, Redis, the broker, Temporal,
+#     or the application's own HTTP port.
+#   - no default for any credential. Every value below is required from the
+#     environment; `docker compose up` refuses to start without it rather than
+#     falling back to something convenient.
+#
+# The image runs as a non-root user (see Dockerfile) with a read-only root
+# filesystem; the paths it must write are the mounted volumes below.
+
+x-required: &required
+  # Compose cannot express "required" per variable in a reusable block, so
+  # every secret is written with the :? form where it is used.
+  restart: unless-stopped
+
+services:
+  app:
+    container_name: goagent-app
+    image: "${GOAGENT_IMAGE:?set GOAGENT_IMAGE to the built image reference}"
+    restart: unless-stopped
+    user: "65532:65532"
+    read_only: true
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    tmpfs:
+      - /tmp
+    environment:
+      GOMAXPROCS: "${APP_GOMAXPROCS:-2}"
+      APP_NAME: "goagent"
+      APP_VERSION: "${APP_VERSION:?set APP_VERSION}"
+      HTTP_PORT: "8080"
+      HTTP_USE_PREFORK_MODE: "false"
+      LOG_LEVEL: "${LOG_LEVEL:-info}"
+      METRICS_ENABLED: "true"
+      SWAGGER_ENABLED: "false"
+      TRACING_ENABLED: "${TRACING_ENABLED:-false}"
+      TRACING_OTLP_ENDPOINT: "${TRACING_OTLP_ENDPOINT:-}"
+      TRACING_OTLP_INSECURE: "false"
+      TRACING_SAMPLE_RATE: "${TRACING_SAMPLE_RATE:-0.1}"
+
+      # Data stores: credentials come from the environment, never from here.
+      PG_POOL_MAX: "${PG_POOL_MAX:-20}"
+      PG_URL: "${PG_URL:?set PG_URL}"
+      REDIS_URL: "${REDIS_URL:?set REDIS_URL}"
+
+      # Authentication. A deployment verifies tokens against its issuer (or
+      # the gateway in front of it); the shared-secret mode is development
+      # only and must not be configured here.
+      AUTH_JWKS_URL: "${AUTH_JWKS_URL:?set AUTH_JWKS_URL or leave AUTH_HMAC_SECRET unset and provide the issuer}"
+      AUTH_ISSUER: "${AUTH_ISSUER:?set AUTH_ISSUER}"
+      AUTH_AUDIENCE: "${AUTH_AUDIENCE:?set AUTH_AUDIENCE}"
+      AUTH_ACCOUNT_CLAIM: "${AUTH_ACCOUNT_CLAIM:-sub}"
+      AUTH_ACTOR_CLAIM: "${AUTH_ACTOR_CLAIM:-act}"
+      AUTH_PUBLIC_PATHS: "/healthz,/readyz"
+
+      # Agent execution control plane.
+      AGENTFW_ENABLED: "true"
+      AGENTFW_TEMPORAL_ADDRESS: "${AGENTFW_TEMPORAL_ADDRESS:?set AGENTFW_TEMPORAL_ADDRESS}"
+      AGENTFW_TEMPORAL_NAMESPACE: "${AGENTFW_TEMPORAL_NAMESPACE:-default}"
+      AGENTFW_NATS_URL: "${AGENTFW_NATS_URL:?set AGENTFW_NATS_URL}"
+      AGENTFW_LLM_CONFIG_PATH: "${AGENTFW_LLM_CONFIG_PATH:-/config/llm.yaml}"
+
+      # Data plane.
+      CENTRIFUGO_BASE_URL: "${CENTRIFUGO_BASE_URL:?set CENTRIFUGO_BASE_URL}"
+      CENTRIFUGO_API_KEY: "${CENTRIFUGO_API_KEY:?set CENTRIFUGO_API_KEY}"
+
+      # MCP transport policy: nothing launches and nothing dials anywhere
+      # private until the operator says so.
+      MCP_ALLOWED_COMMANDS: "${MCP_ALLOWED_COMMANDS:-}"
+      MCP_INHERITED_ENV: "${MCP_INHERITED_ENV:-PATH,HOME}"
+      MCP_CONFIG_ENV: "${MCP_CONFIG_ENV:-}"
+      MCP_ALLOWED_HTTP_HOSTS: "${MCP_ALLOWED_HTTP_HOSTS:-}"
+
+      # Artifacts. A deployment uses its object store; the local backend
+      # writes to the mounted volume below.
+      AGENTOS_ARTIFACT_STORE_BACKEND: "${AGENTOS_ARTIFACT_STORE_BACKEND:-local}"
+      AGENTOS_ARTIFACT_STORE_LOCAL_ROOT: "/var/lib/goagent/artifacts"
+      AGENTOS_ARTIFACT_STORE_S3_BUCKET: "${AGENTOS_ARTIFACT_STORE_S3_BUCKET:-}"
+      AGENTOS_ARTIFACT_STORE_S3_REGION: "${AGENTOS_ARTIFACT_STORE_S3_REGION:-}"
+      AGENTOS_ARTIFACT_STORE_S3_ENDPOINT: "${AGENTOS_ARTIFACT_STORE_S3_ENDPOINT:-}"
+      AGENTOS_ARTIFACT_STORE_S3_ACCESS_KEY_ID: "${AGENTOS_ARTIFACT_STORE_S3_ACCESS_KEY_ID:-}"
+      AGENTOS_ARTIFACT_STORE_S3_SECRET_ACCESS_KEY: "${AGENTOS_ARTIFACT_STORE_S3_SECRET_ACCESS_KEY:-}"
+      AGENTOS_ARTIFACT_STORE_S3_FORCE_PATH_STYLE: "false"
+
+      AGENTFW_MAX_DELEGATE_DEPTH: "${AGENTFW_MAX_DELEGATE_DEPTH:-3}"
+      AGENTFW_DELEGATE_TOKEN_BUDGET: "${AGENTFW_DELEGATE_TOKEN_BUDGET:-0}"
+      AGENTFW_RUN_WORKFLOW_TIMEOUT_SECONDS: "${AGENTFW_RUN_WORKFLOW_TIMEOUT_SECONDS:-172800}"
+    volumes:
+      - agentos_artifacts:/var/lib/goagent/artifacts
+    networks:
+      - app_network
+
+  # The single published entry point. TLS terminates here; the application
+  # never speaks directly to the outside.
+  gateway:
+    container_name: goagent-gateway
+    image: "nginx:${NGINX_VERSION:-1.29.7-alpine}"
+    restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
+    ports:
+      - "${GATEWAY_PORT:-8443}:8443"
+    volumes:
+      - ./nginx/nginx.prod.conf:/etc/nginx/nginx.conf:ro
+      - ./deploy/tls:/etc/nginx/tls:ro
+    depends_on:
+      - app
+    networks:
+      - app_network
+
+volumes:
+  agentos_artifacts:
+
+networks:
+  app_network:
+    driver: bridge
