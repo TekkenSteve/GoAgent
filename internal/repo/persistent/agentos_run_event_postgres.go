@@ -3,52 +3,17 @@ package persistent
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"time"
 
 	agentoscore "github.com/TekkenSteve/GoAgent/agentos/core"
 	"github.com/TekkenSteve/GoAgent/internal/pkg/postgres"
+	"github.com/TekkenSteve/GoAgent/internal/repo/persistent/sqlcgen"
+	"github.com/jackc/pgx/v5"
 )
 
 const (
-	// agentosRunEventLastSequenceSQL reads the highest persisted bus offset for
-	// a run — the resume cursor for a projector re-attaching after a reconnect
-	// or process restart. COALESCE makes an empty run report 0 (replay from the
-	// start of the retained window).
-	agentosRunEventLastSequenceSQL = `
-SELECT COALESCE(MAX(sequence), 0)
-FROM agentos_run_events
-WHERE run_id = $1`
-
-	// agentosRunEventInsertSQL persists one projected milestone. The bus offset
-	// (StoredEvent.Sequence) IS the idempotency token: the same (run_id,
-	// sequence) always carries the same event, so a replay conflict is success
-	// rather than an error.
-	agentosRunEventInsertSQL = `
-INSERT INTO agentos_run_events (
-    run_id,
-    sequence,
-    event_id,
-    event_type,
-    thread_id,
-    process_id,
-    source,
-    occurred_at,
-    payload
-) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)
-ON CONFLICT (run_id, sequence) DO NOTHING`
-
-	// agentosRunEventListSQL reads a run's projected milestones in sequence
-	// order, resuming after a cursor. This is the run's authoritative history:
-	// the same durable timeline the projector wrote, minus the transient byte
-	// deltas that only ever live in the bus history window.
-	agentosRunEventListSQL = `
-SELECT event_id, event_type, thread_id, process_id, source, occurred_at, payload, sequence
-FROM agentos_run_events
-WHERE run_id = $1 AND sequence > $2
-ORDER BY sequence
-LIMIT $3`
-
 	// defaultRunEventsLimit and maxRunEventsLimit bound history reads so one
 	// request can never page an entire timeline at once.
 	defaultRunEventsLimit = 100
@@ -57,21 +22,50 @@ LIMIT $3`
 
 // AgentOSRunEventRepo persists the projected AgentOS run milestone timeline —
 // the durable half of the data plane's projection consumption.
+//
+// The SQL lives in queries/run_outbox.sql and sqlc generates the parameter
+// and row bindings: a column the migrations do not define, or a scan whose
+// types do not match, is a generate-time failure rather than a runtime one.
 type AgentOSRunEventRepo struct {
 	*postgres.Postgres
+
+	queries *sqlcgen.Queries
+
+	// eventOutbox records each newly stored event's publication intent in the
+	// same transaction, so the run timeline reaches the fact log through the
+	// backbone drainer instead of a second write path. It is enabled exactly
+	// when the deployment runs a drainer.
+	eventOutbox bool
+}
+
+// RunEventRepoOption configures an AgentOSRunEventRepo.
+type RunEventRepoOption func(*AgentOSRunEventRepo)
+
+// WithRunEventOutbox enqueues every newly stored run event for publication to
+// the run.timeline domain of the fact log. A deployment without a backbone
+// drainer leaves it off: rows nobody drains would only pile up.
+func WithRunEventOutbox() RunEventRepoOption {
+	return func(r *AgentOSRunEventRepo) {
+		r.eventOutbox = true
+	}
 }
 
 // NewAgentOSRunEventRepo creates a Postgres-backed run event repository.
-func NewAgentOSRunEventRepo(pg *postgres.Postgres) *AgentOSRunEventRepo {
-	return &AgentOSRunEventRepo{pg}
+func NewAgentOSRunEventRepo(pg *postgres.Postgres, opts ...RunEventRepoOption) *AgentOSRunEventRepo {
+	repo := &AgentOSRunEventRepo{Postgres: pg, queries: sqlcgen.New(pg.Pool)}
+
+	for _, opt := range opts {
+		opt(repo)
+	}
+
+	return repo
 }
 
 // LastRunEventSequence returns the highest persisted sequence for a run, or 0
 // when nothing has been projected yet.
 func (r *AgentOSRunEventRepo) LastRunEventSequence(ctx context.Context, runID string) (int64, error) {
-	var sequence int64
-
-	if err := r.Pool.QueryRow(ctx, agentosRunEventLastSequenceSQL, runID).Scan(&sequence); err != nil {
+	sequence, err := r.queries.LastRunEventSequence(ctx, runID)
+	if err != nil {
 		return 0, fmt.Errorf("AgentOSRunEventRepo - LastRunEventSequence - query: %w", err)
 	}
 
@@ -81,7 +75,147 @@ func (r *AgentOSRunEventRepo) LastRunEventSequence(ctx context.Context, runID st
 // AppendRunEvent persists one projected milestone idempotently. Re-append of an
 // already-stored (run_id, sequence) is a no-op, not an error, so replay after a
 // reconnect never duplicates a milestone.
-func (r *AgentOSRunEventRepo) AppendRunEvent(ctx context.Context, ev *agentoscore.Event) error {
+//
+// When the outbox is enabled, the event row and its publication intent commit
+// in one transaction: a run milestone that is durable is also queued for the
+// fact log, or neither — which is what makes the log a derived delivery of
+// Postgres rather than a second write path. Only a newly stored event is
+// queued; a replayed append enqueues nothing, so an upgrade cannot flood the
+// log with history it already carries.
+func (r *AgentOSRunEventRepo) AppendRunEvent(ctx context.Context, ev *agentoscore.Event) (err error) {
+	if err := normalizeRunEvent(ev); err != nil {
+		return err
+	}
+
+	payloadJSON, err := json.Marshal(ev.Payload)
+	if err != nil {
+		return fmt.Errorf("AgentOSRunEventRepo - AppendRunEvent - marshal payload: %w", err)
+	}
+
+	tx, err := r.Pool.BeginTx(ctx, pgx.TxOptions{})
+	if err != nil {
+		return fmt.Errorf("AgentOSRunEventRepo - AppendRunEvent - begin: %w", err)
+	}
+
+	defer func() {
+		if rollbackErr := tx.Rollback(ctx); rollbackErr != nil && !errors.Is(rollbackErr, pgx.ErrTxClosed) {
+			err = errors.Join(err, fmt.Errorf("AgentOSRunEventRepo - AppendRunEvent - rollback: %w", rollbackErr))
+		}
+	}()
+
+	if err := r.storeRunEvent(ctx, r.queries.WithTx(tx), ev, payloadJSON); err != nil {
+		return err
+	}
+
+	if err := tx.Commit(ctx); err != nil {
+		return fmt.Errorf("AgentOSRunEventRepo - AppendRunEvent - commit: %w", err)
+	}
+
+	return nil
+}
+
+// storeRunEvent writes the event and, when this repo carries the outbox, its
+// publication intent — both inside the caller's transaction, so a milestone
+// that is durable is also queued for the fact log, or neither.
+//
+// A zero-rows insert means the event is already stored — a replayed append —
+// and returns without queueing: the fact was queued when it was first stored,
+// or predates the outbox and was published by the path that stored it, so an
+// upgrade cannot flood the log with history it already carries.
+func (r *AgentOSRunEventRepo) storeRunEvent(ctx context.Context, tx *sqlcgen.Queries, ev *agentoscore.Event, payloadJSON []byte) error {
+	stored, err := tx.InsertRunEvent(ctx, sqlcgen.InsertRunEventParams{
+		RunID:      ev.RunID,
+		Sequence:   ev.Sequence,
+		EventID:    ev.EventID,
+		EventType:  string(ev.EventType),
+		ThreadID:   ev.ThreadID,
+		ProcessID:  ev.ProcessID,
+		Source:     ev.Source,
+		OccurredAt: ev.Timestamp,
+		Payload:    payloadJSON,
+	})
+	if err != nil {
+		return fmt.Errorf("AgentOSRunEventRepo - AppendRunEvent - insert: %w", err)
+	}
+
+	if stored == 0 {
+		return nil
+	}
+
+	if !r.eventOutbox {
+		return nil
+	}
+
+	if err := tx.EnqueueRunEventOutbox(ctx, sqlcgen.EnqueueRunEventOutboxParams{
+		RunID:    ev.RunID,
+		Sequence: ev.Sequence,
+	}); err != nil {
+		return fmt.Errorf("AgentOSRunEventRepo - AppendRunEvent - enqueue outbox: %w", err)
+	}
+
+	return nil
+}
+
+// ListRunEvents returns a run's projected milestones in sequence order,
+// resuming after the given cursor. A limit of 0 applies the default; a limit
+// beyond the maximum is clamped. Unknown runs return an empty slice.
+func (r *AgentOSRunEventRepo) ListRunEvents(ctx context.Context, runID string, after int64, limit int) ([]agentoscore.Event, error) {
+	if limit <= 0 {
+		limit = defaultRunEventsLimit
+	} else if limit > maxRunEventsLimit {
+		limit = maxRunEventsLimit
+	}
+
+	rows, err := r.queries.ListRunEvents(ctx, sqlcgen.ListRunEventsParams{
+		RunID:         runID,
+		AfterSequence: after,
+		RowLimit:      int32(limit),
+	})
+	if err != nil {
+		return nil, fmt.Errorf("AgentOSRunEventRepo - ListRunEvents - query: %w", err)
+	}
+
+	events := make([]agentoscore.Event, 0, limit)
+
+	for i := range rows {
+		ev, err := runEventFromListRow(runID, &rows[i])
+		if err != nil {
+			return nil, err
+		}
+
+		events = append(events, ev)
+	}
+
+	return events, nil
+}
+
+// runEventFromListRow turns one generated history row into the domain event.
+func runEventFromListRow(runID string, row *sqlcgen.ListRunEventsRow) (agentoscore.Event, error) {
+	ev := agentoscore.Event{
+		RunID:     runID,
+		EventID:   row.EventID,
+		EventType: agentoscore.EventType(row.EventType),
+		ThreadID:  row.ThreadID,
+		ProcessID: row.ProcessID,
+		Source:    row.Source,
+		Timestamp: row.OccurredAt,
+		Sequence:  row.Sequence,
+	}
+
+	if len(row.Payload) > 0 {
+		if err := json.Unmarshal(row.Payload, &ev.Payload); err != nil {
+			return agentoscore.Event{}, fmt.Errorf("AgentOSRunEventRepo - ListRunEvents - unmarshal payload: %w", err)
+		}
+	}
+
+	return ev, nil
+}
+
+// normalizeRunEvent validates one milestone and fills the fields a producer
+// may leave unset: the event id derives from the run and sequence, the
+// timestamp from the clock, and the payload from nothing — an explicit empty
+// object rather than a null the column's default would otherwise mask.
+func normalizeRunEvent(ev *agentoscore.Event) error {
 	if ev == nil {
 		return fmt.Errorf("%w: run event is required", agentoscore.ErrInvalidRunEvent)
 	}
@@ -110,81 +244,5 @@ func (r *AgentOSRunEventRepo) AppendRunEvent(ctx context.Context, ev *agentoscor
 		ev.Payload = map[string]any{}
 	}
 
-	payloadJSON, err := json.Marshal(ev.Payload)
-	if err != nil {
-		return fmt.Errorf("AgentOSRunEventRepo - AppendRunEvent - marshal payload: %w", err)
-	}
-
-	_, err = r.Pool.Exec(ctx, agentosRunEventInsertSQL,
-		ev.RunID,
-		ev.Sequence,
-		ev.EventID,
-		string(ev.EventType),
-		ev.ThreadID,
-		ev.ProcessID,
-		ev.Source,
-		ev.Timestamp,
-		payloadJSON,
-	)
-	if err != nil {
-		return fmt.Errorf("AgentOSRunEventRepo - AppendRunEvent - insert: %w", err)
-	}
-
 	return nil
-}
-
-// ListRunEvents returns a run's projected milestones in sequence order,
-// resuming after the given cursor. A limit of 0 applies the default; a limit
-// beyond the maximum is clamped. Unknown runs return an empty slice.
-func (r *AgentOSRunEventRepo) ListRunEvents(ctx context.Context, runID string, after int64, limit int) ([]agentoscore.Event, error) {
-	if limit <= 0 {
-		limit = defaultRunEventsLimit
-	} else if limit > maxRunEventsLimit {
-		limit = maxRunEventsLimit
-	}
-
-	rows, err := r.Pool.Query(ctx, agentosRunEventListSQL, runID, after, limit)
-	if err != nil {
-		return nil, fmt.Errorf("AgentOSRunEventRepo - ListRunEvents - query: %w", err)
-	}
-	defer rows.Close()
-
-	events := make([]agentoscore.Event, 0, limit)
-
-	for rows.Next() {
-		var (
-			ev          agentoscore.Event
-			eventType   string
-			payloadJSON []byte
-		)
-
-		if err := rows.Scan(
-			&ev.EventID,
-			&eventType,
-			&ev.ThreadID,
-			&ev.ProcessID,
-			&ev.Source,
-			&ev.Timestamp,
-			&payloadJSON,
-			&ev.Sequence,
-		); err != nil {
-			return nil, fmt.Errorf("AgentOSRunEventRepo - ListRunEvents - scan: %w", err)
-		}
-
-		ev.EventType = agentoscore.EventType(eventType)
-		if len(payloadJSON) > 0 {
-			if err := json.Unmarshal(payloadJSON, &ev.Payload); err != nil {
-				return nil, fmt.Errorf("AgentOSRunEventRepo - ListRunEvents - unmarshal payload: %w", err)
-			}
-		}
-
-		ev.RunID = runID
-		events = append(events, ev)
-	}
-
-	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("AgentOSRunEventRepo - ListRunEvents - rows: %w", err)
-	}
-
-	return events, nil
 }

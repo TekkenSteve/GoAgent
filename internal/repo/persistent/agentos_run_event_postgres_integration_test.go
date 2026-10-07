@@ -15,6 +15,10 @@ import (
 	"github.com/TekkenSteve/GoAgent/internal/pkg/postgres"
 )
 
+// agentosRunEventPostgresIntegrationPrefix names the throwaway databases this
+// suite creates, so a leaked database identifies its suite.
+const agentosRunEventPostgresIntegrationPrefix = "goagent_run_event_"
+
 // TestAgentOSRunEventPostgresDurablePersistence locks the run event projection
 // sink: the persisted cursor, idempotent re-append on the bus offset, the
 // in-process validation, and the schema-level CHECK / UNIQUE / append-only
@@ -242,11 +246,11 @@ func newAgentOSRunEventPostgresIntegrationDB(t *testing.T) (context.Context, *po
 		t.Fatal("GOAGENT_POSTGRES_TEST_URL is required for postgres_integration tests")
 	}
 
-	suffix := postgresIntegrationSuffix(t)
+	suffix := postgresIntegrationSuffix(t, agentosRunEventPostgresIntegrationPrefix)
 	isolatedURL, cleanup := createPostgresIntegrationDatabase(
 		t,
 		pgURL,
-		postgresIntegrationDatabasePrefix+suffix,
+		agentosRunEventPostgresIntegrationPrefix+suffix,
 	)
 	t.Cleanup(cleanup)
 
