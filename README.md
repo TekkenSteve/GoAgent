@@ -14,6 +14,7 @@ The native GoAgent agent framework is one backend implementation. Temporal is th
 - **Agent Control Plane** — backend-owned run lifecycle, signals, controls, durable RunPlan orchestration, backend capabilities, and event ingest
 - **Durable Process Platform** — generic resource/process runtime, ledger, governed action, batch/workset, and projection interfaces
 - **Temporal Kernel Adapter** — explicit Temporal task queue isolation, durable workflows, timers, signals, retries, cancellation, and recovery
+- **Nexus Service Surface** — a versioned Nexus service (`agentos/nexusapi`) exposes run start, signal, control, and status across Namespaces, so callers depend on a contract instead of internals; `run.status` is a bounded-staleness snapshot (≈5s) because synchronous handlers never touch a backend directly
 - **Native Agent Backend** — ReAct loop agent runtime with LLM integration, tool execution, team composition, and MCP server support
 - **External Backend Adapters** — HTTP, gRPC, and `temporal_external` backends for runtimes owned outside GoAgent
 - **Multi-Agent Teams** — Hierarchical team composition with recursive sub-team expansion
@@ -31,7 +32,7 @@ The native GoAgent agent framework is one backend implementation. Temporal is th
 [![API Documentation](https://img.shields.io/badge/Swagger-API%20Documentation-blue)](https://github.com/swaggo/swag)
 [![Validation](https://img.shields.io/badge/Validator-Data%20Integrity-blue)](https://github.com/go-playground/validator)
 [![JSON Handling](https://img.shields.io/badge/Go--JSON-Fast%20Serialization-blue)](https://github.com/goccy/go-json)
-[![Query Builder](https://img.shields.io/badge/Squirrel-SQL%20Query%20Builder-blue)](https://github.com/Masterminds/squirrel)
+[![SQL Compiler](https://img.shields.io/badge/sqlc-Type--Safe%20SQL-blue)](https://sqlc.dev/)
 [![Database Migrations](https://img.shields.io/badge/Migrations-Seamless%20Schema%20Updates-blue)](https://github.com/golang-migrate/migrate)
 [![Logging](https://img.shields.io/badge/ZeroLog-Structured%20Logging-blue)](https://github.com/rs/zerolog)
 [![Metrics](https://img.shields.io/badge/Prometheus-Metrics%20Integration-blue)](https://github.com/ansrivas/fiberprometheus)
@@ -48,7 +49,11 @@ The native GoAgent agent framework is one backend implementation. Temporal is th
 ### Local Development
 
 ```sh
-# Start dependency services (Postgres, Redis, Temporal)
+# Once: create .env with freshly generated development credentials. The dev
+# stack refuses to start without them, and the repository ships none.
+make dev-secrets
+
+# Start dependency services (Postgres, Redis, NATS JetStream, Centrifugo, Temporal)
 make compose-up
 
 # Run the application (includes database migration)
@@ -99,7 +104,7 @@ make compose-up-all
   - `GET /v1/templates/` — List templates
   - `GET /v1/templates/{template_id}` — Get template details
   - `DELETE /v1/templates/{template_id}` — Delete template
-- **PostgreSQL**: `postgres://user:myAwEsOm3pa55@w0rd@127.0.0.1:5432/db`
+- **PostgreSQL**: `postgres://user@127.0.0.1:5432/db`
 
 ## Project Structure
 
@@ -113,6 +118,7 @@ Applications / reference distributions
           -> agentos/core    # shared OS primitives
 
 Default implementation
+  -> agentos/nexusapi        # Nexus service contract: names and operation I/O types
   -> agentos/temporal        # Temporal/Postgres/Redis/artifact adapter
       -> agentos/control
       -> agentos/process
@@ -159,6 +165,8 @@ The separation is intentional:
 - `examples/` — Runnable pattern examples
 - `integration-test/` — Integration tests (requires Docker)
 - `migrations/` — PostgreSQL migrations
+- `internal/repo/persistent/queries/` — the SQL statements, one file per domain
+- `internal/repo/persistent/sqlcgen/` — generated type-safe bindings (`make sqlc`)
 
 ### Configuration Management
 
@@ -236,7 +244,7 @@ The `examples/types/` directory shows importing only `agentos/core` and `agentos
 
 AgentOS supports durable cross-backend orchestration through `control.PlanRuntime`.
 
-`RunPlan` is the public control-plane model for coordinating backend-owned child runs. A `PlanNodeSpec` is a full `control.RunSpec` plus backend, capability, input, output, condition, and policy contracts. It is not a native GoAgent step, not a Temporal activity, and not a LangGraph node.
+`RunPlan` is the public control-plane model for coordinating backend-owned child runs. A `PlanNodeSpec` is a full `control.RunSpec` plus backend, capability, peer (the town its run happens in), input, output, condition, and policy contracts. It is not a native GoAgent step, not a Temporal activity, and not a LangGraph node.
 
 Native GoAgent `entity.Step` remains an internal detail of the GoAgent native backend. Backend-specific step, graph, loop, and tool execution details should be emitted through events or artifacts, not promoted into the public AgentOS API.
 
@@ -438,6 +446,9 @@ make swag-v1
 
 # Generate Mocks
 make mock
+
+# Generate type-safe SQL bindings from queries/*.sql
+make sqlc
 ```
 
 ### Code Quality

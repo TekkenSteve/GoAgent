@@ -14,6 +14,7 @@ GoAgent native agent framework 只是一个 backend 实现。Temporal 是 durabl
 - **Agent Control Plane** — backend-owned run 生命周期、signal、control、durable RunPlan 编排、backend capability 和 event ingest
 - **Durable Process Platform** — 通用 resource/process runtime、ledger、governed action、batch/workset 和 projection 接口
 - **Temporal Kernel Adapter** — 显式 Temporal task queue 隔离、durable workflow、timer、signal、retry、cancel 和故障恢复
+- **Nexus Service Surface** — 通过 `agentos/nexusapi` 暴露版本化的 Nexus service（run 启动、signal、control、status），调用方依赖契约而非内部实现；`run.status` 是**有界延迟快照（≈5s）**，因为同步 handler 不会直接触碰后端
 - **Native Agent Backend** — 支持 LLM 集成的 ReAct 循环运行时、工具执行、team composition 和 MCP 服务器
 - **外部 Backend Adapter** — HTTP、gRPC 和 `temporal_external` backend，用于接入 GoAgent 外部拥有的 runtime
 - **多 Agent 团队** — 具有递归子团队扩展的分层团队组合
@@ -31,7 +32,7 @@ GoAgent native agent framework 只是一个 backend 实现。Temporal 是 durabl
 [![API Documentation](https://img.shields.io/badge/Swagger-API%20Documentation-blue)](https://github.com/swaggo/swag)
 [![Validation](https://img.shields.io/badge/Validator-Data%20Integrity-blue)](https://github.com/go-playground/validator)
 [![JSON Handling](https://img.shields.io/badge/Go--JSON-Fast%20Serialization-blue)](https://github.com/goccy/go-json)
-[![Query Builder](https://img.shields.io/badge/Squirrel-SQL%20Query%20Builder-blue)](https://github.com/Masterminds/squirrel)
+[![SQL Compiler](https://img.shields.io/badge/sqlc-Type--Safe%20SQL-blue)](https://sqlc.dev/)
 [![Database Migrations](https://img.shields.io/badge/Migrations-Seamless%20Schema%20Updates-blue)](https://github.com/golang-migrate/migrate)
 [![Logging](https://img.shields.io/badge/ZeroLog-Structured%20Logging-blue)](https://github.com/rs/zerolog)
 [![Metrics](https://img.shields.io/badge/Prometheus-Metrics%20Integration-blue)](https://github.com/ansrivas/fiberprometheus)
@@ -48,7 +49,7 @@ GoAgent native agent framework 只是一个 backend 实现。Temporal 是 durabl
 ### 本地开发
 
 ```sh
-# 启动依赖服务 (Postgres, Redis, Temporal)
+# 启动依赖服务 (Postgres, Redis, NATS JetStream, Centrifugo, Temporal)
 make compose-up
 
 # 运行应用（包含数据库迁移）
@@ -99,7 +100,7 @@ make compose-up-all
   - `GET /v1/templates/` — 模板列表
   - `GET /v1/templates/{template_id}` — 模板详情
   - `DELETE /v1/templates/{template_id}` — 删除模板
-- **PostgreSQL**: `postgres://user:myAwEsOm3pa55@w0rd@127.0.0.1:5432/db`
+- **PostgreSQL**: `postgres://user@127.0.0.1:5432/db`
 
 ## 项目结构
 
@@ -113,6 +114,7 @@ Applications / reference distributions
           -> agentos/core    # 共享 OS 原语
 
 Default implementation
+  -> agentos/nexusapi        # Nexus service contract: names and operation I/O types
   -> agentos/temporal        # Temporal/Postgres/Redis/artifact adapter
       -> agentos/control
       -> agentos/process
@@ -159,6 +161,8 @@ Internal application
 - `examples/` — 可运行的模式示例
 - `integration-test/` — 集成测试（需要 Docker）
 - `migrations/` — PostgreSQL 迁移文件
+- `internal/repo/persistent/queries/` — SQL 语句，按域一个文件
+- `internal/repo/persistent/sqlcgen/` — 生成的类型安全绑定（`make sqlc`）
 
 ### 配置管理
 
@@ -231,6 +235,46 @@ native step 队列、team expansion、LLM call、tool call 和 backend 内部 gr
 ### 仅使用类型（方式三）
 
 `examples/types/` 目录展示仅导入 `agentos/core` 和 `agentos/control` 来共享公共类型定义。
+
+### 跨 Backend Plan（AgentOS RunPlan）
+
+AgentOS 通过 `control.PlanRuntime` 支持持久的跨 backend 编排。
+
+`RunPlan` 是用于协调 backend-owned 子 run 的公开控制面模型。`PlanNodeSpec` 是一个完整的 `control.RunSpec`，外加 backend、capability、peer（它的 run 在哪个城执行）、input、output、condition 和 policy 契约。它既不是 native GoAgent step，也不是 Temporal activity，也不是 LangGraph 节点。
+
+Native GoAgent 的 `entity.Step` 仍是 GoAgent native backend 的内部细节。特定 backend 的 step、graph、loop 与 tool 执行细节应通过事件或 artifact 输出，而不是提升为 AgentOS 的公开 API。
+
+Capability 是粗粒度的 backend 契约。`control.CapabilityRun` 启动一个 backend-owned run；`control.CapabilityRunBatch` 启动一个 backend-owned batch run，并通过 capability 限额校验有界 batch 输入；AgentOS 不会把 batch 条目展开成 plan 节点。
+
+Plan runtime 的查询 API 是持久的：status 来自 plan index，事件历史来自 plan event store，审计来自 audit store，artifact 载荷来自 artifact store。SSE 只是叠加在持久事件历史之上的实时流传输。
+
+持久流程层暴露 `process.ProjectionRuntime`，用于 REST、MCP、UI 与运维读模型。投影读取来自持久的 process、ledger、governed action 与 workset 存储，而不是高频 Temporal Workflow Query 调用。
+
+`control.PlanJSONSchema` 与 `GET /v1/agentos/plans/schemas/{kind}` 为编辑器和 CI 提供公开的编写 schema。`cmd/agentos-plan` 是 RunPlan DSL/编译器工具：校验 JSON/YAML `RunPlanSpec`、生成 JSON Schema、校验有界 `PlanDelta` 展开，并以 Serverless Workflow 作为边缘互操作格式导入/导出。类型化的 `control.RunPlanSpec` 始终是唯一真相来源。
+
+```bash
+go run ./cmd/agentos-plan schema --kind run-plan --out docs/schemas/run_plan.schema.json
+go run ./cmd/agentos-plan schema --kind plan-delta --out docs/schemas/plan_delta.schema.json
+go run ./cmd/agentos-plan schema --kind capability-catalog --out docs/schemas/capability_catalog.schema.json
+go run ./cmd/agentos-plan schema --kind artifact-schema-catalog --out docs/schemas/artifact_schema_catalog.schema.json
+go run ./cmd/agentos-plan validate --file plan.yaml --format yaml --capabilities capabilities.yaml --capabilities-format yaml --artifact-schemas artifact-schemas.yaml --artifact-schemas-format yaml
+go run ./cmd/agentos-plan export-serverless --file plan.yaml --format yaml --capabilities capabilities.yaml --capabilities-format yaml --artifact-schemas artifact-schemas.yaml --artifact-schemas-format yaml --out-format yaml --out workflow.yaml
+go run ./cmd/agentos-plan import-serverless --file workflow.yaml --format yaml --capabilities capabilities.yaml --capabilities-format yaml --artifact-schemas artifact-schemas.yaml --artifact-schemas-format yaml --out-format json
+```
+
+外部 Go 项目只应导入：
+
+```go
+import (
+    "github.com/TekkenSteve/GoAgent/agentos/control"
+    "github.com/TekkenSteve/GoAgent/agentos/core"
+    "github.com/TekkenSteve/GoAgent/agentos/process"
+    "github.com/TekkenSteve/GoAgent/agentos/platform"
+    agentostemporal "github.com/TekkenSteve/GoAgent/agentos/temporal"
+)
+```
+
+Do not import implementation packages such as `internal/entity`, `internal/repo`, `internal/usecase`, or old root-level implementation packages. Public examples and docs are guarded by tests to keep that boundary intact.
 
 ## 三种使用方式
 
@@ -393,6 +437,9 @@ make swag-v1
 
 # 生成 Mock
 make mock
+
+# 从 queries/*.sql 生成类型安全的 SQL 绑定
+make sqlc
 ```
 
 ### 代码检查

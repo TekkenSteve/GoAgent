@@ -1,7 +1,7 @@
 # go-clean-template
 
 Go clean-architecture reference service. Three domains (`user`, `task`, `translation`) exposed
-over four transports (REST/Fiber, gRPC, RabbitMQ RPC, NATS RPC) from one shared use-case layer.
+over REST and gRPC from one shared use-case layer.
 Module path: `github.com/evrone/go-clean-template`. The Go version is declared in `go.mod`.
 
 ## Commands — drive everything through the Makefile
@@ -22,7 +22,7 @@ different settings than CI. Use the target, not the tool.
 | Regenerate protobuf | `make proto-v1` | `protoc ...` |
 | Tidy / verify modules | `make deps` | `go mod tidy` |
 | Vulnerability scan | `make deps-audit` | `govulncheck ./...` |
-| Start dependencies (Postgres, RabbitMQ, NATS) | `make compose-up` | `docker compose up` |
+| Start dependencies (Postgres, Redis, Centrifugo, Temporal) | `make compose-up` | `docker compose up` |
 | Start the whole stack including the app | `make compose-up-all` | `docker compose up` |
 | Tear down | `make compose-down` | `docker compose down` |
 | Run the app locally | `make run` | `go run ./cmd/app` — the target regenerates docs and builds with `-tags migrate` |
@@ -97,7 +97,7 @@ Every controller method, on every transport, does the same six things in the sam
 shape from a neighbouring handler in the same transport.
 
 1. **Get the caller.** REST: `ctx.Locals("userID").(string)`. gRPC: `grpcmw.UserIDFromContext(ctx)`.
-   AMQP / NATS: `extractUserID(d, r.j)`. A failure here is an auth error, not a 500.
+   A failure here is an auth error, not a 500.
 2. **Decode into a transport-local DTO** from `<transport>/v1/request/`. Never decode into an
    `entity` type, and never pass a `request.*` type into a use case.
 3. **Validate the DTO** with the injected `*validator.Validate` (`r.v.Struct(req)`). Structural
@@ -114,12 +114,6 @@ shape from a neighbouring handler in the same transport.
    Anything with a wrapper, a projection or a different field set gets a type in
    `<transport>/v1/response/` (`response.TaskList`, `response.Token`). gRPC always converts through
    `response.New*Response`.
-
-AMQP and NATS handlers are closures returning that transport's `server.CallHandler` —
-`func(ctx, *amqp.Delivery) (any, error)` and `func(ctx, *nats.Msg) (any, error)`. Each transport
-has its own `extractUserID` in `v1/auth.go` taking its own message type. Handlers return a plain
-wrapped `error`; the RPC server turns it into a generic `ErrInternalServer` / `ErrBadHandler`
-reply. Do not hand-build an error envelope there.
 
 ## Conventions that will bite you
 
@@ -141,7 +135,7 @@ instead. Controllers are the only place that translates a sentinel into a transp
 
 **Config is environment-only.** `config/config.go` parses env vars with `caarlos0/env`. A new
 setting needs the struct field, an entry in `.env.example`, and — if the container needs it — the
-`environment` block in `docker-compose.yml`. Fields tagged `required` make the app fail at
+`environment` block in `docker-compose.dev.yml`. Fields tagged `required` make the app fail at
 startup.
 
 **The linter is strict and non-obvious.** `.golangci.yml` enables ~45 linters. The ones that
@@ -156,6 +150,8 @@ around blocks), `funlen` (65 lines / 40 statements), `gocyclo` (10), `gocognit` 
   annotation comments above REST handlers and on `NewRouter` in `internal/controller/restapi/router.go`.
 - `docs/proto/v1/*.pb.go` ← `make proto-v1` from the `.proto` files beside them.
 - `internal/usecase/mocks_*_test.go` ← `make mock`.
+- `internal/repo/persistent/sqlcgen/` ← `make sqlc`, from the statements in
+  `internal/repo/persistent/queries/*.sql`.
 
 ## READMEs must be updated as a set
 
@@ -200,8 +196,6 @@ Rules for the translations:
      `router.go` + swagger annotations, then `make swag-v1`.
    - gRPC: `.proto` change → `make proto-v1` → controller method in
      `internal/controller/grpc/v1/`.
-   - AMQP / NATS: handler returning a `CallHandler` + a `"v1.<domain>.<action>"` key in the
-     transport's `v1/router.go`.
 
 Transports are independent by design; adding a method to only one is a legitimate choice, not an
 oversight — but say which ones you covered.
@@ -217,8 +211,8 @@ before writing.
    `.down.sql`. A missing down-migration is a review failure.
 3. **Repo contract** — add the interface to `internal/repo/contracts.go`.
 4. **Repo implementation** — `internal/repo/persistent/<domain>/<domain>.go` (`package <domain>`,
-   Squirrel queries, driver errors mapped to sentinels) plus `tracing.go` next to it, and a `New`
-   returning the interface wrapped in `newTraced`.
+   queries in `queries/<domain>.sql` with `make sqlc` bindings, driver errors mapped to sentinels)
+   plus `tracing.go` next to it, and a `New` returning the interface wrapped in `newTraced`.
 5. **Use-case contract** — add the interface to `internal/usecase/contracts.go`.
 6. **Use-case implementation** — `internal/usecase/<domain>/<domain>.go` plus its `tracing.go`,
    same `New` pattern.
@@ -238,22 +232,38 @@ before writing.
 
 Routes are grouped under a version package (`<transport>/v1/`). A v2 means a new sibling package
 with the same layout, registered alongside v1 in the transport's top-level `router.go` — REST adds
-an `app.Group("/v2")`, gRPC registers a second set of `NewXRoutes`, AMQP/NATS add more
-`"v2.<domain>.<action>"` keys to the same route map. v1 stays untouched. `README.md` documents this
-with worked examples per transport; follow it rather than inventing a scheme.
+an `app.Group("/v2")`, gRPC registers a second set of `NewXRoutes`. v1 stays untouched. `README.md`
+documents this with worked examples per transport; follow it rather than inventing a scheme.
 
 ## Database
 
 `migrations/` holds golang-migrate pairs (`<timestamp>_<name>.up.sql` / `.down.sql`). Create with
 `make migrate-create <name>`, apply with `make migrate-up`. The app applies them itself at startup
 only when built with the `migrate` build tag (`internal/app/migrate.go`) — that is what `make run`
-and the Dockerfile do. Queries are built with Squirrel via the embedded `*postgres.Postgres`;
-there is no ORM and no raw string concatenation.
+and the Dockerfile do.
+
+Query access is SQL-first: statements live in `internal/repo/persistent/queries/*.sql`, and
+`make sqlc` generates the typed bindings (pgx/v5) into `internal/repo/persistent/sqlcgen/`;
+`make sqlc-check` (part of `make pre-commit`) fails when the bindings are stale. A query touching a
+column the migrations do not define, or a scan whose types mismatch, fails at generate time rather
+than at runtime. When a migration adds a table your queries touch, add it to the `schema` list in
+`sqlc.yaml`. Every persistent query in the repository is now a generated binding: there is no ORM,
+no query builder, no runtime SQL assembly and no string concatenation in production code.
+`sqlc.yaml` maps `uuid` to `string`, `timestamptz` to `time.Time` and `numeric` to `float64`, so
+generated rows drop into the domain types without `pgtype` conversions at the call sites; `pgtype`
+appears only where a column or parameter is genuinely nullable. Three binding idioms matter: an
+empty-string-means-absent filter is `(sqlc.arg(x)::text = '' OR col = sqlc.arg(x)::text)` — never
+`narg`, because `NULL::text = ''` is NULL and silently excludes every row; a partial update is
+`col = COALESCE(sqlc.narg(col)::type, col)`, so NULL keeps the stored value; and `narg` binds a NULL
+limit, which `LIMIT` reads as ALL. Repeated protocol shapes (row mapping, JSON-document rows,
+idempotent create/claim, nullable bindings) live once as the generics in
+`internal/repo/persistent/agentos_process_platform_helpers.go`; domain repositories supply their own
+queries and validators, not their own plumbing.
 
 ## Tests
 
 - Unit: `internal/...` and `pkg/...`, run by `make test` with `-race`. Use-case tests use the
   generated gomock mocks, are table-driven, and call `t.Parallel()` (`paralleltest` enforces it).
-- Integration: `integration-test/` runs *inside* the docker network — it resolves the service as
-  host `app` and talks to `rabbitmq` / `nats` by container name, so it fails on the host machine.
+- Integration: `integration-test/` runs *inside* the docker network — it resolves the services it
+  needs by container name, so it fails on the host machine.
   Always run it through `make compose-up-integration-test`.
