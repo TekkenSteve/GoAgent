@@ -93,7 +93,7 @@ func testPipeline(t *testing.T, cfg *PipelineConfig) *Pipeline {
 	return pipeline
 }
 
-func TestNewPipelineRefusesAMissingProtectiveStage(t *testing.T) {
+func TestSecuritySuiteRefusesAMissingProtectiveStage(t *testing.T) {
 	t.Parallel()
 
 	tests := []struct {
@@ -151,7 +151,7 @@ func TestNewPipelineRefusesAMissingProtectiveStage(t *testing.T) {
 	}
 }
 
-func TestPipelineRedactsCredentialsBeforeRecording(t *testing.T) {
+func TestSecuritySuiteRedactsCredentialsBeforeRecording(t *testing.T) {
 	t.Parallel()
 
 	pipeline := testPipeline(t, &PipelineConfig{
@@ -175,7 +175,7 @@ func TestPipelineRedactsCredentialsBeforeRecording(t *testing.T) {
 	require.Equal(t, 42, result.Output["token_count"])
 }
 
-func TestPipelineRedactsNestedCredentials(t *testing.T) {
+func TestSecuritySuiteRedactsNestedCredentials(t *testing.T) {
 	t.Parallel()
 
 	pipeline := testPipeline(t, &PipelineConfig{
@@ -209,7 +209,7 @@ func TestPipelineRedactsNestedCredentials(t *testing.T) {
 // Credentials hide inside containers as readily as at the top level: an array
 // of arrays of objects is where a key-name check that does not walk every
 // container type leaks one.
-func TestPipelineRedactsCredentialsInsideNestedArrays(t *testing.T) {
+func TestSecuritySuiteRedactsCredentialsInsideNestedArrays(t *testing.T) {
 	t.Parallel()
 
 	pipeline := testPipeline(t, &PipelineConfig{
@@ -266,7 +266,7 @@ func TestPipelineRedactsCredentialsInsideNestedArrays(t *testing.T) {
 }
 
 // A denied call is refused and the decision is on record.
-func TestPipelineDeniedCallIsRefusedAndAudited(t *testing.T) {
+func TestSecuritySuiteDeniedCallIsRefusedAndAudited(t *testing.T) {
 	t.Parallel()
 
 	audit := &recordAuditSink{}
@@ -299,7 +299,7 @@ func TestPipelineDeniedCallIsRefusedAndAudited(t *testing.T) {
 
 // An allowed call is recorded too: an audit trail that only holds denials
 // cannot answer what ran.
-func TestPipelineAllowedCallIsAudited(t *testing.T) {
+func TestSecuritySuiteAllowedCallIsAudited(t *testing.T) {
 	t.Parallel()
 
 	audit := &recordAuditSink{}
@@ -322,7 +322,7 @@ func TestPipelineAllowedCallIsAudited(t *testing.T) {
 
 // A decision that cannot be recorded fails the call: an audit trail with holes
 // cannot answer who ran what.
-func TestPipelineUnrecordableDecisionFailsClosed(t *testing.T) {
+func TestSecuritySuiteUnrecordableDecisionFailsClosed(t *testing.T) {
 	t.Parallel()
 
 	executor := &staticRawExecutor{}
@@ -344,7 +344,7 @@ func TestPipelineUnrecordableDecisionFailsClosed(t *testing.T) {
 
 // The tool-level subject is the run's own principal: the account came from the
 // run the platform launched under a verified credential.
-func TestTenantAuthorizerUsesTheRunsPrincipal(t *testing.T) {
+func TestSecuritySuiteAuthorizerUsesTheRunsPrincipal(t *testing.T) {
 	t.Parallel()
 
 	seen := &capturingAuthorizer{}
@@ -370,7 +370,7 @@ func TestTenantAuthorizerUsesTheRunsPrincipal(t *testing.T) {
 
 // An empty account cannot be authorized: the request is incomplete, and the
 // only safe answer to "I cannot tell" is no.
-func TestTenantAuthorizerRefusesAnIncompleteRequest(t *testing.T) {
+func TestSecuritySuiteAuthorizerRefusesAnIncompleteRequest(t *testing.T) {
 	t.Parallel()
 
 	authorizer := &TenantAuthorizer{Authorizer: allowOwnTenantPolicy{}}
@@ -378,7 +378,7 @@ func TestTenantAuthorizerRefusesAnIncompleteRequest(t *testing.T) {
 	require.Error(t, authorizer.Authorize(context.Background(), &Request{ToolName: "search"}))
 }
 
-func TestTenantAuthorizerRefusesWithoutAPolicy(t *testing.T) {
+func TestSecuritySuiteAuthorizerRefusesWithoutAPolicy(t *testing.T) {
 	t.Parallel()
 
 	authorizer := &TenantAuthorizer{}
