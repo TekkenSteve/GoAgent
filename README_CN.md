@@ -1,318 +1,164 @@
 # GoAgent
 
-GoAgent 是 **AgentOS** 的参考实现：一个基于 Temporal 的 **Agent Control Plane** 与 **Durable Process Platform**。
-
-它有两个公共使用面：
-
-- **Agent Control Plane** — 启动、控制、观察和组合 backend-owned agent runs，可编排 native GoAgent、LangGraph、OpenCode 风格 runtime、HTTP backend、gRPC backend 和外部 Temporal workflow。
-- **Durable Process Platform** — 用通用 resource、process、ledger、governed action、batch、projection 描述长生命周期智能工作。AiSOC 这类领域系统应该构建在这些通用原语上，而不是把自己的业务名词写进 AgentOS core。
-
-GoAgent native agent framework 只是一个 backend 实现。Temporal 是 durable process kernel。`agentos/temporal` 是默认 adapter，负责把 AgentOS ports 接到 Temporal、Postgres、Redis 和 artifact storage。
-
-## 特性
-
-- **Agent Control Plane** — backend-owned run 生命周期、signal、control、durable RunPlan 编排、backend capability 和 event ingest
-- **Durable Process Platform** — 通用 resource/process runtime、ledger、governed action、batch/workset 和 projection 接口
-- **Temporal Kernel Adapter** — 显式 Temporal task queue 隔离、durable workflow、timer、signal、retry、cancel 和故障恢复
-- **Nexus Service Surface** — 通过 `agentos/nexusapi` 暴露版本化的 Nexus service（run 启动、signal、control、status），调用方依赖契约而非内部实现；`run.status` 是**有界延迟快照（≈5s）**，因为同步 handler 不会直接触碰后端
-- **Native Agent Backend** — 支持 LLM 集成的 ReAct 循环运行时、工具执行、team composition 和 MCP 服务器
-- **外部 Backend Adapter** — HTTP、gRPC 和 `temporal_external` backend，用于接入 GoAgent 外部拥有的 runtime
-- **多 Agent 团队** — 具有递归子团队扩展的分层团队组合
-- **人在回路中** — 工作流暂停/恢复/取消和基于信号的等待步骤
-- **流式输出** — 支持 SSE 和 WebSocket 的实时 Agent 输出
-- **账户与计费** — 基于信用额度的使用跟踪和套餐分配
-- **整洁架构** — 依赖反转、基于接口的隔离、可测试性
-- **可观测性** — 结构化日志（zerolog）、Prometheus 指标、OpenTelemetry 追踪
-- **数据库迁移** — 使用 golang-migrate 管理 PostgreSQL 架构
-
-## 技术栈
+> **GoAgent** 是一个开源 **AgentOS**：为内嵌 AI 的产品提供 Agent 执行层。产品团队只做产品——领域、交互、闭环；GoAgent 运行它的 Agent 那一半：耐久 run 与 plan、工具与 MCP 执行、流式输出、artifacts、审计、计费、多租户，全部收在一个控制平面后面。
 
 [![Web Framework](https://img.shields.io/badge/Fiber-Web%20Framework-blue)](https://github.com/gofiber/fiber)
 [![Workflow Engine](https://img.shields.io/badge/Temporal-Workflow%20Engine-blue)](https://temporal.io/)
-[![API Documentation](https://img.shields.io/badge/Swagger-API%20Documentation-blue)](https://github.com/swaggo/swag)
-[![Validation](https://img.shields.io/badge/Validator-Data%20Integrity-blue)](https://github.com/go-playground/validator)
-[![JSON Handling](https://img.shields.io/badge/Go--JSON-Fast%20Serialization-blue)](https://github.com/goccy/go-json)
+[![Event Backbone](https://img.shields.io/badge/NATS%20JetStream-Event%20Backbone-blue)](https://nats.io/)
 [![SQL Compiler](https://img.shields.io/badge/sqlc-Type--Safe%20SQL-blue)](https://sqlc.dev/)
-[![Database Migrations](https://img.shields.io/badge/Migrations-Seamless%20Schema%20Updates-blue)](https://github.com/golang-migrate/migrate)
+[![Database Migrations](https://img.shields.io/badge/golang--migrate-Schema%20Updates-blue)](https://github.com/golang-migrate/migrate)
 [![Logging](https://img.shields.io/badge/ZeroLog-Structured%20Logging-blue)](https://github.com/rs/zerolog)
 [![Metrics](https://img.shields.io/badge/Prometheus-Metrics%20Integration-blue)](https://github.com/ansrivas/fiberprometheus)
-[![Testing](https://img.shields.io/badge/Testify-Testing%20Framework-blue)](https://github.com/stretchr/testify)
+
+## 问题
+
+模型是产品的一层，不是产品本身。模型升级让这一层免费变强——而它周围的一切原封不动。一个核心环节包含长时 AI 工作的产品，仍然必须用工程回答：进程跑到一半挂了怎么办、跨三天的对话怎么活过重启、那次工具调用是谁批准的、Agent 究竟对我的数据做了什么、花了多少钱。
+
+每个 AI 产品团队都在手搓同一套不性感的机器来回答这些问题——run 生命周期、抗宕机的任务队列、工具分发、进度流式、artifact 存储、审计轨迹、用量计量。这套机器对产品一无所知：一个抽认卡工坊和一个安全运营平台需要*相同*的那一半，不同的只是各自的名词。
+
+五个分布式系统问题，每一个都被不确定性推理放大：
+
+| 生产问题 | Agent 带来的放大 | 系统必须承担的 |
+|---|---|---|
+| 长时运行 | 对话、审批、观察周期跨天跨月 | 耐久等待、定时器、宕机恢复 |
+| 外部副作用 | 模型*一定会*调你的付款和通知工具 | 幂等、重试、补偿、审批门 |
+| 不确定决策 | 同一目标，多条推理路径 | 策略门、预算、决策留痕 |
+| 多主体协作 | 团队、Agent、人同时在场 | 契约、隔离、授权 |
+| 持续演进 | prompt、工具 schema、策略漂移 | 版本化 schema、可控迁移 |
+
+GoAgent 就是这套机器的产品化。LLM 负责不确定的认知步骤；耐久工作流负责围绕它的确定的生命周期与治理。
+
+## GoAgent 是什么
+
+```mermaid
+graph TB
+    subgraph PRODUCTS["你的产品 —— 任何领域"]
+        direction LR
+        P1["抽认卡工坊<br/>（对话驱动的卡片制作）"]
+        P2["安全运营平台"]
+        P3["开发工具 · 游戏 · 任何<br/>有长时 AI 工作的东西"]
+    end
+
+    subgraph AGENTOS["GoAgent / AgentOS"]
+        CP["Agent 控制平面<br/>runs · plans · signals · capabilities"]
+        PP["耐久流程平台<br/>resources · ledger · governed actions · worksets"]
+        NX["Nexus API<br/>跨服务的耐久操作"]
+    end
+
+    subgraph STATE["耐久性与事实"]
+        T["Temporal<br/>状态 · 定时器 · 重试 · 恢复"]
+        N["NATS JetStream<br/>事务性 outbox → 投影 · 镜像"]
+        P[("Postgres<br/>账本 · 哈希链审计 · 投影")]
+    end
+
+    subgraph BACKENDS["Agent 后端"]
+        NA["原生 GoAgent ReAct<br/>+ MCP 工具"]
+        LG["LangGraph · OpenCode 式<br/>运行时"]
+        EXT["HTTP · gRPC ·<br/>外部 Temporal"]
+    end
+
+    PRODUCTS -->|"引擎中立契约<br/>agentos/core · control · process"| AGENTOS
+    CP --> BACKENDS
+    PP --> STATE
+    NX --> T
+```
+
+三个决定撑起整个设计：
+
+- **你的名词归你。** 领域工作以泛型 `ResourceRef` 进入——对 AgentOS 来说，一个卡包和一个安全事件是同一种原语。它永远不学你的领域模型，你的产品也永远不碰它的内部：公共契约（`agentos/core`、`agentos/control`、`agentos/process`）不 import 任何执行引擎，由 `make check-import-boundary` 锁死。
+- **控制平面管编排，后端管执行。** GoAgent 启动、发信号、控制和观察*后端持有*的 run，并把它们编排成跨后端的耐久 plan。后端可以是原生 ReAct 循环、一个 LangGraph 服务、一个 OpenCode 式运行时，或任何 HTTP/gRPC/Temporal 服务——它内部的图、步骤、工具都留在它那里。
+- **大载荷永不进入工作流历史。** prompt、工具 I/O、证据存在外部存储，以 claim-check 引用进入；工作流只保留状态、命令和引用。已提交的事实从事务性 outbox 流向 JetStream，供给投影、镜像和分析；REST、MCP、控制台读的是 Postgres 读模型，从不打高频 workflow query。
+
+## 实际案例
+
+[Kardcraft](https://github.com/TekkenSteve/Kardcraft)——一个面向间隔重复的对话式抽认卡制作产品——运行在这个设计上：它的 LangGraph 卡片生产图是一个 AgentOS 后端；它的 Go 任务编排器是 `agentos.PlanRuntime` 的下游消费者。边界有多干净，一句话可以度量：编排器的 AgentOS 适配器按其自身契约，是*唯一知道 AgentOS 类型的 Kardcraft 包*。
+
+## 保证清单
+
+平台评审者真正会逐条核对的东西：
+
+- **耐久** —— run 和 plan 扛得住宕机、发版和跨天等待；Nexus 上的 `run.status` 是有界陈旧度快照（≈5s），从不阻塞调用后端。
+- **后端无关** —— 原生、LangGraph、OpenCode 式、HTTP、gRPC、外部 Temporal 的 run 在同一契约后面；批量条目由 capability 上界约束，不会爆成几千个 plan 节点。
+- **受治理** —— 高危工作走 dry-run、风险评估、审批、执行、取消、补偿（`GovernedActionRuntime`）。
+- **可审计** —— 决策、证据引用、执行者、理由进入账本；审计日志哈希链化、防篡改。
+- **可计费** —— credit 账户与使用台账对每个 run 计量。
+- **多租户** —— account/project 维度端到端强制，包括 schema 里的行级租户键。
+- **引擎中立** —— 公共契约零 Temporal import；Temporal 只存在于 `agentos/temporal` 适配器里，可以整体更换而不动任何消费者。
+- **互操作边缘** —— `cmd/agentos-plan` 校验 plan、产出 JSON Schema 创作契约，并以 [Serverless Workflow](https://serverlessworkflow.io/) 作为交换格式导入导出。
+
+## 定位
+
+Agent 技术栈的每一层都在风口上。它们解决的是不同的问题：
+
+| 类别 | 例子 | 服务单位 | 优化目标 |
+|---|---|---|---|
+| 陪伴型 Agent | OpenClaw（🦞 龙虾）、Hermes（爱马仕）、Muse、Cue、Grokbot | 一个人的注意力 | 人格、个人上下文、聊天渠道 |
+| 自主任务产品 | Manus | 一个任务交付物 | 厂商沙箱里的端到端完成 |
+| 编码 Agent harness | DeepSeek Harness、Claude Code、Codex | 一个开发者的会话 | Agent 循环：工具、沙箱、评审 |
+| Agent 框架 | LangGraph、CrewAI | 你这个应用的代码 | 构建一个 Agent 应用 |
+| **GoAgent（AgentOS）** | **本仓库** | **一个产品的 Agent 工作负载** | 耐久、治理、审计、计费、多租户——作为产品自己拥有的平台 |
+
+**GoAgent 算 harness 吗？** 不算。harness 是*单个* Agent 循环的驾驶舱——为一个终端前的开发者驱动工具、沙箱和评审。GoAgent 是*众多*后端持有 run 的空管系统——面向整个工作负载的生命周期、治理与审计。二者是组合而非竞争：harness 构建的 Agent（或任何 HTTP/gRPC/Temporal 服务）作为一个后端接入控制平面——LangGraph 和 OpenCode 式运行时现在就是这么接进来的。GoAgent 也不是你在进程内编码的框架——它是你的产品*使用*的基础设施，通过 REST、Go 内嵌或纯类型契约接入。
 
 ## 快速开始
 
-### 前提条件
-
-- Go 1.26+
-- Docker & Docker Compose
-- Temporal Server（通过 Docker）
-
-### 本地开发
+需要 Go 1.26+、Docker 和 Docker Compose。
 
 ```sh
-# 启动依赖服务 (Postgres, Redis, NATS JetStream, Centrifugo, Temporal)
+# 一次性：生成开发凭据（.env）。没有它栈拒绝启动，仓库也不自带任何凭据。
+make dev-secrets
+
+# 启动依赖：Postgres、Redis、NATS JetStream、Centrifugo、Temporal
 make compose-up
 
-# 运行应用（包含数据库迁移）
+# 运行应用（以 migrate 标签构建并应用迁移）
 make run
 ```
 
-### 集成测试
+- REST API：`http://127.0.0.1:8080` —— [`/healthz`](http://127.0.0.1:8080/healthz)、[`/metrics`](http://127.0.0.1:8080/metrics)、[`/swagger`](http://127.0.0.1:8080/swagger)
+- Docker 全栈：`make compose-up-all`
+- 集成测试（mock LLM，容器网络内）：`make compose-up-integration-test`
 
-```sh
-# 启动完整测试环境（含 mock LLM）
-make compose-up-integration-test
-```
+## API 一览
 
-### 完整 Docker 栈
+REST 按 `/v1` 版本化；完整参考见 [`/swagger`](http://127.0.0.1:8080/swagger)。形状如下：
 
-```sh
-make compose-up-all
-```
-
-## 服务端点
-
-- **REST API**:
-  - `http://127.0.0.1:8080/healthz` — 健康检查
-  - `http://127.0.0.1:8080/metrics` — Prometheus 指标
-  - `http://127.0.0.1:8080/swagger` — API 文档
-- **AgentOS API (v1)**:
-  - `POST /v1/agentos/runs` — 在指定 backend 上启动 run
-  - `GET /v1/agentos/runs/{run_id}/status` — 轮询 run 状态
-  - `POST /v1/agentos/runs/{run_id}/signals` — 发送 `user.message` 等业务输入
-  - `POST /v1/agentos/runs/{run_id}/control` — 发送 pause、resume、cancel
-  - `POST /v1/agentos/runs/{run_id}/events` — 接收 backend 事件回写
-  - `GET /v1/agentos/plans/schemas/{kind}` — 读取 RunPlan 编写用 JSON Schema
-  - `GET /v1/agentos/plans/author` — 渲染 RunPlanSpec 编写控制台
-  - `POST /v1/agentos/plans` — 启动跨 backend 的持久 RunPlan
-  - `GET /v1/agentos/plans/{plan_id}/status` — 轮询 plan 聚合状态
-  - `GET /v1/agentos/plans/{plan_id}/description` — 读取公开拓扑和状态
-  - `GET /v1/agentos/plans/{plan_id}/console` — 渲染 RunPlan 运维控制台
-  - `POST /v1/agentos/plans/{plan_id}/signals` — 发送 retry、approve、reject 等 plan 信号
-  - `POST /v1/agentos/plans/{plan_id}/control` — 向 RunPlan 发送 pause、resume、cancel
-  - `GET /v1/agentos/plans/{plan_id}/events` — 通过 SSE 订阅 RunPlan 事件
-  - `GET /v1/agentos/plans/{plan_id}/events/history` — 查询持久 RunPlan 事件历史
-  - `GET /v1/agentos/plans/{plan_id}/debug/traces` — 查询类型化 debug traces
-  - `GET /v1/agentos/plans/{plan_id}/audits` — 查询持久 plan audit records
-  - `GET /v1/agentos/plans/{plan_id}/artifacts` — 查询 plan artifact refs
-  - `GET /v1/agentos/plans/{plan_id}/artifacts/{artifact_id}` — 读取单个 plan artifact 文档
-- **模板 API**:
-  - `POST /v1/templates/import` — 从 YAML 导入工作流模板
-  - `GET /v1/templates/` — 模板列表
-  - `GET /v1/templates/{template_id}` — 模板详情
-  - `DELETE /v1/templates/{template_id}` — 删除模板
-- **PostgreSQL**: `postgres://user@127.0.0.1:5432/db`
+| 领域 | 代表端点 |
+|---|---|
+| Runs | `POST /v1/agentos/runs` · `GET /runs/{id}/status` · `POST /runs/{id}/signals` · `POST /runs/{id}/control` |
+| 耐久 Plans | `POST /v1/agentos/plans` · `GET /plans/{id}/status` · `GET /plans/{id}/events`（SSE）· `GET /plans/{id}/audits` · `GET /plans/{id}/artifacts/{id}` |
+| 创作工具 | `GET /v1/agentos/plans/schemas/{kind}` · `GET /v1/agentos/plans/author` · `cmd/agentos-plan`（validate / schema / Serverless Workflow 导入导出） |
+| 模板 | `POST /v1/templates/import` · `GET /v1/templates/` |
 
 ## 项目结构
 
-GoAgent 围绕小而稳定的 **AgentOS 边界**、adapter 和应用壳组织。实现包位于 `internal/`，不是外部项目的公共契约。
+一个小的公共 **AgentOS 边界** + 适配器 + 应用外壳。`internal/` 下的实现包不是公共契约。
 
 ```text
-Applications / reference distributions
-  -> agentos/platform        # 应用需要同时使用两个平面时的组合门面
-      -> agentos/control     # Agent Control Plane
-      -> agentos/process     # Durable Process Platform
-          -> agentos/core    # 共享 OS 原语
+公共端口（引擎中立，零 Temporal import）
+  agentos/core       # signals、controls、events、artifacts、tools、errors
+  agentos/control    # run 与 plan 契约、capabilities、backend refs
+  agentos/process    # resources、ledger、governed actions、batches、projections
+  agentos/platform   # 需要两个平面时的组合门面
 
-Default implementation
-  -> agentos/nexusapi        # Nexus service contract: names and operation I/O types
-  -> agentos/temporal        # Temporal/Postgres/Redis/artifact adapter
-      -> agentos/control
-      -> agentos/process
-      -> agentos/core
+默认适配器
+  agentos/temporal   # Temporal + Postgres + Redis + artifact store
+  agentos/nexusapi   # 版本化的 Nexus 服务契约
 
-Internal application
-  -> internal/controller     # REST transport
-  -> internal/usecase        # application use cases
-  -> internal/repo           # persistence/backend adapters
-  -> internal/agentfw        # native GoAgent backend implementation
+应用外壳（非公共）
+  internal/controller   # REST 传输
+  internal/usecase      # 应用用例
+  internal/repo         # 持久化（sqlc 优先）与后端适配器
+  internal/agentfw      # 原生 GoAgent 后端——一个后端，不是架构本身
+  internal/app, cmd/    # 装配与入口
 ```
 
-这个隔离是架构边界，不是目录装饰：
+两条规则保持边界诚实：`agentos/control` 永不 import `agentos/process`（Agent run 不懂业务语义）；`agentos/process` 永不 import `agentos/control`（耐久流程离开 Agent 执行也存在）。SQL 放在 `internal/repo/persistent/queries/*.sql`，由 `make sqlc` 编译成类型安全的绑定——没有 ORM，没有运行时拼 SQL。
 
-- `agentos/control` 不 import `agentos/process`；agent run 和 plan 不知道业务 process 语义。
-- `agentos/process` 不 import `agentos/control`；durable process 可以独立于 agent execution 存在。
-- `agentos/platform` 是需要同时使用两个平面的应用侧组合门面。
-- `agentos/temporal` 只实现 public ports，不定义 AiSOC、DevOps、CodeAgent 等业务模型。
-- `internal/agentfw` 是 native backend，不是所有 backend 都必须复制的公共架构。
+## 使用方式
 
-### 公共库包
-
-| 包 | 层 | 说明 |
-|---------|-------|-------------|
-| `agentos/core/` | 共享原语 | signal、control、event、artifact、message、tool、subscription 和公共错误 |
-| `agentos/control/` | Agent Control Plane | Runtime、PlanRuntime、RunSpec、RunPlanSpec、PlanNodeSpec、capability、backend ref、plan schema |
-| `agentos/process/` | Durable Process Platform | ResourceRef、process runtime、ledger runtime、governed action runtime、batch runtime、projection runtime |
-| `agentos/platform/` | 组合门面 | 嵌入 control 与 process interfaces 的统一 runtime 接口 |
-| `agentos/temporal/` | 默认 adapter | Temporal/Postgres/Redis/artifact-store 实现和 worker 注册工具 |
-| `config/` | 外层 | 应用配置（基于环境变量） |
-| `pkg/` | 通用工具 | 不作为 GoAgent 实现契约的基础设施包装 |
-
-### 应用壳
-
-- `internal/app/` — 依赖注入与应用引导
-- `internal/agentfw/` — Agent 工作流和运行时实现
-- `internal/entity/`、`internal/usecase/`、`internal/repo/`、`internal/state/` — 内部领域和基础设施实现
-- `internal/controller/` — 传输层（REST AgentOS 控制面）
-- `cmd/app/` — 入口点
-
-### 其他目录
-
-- `docs/` — Swagger 文档
-- `examples/` — 可运行的模式示例
-- `integration-test/` — 集成测试（需要 Docker）
-- `migrations/` — PostgreSQL 迁移文件
-- `internal/repo/persistent/queries/` — SQL 语句，按域一个文件
-- `internal/repo/persistent/sqlcgen/` — 生成的类型安全绑定（`make sqlc`）
-
-### 配置管理
-
-遵循 [12-Factor App](https://12factor.net/) 原则，所有配置通过环境变量管理。
-
-配置文件：[config/config.go](config/config.go)  
-示例配置：[.env.example](.env.example)
-
-### 可观测性
-
-OpenTelemetry 追踪通过 OTLP gRPC 采集器导出 span。由 `TRACING_ENABLED` 控制（默认 `false`），还可通过 `TRACING_OTLP_ENDPOINT`、`TRACING_OTLP_INSECURE` 和 `TRACING_SAMPLE_RATE` 调整。参见 [pkg/tracing](pkg/tracing)。
-
-## Agent Control Plane
-
-Agent Control Plane 协调 backend-owned agent runs。backend 可以是 native GoAgent backend、LangGraph 服务、OpenCode 风格 runtime、HTTP 服务、gRPC 服务，或外部 Temporal workflow。
-
-公共模型刻意保持粗粒度：
-
-- `control.RunSpec` 启动一个 backend-owned run。
-- `control.RunStatus` 是这个 run 的公共生命周期视图。
-- `control.RunPlanSpec` 组合多个 backend-owned runs。
-- `control.PlanNodeSpec` 是 run 级编排节点。它不是 native GoAgent step、Temporal activity、LangGraph graph node、OpenCode step，也不是 tool call。
-- `control.CapabilityRunBatch` 表示一个 backend-owned batch run。AgentOS 校验粗粒度 limit 并观察进度，不会把 batch items 展开成成千上万个 plan nodes。
-
-backend 内部的 graph、loop、step、tool、record 级执行细节留在拥有它的 backend 或 data plane 里。它们可以作为 event、artifact、ledger record 或 projection 回写给 AgentOS。
-
-## Durable Process Platform
-
-Durable Process Platform 为长生命周期智能工作提供通用构件：
-
-- `process.ResourceRef` 标识 case、ticket、order、incident、alert、pull request、change 等领域资源，但这些业务名词不会进入 AgentOS core。
-- `process.Runtime` 管理 durable process 生命周期。
-- `process.LedgerRuntime` 记录 decision、evidence ref、action ref、prompt/response ref、artifact ref、actor、timestamp 和 rationale。
-- `process.GovernedActionRuntime` 描述 dry-run、risk evaluation、approval、execution、cancel 和 compensation。
-- `process.BatchRuntime` 描述 workset 和有界 batch progress。
-- `process.ProjectionRuntime` 从 durable projection 为 REST、MCP、UI 和 operator read model 服务，不依赖高频 Temporal Workflow Query。
-
-Temporal 存储确定性的 process control、timer、signal、retry 和紧凑引用。大型 prompt、response、evidence blob、search index、lake data、graph data 和 artifact payload 留在外部存储。
-
-## Native Agent Backend
-
-GoAgent native backend 是 control plane 后面的一个实现：
-
-1. **Agent 运行时** — 带 LLM provider 抽象的 ReAct 循环
-2. **工具系统** — 基于 JSON Schema 的工具定义、执行器抽象、MCP 服务器集成
-3. **团队系统** — native backend 内部的分层团队组合
-4. **Temporal Worker Kit** — 为 durable native execution 注册 workflow/activity
-
-native step 队列、team expansion、LLM call、tool call 和 backend 内部 graph 逻辑都是实现细节。它们不是外部 backend 必须复制的模型。
-
-### REST 示例
-
-`examples/http/` 目录包含 AgentOS REST 示例：
-
-| 示例 | 文件 | 展示内容 |
-|---------|------|---------------|
-| [RunPlan](examples/http/runplan/) | `examples/http/runplan/main.go` | 使用公共 `agentos/control` 类型通过 REST 启动 durable AgentOS RunPlan |
-
-### 库嵌入示例（方式二 — AgentOS Runtime）
-
-`examples/embed/` 目录展示如何通过公共 AgentOS 边界嵌入 GoAgent：
-
-| 示例 | 文件 | 展示内容 |
-|---------|------|---------------|
-| [ReAct](examples/embed/react/) | `examples/embed/react/main.go` | 使用 `control.Runtime` 启动通用运行 |
-| [对话](examples/embed/conversation/) | `examples/embed/conversation/main.go` | 通过 `agentos/temporal` 启动对话运行 |
-| [工具](examples/embed/tools/) | `examples/embed/tools/main.go` | 通过运行时边界启动可使用工具的提示 |
-| [RunPlan](examples/embed/plan/) | `examples/embed/plan/main.go` | 使用 `control.PlanRuntime` 启动 durable 跨 backend plan |
-
-### 仅使用类型（方式三）
-
-`examples/types/` 目录展示仅导入 `agentos/core` 和 `agentos/control` 来共享公共类型定义。
-
-### 跨 Backend Plan（AgentOS RunPlan）
-
-AgentOS 通过 `control.PlanRuntime` 支持持久的跨 backend 编排。
-
-`RunPlan` 是用于协调 backend-owned 子 run 的公开控制面模型。`PlanNodeSpec` 是一个完整的 `control.RunSpec`，外加 backend、capability、peer（它的 run 在哪个城执行）、input、output、condition 和 policy 契约。它既不是 native GoAgent step，也不是 Temporal activity，也不是 LangGraph 节点。
-
-Native GoAgent 的 `entity.Step` 仍是 GoAgent native backend 的内部细节。特定 backend 的 step、graph、loop 与 tool 执行细节应通过事件或 artifact 输出，而不是提升为 AgentOS 的公开 API。
-
-Capability 是粗粒度的 backend 契约。`control.CapabilityRun` 启动一个 backend-owned run；`control.CapabilityRunBatch` 启动一个 backend-owned batch run，并通过 capability 限额校验有界 batch 输入；AgentOS 不会把 batch 条目展开成 plan 节点。
-
-Plan runtime 的查询 API 是持久的：status 来自 plan index，事件历史来自 plan event store，审计来自 audit store，artifact 载荷来自 artifact store。SSE 只是叠加在持久事件历史之上的实时流传输。
-
-持久流程层暴露 `process.ProjectionRuntime`，用于 REST、MCP、UI 与运维读模型。投影读取来自持久的 process、ledger、governed action 与 workset 存储，而不是高频 Temporal Workflow Query 调用。
-
-`control.PlanJSONSchema` 与 `GET /v1/agentos/plans/schemas/{kind}` 为编辑器和 CI 提供公开的编写 schema。`cmd/agentos-plan` 是 RunPlan DSL/编译器工具：校验 JSON/YAML `RunPlanSpec`、生成 JSON Schema、校验有界 `PlanDelta` 展开，并以 Serverless Workflow 作为边缘互操作格式导入/导出。类型化的 `control.RunPlanSpec` 始终是唯一真相来源。
-
-```bash
-go run ./cmd/agentos-plan schema --kind run-plan --out docs/schemas/run_plan.schema.json
-go run ./cmd/agentos-plan schema --kind plan-delta --out docs/schemas/plan_delta.schema.json
-go run ./cmd/agentos-plan schema --kind capability-catalog --out docs/schemas/capability_catalog.schema.json
-go run ./cmd/agentos-plan schema --kind artifact-schema-catalog --out docs/schemas/artifact_schema_catalog.schema.json
-go run ./cmd/agentos-plan validate --file plan.yaml --format yaml --capabilities capabilities.yaml --capabilities-format yaml --artifact-schemas artifact-schemas.yaml --artifact-schemas-format yaml
-go run ./cmd/agentos-plan export-serverless --file plan.yaml --format yaml --capabilities capabilities.yaml --capabilities-format yaml --artifact-schemas artifact-schemas.yaml --artifact-schemas-format yaml --out-format yaml --out workflow.yaml
-go run ./cmd/agentos-plan import-serverless --file workflow.yaml --format yaml --capabilities capabilities.yaml --capabilities-format yaml --artifact-schemas artifact-schemas.yaml --artifact-schemas-format yaml --out-format json
-```
-
-外部 Go 项目只应导入：
-
-```go
-import (
-    "github.com/TekkenSteve/GoAgent/agentos/control"
-    "github.com/TekkenSteve/GoAgent/agentos/core"
-    "github.com/TekkenSteve/GoAgent/agentos/process"
-    "github.com/TekkenSteve/GoAgent/agentos/platform"
-    agentostemporal "github.com/TekkenSteve/GoAgent/agentos/temporal"
-)
-```
-
-Do not import implementation packages such as `internal/entity`, `internal/repo`, `internal/usecase`, or old root-level implementation packages. Public examples and docs are guarded by tests to keep that boundary intact.
-
-## 三种使用方式
-
-GoAgent 支持三种集成方式，从简单到深度集成：
-
-### 方式一 — 独立服务（REST API）
-
-将 GoAgent 作为独立服务运行，应用通过 AgentOS REST 控制面与其交互。
-
-```go
-import (
-    "bytes"
-    "encoding/json"
-    "net/http"
-
-    agentos "github.com/TekkenSteve/GoAgent/agentos/control"
-)
-
-body, _ := json.Marshal(agentos.RunSpec{
-    RunID: "run-1",
-    AccountID: "acct-1",
-    ProjectID: "proj-1",
-    UserMessage: "1+1 等于几？",
-    IdempotencyKey: "run-1-start",
-    Backend: agentos.BackendRef{
-        Kind: agentos.BackendKindNative,
-        Name: agentos.BackendNameGoAgentNative,
-    },
-})
-req, _ := http.NewRequestWithContext(ctx, http.MethodPost, "http://localhost:8080/v1/agentos/runs", bytes.NewReader(body))
-req.Header.Set("Content-Type", "application/json")
-resp, _ := http.DefaultClient.Do(req)
-defer resp.Body.Close()
-```
-
-### 方式二 — Go 库嵌入
-
-将稳定的 AgentOS 边界导入你的 Go 应用。默认 Temporal/Postgres/Redis 实现位于 `agentos/temporal`。
+1. **独立服务器** —— 把 GoAgent 当服务跑，你的产品通过 REST 控制面对接。
+2. **Go 库内嵌** —— import AgentOS 边界，用默认适配器启动：
 
 ```go
 import (
@@ -321,157 +167,47 @@ import (
 )
 
 rt, _ := agentostemporal.NewRuntime(ctx, agentostemporal.RuntimeConfig{
-    TemporalAddress: "127.0.0.1:7233",
-    TemporalNamespace: "default",
+    TemporalAddress:    "127.0.0.1:7233",
+    TemporalNamespace:  "default",
     TemporalTaskQueues: agentostemporal.DefaultTaskQueues(),
-    PostgresURL: "postgres://goagent:goagent@127.0.0.1:5432/goagent?sslmode=disable",
-    RedisURL: "redis://127.0.0.1:6379/0",
+    PostgresURL:        "postgres://goagent:goagent@127.0.0.1:5432/goagent?sslmode=disable",
+    RedisURL:           "redis://127.0.0.1:6379/0",
 })
-status, _ := rt.Start(ctx, agentos.RunSpec{
-    RunID: "run-1",
-    AccountID: "acct-1",
-    ProjectID: "proj-1",
-    ModelRef: "gpt-4.1-mini",
-    UserMessage: "1+1 等于几？",
-    IdempotencyKey: "run-1-start",
-})
+status, _ := rt.Start(ctx, agentos.RunSpec{ /* … */ })
 ```
 
-### 方式三 — 仅使用类型
+3. **只用公共类型** —— import `agentos/core` 和 `agentos/control` 获取共享契约。
 
-仅导入服务需要的公共 AgentOS 包。`agentos/core` 放共享 message/tool/event，`agentos/control` 放 run/plan 契约。
+每种模式都有可运行示例，在 [`examples/`](examples/)（REST、embed、types）。
 
-```go
-import (
-    "github.com/TekkenSteve/GoAgent/agentos/core"
-    "github.com/TekkenSteve/GoAgent/agentos/control"
-)
-
-type MyService struct {
-    messages []core.Message
-    tools    []core.ToolDef
-    plans    []control.RunPlanSpec
-}
-```
-
-## 架构设计
-
-### Clean Architecture 原则
-
-本项目遵循 [go-clean-template](https://github.com/evrone/go-clean-template) 架构模式：
-
-1. **公共 ports**（`agentos/core`、`agentos/control`、`agentos/process`、`agentos/platform`）定义稳定的应用侧契约。
-2. **Adapters**（`agentos/temporal`、`internal/repo/*`、`internal/controller/*`）为 Temporal、存储、backend runtime 和 transport 实现 ports。
-3. **Use cases** 通过接口协调应用行为，而不是依赖具体基础设施。
-4. **依赖方向**保持明确：领域契约不 import adapter，公共包不 import `internal`。
-5. **可测试性**来自小接口、确定性的 workflow input 和边界测试。
-
-### 依赖流向
-
-```text
-┌────────────────────────────────────────────────────────────┐
-│ Applications / reference distributions                     │
-│  - AiSOC, CodeAgent, DevOps, CustomerOps                   │
-│  - import agentos/platform 或具体 public packages           │
-├────────────────────────────────────────────────────────────┤
-│ Public AgentOS ports                                        │
-│  agentos/core                                               │
-│  agentos/control        Agent Control Plane                 │
-│  agentos/process        Durable Process Platform            │
-│  agentos/platform       Composition facade                  │
-├────────────────────────────────────────────────────────────┤
-│ Public default adapter                                      │
-│  agentos/temporal       Temporal/Postgres/Redis/artifacts   │
-├────────────────────────────────────────────────────────────┤
-│ Application shell                                           │
-│  internal/controller    REST transport                      │
-│  internal/usecase       application services                │
-│  internal/repo          persistence and backend adapters     │
-│  internal/agentfw       native GoAgent backend              │
-│  internal/app           dependency injection                │
-└────────────────────────────────────────────────────────────┘
-```
-
-- **Public ports** 是支持应用直接依赖的契约。
-- **Temporal adapter** 是这些契约的默认实现，不拥有业务词汇。
-- **Application shell** 负责组装 service、HTTP API、persistence、worker registration 和 native backend。
-- **Reference distributions** 应放在 `examples/` 或下游仓库；它们使用 AgentOS primitives，但不改变 AgentOS core types。
-
-### 依赖注入
-
-通过构造函数注入依赖，保持业务逻辑的独立性和可测试性：
-
-```go
-type UseCase struct {
-    repo Repository  // 接口依赖
-}
-
-func New(r Repository) *UseCase {
-    return &UseCase{repo: r}
-}
-```
-
-### API 版本管理
-
-支持简单的版本管理策略，通过目录结构区分版本：
-
-- REST API: `internal/controller/restapi/v1`, `v2`...
-
-## 开发指南
-
-### 数据库迁移
+## 开发
 
 ```sh
-# 运行迁移
-go run -tags migrate ./cmd/app
-
-# 或使用 make
-make run
+make sqlc                # 重新生成类型安全的 SQL 绑定（query/schema 变更后必跑）
+make swag-v1             # 重新生成 Swagger 文档
+make mock                # 重新生成 gomock mocks
+make test                # 单元测试（-race）
+make compose-up-integration-test   # 容器网络内的集成套件
+make linter-golangci     # lint
+make check-import-boundary        # 强制公共契约引擎中立
+make check-workflow-determinism   # Temporal workflow 确定性
 ```
 
-### 生成代码
+配置遵循 12-factor，只用环境变量——见 [config/config.go](config/config.go) 和 [.env.example](.env.example)。迁移是 [`migrations/`](migrations/) 里的 golang-migrate 成对文件；应用以 `migrate` 标签构建时在启动时应用。链路追踪 OpenTelemetry（`TRACING_ENABLED`），指标 Prometheus，日志 zerolog。
 
-```sh
-# 生成 Swagger 文档
-make swag-v1
+## 展望
 
-# 生成 Mock
-make mock
+- **内核只是细节。** 公共契约从不提及执行引擎；Temporal 活在一个适配器里。换一个耐久内核，不用动任何消费者。
+- **承诺取代轮询。** Nexus 面向耐久跨服务操作生长：在崩溃中保持数秒或数天、精确一次，而不是各自造状态轮询。
+- **事实单向流动。** 事务性 outbox → JetStream 骨干成为唯一正道的事实源：投影、镜像、分析、重放都来订阅；UI 增量单独走 Centrifugo，永不进入 stream。
+- **MCP 作为工具通用语。** 原生后端已说 MCP；capability 与 artifact-schema 目录是版本化的 JSON Schema——这是 Agent 市场在拥有 Agent 之前先需要的地基。
+- **Agent 即公用事业。** 终局是像用电一样使用 Agent 工作：账本计量、审计链防篡改、governed action 圈定边界——以基础设施应有的方式无聊。
 
-# 从 queries/*.sql 生成类型安全的 SQL 绑定
-make sqlc
-```
+## 参考
 
-### 代码检查
-
-```sh
-# 运行 linter
-make linter-golangci
-
-# 格式化代码
-make format
-
-# 运行单元测试
-make test
-```
-
-## CI 检查（推送前本地运行）
-
-```sh
-make linter-golangci               # golangci-lint
-make linter-hadolint               # Dockerfile 检查
-make linter-dotenv                  # .env 检查
-make check-workflow-determinism    # Temporal 工作流确定性检查
-make test                          # 单元测试
-```
-
-## 参考资料
-
-- [Clean Architecture](https://blog.cleancoder.com/uncle-bob/2012/08/13/the-clean-architecture.html) — Robert Martin
-- [The Twelve-Factor App](https://12factor.net/)
-- [Temporal Workflow Platform](https://temporal.io/)
-- [Go Project Layout](https://github.com/golang-standards/project-layout)
+- [Temporal](https://temporal.io/) · [NATS JetStream](https://nats.io/) · [Centrifugo](https://centrifugal.dev/) · [sqlc](https://sqlc.dev/)
+- [Clean Architecture](https://blog.cleancoder.com/uncle-bob/2012/08/13/the-clean-architecture.html) · [The Twelve-Factor App](https://12factor.net/)
 
 ## 许可证
 
-MIT License — 详见 [LICENSE](LICENSE) 文件
+MIT License —— 见 [LICENSE](LICENSE)。
