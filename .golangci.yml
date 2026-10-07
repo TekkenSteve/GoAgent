@@ -121,7 +121,14 @@ formatters:
     - goimports
   settings:
     gofumpt:
-      extra-rules: true
+      # The rules named one by one rather than the deprecated "extra-rules:
+      # true", which enabled whatever the current gofumpt release calls extra —
+      # the same three today (extra-rules expands to Extra.Set("true")), but a
+      # future release could add a fourth and reformat the tree unannounced.
+      extra:
+        group-params: true
+        clothe-returns: true
+        balance-calls: true
   exclusions:
     generated: lax
     paths:
