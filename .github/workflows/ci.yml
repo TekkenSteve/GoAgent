@@ -1,5 +1,15 @@
 name: CI
-on: pull_request
+
+# Every branch is verified, not only pull requests: this repository is worked on
+# by pushing to branches directly, and a gate that never runs there is how the
+# tree drifted out of a passing state. Documentation-only changes skip the run.
+on:
+  pull_request:
+  push:
+    paths-ignore:
+      - '**.md'
+      - 'docs/**'
+      - 'LICENSE'
 
 jobs:
   golangci-lint:
@@ -13,9 +23,7 @@ jobs:
           go-version: '1.26'
           cache: false
       - name: golangci-lint
-        uses: golangci/golangci-lint-action@v9
-        with:
-          args: --timeout=15m
+        run: make linter-golangci
 
   yamllint:
     name: runner / yamllint
@@ -26,7 +34,7 @@ jobs:
         with:
           fail_level: error
           reporter: github-pr-review
-          yamllint_flags: '-d "{extends: default, rules: {truthy: disable}}" .'
+          yamllint_flags: '.'
 
   hadolint:
     name: runner / hadolint
@@ -86,6 +94,8 @@ jobs:
         run: "make check-import-boundary"
       - name: AgentOS schema freshness
         run: "make check-agentos-plan-schema"
+      - name: Migration safety
+        run: "make check-migration-safety"
 
   postgres-integration-tests:
     name: runner / tests / postgres integration
@@ -114,11 +124,47 @@ jobs:
       - name: Postgres-backed AgentOS persistence integration tests
         run: "make postgres-integration-test"
 
+  migration-drill:
+    name: runner / migrations / drill
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:18.3-alpine
+        env:
+          POSTGRES_USER: goagent
+          POSTGRES_PASSWORD: goagent
+          POSTGRES_DB: goagent
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U goagent -d goagent"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+    env:
+      MIGRATION_DRILL_URL: postgres://goagent:goagent@localhost:5432/goagent
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version: 1.26
+      - name: Apply, roll back and re-apply every migration
+        run: "make migration-drill"
+
   integration-tests:
     name: runner / tests / integration
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
+      - name: Generate the stack's development credentials
+        # The repository ships no credentials, and the development stack
+        # refuses to start without them, so each run makes its own.
+        run: |
+          cat > .env <<EOF
+          CENTRIFUGO_API_KEY=$(openssl rand -hex 16)
+          CENTRIFUGO_ADMIN_PASSWORD=$(openssl rand -hex 16)
+          CENTRIFUGO_ADMIN_SECRET=$(openssl rand -hex 16)
+          EOF
       - name: Integration tests
         run: "make compose-up-integration-test"
 
