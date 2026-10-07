@@ -7,7 +7,10 @@
 #   - the stateful services run without credentials because they are reachable
 #     only on the loopback interface and the compose network. Postgres uses
 #     trust authentication for the same reason — there is no password here to
-#     leak, rotate, or accidentally promote to production;
+#     leak, rotate, or accidentally promote to production. The NATS broker is
+#     the one that does ask, with guest:guest, its own dev default: a shutter
+#     on a published port, not a secret. Clients present it too — the init
+#     container, the app, and the nats scripts all carry the same pair;
 #   - the Centrifugo API key and admin credentials come from the environment.
 #     Set them in .env (see .env.example); the stack refuses to start without
 #     them.
@@ -63,9 +66,10 @@ x-backend-app-environment: &x-backend-app-environment
   CENTRIFUGO_API_KEY: "${CENTRIFUGO_API_KEY:?set CENTRIFUGO_API_KEY in .env}"
   # Event backbone (NATS JetStream). An empty URL disables it, which is how a
   # host-side `make run` behaves; the stack below always has the broker.
-  # Dev only: the broker runs without authentication because it is reachable
-  # on the compose network and the loopback interface alone.
-  AGENTFW_NATS_URL: "nats://nats:4222"
+  # The credentials match the broker's -user/-pass flags: the broker publishes
+  # its port to the host loopback, and guest:guest keeps that publish from
+  # being an open door. Dev only.
+  AGENTFW_NATS_URL: "nats://guest:guest@nats:4222"
   # Auth — development posture. Tokens are signed with a shared secret because
   # the stack has no identity provider; a real deployment sets AUTH_JWKS_URL to
   # its issuer (or to the gateway that terminates authentication) and leaves
@@ -234,7 +238,7 @@ services:
       nats:
         condition: service_healthy
     environment:
-      - AGENTFW_NATS_URL=${AGENTFW_NATS_URL:-nats://nats:4222}
+      - AGENTFW_NATS_URL=${AGENTFW_NATS_URL:-nats://guest:guest@nats:4222}
       - AGENTFW_NATS_SUBJECT_PREFIX=${AGENTFW_NATS_SUBJECT_PREFIX:-agentos}
     volumes:
       - ./scripts/nats/create-streams.sh:/scripts/create-streams.sh:ro

@@ -46,7 +46,7 @@ compose-up-all: ### Run docker compose (with backend and reverse proxy)
 compose-up-integration-test: ### Run docker compose with integration test
 	exit_code=0; \
 	trap '$(ALL_STACK) down --remove-orphans' EXIT; \
-	$(INTEGRATION_TEST_STACK) up --build integration-test || exit_code=$$?; \
+	$(INTEGRATION_TEST_STACK) up --build --exit-code-from integration-test integration-test || exit_code=$$?; \
 	exit $$exit_code
 .PHONY: compose-up-integration-test
 
@@ -55,7 +55,7 @@ compose-up-mixed-backend-integration-test: ### Run docker compose mixed AgentOS 
 	trap '$(ALL_STACK) down --remove-orphans' EXIT; \
 	GO_TEST_FLAGS="-v -run TestHTTPAgentOSRunPlanMixedBackendsV1 -count=1" \
 	GO_TEST_PACKAGES="./integration-test" \
-	$(INTEGRATION_TEST_STACK) up --build integration-test || exit_code=$$?; \
+	$(INTEGRATION_TEST_STACK) up --build --exit-code-from integration-test integration-test || exit_code=$$?; \
 	exit $$exit_code
 .PHONY: compose-up-mixed-backend-integration-test
 

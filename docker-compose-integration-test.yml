@@ -119,6 +119,13 @@ services:
       context: .
       dockerfile: integration-test/Dockerfile
     environment:
+      # The suite authenticates like any other client: it mints HS256 tokens
+      # from these values, so they must match the app's auth configuration
+      # (x-backend-app-environment in docker-compose.dev.yml). Drift surfaces as
+      # a 401 on every protected route, not as a check that quietly passes.
+      AUTH_HMAC_SECRET: "${AUTH_HMAC_SECRET:-dev-only-shared-secret-not-for-production}"
+      AUTH_ISSUER: "${AUTH_ISSUER:-goagent-dev}"
+      AUTH_AUDIENCE: "${AUTH_AUDIENCE:-goagent}"
       PG_URL: "postgres://user@db:5432/db"
       GO_TEST_FLAGS: "${GO_TEST_FLAGS:--v}"
       GO_TEST_PACKAGES: "${GO_TEST_PACKAGES:-./integration-test/...}"

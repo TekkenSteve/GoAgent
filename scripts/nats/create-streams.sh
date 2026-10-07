@@ -43,7 +43,8 @@ until nats stream ls --server "$URL" >/dev/null 2>&1; do
   attempt=$((attempt + 1))
 
   if [ "$attempt" -ge 30 ]; then
-    echo "NATS JetStream at $URL did not become ready" >&2
+    echo "NATS JetStream at $URL did not become ready; last error was:" >&2
+    nats stream ls --server "$URL" >/dev/null || true
     exit 1
   fi
 
@@ -68,7 +69,9 @@ create_stream() {
     return 0
   fi
 
-  if nats stream add "$name" \
+  # Success stays quiet; failure carries its reason, so a rejected URL or
+  # stream config names itself in the log instead of exiting blind.
+  if out=$(nats stream add "$name" \
     --server "$URL" \
     --subjects "$subjects" \
     --storage file \
@@ -76,10 +79,11 @@ create_stream() {
     --max-age "$max_age" \
     --dupe-window "$DUPE_WINDOW" \
     --discard old \
-    --defaults >/dev/null 2>&1; then
+    --defaults 2>&1); then
     echo "Stream '$name' created (subjects=$subjects max-age=$max_age)"
   else
-    echo "Failed to create stream '$name'" >&2
+    echo "Failed to create stream '$name':" >&2
+    echo "$out" >&2
     exit 1
   fi
 }
