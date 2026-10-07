@@ -114,8 +114,8 @@ func (uc *UseCase) CreateFromYAML(ctx context.Context, accountID string, yamlDat
 }
 
 // Get retrieves a workflow template by ID.
-func (uc *UseCase) Get(ctx context.Context, templateID string) (entity.WorkflowTemplate, error) {
-	record, exists, err := uc.templateRepo.Get(ctx, templateID)
+func (uc *UseCase) Get(ctx context.Context, accountID, templateID string) (entity.WorkflowTemplate, error) {
+	record, exists, err := uc.templateRepo.Get(ctx, accountID, templateID)
 	if err != nil {
 		return entity.WorkflowTemplate{}, fmt.Errorf("TemplateUseCase - Get - repo: %w", err)
 	}
@@ -128,13 +128,13 @@ func (uc *UseCase) Get(ctx context.Context, templateID string) (entity.WorkflowT
 }
 
 // Update updates an existing workflow template.
-func (uc *UseCase) Update(ctx context.Context, templateID string, req entity.UpdateWorkflowTemplateRequest) (entity.WorkflowTemplate, error) {
-	return uc.templateRepo.Update(ctx, templateID, req)
+func (uc *UseCase) Update(ctx context.Context, accountID, templateID string, req entity.UpdateWorkflowTemplateRequest) (entity.WorkflowTemplate, error) {
+	return uc.templateRepo.Update(ctx, accountID, templateID, req)
 }
 
-// Delete removes a workflow template by ID.
-func (uc *UseCase) Delete(ctx context.Context, templateID string) error {
-	return uc.templateRepo.Delete(ctx, templateID)
+// Delete removes a workflow template the account owns.
+func (uc *UseCase) Delete(ctx context.Context, accountID, templateID string) error {
+	return uc.templateRepo.Delete(ctx, accountID, templateID)
 }
 
 // ListByAccount retrieves all templates for an account.
