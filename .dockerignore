@@ -27,8 +27,14 @@ docker-compose*.yml
 # this line every image layer would carry the development keys.
 config/llm.yaml
 
-# Build inputs and documentation, not runtime content.
-docs
+# Build inputs and documentation, not runtime content. docs/docs.go is
+# the one exception: it is the swaggo-generated package the REST router
+# imports, so it must stay in the build context. Never collapse the
+# docs/* pattern and its exception back to a bare `docs` line - that
+# drops the package and the image build fails with
+# "no required module provides package .../docs".
+docs/*
+!docs/docs.go
 *.zip
 .test-out.txt
 
