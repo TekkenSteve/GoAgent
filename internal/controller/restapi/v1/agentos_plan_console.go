@@ -80,10 +80,15 @@ func (r *V1) agentOSPlanConsole(ctx *fiber.Ctx) error {
 		return errorResponse(ctx, http.StatusBadRequest, err.Error())
 	}
 
+	tenant, ok := r.tenantFromRequest(ctx, req.ProjectID, agentoscore.ActionPlanRead, "plan")
+	if !ok {
+		return nil
+	}
+
 	ref := agentos.PlanRef{
 		PlanID:    ctx.Params("plan_id"),
-		AccountID: req.AccountID,
-		ProjectID: req.ProjectID,
+		AccountID: tenant.AccountID,
+		ProjectID: tenant.ProjectID,
 	}
 
 	data, err := r.collectPlanConsoleData(ctx, ref, eventLimit, auditLimit, artifactLimit)

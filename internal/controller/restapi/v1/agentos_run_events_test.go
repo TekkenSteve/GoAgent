@@ -7,7 +7,6 @@ import (
 	"testing"
 
 	agentoscore "github.com/TekkenSteve/GoAgent/agentos/core"
-	"github.com/TekkenSteve/GoAgent/pkg/logger"
 	"github.com/gofiber/fiber/v2"
 )
 
@@ -34,7 +33,7 @@ func TestAgentOSRunEventHistoryRoute(t *testing.T) {
 		{EventID: "run-1:4", EventType: agentoscore.EventRunStarted, RunID: "run-1", Sequence: 4},
 	}}
 	app := fiber.New()
-	NewRoutes(app.Group("/v1"), nil, nil, logger.New("error"), nil, nil, nil, nil, nil, nil, nil, reader)
+	newTestRoutes(t, app, nil, nil, nil, reader)
 
 	resp := doAgentOSRouteRequest(t, app, http.MethodGet, "/v1/agentos/runs/run-1/events/history?after_sequence=3&limit=10", "")
 
@@ -66,7 +65,7 @@ func TestAgentOSRunEventHistoryUnconfigured(t *testing.T) {
 	t.Parallel()
 
 	app := fiber.New()
-	NewRoutes(app.Group("/v1"), nil, nil, logger.New("error"), nil, nil, nil, nil, nil, nil, nil, nil)
+	newTestRoutes(t, app, nil, nil, nil, nil)
 
 	resp := doAgentOSRouteRequest(t, app, http.MethodGet, "/v1/agentos/runs/run-1/events/history", "")
 

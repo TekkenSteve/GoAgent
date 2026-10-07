@@ -11,7 +11,6 @@ import (
 
 	agentos "github.com/TekkenSteve/GoAgent/agentos/control"
 	agentoscore "github.com/TekkenSteve/GoAgent/agentos/core"
-	"github.com/TekkenSteve/GoAgent/pkg/logger"
 	"github.com/TekkenSteve/GoAgent/pkg/sse"
 	"github.com/gofiber/fiber/v2"
 )
@@ -32,7 +31,7 @@ func TestAgentOSPlanRoutesUsePlanRuntime(t *testing.T) {
 
 	planRuntime := newFakePlanRuntime()
 	app := fiber.New()
-	NewRoutes(app.Group("/v1"), nil, nil, logger.New("error"), nil, nil, nil, nil, nil, planRuntime, nil, nil)
+	newTestRoutes(t, app, nil, planRuntime, nil, nil)
 
 	testPlanStartRoute(t, app, planRuntime)
 	testPlanSignalRoute(t, app, planRuntime)
@@ -50,9 +49,9 @@ func testPlanStartRoute(t *testing.T, app *fiber.App, planRuntime *fakePlanRunti
 	t.Helper()
 
 	startBody := `{
-		"plan_id": "plan-1", "thread_id": "thread-1", "account_id": "acct-1", "project_id": "proj-1",
+		"plan_id": "plan-1", "thread_id": "thread-1", "project_id": "proj-1",
 		"idempotency_key": "plan-start-1", "inputs": {"topic": "durable coordination"},
-		"nodes": [{"node_id": "research", "run": {"run_id": "run-research", "account_id": "acct-1", "project_id": "proj-1", "backend": {"kind": "http", "name": "research-http"}, "input": {"task": "research"}}}]
+		"nodes": [{"node_id": "research", "run": {"run_id": "run-research", "project_id": "proj-1", "backend": {"kind": "http", "name": "research-http"}, "input": {"task": "research"}}}]
 	}`
 
 	resp := doAgentOSRouteRequest(t, app, http.MethodPost, "/v1/agentos/plans", startBody)
@@ -77,7 +76,7 @@ func testPlanStartRoute(t *testing.T, app *fiber.App, planRuntime *fakePlanRunti
 func testPlanSignalRoute(t *testing.T, app *fiber.App, planRuntime *fakePlanRuntime) {
 	t.Helper()
 
-	signalBody := `{"type": "plan.node.retry", "account_id": "acct-1", "project_id": "proj-1", "idempotency_key": "retry-1", "actor_id": "operator-1", "payload": {"node_id": "research"}}`
+	signalBody := `{"type": "plan.node.retry", "project_id": "proj-1", "idempotency_key": "retry-1", "actor_id": "operator-1", "payload": {"node_id": "research"}}`
 
 	resp := doAgentOSRouteRequest(t, app, http.MethodPost, "/v1/agentos/plans/plan-1/signals", signalBody)
 	t.Cleanup(func() {
@@ -103,7 +102,7 @@ func testPlanSignalRoute(t *testing.T, app *fiber.App, planRuntime *fakePlanRunt
 func testPlanControlRoute(t *testing.T, app *fiber.App, planRuntime *fakePlanRuntime) {
 	t.Helper()
 
-	controlBody := `{"operation": "pause", "account_id": "acct-1", "project_id": "proj-1", "idempotency_key": "pause-1", "actor_id": "operator-1"}`
+	controlBody := `{"operation": "pause", "project_id": "proj-1", "idempotency_key": "pause-1", "actor_id": "operator-1"}`
 
 	resp := doAgentOSRouteRequest(t, app, http.MethodPost, "/v1/agentos/plans/plan-1/control", controlBody)
 	t.Cleanup(func() {
@@ -128,7 +127,7 @@ func testPlanControlRoute(t *testing.T, app *fiber.App, planRuntime *fakePlanRun
 func testPlanStatusRoute(t *testing.T, app *fiber.App, _ *fakePlanRuntime) {
 	t.Helper()
 
-	resp := doAgentOSRouteRequest(t, app, http.MethodGet, "/v1/agentos/plans/plan-1/status?account_id=acct-1&project_id=proj-1", "")
+	resp := doAgentOSRouteRequest(t, app, http.MethodGet, "/v1/agentos/plans/plan-1/status?project_id=proj-1", "")
 	t.Cleanup(func() {
 		if err := resp.Body.Close(); err != nil {
 			t.Errorf("close response body: %v", err)
@@ -152,7 +151,7 @@ func testPlanStatusRoute(t *testing.T, app *fiber.App, _ *fakePlanRuntime) {
 func testPlanDescriptionRoute(t *testing.T, app *fiber.App, _ *fakePlanRuntime) {
 	t.Helper()
 
-	resp := doAgentOSRouteRequest(t, app, http.MethodGet, "/v1/agentos/plans/plan-1/description?account_id=acct-1&project_id=proj-1", "")
+	resp := doAgentOSRouteRequest(t, app, http.MethodGet, "/v1/agentos/plans/plan-1/description?project_id=proj-1", "")
 	t.Cleanup(func() {
 		if err := resp.Body.Close(); err != nil {
 			t.Errorf("close response body: %v", err)
@@ -180,7 +179,7 @@ func testPlanDescriptionRoute(t *testing.T, app *fiber.App, _ *fakePlanRuntime) 
 func testPlanAuditsRoute(t *testing.T, app *fiber.App, planRuntime *fakePlanRuntime) {
 	t.Helper()
 
-	resp := doAgentOSRouteRequest(t, app, http.MethodGet, "/v1/agentos/plans/plan-1/audits?account_id=acct-1&project_id=proj-1&action=plan.control&limit=25", "")
+	resp := doAgentOSRouteRequest(t, app, http.MethodGet, "/v1/agentos/plans/plan-1/audits?project_id=proj-1&action=plan.control&limit=25", "")
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("audits status = %d", resp.StatusCode)
 	}
@@ -204,7 +203,7 @@ func testPlanAuditsRoute(t *testing.T, app *fiber.App, planRuntime *fakePlanRunt
 func testPlanArtifactsRoute(t *testing.T, app *fiber.App, planRuntime *fakePlanRuntime) {
 	t.Helper()
 
-	resp := doAgentOSRouteRequest(t, app, http.MethodGet, "/v1/agentos/plans/plan-1/artifacts?account_id=acct-1&project_id=proj-1&node_id=research&limit=10", "")
+	resp := doAgentOSRouteRequest(t, app, http.MethodGet, "/v1/agentos/plans/plan-1/artifacts?project_id=proj-1&node_id=research&limit=10", "")
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("artifacts status = %d", resp.StatusCode)
 	}
@@ -228,7 +227,7 @@ func testPlanArtifactsRoute(t *testing.T, app *fiber.App, planRuntime *fakePlanR
 func testPlanArtifactGetRoute(t *testing.T, app *fiber.App, planRuntime *fakePlanRuntime) {
 	t.Helper()
 
-	resp := doAgentOSRouteRequest(t, app, http.MethodGet, "/v1/agentos/plans/plan-1/artifacts/artifact-1?account_id=acct-1&project_id=proj-1", "")
+	resp := doAgentOSRouteRequest(t, app, http.MethodGet, "/v1/agentos/plans/plan-1/artifacts/artifact-1?project_id=proj-1", "")
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("artifact status = %d", resp.StatusCode)
 	}
@@ -292,7 +291,7 @@ func assertPlanArtifactGetScope(t *testing.T, scope *agentos.PlanArtifactScope) 
 func testPlanEventHistoryRoute(t *testing.T, app *fiber.App, planRuntime *fakePlanRuntime) {
 	t.Helper()
 
-	planEvents := getPlanRouteJSON[[]agentos.PlanEvent](t, app, "/v1/agentos/plans/plan-1/events/history?account_id=acct-1&project_id=proj-1&node_id=research&run_id=run-research&after_sequence=7&limit=3", "event history")
+	planEvents := getPlanRouteJSON[[]agentos.PlanEvent](t, app, "/v1/agentos/plans/plan-1/events/history?project_id=proj-1&node_id=research&run_id=run-research&after_sequence=7&limit=3", "event history")
 	assertPlanEventHistoryScope(t, &planRuntime.eventScope)
 	assertPlanEventHistory(t, planEvents)
 }
@@ -344,7 +343,7 @@ func assertPlanEventHistory(t *testing.T, planEvents []agentos.PlanEvent) {
 func testPlanDebugTracesRoute(t *testing.T, app *fiber.App, planRuntime *fakePlanRuntime) {
 	t.Helper()
 
-	traces := getPlanRouteJSON[[]agentos.PlanDebugTrace](t, app, "/v1/agentos/plans/plan-1/debug/traces?account_id=acct-1&project_id=proj-1&node_id=research&after_sequence=7&limit=3", "debug traces")
+	traces := getPlanRouteJSON[[]agentos.PlanDebugTrace](t, app, "/v1/agentos/plans/plan-1/debug/traces?project_id=proj-1&node_id=research&after_sequence=7&limit=3", "debug traces")
 	assertPlanDebugScope(t, &planRuntime.debugScope)
 	assertPlanDebugTraces(t, traces)
 }
@@ -404,7 +403,7 @@ func runControlOrSignalConsoleCase(t *testing.T, cases []controlOrSignalCase) {
 
 			planRuntime := newFakePlanRuntime()
 			app := fiber.New()
-			NewRoutes(app.Group("/v1"), nil, nil, logger.New("error"), nil, nil, nil, nil, nil, planRuntime, nil, nil)
+			newTestRoutes(t, app, nil, planRuntime, nil, nil)
 
 			resp := doAgentOSRouteRequest(t, app, http.MethodPost, tc.route, tc.body)
 			t.Cleanup(func() {
@@ -464,7 +463,7 @@ func TestAgentOSPlanSchemaRouteDoesNotRequirePlanRuntime(t *testing.T) {
 	t.Parallel()
 
 	app := fiber.New()
-	NewRoutes(app.Group("/v1"), nil, nil, logger.New("error"), nil, nil, nil, nil, nil, nil, nil, nil)
+	newTestRoutes(t, app, nil, nil, nil, nil)
 
 	resp := doAgentOSRouteRequest(t, app, http.MethodGet, "/v1/agentos/plans/schemas/run-plan", "")
 	t.Cleanup(func() {
@@ -506,7 +505,7 @@ func TestAgentOSPlanAuthorRouteDoesNotRequirePlanRuntime(t *testing.T) {
 	t.Parallel()
 
 	app := fiber.New()
-	NewRoutes(app.Group("/v1"), nil, nil, logger.New("error"), nil, nil, nil, nil, nil, nil, nil, nil)
+	newTestRoutes(t, app, nil, nil, nil, nil)
 
 	resp := doAgentOSRouteRequest(t, app, http.MethodGet, "/v1/agentos/plans/author", "")
 	t.Cleanup(func() {
@@ -555,7 +554,7 @@ func TestAgentOSPlanAuthorRouteEnablesStartWithPlanRuntime(t *testing.T) {
 	t.Parallel()
 
 	app := fiber.New()
-	NewRoutes(app.Group("/v1"), nil, nil, logger.New("error"), nil, nil, nil, nil, nil, newFakePlanRuntime(), nil, nil)
+	newTestRoutes(t, app, nil, newFakePlanRuntime(), nil, nil)
 
 	resp := doAgentOSRouteRequest(t, app, http.MethodGet, "/v1/agentos/plans/author", "")
 	t.Cleanup(func() {
@@ -589,7 +588,7 @@ func TestAgentOSPlanRoutesDoNotMutateRunningTopology(t *testing.T) {
 	t.Parallel()
 
 	app := fiber.New()
-	NewRoutes(app.Group("/v1"), nil, nil, logger.New("error"), nil, nil, nil, nil, nil, newFakePlanRuntime(), nil, nil)
+	newTestRoutes(t, app, nil, newFakePlanRuntime(), nil, nil)
 
 	planRoutes := 0
 
@@ -621,7 +620,7 @@ func TestAgentOSPlanRoutesRequireProjectScope(t *testing.T) {
 
 	app := fiber.New()
 	planRuntime := newFakePlanRuntime()
-	NewRoutes(app.Group("/v1"), nil, nil, logger.New("error"), nil, nil, nil, nil, nil, planRuntime, nil, nil)
+	newTestRoutes(t, app, nil, planRuntime, nil, nil)
 
 	for _, tt := range []struct {
 		name   string
@@ -686,9 +685,9 @@ func TestAgentOSPlanEventRouteStreamsSSE(t *testing.T) {
 
 	planRuntime := newFakePlanRuntime()
 	app := fiber.New()
-	NewRoutes(app.Group("/v1"), nil, nil, logger.New("error"), nil, nil, nil, nil, nil, planRuntime, nil, nil)
+	newTestRoutes(t, app, nil, planRuntime, nil, nil)
 
-	resp := doAgentOSRouteRequest(t, app, http.MethodGet, "/v1/agentos/plans/plan-1/events?account_id=acct-1&project_id=proj-1&node_id=research&after_sequence=7", "")
+	resp := doAgentOSRouteRequest(t, app, http.MethodGet, "/v1/agentos/plans/plan-1/events?project_id=proj-1&node_id=research&after_sequence=7", "")
 	t.Cleanup(func() {
 		if err := resp.Body.Close(); err != nil {
 			t.Errorf("close response body: %v", err)
@@ -762,9 +761,9 @@ func TestAgentOSPlanConsoleRendersRuntimeData(t *testing.T) {
 
 	planRuntime := newFakePlanRuntime()
 	app := fiber.New()
-	NewRoutes(app.Group("/v1"), nil, nil, logger.New("error"), nil, nil, nil, nil, nil, planRuntime, nil, nil)
+	newTestRoutes(t, app, nil, planRuntime, nil, nil)
 
-	resp := doAgentOSRouteRequest(t, app, http.MethodGet, "/v1/agentos/plans/plan-1/console?account_id=acct-1&project_id=proj-1", "")
+	resp := doAgentOSRouteRequest(t, app, http.MethodGet, "/v1/agentos/plans/plan-1/console?project_id=proj-1", "")
 	t.Cleanup(func() {
 		if err := resp.Body.Close(); err != nil {
 			t.Errorf("close response body: %v", err)
@@ -822,17 +821,21 @@ func assertPlanConsoleRuntimeCalls(t *testing.T, planRuntime *fakePlanRuntime) {
 	}
 }
 
-func TestAgentOSPlanConsoleRequiresTenantScope(t *testing.T) {
+// TestAgentOSPlanConsoleRequiresAProject pins what a plan request must name:
+// the project, because it is the resource dimension. The account is not a
+// request field — it comes from the credential — so a query that carries only
+// a project is served, and the reference the runtime receives is the
+// authenticated account.
+func TestAgentOSPlanConsoleRequiresAProject(t *testing.T) {
 	t.Parallel()
 
 	planRuntime := newFakePlanRuntime()
 	app := fiber.New()
-	NewRoutes(app.Group("/v1"), nil, nil, logger.New("error"), nil, nil, nil, nil, nil, planRuntime, nil, nil)
+	newTestRoutes(t, app, nil, planRuntime, nil, nil)
 
 	for _, path := range []string{
 		"/v1/agentos/plans/plan-1/console",
 		"/v1/agentos/plans/plan-1/console?account_id=acct-1",
-		"/v1/agentos/plans/plan-1/console?project_id=proj-1",
 	} {
 		resp := doAgentOSRouteRequest(t, app, http.MethodGet, path, "")
 		if err := resp.Body.Close(); err != nil {
@@ -840,8 +843,17 @@ func TestAgentOSPlanConsoleRequiresTenantScope(t *testing.T) {
 		}
 
 		if resp.StatusCode != http.StatusBadRequest {
-			t.Fatalf("console path %q status = %d", path, resp.StatusCode)
+			t.Fatalf("console path %q status = %d, want 400", path, resp.StatusCode)
 		}
+	}
+
+	resp := doAgentOSRouteRequest(t, app, http.MethodGet, "/v1/agentos/plans/plan-1/console?project_id=proj-1", "")
+	if err := resp.Body.Close(); err != nil {
+		t.Errorf("close response body: %v", err)
+	}
+
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("console status = %d, want 200", resp.StatusCode)
 	}
 }
 
@@ -1088,4 +1100,73 @@ func (s fakeSubscription) Events() <-chan agentoscore.Event {
 
 func (s fakeSubscription) Close() error {
 	return nil
+}
+
+// TestAgentOSPlanTenantComesFromTheCredential is the plan-side regression guard:
+// a request that names another account must not address that account's plan.
+// The runtime receives the authenticated account, because the request has no
+// say in it.
+func TestAgentOSPlanTenantComesFromTheCredential(t *testing.T) {
+	t.Parallel()
+
+	planRuntime := newFakePlanRuntime()
+	app := fiber.New()
+	newTestRoutes(t, app, nil, planRuntime, nil, nil)
+
+	// A query that tries to name the account is ignored: only the project is a
+	// request dimension.
+	resp := doAgentOSRouteRequest(t, app, http.MethodGet,
+		"/v1/agentos/plans/plan-1/status?project_id=proj-1&account_id=acct-2", "")
+	if err := resp.Body.Close(); err != nil {
+		t.Errorf("close response body: %v", err)
+	}
+
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status route = %d, want 200", resp.StatusCode)
+	}
+
+	if planRuntime.statusRef.AccountID != testAccountID {
+		t.Fatalf("status plan ref account = %q, want the authenticated %q", planRuntime.statusRef.AccountID, testAccountID)
+	}
+
+	body := `{"type": "plan.node.retry", "project_id": "proj-1", "account_id": "acct-2", "idempotency_key": "retry-2", "payload": {"node_id": "research"}}`
+
+	resp = doAgentOSRouteRequest(t, app, http.MethodPost, "/v1/agentos/plans/plan-1/signals", body)
+	if err := resp.Body.Close(); err != nil {
+		t.Errorf("close response body: %v", err)
+	}
+
+	if resp.StatusCode != http.StatusAccepted {
+		t.Fatalf("signal route = %d, want 202", resp.StatusCode)
+	}
+
+	if planRuntime.signalRef.AccountID != testAccountID {
+		t.Fatalf("signal plan ref account = %q, want the authenticated %q", planRuntime.signalRef.AccountID, testAccountID)
+	}
+}
+
+// TestAgentOSPlanStartOverwritesTheSpecifiedTenant covers plan start, where the
+// body deserializes a spec that legitimately carries a tenant: the server
+// decides it rather than trusting the caller.
+func TestAgentOSPlanStartOverwritesTheSpecifiedTenant(t *testing.T) {
+	t.Parallel()
+
+	planRuntime := newFakePlanRuntime()
+	app := fiber.New()
+	newTestRoutes(t, app, nil, planRuntime, nil, nil)
+
+	body := `{"plan_id": "plan-1", "account_id": "acct-2", "project_id": "proj-1", "idempotency_key": "plan-start-1", "nodes": []}`
+
+	resp := doAgentOSRouteRequest(t, app, http.MethodPost, "/v1/agentos/plans", body)
+	if err := resp.Body.Close(); err != nil {
+		t.Errorf("close response body: %v", err)
+	}
+
+	if resp.StatusCode != http.StatusAccepted {
+		t.Fatalf("start plan = %d, want 202", resp.StatusCode)
+	}
+
+	if planRuntime.started.AccountID != testAccountID {
+		t.Fatalf("started plan account = %q, want the authenticated %q", planRuntime.started.AccountID, testAccountID)
+	}
 }

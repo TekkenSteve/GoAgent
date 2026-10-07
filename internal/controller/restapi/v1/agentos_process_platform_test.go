@@ -11,7 +11,6 @@ import (
 	agentoscore "github.com/TekkenSteve/GoAgent/agentos/core"
 	agentosprocess "github.com/TekkenSteve/GoAgent/agentos/process"
 	"github.com/TekkenSteve/GoAgent/internal/controller/restapi/v1/request"
-	"github.com/TekkenSteve/GoAgent/pkg/logger"
 	"github.com/go-playground/validator/v10"
 	"github.com/gofiber/fiber/v2"
 )
@@ -33,7 +32,7 @@ func TestAgentOSProcessPlatformRoutesUseRuntime(t *testing.T) {
 
 	runtime := newFakePlatformRuntime()
 	app := fiber.New()
-	NewRoutes(app.Group("/v1"), nil, nil, logger.New("error"), nil, nil, nil, nil, runtime, runtime, runtime, nil)
+	newTestRoutes(t, app, runtime, runtime, runtime, nil)
 
 	testProcessStartRoute(t, app, runtime)
 	testProcessListRoute(t, app, runtime)
@@ -62,10 +61,16 @@ func TestAgentOSQueryScopeValidationRejectsMissingProject(t *testing.T) {
 	app.Get("/scope", func(ctx *fiber.Ctx) error {
 		var req request.AgentOSPlanScope
 
-		return parseRuntimeScopedQuery(&V1{v: validator.New(validator.WithRequiredStructEnabled())}, ctx, "plan scope", true, "", &req)
+		_, ok := parseRuntimeScopedQuery(&V1{v: validator.New(validator.WithRequiredStructEnabled())}, ctx,
+			"plan scope", agentoscore.ActionPlanRead, "plan", true, "", &req)
+		if !ok {
+			return nil
+		}
+
+		return ctx.SendStatus(http.StatusNoContent)
 	})
 
-	resp := doAgentOSRouteRequest(t, app, http.MethodGet, "/scope?account_id=acct-1", "")
+	resp := doAgentOSRouteRequest(t, app, http.MethodGet, "/scope", "")
 	t.Cleanup(func() {
 		if err := resp.Body.Close(); err != nil {
 			t.Errorf("close response body: %v", err)
@@ -81,9 +86,9 @@ func TestAgentOSPlanRouteRejectsMissingProjectScope(t *testing.T) {
 	t.Parallel()
 
 	app := fiber.New()
-	NewRoutes(app.Group("/v1"), nil, nil, logger.New("error"), nil, nil, nil, nil, nil, newFakePlanRuntime(), nil, nil)
+	newTestRoutes(t, app, nil, newFakePlanRuntime(), nil, nil)
 
-	resp := doAgentOSRouteRequest(t, app, http.MethodGet, "/v1/agentos/plans/plan-1/status?account_id=acct-1", "")
+	resp := doAgentOSRouteRequest(t, app, http.MethodGet, "/v1/agentos/plans/plan-1/status", "")
 	t.Cleanup(func() {
 		if err := resp.Body.Close(); err != nil {
 			t.Errorf("close response body: %v", err)
@@ -99,8 +104,8 @@ func testProcessStartRoute(t *testing.T, app *fiber.App, runtime *fakePlatformRu
 	t.Helper()
 
 	body := `{
-		"process_id":"process-1","kind":"aisoc.investigation","account_id":"acct-1","project_id":"proj-1","idempotency_key":"process-start-1",
-		"resource":{"kind":"alert","resource_id":"alert-1","account_id":"acct-1","project_id":"proj-1"},
+		"process_id":"process-1","kind":"aisoc.investigation","project_id":"proj-1","idempotency_key":"process-start-1",
+		"resource":{"kind":"alert","resource_id":"alert-1","project_id":"proj-1"},
 		"inputs":{"severity":"high"}
 	}`
 
@@ -117,7 +122,7 @@ func testProcessStartRoute(t *testing.T, app *fiber.App, runtime *fakePlatformRu
 func testProcessListRoute(t *testing.T, app *fiber.App, runtime *fakePlatformRuntime) {
 	t.Helper()
 
-	statuses := routeJSON[[]agentosprocess.Status](t, app, http.MethodGet, "/v1/agentos/processes?account_id=acct-1&project_id=proj-1&resource_kind=alert&kind=aisoc.investigation&lifecycle_state=running&limit=9", "", http.StatusOK, "process list")
+	statuses := routeJSON[[]agentosprocess.Status](t, app, http.MethodGet, "/v1/agentos/processes?project_id=proj-1&resource_kind=alert&kind=aisoc.investigation&lifecycle_state=running&limit=9", "", http.StatusOK, "process list")
 	if runtime.processScope.AccountID != account1 ||
 		runtime.processScope.ProjectID != project1 ||
 		runtime.processScope.ResourceKind != alertKind ||
@@ -133,7 +138,7 @@ func testProcessListRoute(t *testing.T, app *fiber.App, runtime *fakePlatformRun
 func testProcessDescriptionRoute(t *testing.T, app *fiber.App, runtime *fakePlatformRuntime) {
 	t.Helper()
 
-	description := routeJSON[agentosprocess.Description](t, app, http.MethodGet, "/v1/agentos/processes/process-1?account_id=acct-1&project_id=proj-1", "", http.StatusOK, "process description")
+	description := routeJSON[agentosprocess.Description](t, app, http.MethodGet, "/v1/agentos/processes/process-1?project_id=proj-1", "", http.StatusOK, "process description")
 	if runtime.descriptionProcessRef.ProcessID != process1 ||
 		runtime.descriptionProcessRef.AccountID != account1 ||
 		runtime.descriptionProcessRef.ProjectID != project1 ||
@@ -145,7 +150,7 @@ func testProcessDescriptionRoute(t *testing.T, app *fiber.App, runtime *fakePlat
 func testProcessStatusRoute(t *testing.T, app *fiber.App, runtime *fakePlatformRuntime) {
 	t.Helper()
 
-	status := routeJSON[agentosprocess.Status](t, app, http.MethodGet, "/v1/agentos/processes/process-1/status?account_id=acct-1&project_id=proj-1", "", http.StatusOK, "process status")
+	status := routeJSON[agentosprocess.Status](t, app, http.MethodGet, "/v1/agentos/processes/process-1/status?project_id=proj-1", "", http.StatusOK, "process status")
 	if runtime.statusProcessRef.ProcessID != process1 ||
 		runtime.statusProcessRef.AccountID != account1 ||
 		runtime.statusProcessRef.ProjectID != project1 ||
@@ -158,7 +163,7 @@ func testLedgerAppendRoute(t *testing.T, app *fiber.App, runtime *fakePlatformRu
 	t.Helper()
 
 	body := `{
-		"entry_id":"ledger-1","idempotency_key":"ledger-append-1","account_id":"acct-1","project_id":"proj-1","process_id":"process-1",
+		"entry_id":"ledger-1","idempotency_key":"ledger-append-1","project_id":"proj-1","process_id":"process-1",
 		"kind":"evidence","summary":"triaged alert"
 	}`
 
@@ -174,7 +179,7 @@ func testLedgerAppendRoute(t *testing.T, app *fiber.App, runtime *fakePlatformRu
 func testLedgerListRoute(t *testing.T, app *fiber.App, runtime *fakePlatformRuntime) {
 	t.Helper()
 
-	entries := routeJSON[[]agentosprocess.LedgerEntry](t, app, http.MethodGet, "/v1/agentos/ledger?account_id=acct-1&project_id=proj-1&process_id=process-1&resource_kind=alert&resource_id=alert-1&kind=evidence&after_sequence=10&limit=5", "", http.StatusOK, "ledger list")
+	entries := routeJSON[[]agentosprocess.LedgerEntry](t, app, http.MethodGet, "/v1/agentos/ledger?project_id=proj-1&process_id=process-1&resource_kind=alert&resource_id=alert-1&kind=evidence&after_sequence=10&limit=5", "", http.StatusOK, "ledger list")
 	if runtime.ledgerScope.ProcessID != process1 ||
 		runtime.ledgerScope.Resource.Kind != alertKind ||
 		runtime.ledgerScope.Resource.ResourceID != resource1 ||
@@ -190,7 +195,7 @@ func testActionRequestRoute(t *testing.T, app *fiber.App, runtime *fakePlatformR
 	t.Helper()
 
 	body := `{
-		"action_id":"action-1","idempotency_key":"action-request-1","account_id":"acct-1","project_id":"proj-1","process_id":"process-1",
+		"action_id":"action-1","idempotency_key":"action-request-1","project_id":"proj-1","process_id":"process-1",
 		"kind":"isolate_host","intent":"contain compromised host","dry_run_required":true,"approval_required":true
 	}`
 
@@ -207,7 +212,7 @@ func testActionRequestRoute(t *testing.T, app *fiber.App, runtime *fakePlatformR
 func testActionListRoute(t *testing.T, app *fiber.App, runtime *fakePlatformRuntime) {
 	t.Helper()
 
-	statuses := routeJSON[[]agentosprocess.GovernedActionStatus](t, app, http.MethodGet, "/v1/agentos/actions?account_id=acct-1&project_id=proj-1&process_id=process-1&resource_kind=alert&resource_id=alert-1&kind=isolate_host&lifecycle_state=waiting_approval&limit=6", "", http.StatusOK, "action list")
+	statuses := routeJSON[[]agentosprocess.GovernedActionStatus](t, app, http.MethodGet, "/v1/agentos/actions?project_id=proj-1&process_id=process-1&resource_kind=alert&resource_id=alert-1&kind=isolate_host&lifecycle_state=waiting_approval&limit=6", "", http.StatusOK, "action list")
 	if !validProcessResourceListScope(runtime.actionScope.ProcessID, runtime.actionScope.Resource, runtime.actionScope.Kind, runtime.actionScope.LifecycleState, runtime.actionScope.Limit, process1, isolateHostKind, agentosprocess.ActionWaitingApproval, 6, len(statuses)) {
 		t.Fatalf("unexpected action list: scope=%#v statuses=%#v", runtime.actionScope, statuses)
 	}
@@ -216,7 +221,7 @@ func testActionListRoute(t *testing.T, app *fiber.App, runtime *fakePlatformRunt
 func testActionStatusRoute(t *testing.T, app *fiber.App, runtime *fakePlatformRuntime) {
 	t.Helper()
 
-	status := routeJSON[agentosprocess.GovernedActionStatus](t, app, http.MethodGet, "/v1/agentos/actions/action-1?account_id=acct-1&project_id=proj-1", "", http.StatusOK, "action status")
+	status := routeJSON[agentosprocess.GovernedActionStatus](t, app, http.MethodGet, "/v1/agentos/actions/action-1?project_id=proj-1", "", http.StatusOK, "action status")
 	if runtime.actionRef.ActionID != action1 ||
 		runtime.actionRef.AccountID != account1 ||
 		runtime.actionRef.ProjectID != project1 ||
@@ -230,7 +235,7 @@ func testActionDryRunRoute(t *testing.T, app *fiber.App, runtime *fakePlatformRu
 
 	body := `{"idempotency_key":"action-1:dry-run","succeeded":true,"summary":"preview ok"}`
 
-	status := routeJSON[agentosprocess.GovernedActionStatus](t, app, http.MethodPost, "/v1/agentos/actions/action-1/dry-run?account_id=acct-1&project_id=proj-1", body, http.StatusOK, "action dry-run")
+	status := routeJSON[agentosprocess.GovernedActionStatus](t, app, http.MethodPost, "/v1/agentos/actions/action-1/dry-run?project_id=proj-1", body, http.StatusOK, "action dry-run")
 	if runtime.actionDryRunRef.ActionID != action1 ||
 		runtime.actionDryRunResult.IdempotencyKey != "action-1:dry-run" ||
 		!runtime.actionDryRunResult.Succeeded ||
@@ -244,7 +249,7 @@ func testActionApprovalRoute(t *testing.T, app *fiber.App, runtime *fakePlatform
 
 	body := `{"idempotency_key":"action-1:approval","approved":true,"reason":"operator approved"}`
 
-	status := routeJSON[agentosprocess.GovernedActionStatus](t, app, http.MethodPost, "/v1/agentos/actions/action-1/approval?account_id=acct-1&project_id=proj-1", body, http.StatusOK, "action approval")
+	status := routeJSON[agentosprocess.GovernedActionStatus](t, app, http.MethodPost, "/v1/agentos/actions/action-1/approval?project_id=proj-1", body, http.StatusOK, "action approval")
 	if runtime.actionApprovalRef.ActionID != action1 ||
 		runtime.actionApprovalDecision.IdempotencyKey != "action-1:approval" ||
 		!runtime.actionApprovalDecision.Approved ||
@@ -258,7 +263,7 @@ func testActionExecutionRoute(t *testing.T, app *fiber.App, runtime *fakePlatfor
 
 	body := `{"idempotency_key":"action-1:execution","succeeded":true,"summary":"executed"}`
 
-	status := routeJSON[agentosprocess.GovernedActionStatus](t, app, http.MethodPost, "/v1/agentos/actions/action-1/execution?account_id=acct-1&project_id=proj-1", body, http.StatusOK, "action execution")
+	status := routeJSON[agentosprocess.GovernedActionStatus](t, app, http.MethodPost, "/v1/agentos/actions/action-1/execution?project_id=proj-1", body, http.StatusOK, "action execution")
 	if runtime.actionExecutionRef.ActionID != action1 ||
 		runtime.actionExecutionResult.IdempotencyKey != "action-1:execution" ||
 		!runtime.actionExecutionResult.Succeeded ||
@@ -272,7 +277,7 @@ func testActionCancelRoute(t *testing.T, app *fiber.App, runtime *fakePlatformRu
 
 	body := `{"idempotency_key":"action-1:cancel","reason":"operator canceled"}`
 
-	status := routeJSON[agentosprocess.GovernedActionStatus](t, app, http.MethodPost, "/v1/agentos/actions/action-1/cancel?account_id=acct-1&project_id=proj-1", body, http.StatusOK, "action cancel")
+	status := routeJSON[agentosprocess.GovernedActionStatus](t, app, http.MethodPost, "/v1/agentos/actions/action-1/cancel?project_id=proj-1", body, http.StatusOK, "action cancel")
 	if runtime.actionCancelRef.ActionID != action1 ||
 		runtime.actionCancelRequest.IdempotencyKey != "action-1:cancel" ||
 		runtime.actionCancelRequest.Reason != "operator canceled" ||
@@ -285,7 +290,7 @@ func testWorksetStartRoute(t *testing.T, app *fiber.App, runtime *fakePlatformRu
 	t.Helper()
 
 	body := `{
-		"workset_id":"workset-1","idempotency_key":"workset-start-1","account_id":"acct-1","project_id":"proj-1","process_id":"process-1","kind":"hunt.backfill",
+		"workset_id":"workset-1","idempotency_key":"workset-start-1","project_id":"proj-1","process_id":"process-1","kind":"hunt.backfill",
 		"items_ref":{"kind":"object","uri":"s3://aisoc/worksets/workset-1.jsonl","count":100}
 	}`
 
@@ -301,7 +306,7 @@ func testWorksetStartRoute(t *testing.T, app *fiber.App, runtime *fakePlatformRu
 func testWorksetListRoute(t *testing.T, app *fiber.App, runtime *fakePlatformRuntime) {
 	t.Helper()
 
-	statuses := routeJSON[[]agentosprocess.WorksetStatus](t, app, http.MethodGet, "/v1/agentos/worksets?account_id=acct-1&project_id=proj-1&process_id=process-1&resource_kind=alert&resource_id=alert-1&kind=hunt.backfill&lifecycle_state=running&limit=8", "", http.StatusOK, "workset list")
+	statuses := routeJSON[[]agentosprocess.WorksetStatus](t, app, http.MethodGet, "/v1/agentos/worksets?project_id=proj-1&process_id=process-1&resource_kind=alert&resource_id=alert-1&kind=hunt.backfill&lifecycle_state=running&limit=8", "", http.StatusOK, "workset list")
 	if !validProcessResourceListScope(runtime.worksetScope.ProcessID, runtime.worksetScope.Resource, runtime.worksetScope.Kind, runtime.worksetScope.LifecycleState, runtime.worksetScope.Limit, process1, huntBackfillKind, agentosprocess.WorksetRunning, 8, len(statuses)) {
 		t.Fatalf("unexpected workset list: scope=%#v statuses=%#v", runtime.worksetScope, statuses)
 	}
@@ -310,7 +315,7 @@ func testWorksetListRoute(t *testing.T, app *fiber.App, runtime *fakePlatformRun
 func testWorksetStatusRoute(t *testing.T, app *fiber.App, runtime *fakePlatformRuntime) {
 	t.Helper()
 
-	status := routeJSON[agentosprocess.WorksetStatus](t, app, http.MethodGet, "/v1/agentos/worksets/workset-1?account_id=acct-1&project_id=proj-1", "", http.StatusOK, "workset status")
+	status := routeJSON[agentosprocess.WorksetStatus](t, app, http.MethodGet, "/v1/agentos/worksets/workset-1?project_id=proj-1", "", http.StatusOK, "workset status")
 	if runtime.worksetRef.WorksetID != workset1 ||
 		runtime.worksetRef.AccountID != account1 ||
 		runtime.worksetRef.ProjectID != project1 ||
@@ -322,7 +327,7 @@ func testWorksetStatusRoute(t *testing.T, app *fiber.App, runtime *fakePlatformR
 func testResourceProjectionRoute(t *testing.T, app *fiber.App, runtime *fakePlatformRuntime) {
 	t.Helper()
 
-	projection := routeJSON[agentosprocess.ResourceProjection](t, app, http.MethodGet, "/v1/agentos/resources?account_id=acct-1&project_id=proj-1&resource_kind=alert&resource_id=alert-1&limit=4", "", http.StatusOK, "resource projection")
+	projection := routeJSON[agentosprocess.ResourceProjection](t, app, http.MethodGet, "/v1/agentos/resources?project_id=proj-1&resource_kind=alert&resource_id=alert-1&limit=4", "", http.StatusOK, "resource projection")
 	if runtime.resourceScope.Resource.Kind != alertKind ||
 		runtime.resourceScope.Resource.ResourceID != resource1 ||
 		runtime.resourceScope.Limit != 4 ||
@@ -334,7 +339,7 @@ func testResourceProjectionRoute(t *testing.T, app *fiber.App, runtime *fakePlat
 func testResourceProjectionListRoute(t *testing.T, app *fiber.App, runtime *fakePlatformRuntime) {
 	t.Helper()
 
-	summaries := routeJSON[[]agentosprocess.ResourceProjectionSummary](t, app, http.MethodGet, "/v1/agentos/resources?account_id=acct-1&project_id=proj-1&resource_kind=alert&lifecycle_state=running&limit=12", "", http.StatusOK, "resource projection list")
+	summaries := routeJSON[[]agentosprocess.ResourceProjectionSummary](t, app, http.MethodGet, "/v1/agentos/resources?project_id=proj-1&resource_kind=alert&lifecycle_state=running&limit=12", "", http.StatusOK, "resource projection list")
 	if runtime.resourceListScope.AccountID != account1 ||
 		runtime.resourceListScope.ProjectID != project1 ||
 		runtime.resourceListScope.ResourceKind != alertKind ||
@@ -643,3 +648,91 @@ var _ interface {
 	agentosprocess.BatchRuntime
 	agentosprocess.ProjectionRuntime
 } = (*fakePlatformRuntime)(nil)
+
+// TestAgentOSProcessTenantComesFromTheCredential is the process-platform
+// regression guard: every scope this surface takes — query scopes and by-id
+// refs — is addressed for the authenticated account, so naming another account
+// in the request reaches nothing. Each case asserts the account the runtime
+// actually received.
+func TestAgentOSProcessTenantComesFromTheCredential(t *testing.T) {
+	t.Parallel()
+
+	cases := map[string]struct {
+		method  string
+		target  string
+		account func(*fakePlatformRuntime) string
+	}{
+		"list processes": {
+			method: http.MethodGet, target: "/v1/agentos/processes?project_id=" + project1 + "&account_id=acct-2",
+			account: func(runtime *fakePlatformRuntime) string { return runtime.processScope.AccountID },
+		},
+		"process status": {
+			method: http.MethodGet, target: "/v1/agentos/processes/" + process1 + "/status?project_id=" + project1 + "&account_id=acct-2",
+			account: func(runtime *fakePlatformRuntime) string { return runtime.statusProcessRef.AccountID },
+		},
+		"list ledger": {
+			method: http.MethodGet, target: "/v1/agentos/ledger?project_id=" + project1 + "&account_id=acct-2",
+			account: func(runtime *fakePlatformRuntime) string { return runtime.ledgerScope.AccountID },
+		},
+		"list actions": {
+			method: http.MethodGet, target: "/v1/agentos/actions?project_id=" + project1 + "&account_id=acct-2",
+			account: func(runtime *fakePlatformRuntime) string { return runtime.actionScope.AccountID },
+		},
+		"action status": {
+			method: http.MethodGet, target: "/v1/agentos/actions/" + action1 + "?project_id=" + project1 + "&account_id=acct-2",
+			account: func(runtime *fakePlatformRuntime) string { return runtime.actionRef.AccountID },
+		},
+		"list worksets": {
+			method: http.MethodGet, target: "/v1/agentos/worksets?project_id=" + project1 + "&account_id=acct-2",
+			account: func(runtime *fakePlatformRuntime) string { return runtime.worksetScope.AccountID },
+		},
+	}
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			runtime := &fakePlatformRuntime{}
+			app := fiber.New()
+			newTestRoutes(t, app, nil, nil, runtime, nil)
+
+			resp := doAgentOSRouteRequest(t, app, tc.method, tc.target, "")
+			if err := resp.Body.Close(); err != nil {
+				t.Errorf("close response body: %v", err)
+			}
+
+			if resp.StatusCode != http.StatusOK {
+				t.Fatalf("%s status = %d, want 200", name, resp.StatusCode)
+			}
+
+			if got := tc.account(runtime); got != testAccountID {
+				t.Fatalf("%s used account %q, want the authenticated %q", name, got, testAccountID)
+			}
+		})
+	}
+}
+
+// TestAgentOSProcessStartOverwritesTheSpecifiedTenant covers the write path,
+// where the body deserializes a spec that legitimately carries a tenant: the
+// server decides it.
+func TestAgentOSProcessStartOverwritesTheSpecifiedTenant(t *testing.T) {
+	t.Parallel()
+
+	runtime := &fakePlatformRuntime{}
+	app := fiber.New()
+	newTestRoutes(t, app, nil, nil, runtime, nil)
+
+	body := `{"process_id": "` + process1 + `", "account_id": "acct-2", "project_id": "` + project1 + `", "kind": "incident_response"}`
+
+	resp := doAgentOSRouteRequest(t, app, http.MethodPost, "/v1/agentos/processes", body)
+	if err := resp.Body.Close(); err != nil {
+		t.Errorf("close response body: %v", err)
+	}
+
+	if resp.StatusCode != http.StatusAccepted {
+		t.Fatalf("start process = %d, want 202", resp.StatusCode)
+	}
+
+	if runtime.startedProcess.AccountID != testAccountID {
+		t.Fatalf("started process account = %q, want the authenticated %q", runtime.startedProcess.AccountID, testAccountID)
+	}
+}

@@ -1,16 +1,14 @@
 package v1
 
 import (
-	"errors"
 	"net/http"
 	"reflect"
 
+	agentoscore "github.com/TekkenSteve/GoAgent/agentos/core"
 	agentosprocess "github.com/TekkenSteve/GoAgent/agentos/process"
 	"github.com/TekkenSteve/GoAgent/internal/controller/restapi/v1/request"
 	"github.com/gofiber/fiber/v2"
 )
-
-var errRESTQueryRequestRequired = errors.New("rest api query request is required")
 
 type restQueryValidator interface {
 	Validate() error
@@ -34,17 +32,14 @@ func (r *V1) startAgentOSProcess(ctx *fiber.Ctx) error {
 		return errorResponse(ctx, http.StatusNotFound, "agentos platform runtime is not configured")
 	}
 
-	var spec agentosprocess.Spec
-	if err := ctx.BodyParser(&spec); err != nil {
-		return errorResponse(ctx, http.StatusBadRequest, "invalid request body")
-	}
+	return withTenantScopedBody[agentosprocess.Spec](r, ctx, processSpecBody{}, agentoscore.ActionProcessWrite, "process", func(spec *agentosprocess.Spec) error {
+		status, err := r.platformRuntime.StartProcess(ctx.UserContext(), spec)
+		if err != nil {
+			return err
+		}
 
-	status, err := r.platformRuntime.StartProcess(ctx.UserContext(), &spec)
-	if err != nil {
-		return agentOSError(ctx, err)
-	}
-
-	return ctx.Status(http.StatusAccepted).JSON(status)
+		return ctx.Status(http.StatusAccepted).JSON(status)
+	})
 }
 
 // @Summary     List AgentOS processes
@@ -67,11 +62,11 @@ func (r *V1) startAgentOSProcess(ctx *fiber.Ctx) error {
 // @Router      /agentos/processes [get]
 // The list is filtered by account and project scope.
 func (r *V1) listAgentOSProcesses(ctx *fiber.Ctx) error {
-	return withPlatformQueryScope(r, ctx, "process scope", func(req request.AgentOSProcessScope) (any, error) {
+	return withPlatformQueryScope(r, ctx, "process scope", agentoscore.ActionProcessRead, "process", func(req request.AgentOSProcessScope, tenant agentoscore.TenantScope) (any, error) {
 		return r.platformRuntime.ListProcesses(ctx.UserContext(), &agentosprocess.Scope{
-			AccountID:      req.AccountID,
-			ProjectID:      req.ProjectID,
-			Resource:       agentOSProcessListResourceRef(req.AccountID, req.ProjectID, req.ResourceKind, req.ResourceID),
+			AccountID:      tenant.AccountID,
+			ProjectID:      tenant.ProjectID,
+			Resource:       agentOSProcessListResourceRef(tenant.AccountID, tenant.ProjectID, req.ResourceKind, req.ResourceID),
 			ResourceKind:   req.ResourceKind,
 			Kind:           req.Kind,
 			LifecycleState: req.LifecycleState,
@@ -150,17 +145,14 @@ func (r *V1) appendAgentOSLedgerEntry(ctx *fiber.Ctx) error {
 		return errorResponse(ctx, http.StatusNotFound, "agentos platform runtime is not configured")
 	}
 
-	var spec agentosprocess.LedgerEntrySpec
-	if err := ctx.BodyParser(&spec); err != nil {
-		return errorResponse(ctx, http.StatusBadRequest, "invalid request body")
-	}
+	return withTenantScopedBody[agentosprocess.LedgerEntrySpec](r, ctx, ledgerEntryBody{}, agentoscore.ActionLedgerWrite, "ledger", func(spec *agentosprocess.LedgerEntrySpec) error {
+		entry, err := r.platformRuntime.AppendLedgerEntry(ctx.UserContext(), spec)
+		if err != nil {
+			return err
+		}
 
-	entry, err := r.platformRuntime.AppendLedgerEntry(ctx.UserContext(), &spec)
-	if err != nil {
-		return agentOSError(ctx, err)
-	}
-
-	return ctx.Status(http.StatusCreated).JSON(entry)
+		return ctx.Status(http.StatusCreated).JSON(entry)
+	})
 }
 
 // @Summary     List AgentOS ledger entries
@@ -186,7 +178,7 @@ func (r *V1) appendAgentOSLedgerEntry(ctx *fiber.Ctx) error {
 func (r *V1) listAgentOSLedgerEntries(ctx *fiber.Ctx) error {
 	var req request.AgentOSLedgerScope
 
-	return withPlatformListScope(r, ctx, "ledger scope", &req, func(selector *processPlatformSelector) (any, error) {
+	return withPlatformListScope(r, ctx, "ledger scope", agentoscore.ActionLedgerRead, "ledger", &req, func(selector *processPlatformSelector) (any, error) {
 		scope := selector.ledgerScope(req.Kind, req.AfterSequence)
 
 		return r.platformRuntime.ListLedgerEntries(ctx.UserContext(), scope)
@@ -211,17 +203,14 @@ func (r *V1) requestAgentOSAction(ctx *fiber.Ctx) error {
 		return errorResponse(ctx, http.StatusNotFound, "agentos platform runtime is not configured")
 	}
 
-	var spec agentosprocess.GovernedActionSpec
-	if err := ctx.BodyParser(&spec); err != nil {
-		return errorResponse(ctx, http.StatusBadRequest, "invalid request body")
-	}
+	return withTenantScopedBody[agentosprocess.GovernedActionSpec](r, ctx, governedActionBody{}, agentoscore.ActionActionWrite, "action", func(spec *agentosprocess.GovernedActionSpec) error {
+		status, err := r.platformRuntime.RequestAction(ctx.UserContext(), spec)
+		if err != nil {
+			return err
+		}
 
-	status, err := r.platformRuntime.RequestAction(ctx.UserContext(), &spec)
-	if err != nil {
-		return agentOSError(ctx, err)
-	}
-
-	return ctx.Status(http.StatusAccepted).JSON(status)
+		return ctx.Status(http.StatusAccepted).JSON(status)
+	})
 }
 
 // @Summary     List AgentOS governed actions
@@ -247,7 +236,7 @@ func (r *V1) requestAgentOSAction(ctx *fiber.Ctx) error {
 func (r *V1) listAgentOSActions(ctx *fiber.Ctx) error {
 	var req request.AgentOSActionScope
 
-	return withPlatformListScope(r, ctx, "action scope", &req, func(selector *processPlatformSelector) (any, error) {
+	return withPlatformListScope(r, ctx, "action scope", agentoscore.ActionActionRead, "action", &req, func(selector *processPlatformSelector) (any, error) {
 		scope := selector.actionScope(req.Kind, req.LifecycleState)
 
 		return r.platformRuntime.ListActions(ctx.UserContext(), scope)
@@ -386,17 +375,14 @@ func (r *V1) startAgentOSWorkset(ctx *fiber.Ctx) error {
 		return errorResponse(ctx, http.StatusNotFound, "agentos platform runtime is not configured")
 	}
 
-	var spec agentosprocess.WorksetSpec
-	if err := ctx.BodyParser(&spec); err != nil {
-		return errorResponse(ctx, http.StatusBadRequest, "invalid request body")
-	}
+	return withTenantScopedBody[agentosprocess.WorksetSpec](r, ctx, worksetBody{}, agentoscore.ActionWorksetWrite, "workset", func(spec *agentosprocess.WorksetSpec) error {
+		status, err := r.platformRuntime.StartWorkset(ctx.UserContext(), spec)
+		if err != nil {
+			return err
+		}
 
-	status, err := r.platformRuntime.StartWorkset(ctx.UserContext(), &spec)
-	if err != nil {
-		return agentOSError(ctx, err)
-	}
-
-	return ctx.Status(http.StatusAccepted).JSON(status)
+		return ctx.Status(http.StatusAccepted).JSON(status)
+	})
 }
 
 // @Summary     List AgentOS worksets
@@ -422,7 +408,7 @@ func (r *V1) startAgentOSWorkset(ctx *fiber.Ctx) error {
 func (r *V1) listAgentOSWorksets(ctx *fiber.Ctx) error {
 	var req request.AgentOSWorksetScope
 
-	return withPlatformListScope(r, ctx, "workset scope", &req, func(selector *processPlatformSelector) (any, error) {
+	return withPlatformListScope(r, ctx, "workset scope", agentoscore.ActionWorksetRead, "workset", &req, func(selector *processPlatformSelector) (any, error) {
 		scope := selector.worksetScope(req.Kind, req.LifecycleState)
 
 		return r.platformRuntime.ListWorksets(ctx.UserContext(), scope)
@@ -474,17 +460,17 @@ func (r *V1) statusAgentOSWorkset(ctx *fiber.Ctx) error {
 // @Router      /agentos/resources [get]
 // The projections are filtered by account, project, and type.
 func (r *V1) getOrListAgentOSResources(ctx *fiber.Ctx) error {
-	return withPlatformQueryScope(r, ctx, "resource scope", func(req request.AgentOSResourceScope) (any, error) {
+	return withPlatformQueryScope(r, ctx, "resource scope", agentoscore.ActionProcessRead, "resource", func(req request.AgentOSResourceScope, tenant agentoscore.TenantScope) (any, error) {
 		if req.ResourceID != "" {
 			return r.platformRuntime.GetResourceProjection(ctx.UserContext(), &agentosprocess.ResourceProjectionScope{
-				Resource: agentOSResourceRef(req.AccountID, req.ProjectID, req.ResourceKind, req.ResourceID),
+				Resource: agentOSResourceRef(tenant.AccountID, tenant.ProjectID, req.ResourceKind, req.ResourceID),
 				Limit:    req.Limit,
 			})
 		}
 
 		return r.platformRuntime.ListResourceProjections(ctx.UserContext(), &agentosprocess.ResourceProjectionListScope{
-			AccountID:      req.AccountID,
-			ProjectID:      req.ProjectID,
+			AccountID:      tenant.AccountID,
+			ProjectID:      tenant.ProjectID,
 			ResourceKind:   req.ResourceKind,
 			LifecycleState: req.LifecycleState,
 			Limit:          req.Limit,
@@ -495,11 +481,11 @@ func (r *V1) getOrListAgentOSResources(ctx *fiber.Ctx) error {
 func (r *V1) withProcessRef(ctx *fiber.Ctx, fn func(agentosprocess.Ref) error) error {
 	var req request.AgentOSProcessRef
 
-	return withPlatformRef(r, ctx, "process scope", &req, func() error {
+	return withPlatformRef(r, ctx, "process scope", agentoscore.ActionProcessRead, "process", &req, func(tenant agentoscore.TenantScope) error {
 		return fn(agentosprocess.Ref{
 			ProcessID: ctx.Params("process_id"),
-			AccountID: req.AccountID,
-			ProjectID: req.ProjectID,
+			AccountID: tenant.AccountID,
+			ProjectID: tenant.ProjectID,
 		})
 	})
 }
@@ -507,11 +493,11 @@ func (r *V1) withProcessRef(ctx *fiber.Ctx, fn func(agentosprocess.Ref) error) e
 func (r *V1) withActionRef(ctx *fiber.Ctx, fn func(agentosprocess.ActionRef) error) error {
 	var req request.AgentOSActionRef
 
-	return withPlatformRef(r, ctx, "action scope", &req, func() error {
+	return withPlatformRef(r, ctx, "action scope", agentoscore.ActionActionRead, "action", &req, func(tenant agentoscore.TenantScope) error {
 		return fn(agentosprocess.ActionRef{
 			ActionID:  ctx.Params("action_id"),
-			AccountID: req.AccountID,
-			ProjectID: req.ProjectID,
+			AccountID: tenant.AccountID,
+			ProjectID: tenant.ProjectID,
 		})
 	})
 }
@@ -539,27 +525,35 @@ func withAgentOSActionTransition[T any](
 func (r *V1) withWorksetRef(ctx *fiber.Ctx, fn func(agentosprocess.WorksetRef) error) error {
 	var req request.AgentOSWorksetRef
 
-	return withPlatformRef(r, ctx, "workset scope", &req, func() error {
+	return withPlatformRef(r, ctx, "workset scope", agentoscore.ActionWorksetRead, "workset", &req, func(tenant agentoscore.TenantScope) error {
 		return fn(agentosprocess.WorksetRef{
 			WorksetID: ctx.Params("workset_id"),
-			AccountID: req.AccountID,
-			ProjectID: req.ProjectID,
+			AccountID: tenant.AccountID,
+			ProjectID: tenant.ProjectID,
 		})
 	})
 }
 
-func withPlatformQueryScope[T any](r *V1, ctx *fiber.Ctx, scopeName string, fn func(T) (any, error)) error {
+func withPlatformQueryScope[T any, PT interface {
+	*T
+	projectScopedQuery
+}](r *V1, ctx *fiber.Ctx, scopeName string, action agentoscore.Action, objectKind string, fn func(T, agentoscore.TenantScope) (any, error)) error {
 	var req T
 
-	return withRuntimeQueryScope(r, ctx, scopeName, r.platformRuntime != nil, "agentos platform runtime is not configured", &req, fn)
+	return withRuntimeQueryScope[T, PT](r, ctx, scopeName, action, objectKind, r.platformRuntime != nil,
+		"agentos platform runtime is not configured", PT(&req), fn)
 }
 
-func withPlatformListScope[T processPlatformScopeRequest](r *V1, ctx *fiber.Ctx, scopeName string, req *T, fn func(*processPlatformSelector) (any, error)) error {
-	if err := parseRuntimeScopedQuery(r, ctx, scopeName, r.platformRuntime != nil, "agentos platform runtime is not configured", req); err != nil {
-		return err
+func withPlatformListScope[T processPlatformScopeRequest, PT interface {
+	*T
+	projectScopedQuery
+}](r *V1, ctx *fiber.Ctx, scopeName string, action agentoscore.Action, objectKind string, req *T, fn func(*processPlatformSelector) (any, error)) error {
+	tenant, ok := parseRuntimeScopedQuery(r, ctx, scopeName, action, objectKind, r.platformRuntime != nil, "agentos platform runtime is not configured", PT(req))
+	if !ok {
+		return nil
 	}
 
-	result, err := fn(newProcessPlatformSelector(*req))
+	result, err := fn(newProcessPlatformSelector(*req, tenant))
 	if err != nil {
 		return agentOSError(ctx, err)
 	}
@@ -588,24 +582,32 @@ func agentOSProcessListResourceRef(accountID, projectID string, kind agentosproc
 	return agentOSResourceRef(accountID, projectID, kind, resourceID)
 }
 
-func withPlatformRef[T any](r *V1, ctx *fiber.Ctx, scopeName string, req *T, fn func() error) error {
-	if err := parseRuntimeScopedQuery(r, ctx, scopeName, r.platformRuntime != nil, "agentos platform runtime is not configured", req); err != nil {
-		return err
+func withPlatformRef[T any, PT interface {
+	*T
+	projectScopedQuery
+}](r *V1, ctx *fiber.Ctx, scopeName string, action agentoscore.Action, objectKind string, req *T, fn func(agentoscore.TenantScope) error) error {
+	tenant, ok := parseRuntimeScopedQuery(r, ctx, scopeName, action, objectKind, r.platformRuntime != nil, "agentos platform runtime is not configured", PT(req))
+	if !ok {
+		return nil
 	}
 
-	if err := fn(); err != nil {
+	if err := fn(tenant); err != nil {
 		return agentOSError(ctx, err)
 	}
 
 	return nil
 }
 
-func withRuntimeQueryScope[T any](r *V1, ctx *fiber.Ctx, scopeName string, runtimeConfigured bool, runtimeMessage string, req *T, fn func(T) (any, error)) error {
-	if err := parseRuntimeScopedQuery(r, ctx, scopeName, runtimeConfigured, runtimeMessage, req); err != nil {
-		return err
+func withRuntimeQueryScope[T any, PT interface {
+	*T
+	projectScopedQuery
+}](r *V1, ctx *fiber.Ctx, scopeName string, action agentoscore.Action, objectKind string, runtimeConfigured bool, runtimeMessage string, req PT, fn func(T, agentoscore.TenantScope) (any, error)) error {
+	tenant, ok := parseRuntimeScopedQuery(r, ctx, scopeName, action, objectKind, runtimeConfigured, runtimeMessage, req)
+	if !ok {
+		return nil
 	}
 
-	result, err := fn(*req)
+	result, err := fn(*req, tenant)
 	if err != nil {
 		return agentOSError(ctx, err)
 	}
@@ -613,24 +615,48 @@ func withRuntimeQueryScope[T any](r *V1, ctx *fiber.Ctx, scopeName string, runti
 	return ctx.Status(http.StatusOK).JSON(result)
 }
 
-func parseRuntimeScopedQuery(r *V1, ctx *fiber.Ctx, scopeName string, runtimeConfigured bool, runtimeMessage string, req any) error {
+// parseRuntimeScopedQuery parses a runtime-scoped query and authorizes the
+// (authenticated account, requested project) pair it names.
+//
+// It reports ok=false when it has already written the response. That signal is
+// a bool rather than an error because writing a response yields a nil error, so
+// an error-returning check would let a handler carry on into the runtime with a
+// half-built scope.
+func parseRuntimeScopedQuery(
+	r *V1,
+	ctx *fiber.Ctx,
+	scopeName string,
+	action agentoscore.Action,
+	objectKind string,
+	runtimeConfigured bool,
+	runtimeMessage string,
+	req projectScopedQuery,
+) (agentoscore.TenantScope, bool) {
 	if !runtimeConfigured {
-		return errorResponse(ctx, http.StatusNotFound, runtimeMessage)
-	}
+		writeError(ctx, http.StatusNotFound, runtimeMessage)
 
-	if req == nil {
-		return errRESTQueryRequestRequired
+		return agentoscore.TenantScope{}, false
 	}
 
 	if err := ctx.QueryParser(req); err != nil {
-		return errorResponse(ctx, http.StatusBadRequest, "invalid "+scopeName)
+		writeError(ctx, http.StatusBadRequest, "invalid "+scopeName)
+
+		return agentoscore.TenantScope{}, false
 	}
 
 	if err := validateRESTQuery(r, req); err != nil {
-		return errorResponse(ctx, http.StatusBadRequest, err.Error())
+		writeError(ctx, http.StatusBadRequest, err.Error())
+
+		return agentoscore.TenantScope{}, false
 	}
 
-	return nil
+	return r.tenantFromRequest(ctx, req.GetProjectID(), action, objectKind)
+}
+
+// projectScopedQuery is a query DTO that names the project it scopes itself to.
+// The account is not part of it: it comes from the credential.
+type projectScopedQuery interface {
+	GetProjectID() string
 }
 
 func validateRESTQuery(r *V1, req any) error {
@@ -669,11 +695,11 @@ type processPlatformScopeRequest interface {
 	request.AgentOSLedgerScope | request.AgentOSActionScope | request.AgentOSWorksetScope
 }
 
-func newProcessPlatformSelector[T processPlatformScopeRequest](req T) *processPlatformSelector {
+func newProcessPlatformSelector[T processPlatformScopeRequest](req T, tenant agentoscore.TenantScope) *processPlatformSelector {
 	switch scope := any(req).(type) {
 	case request.AgentOSLedgerScope:
 		return &processPlatformSelector{
-			accountID:    scope.AccountID,
+			accountID:    tenant.AccountID,
 			projectID:    scope.ProjectID,
 			processID:    scope.ProcessID,
 			resourceKind: scope.ResourceKind,
@@ -682,7 +708,7 @@ func newProcessPlatformSelector[T processPlatformScopeRequest](req T) *processPl
 		}
 	case request.AgentOSActionScope:
 		return &processPlatformSelector{
-			accountID:    scope.AccountID,
+			accountID:    tenant.AccountID,
 			projectID:    scope.ProjectID,
 			processID:    scope.ProcessID,
 			resourceKind: scope.ResourceKind,
@@ -691,7 +717,7 @@ func newProcessPlatformSelector[T processPlatformScopeRequest](req T) *processPl
 		}
 	case request.AgentOSWorksetScope:
 		return &processPlatformSelector{
-			accountID:    scope.AccountID,
+			accountID:    tenant.AccountID,
 			projectID:    scope.ProjectID,
 			processID:    scope.ProcessID,
 			resourceKind: scope.ResourceKind,
