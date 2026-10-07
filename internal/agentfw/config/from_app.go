@@ -23,10 +23,15 @@ func FromAppConfig(cfg *appconfig.Config) Config {
 		NativeLLM:       cfg.AgentFW.TemporalNativeLLMTaskQueue,
 		NativeTool:      cfg.AgentFW.TemporalNativeToolTaskQueue,
 		Stream:          cfg.AgentFW.TemporalStreamTaskQueue,
+		Nexus:           cfg.AgentFW.TemporalNexusTaskQueue,
 	}
+	base.Temporal.NexusEndpoint = cfg.AgentFW.TemporalNexusEndpoint
 	base.Temporal.MaxConcurrentWorkflowTaskPollers = cfg.AgentFW.MaxConcurrentWorkflowTaskPollers
 	base.Temporal.MaxConcurrentActivityTaskPollers = cfg.AgentFW.MaxConcurrentActivityTaskPollers
 	base.Temporal.MaxConcurrentActivityExecution = cfg.AgentFW.MaxConcurrentActivityExecution
+	base.Temporal.MaxDelegateDepth = cfg.AgentFW.MaxDelegateDepth
+	base.Temporal.DelegateTokenBudget = cfg.AgentFW.DelegateTokenBudget
+	base.Temporal.RunWorkflowTimeout = time.Duration(cfg.AgentFW.RunWorkflowTimeoutSeconds) * time.Second
 	base.Runtime.ContinueAsNewStepThreshold = cfg.AgentFW.ContinueAsNewStepThreshold
 	base.Runtime.ContinueAsNewHistoryThreshold = cfg.AgentFW.ContinueAsNewHistoryThreshold
 	base.Runtime.ContinueAsNewStateSizeThresholdByte = cfg.AgentFW.ContinueAsNewStateSizeThreshold

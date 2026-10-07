@@ -1,6 +1,7 @@
 package orchestration
 
 import (
+	"errors"
 	"fmt"
 	"time"
 
@@ -16,9 +17,83 @@ const (
 	// sub-agent is allowed to run before the parent gets a timeout error.
 	delegateChildWorkflowTimeout = 10 * time.Minute
 
+	// defaultMaxDelegateDepth bounds a delegation tree when the run states
+	// no limit. A tree, not a chain: what matters is that the recursion
+	// terminates, because every level re-injects the delegate tool and a
+	// prompt that talks an agent into delegating to itself would otherwise
+	// never stop.
+	defaultMaxDelegateDepth = 3
+
 	// _delegateKeyType is the JSON-Schema "type" key in the tool's parameters.
 	_delegateKeyType = "type"
+
+	// Reasons a delegation is refused. They are stable tokens: a run's
+	// events and the model's tool message both carry them, so an operator
+	// reading a run can tell a refusal from a failure.
+	delegateReasonDepthExhausted  = "delegate_depth_exhausted"
+	delegateReasonBudgetExhausted = "delegate_token_budget_exhausted"
 )
+
+var (
+	// ErrDelegateDepthExhausted is returned when a delegation would exceed
+	// the tree's depth limit.
+	ErrDelegateDepthExhausted = errors.New(delegateReasonDepthExhausted)
+	// ErrDelegateBudgetExhausted is returned when the delegation tree has
+	// spent its token budget.
+	ErrDelegateBudgetExhausted = errors.New(delegateReasonBudgetExhausted)
+)
+
+// DepthLimit is the tree's depth limit, defaulting on the root.
+func (b *DelegateBudget) DepthLimit() int {
+	if b.MaxDepth <= 0 {
+		return defaultMaxDelegateDepth
+	}
+
+	return b.MaxDepth
+}
+
+// Allowed reports whether this workflow may delegate at all. A workflow at the
+// limit is not offered the tool: a model cannot call what it cannot see, and
+// the guard in executeDelegateTool catches a hallucinated call anyway.
+func (b *DelegateBudget) Allowed() bool {
+	return b.Depth < b.DepthLimit()
+}
+
+// Exhausted reports whether the tree has spent its token budget.
+func (b *DelegateBudget) Exhausted() bool {
+	return b.TokenBudget > 0 && b.TokensSpent() >= b.TokenBudget
+}
+
+// TokensSpent is what the tree has spent in total, baseline included: the
+// number a delegation decision is measured against.
+func (b *DelegateBudget) TokensSpent() int64 {
+	return b.BaselineSpent + b.OwnTokensSpent
+}
+
+// Check reports why the tree may not delegate further, or nil when it may.
+// It is a pure decision, so the policy is testable without a workflow.
+func (b *DelegateBudget) Check() error {
+	if !b.Allowed() {
+		return fmt.Errorf("%w: depth %d of %d", ErrDelegateDepthExhausted, b.Depth, b.DepthLimit())
+	}
+
+	if b.Exhausted() {
+		return fmt.Errorf("%w: spent %d of %d tokens", ErrDelegateBudgetExhausted, b.TokensSpent(), b.TokenBudget)
+	}
+
+	return nil
+}
+
+// Child returns the budget a delegated child starts under: one level deeper,
+// under the same limit and budget, carrying what the tree has spent so far.
+func (b *DelegateBudget) Child() DelegateBudget {
+	return DelegateBudget{
+		Depth:         b.Depth + 1,
+		MaxDepth:      b.DepthLimit(),
+		TokenBudget:   b.TokenBudget,
+		BaselineSpent: b.TokensSpent(),
+	}
+}
 
 // DelegateToolDef returns the ToolDef for the delegate_to_agent tool.
 // It is injected into every agent's tool list so the LLM can delegate sub-tasks.
@@ -55,29 +130,84 @@ func DelegateToolDef() entity.ToolDef {
 	}
 }
 
+// toolsWithDelegate exposes the domain tools plus the delegate tool while the
+// delegation tree has room left. Both agent loops assemble their tool list this
+// way, so a workflow at the limit — either loop — never sees the tool, and the
+// model cannot call what it cannot see.
+func toolsWithDelegate(budget *DelegateBudget, domainTools []entity.ToolDef) []entity.ToolDef {
+	allTools := make([]entity.ToolDef, 0, len(domainTools)+1)
+	allTools = append(allTools, domainTools...)
+
+	if budget.Allowed() {
+		allTools = append(allTools, DelegateToolDef())
+	}
+
+	return allTools
+}
+
 // isDelegateToolCall checks whether a tool call targets the delegate tool.
 func isDelegateToolCall(tc entity.ToolCall) bool {
 	return tc.Function.Name == delegateToolName
 }
 
-// executeDelegateTool spawns a child AgentWorkflow for the delegated task
-// and returns the final assistant output.
+// handleDelegateToolCall runs one delegate_to_agent call for an agent loop:
+// it enforces the delegation budget, spawns the child, accounts what the child
+// spent, and returns the tool message the model reads. Both agent loops call
+// it, so neither can drift from the other's budget.
+func handleDelegateToolCall(
+	ctx workflow.Context,
+	tc entity.ToolCall,
+	parent *delegateParent,
+) entity.Message {
+	content, spent, err := executeDelegateTool(ctx, tc, parent)
+	if err != nil {
+		// A refusal is an answer, not a crash: the reason reaches the model
+		// in the tool message, where it can change what the agent does next.
+		content = fmt.Sprintf("Error delegating task: %v", err)
+	}
+
+	parent.budget.OwnTokensSpent += spent
+
+	return entity.Message{
+		Role:       entity.RoleTool,
+		ToolCallID: tc.ID,
+		Content:    content,
+	}
+}
+
+// delegateParent is everything a delegation needs from its parent. It is a
+// value, so the budget it carries is the parent's own: the accounting below
+// updates the caller's total through the pointer it holds.
+type delegateParent struct {
+	budget      *DelegateBudget
+	accountID   string
+	projectID   string
+	config      entity.LLMConfig
+	domainTools []entity.ToolDef
+	mcpConfigs  []entity.MCPServerConfig
+	taskQueues  WorkflowTaskQueues
+}
+
+// executeDelegateTool spawns a child AgentWorkflow for the delegated task and
+// returns the final assistant output along with what the child's subtree spent.
 func executeDelegateTool(
 	ctx workflow.Context,
 	tc entity.ToolCall,
-	parentCfg entity.LLMConfig,
-	accountID string,
-	parentTools []entity.ToolDef,
-	parentMCPServerConfigs []entity.MCPServerConfig,
-	taskQueues *WorkflowTaskQueues,
-) (string, error) {
-	if err := taskQueues.ValidateNativeAgent(); err != nil {
-		return "", err
+	parent *delegateParent,
+) (output string, tokensSpent int64, err error) {
+	if err := parent.taskQueues.ValidateNativeAgent(); err != nil {
+		return "", 0, err
+	}
+
+	// Refuse a delegation the tree cannot afford before spending anything on
+	// it. A model that keeps asking gets told why, in stable words.
+	if err := parent.budget.Check(); err != nil {
+		return "", 0, err
 	}
 
 	delegateInput, err := entity.ParseDelegateArgs(tc.Function.Arguments)
 	if err != nil {
-		return "", fmt.Errorf("failed to parse delegate_to_agent args: %w", err)
+		return "", 0, fmt.Errorf("failed to parse delegate_to_agent args: %w", err)
 	}
 
 	childOptions := workflow.ChildWorkflowOptions{
@@ -93,41 +223,39 @@ func executeDelegateTool(
 		ParentClosePolicy:        enumspb.PARENT_CLOSE_POLICY_REQUEST_CANCEL,
 		WorkflowIDReusePolicy:    enumspb.WORKFLOW_ID_REUSE_POLICY_ALLOW_DUPLICATE_FAILED_ONLY,
 		WorkflowExecutionTimeout: delegateChildWorkflowTimeout,
-		TaskQueue:                taskQueues.NativeControl,
+		TaskQueue:                parent.taskQueues.NativeControl,
 	}
 
 	childCtx := workflow.WithChildOptions(ctx, childOptions)
 
 	var result WorkflowResult
 
-	childInput := delegateChildWorkflowInput(tc.ID, delegateInput, parentCfg, accountID, parentTools, parentMCPServerConfigs, taskQueues)
+	childInput := delegateChildWorkflowInput(tc.ID, delegateInput, parent)
 
 	err = workflow.ExecuteChildWorkflow(childCtx, AgentWorkflowName, childInput).Get(ctx, &result)
 	if err != nil {
-		return "", err
+		return "", 0, err
 	}
 
-	return result.Output, nil
+	return result.Output, result.TokensSpent, nil
 }
 
 func delegateChildWorkflowInput(
 	runID string,
 	delegateInput *entity.DelegateTaskInput,
-	parentCfg entity.LLMConfig,
-	accountID string,
-	parentTools []entity.ToolDef,
-	parentMCPServerConfigs []entity.MCPServerConfig,
-	taskQueues *WorkflowTaskQueues,
+	parent *delegateParent,
 ) *AgentWorkflowInput {
 	return &AgentWorkflowInput{
-		AccountID:        accountID,
+		AccountID:        parent.accountID,
+		ProjectID:        parent.projectID,
 		RunID:            runID,
 		SystemPrompt:     delegateInput.SystemPrompt,
 		Message:          delegateInput.Task,
-		Config:           delegateChildConfig(parentCfg, delegateInput.ModelRef),
-		Tools:            delegateChildTools(parentTools, delegateInput.Tools),
-		MCPServerConfigs: parentMCPServerConfigs,
-		TaskQueues:       *taskQueues,
+		Config:           delegateChildConfig(parent.config, delegateInput.ModelRef),
+		Tools:            delegateChildTools(parent.domainTools, delegateInput.Tools),
+		MCPServerConfigs: parent.mcpConfigs,
+		TaskQueues:       parent.taskQueues,
+		Delegate:         parent.budget.Child(),
 	}
 }
 

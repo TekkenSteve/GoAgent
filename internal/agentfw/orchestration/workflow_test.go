@@ -58,7 +58,7 @@ func (m *mockLLMStepWithTool) fn(_ context.Context, _ *LLMStepInput) (*LLMStepOu
 	}, nil
 }
 
-func mockToolExecActivity(_ context.Context, _ ToolInput) (*ToolOutput, error) {
+func mockToolExecActivity(_ context.Context, _ *ToolInput) (*ToolOutput, error) {
 	return &ToolOutput{
 		Output:     `{"result": "mock_output"}`,
 		ExitCode:   0,

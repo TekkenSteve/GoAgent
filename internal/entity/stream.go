@@ -105,6 +105,7 @@ type LLMStreamChunk struct {
 type StreamRequest struct {
 	RunID            string
 	AccountID        string
+	ProjectID        string
 	SystemPrompt     string
 	Message          string
 	History          []Message

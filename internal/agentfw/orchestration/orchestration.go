@@ -1,6 +1,7 @@
 package orchestration
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"time"
@@ -13,6 +14,7 @@ import (
 // Sentinel errors.
 var (
 	ErrUnknownStepType       = errors.New("unknown step type")
+	ErrInvalidRunInput       = errors.New("invalid native run input")
 	ErrToolNameRequired      = errors.New("tool step: tool name is required")
 	ErrWaitForConfigRequired = errors.New("wait step: WaitFor config is required")
 	ErrWaitStepTimeout       = errors.New("wait step: timeout")
@@ -54,12 +56,22 @@ func initSteps(input *entity.OrchestrationInput) ([]entity.Step, error) {
 
 	if len(steps) == 0 {
 		steps = append(steps, entity.Step{
-			ID:     "default",
-			Type:   entity.StepAgent,
-			Name:   "default",
-			Input:  map[string]any{"message": input.Message},
-			Status: entity.StepPending,
+			ID:    "default",
+			Type:  entity.StepAgent,
+			Name:  "default",
+			Input: map[string]any{"message": input.Message},
 		})
+	}
+
+	// A step's status, result and error are the engine's state, not the
+	// caller's: an authored queue says what to do, and the queue it is executed
+	// from starts every step pending. A caller that had to remember this would
+	// be writing runtime state into its request, and a caller that forgot it
+	// would get a queue that silently executes nothing.
+	for i := range steps {
+		steps[i].Status = entity.StepPending
+		steps[i].Result = nil
+		steps[i].Error = ""
 	}
 
 	return steps, nil
@@ -79,7 +91,7 @@ func initSteps(input *entity.OrchestrationInput) ([]entity.Step, error) {
 //   - external-event: payload delivered to a waiting StepWait
 //
 // Query:
-//   - query-run-status: returns Status
+//   - QueryRunStatus: returns Status
 func Workflow(ctx workflow.Context, input *WorkflowInput) (*entity.OrchestrationResult, error) {
 	if input == nil {
 		return nil, nonRetryableWorkflowValidationError(ErrWorkflowInputRequired)
@@ -108,7 +120,7 @@ func Workflow(ctx workflow.Context, input *WorkflowInput) (*entity.Orchestration
 		State: "running",
 	}
 
-	if qErr := workflow.SetQueryHandler(ctx, "query-run-status", func() (Status, error) {
+	if qErr := workflow.SetQueryHandler(ctx, QueryRunStatus, func() (Status, error) {
 		return status, nil
 	}); qErr != nil {
 		return nil, qErr
@@ -124,7 +136,9 @@ func Workflow(ctx workflow.Context, input *WorkflowInput) (*entity.Orchestration
 
 		var canceled, done bool
 
-		steps, canceled, done, err = processWorkflowRound(ctx, &input.TaskQueues, steps, cmdCh, modifyCh, eventCh)
+		identity := stepIdentity{AccountID: orchestrationInput.AccountID, ProjectID: orchestrationInput.ProjectID}
+
+		steps, canceled, done, err = processWorkflowRound(ctx, &input.TaskQueues, steps, identity, cmdCh, modifyCh, eventCh)
 		if err != nil {
 			return nil, err
 		}
@@ -138,7 +152,9 @@ func Workflow(ctx workflow.Context, input *WorkflowInput) (*entity.Orchestration
 		}
 	}
 
-	return buildResult(orchestrationInput.RunID, steps, "completed"), nil
+	// Falling out of the loop means the step cap was reached, which is a
+	// different outcome from every step finishing.
+	return buildResult(orchestrationInput.RunID, steps, reasonMaxRounds), nil
 }
 
 // processSignals checks for step-modify and external-event signals and applies them.
@@ -158,7 +174,14 @@ func processSignals(steps []entity.Step, modifyCh, eventCh workflow.ReceiveChann
 
 // tryExecuteReadyStep finds and executes the next ready step.
 // Returns the updated steps and whether a step was executed.
-func tryExecuteReadyStep(ctx workflow.Context, queues *WorkflowTaskQueues, steps []entity.Step, cmdCh, eventCh workflow.ReceiveChannel) ([]entity.Step, bool) {
+func tryExecuteReadyStep(
+	ctx workflow.Context,
+	queues *WorkflowTaskQueues,
+	steps []entity.Step,
+	identity stepIdentity,
+	_ workflow.ReceiveChannel,
+	eventCh workflow.ReceiveChannel,
+) ([]entity.Step, bool) {
 	idx := findReadyStepIndex(steps)
 	if idx < 0 {
 		return steps, false
@@ -166,7 +189,7 @@ func tryExecuteReadyStep(ctx workflow.Context, queues *WorkflowTaskQueues, steps
 
 	step := &steps[idx]
 
-	result, err := executeStep(ctx, queues, step, cmdCh, eventCh)
+	result, err := executeStep(ctx, queues, step, identity, eventCh)
 	if err != nil {
 		step.Status = entity.StepFailed
 		step.Error = err.Error()
@@ -188,8 +211,19 @@ func tryExecuteReadyStep(ctx workflow.Context, queues *WorkflowTaskQueues, steps
 // processWorkflowRound handles one iteration of the main workflow loop.
 // Returns the updated steps, whether the workflow was canceled,
 // whether all work is done, and any error.
-func processWorkflowRound(ctx workflow.Context, queues *WorkflowTaskQueues, steps []entity.Step, cmdCh, modifyCh, eventCh workflow.ReceiveChannel) (outSteps []entity.Step, canceled, done bool, err error) {
-	if handleControlSignal(cmdCh, ctx) {
+func processWorkflowRound(
+	ctx workflow.Context,
+	queues *WorkflowTaskQueues,
+	steps []entity.Step,
+	identity stepIdentity,
+	cmdCh, modifyCh, eventCh workflow.ReceiveChannel,
+) (outSteps []entity.Step, canceled, done bool, err error) {
+	canceledBySignal, err := handleControlSignal(cmdCh, ctx)
+	if err != nil {
+		return nil, false, false, err
+	}
+
+	if canceledBySignal {
 		outSteps = steps
 		canceled = true
 
@@ -200,7 +234,7 @@ func processWorkflowRound(ctx workflow.Context, queues *WorkflowTaskQueues, step
 
 	var executed bool
 
-	steps, executed = tryExecuteReadyStep(ctx, queues, steps, cmdCh, eventCh)
+	steps, executed = tryExecuteReadyStep(ctx, queues, steps, identity, cmdCh, eventCh)
 
 	if !executed {
 		if allStepsTerminal(steps) {
@@ -241,18 +275,25 @@ type stepExecResult struct {
 	Mutation *entity.StepMutation
 }
 
+// stepIdentity is the run a step's work belongs to: the child agent it starts
+// and the tool call it makes are both authorized as this tenant.
+type stepIdentity struct {
+	AccountID string
+	ProjectID string
+}
+
 func executeStep(
 	ctx workflow.Context,
 	queues *WorkflowTaskQueues,
 	step *entity.Step,
-	_ workflow.ReceiveChannel,
+	identity stepIdentity,
 	eventCh workflow.ReceiveChannel,
 ) (*stepExecResult, error) {
 	switch step.Type {
 	case entity.StepAgent:
-		return executeAgentStep(ctx, queues, step)
+		return executeAgentStep(ctx, queues, step, identity)
 	case entity.StepTool:
-		return executeToolStep(ctx, queues, step)
+		return executeToolStep(ctx, queues, step, identity)
 	case entity.StepWait:
 		return executeWaitStep(ctx, step, eventCh)
 	case entity.StepSplit:
@@ -266,7 +307,7 @@ func executeStep(
 	}
 }
 
-func executeAgentStep(ctx workflow.Context, queues *WorkflowTaskQueues, step *entity.Step) (*stepExecResult, error) {
+func executeAgentStep(ctx workflow.Context, queues *WorkflowTaskQueues, step *entity.Step, identity stepIdentity) (*stepExecResult, error) {
 	msg, ok := step.Input["message"].(string)
 	if !ok {
 		msg = ""
@@ -292,8 +333,13 @@ func executeAgentStep(ctx workflow.Context, queues *WorkflowTaskQueues, step *en
 
 	var result WorkflowResult
 
+	// The child runs as the orchestration run: it inherits the tenant, so its
+	// own tool calls and any agents it delegates to are authorized as the same
+	// account and project instead of as nobody.
 	err := workflow.ExecuteChildWorkflow(childCtx, AgentWorkflowName, &AgentWorkflowInput{
 		RunID:        step.ID,
+		AccountID:    identity.AccountID,
+		ProjectID:    identity.ProjectID,
 		Message:      msg,
 		SystemPrompt: systemPrompt,
 		TaskQueues:   *queues,
@@ -314,7 +360,24 @@ func executeAgentStep(ctx workflow.Context, queues *WorkflowTaskQueues, step *en
 	return &stepExecResult{Data: out, Mutation: mutation}, nil
 }
 
-func executeToolStep(ctx workflow.Context, queues *WorkflowTaskQueues, step *entity.Step) (*stepExecResult, error) {
+// marshalToolArgs serializes an authored step input into the JSON arguments
+// string a tool call carries. Called in workflow code: json.Marshal sorts map
+// keys, so the output is deterministic. A step with no input is "no
+// arguments", which stays distinguishable from an empty object.
+func marshalToolArgs(args map[string]any) (string, error) {
+	if args == nil {
+		return "", nil
+	}
+
+	raw, err := json.Marshal(args)
+	if err != nil {
+		return "", fmt.Errorf("marshal tool arguments: %w", err)
+	}
+
+	return string(raw), nil
+}
+
+func executeToolStep(ctx workflow.Context, queues *WorkflowTaskQueues, step *entity.Step, identity stepIdentity) (*stepExecResult, error) {
 	toolName := step.Tool
 	if toolName == "" {
 		return nil, fmt.Errorf("%w: %q", ErrToolNameRequired, step.ID)
@@ -324,11 +387,18 @@ func executeToolStep(ctx workflow.Context, queues *WorkflowTaskQueues, step *ent
 
 	toolCtx := withRequiredActivityTaskQueue(ctx, queues.NativeTool)
 
-	err := workflow.ExecuteActivity(toolCtx, ToolExecActivityName, ToolInput{
+	args, err := marshalToolArgs(step.Input)
+	if err != nil {
+		return nil, fmt.Errorf("tool step %q: %w", step.ID, err)
+	}
+
+	err = workflow.ExecuteActivity(toolCtx, ToolExecActivityName, ToolInput{
+		AccountID:  identity.AccountID,
+		ProjectID:  identity.ProjectID,
 		RunID:      step.ID,
 		ToolCallID: step.ID,
 		ToolName:   toolName,
-		Args:       step.Input,
+		Args:       args,
 	}).Get(ctx, &toolResult)
 	if err != nil {
 		return nil, fmt.Errorf("tool step %q: %w", step.ID, err)
@@ -664,26 +734,27 @@ func allStepsTerminal(steps []entity.Step) bool {
 
 // ——— Signal handling ———
 
-func handleControlSignal(cmdCh workflow.ReceiveChannel, ctx workflow.Context) bool {
+func handleControlSignal(cmdCh workflow.ReceiveChannel, ctx workflow.Context) (bool, error) {
 	var signal string
 	if ok := cmdCh.ReceiveAsync(&signal); !ok {
-		return false
+		return false, nil
 	}
 
 	switch signal {
 	case AgentCmdCancel:
-		return true
+		return true, nil
 	case AgentCmdPause:
-		if _, err := waitForResume(cmdCh, ctx); err != nil {
-			_ = err
-		}
+		// A pause that cannot be resolved is reported, never treated as a
+		// resume: silently continuing a paused run is the one outcome the
+		// operator did not ask for.
+		_, err := waitForResume(cmdCh, ctx)
 
-		return false
+		return false, err
 	case AgentCmdResume:
-		return false
+		return false, nil
 	}
 
-	return false
+	return false, nil
 }
 
 // ——— Result builder ———

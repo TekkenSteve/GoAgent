@@ -12,7 +12,6 @@ import (
 
 	agentosstream "github.com/TekkenSteve/GoAgent/agentos/stream"
 	"github.com/TekkenSteve/GoAgent/internal/entity"
-	"github.com/TekkenSteve/GoAgent/internal/repo/agentos/runprojection"
 	"github.com/TekkenSteve/GoAgent/internal/repo/agentos/streamadapter"
 	"github.com/TekkenSteve/GoAgent/internal/repo/artifact"
 	agentuc "github.com/TekkenSteve/GoAgent/internal/usecase/agent"
@@ -20,10 +19,7 @@ import (
 	"github.com/TekkenSteve/GoAgent/pkg/logger"
 )
 
-const (
-	defaultConcurrentLimit = 10
-	prepCompletePercent    = 100
-)
+const prepCompletePercent = 100
 
 // errHistoryBlobStoreRequired reports that a history snapshot cannot be
 // restored because no blob store is configured. Static so classification and
@@ -45,11 +41,11 @@ type AgentActivities struct {
 	// streaming data plane (memstream default / Centrifugo); nil keeps the
 	// activities running without a live mirror.
 	streamPub agentosstream.Publisher
-	// runProjection is the data-plane projection controller. When set (with
-	// streamPub), the first publish of each streaming activity attaches the
-	// control plane to the run channel as a projection consumer (idempotent,
-	// fail-open); nil keeps the runtime unchanged.
-	runProjection runprojection.Controller
+	// facts is the milestone recorder every streaming activity makes its
+	// milestones durable through (fail-hard: a persist error fails the
+	// activity so Temporal retries the fact). Nil keeps the runtime a pure
+	// bus mirror.
+	facts *streamadapter.MilestoneRecorder
 }
 
 // artifactBlobStore is the subset of artifact.BlobStore needed for history
@@ -110,12 +106,12 @@ func (a *AgentActivities) WithStreamPublisher(pub agentosstream.Publisher) *Agen
 	return a
 }
 
-// WithRunProjectionController enables the durable run-event projection: the
-// first publish of each streaming activity attaches the projector to the run
-// channel (idempotent, fail-open). Optional — without it the runtime is
-// unchanged.
-func (a *AgentActivities) WithRunProjectionController(controller runprojection.Controller) *AgentActivities {
-	a.runProjection = controller
+// WithMilestoneRecorder makes every streaming activity's milestones durable
+// at the writer: each fact is appended (with its fact-log publication intent)
+// before the bus publish, and a persist failure fails the activity so the
+// platform retries it. Optional — without it the runtime is a pure mirror.
+func (a *AgentActivities) WithMilestoneRecorder(recorder *streamadapter.MilestoneRecorder) *AgentActivities {
+	a.facts = recorder
 
 	return a
 }
@@ -126,30 +122,30 @@ type billingResult struct {
 	err error
 }
 
-type limitsResult struct {
-	out *PrepLimitsOutput
-}
-
 // PrepareActivity runs the full prep pipeline: tool validation, message assembly,
-// billing/limits checks, and tool definition validation. It returns a composite
-// PrepareOutput with all check results and a CanProceed() gate for the workflow.
+// billing, and tool definition validation. It returns a composite PrepareOutput
+// with all check results, the warnings they produced, and a CanProceed() gate
+// for the workflow.
 func (a *AgentActivities) PrepareActivity(ctx context.Context, input *PrepareInput) (*PrepareOutput, error) {
 	a.logger.Info("PrepareActivity: started, mcpManager=%v serverConfigs=%d", a.mcpManager != nil, len(input.MCPServerConfigs))
 
-	billingRes, limitsRes, toolsOut, mcpOut := a.runPrepChecks(ctx, input)
+	billingRes, toolsOut, mcpOut := a.runPrepChecks(ctx, input)
 	a.logger.Info("PrepareActivity: pre-checks done, billing.err=%v", billingRes.err)
 
-	var errs []string
+	// Warnings, not failures: none of these stops the run, and each one is
+	// reported so an operator can see a degraded toolset.
+	var warnings []string
+
 	if billingRes.err != nil {
-		errs = append(errs, fmt.Sprintf("billing: %v", billingRes.err))
+		warnings = append(warnings, fmt.Sprintf("billing: %v", billingRes.err))
 	}
 
 	for _, name := range toolsOut.Failed {
-		errs = append(errs, fmt.Sprintf("tool: %s missing name or type", name))
+		warnings = append(warnings, fmt.Sprintf("tool: %s missing name or type", name))
 	}
 
-	for _, err := range mcpOut.Errors {
-		errs = append(errs, fmt.Sprintf("mcp: %s", err))
+	for _, failure := range mcpOut.Failures {
+		warnings = append(warnings, fmt.Sprintf("mcp: %s", failure))
 	}
 
 	// Run Prep for message assembly
@@ -172,22 +168,22 @@ func (a *AgentActivities) PrepareActivity(ctx context.Context, input *PrepareInp
 	allTools := prepResult.Tools
 	allTools = append(allTools, mcpOut.Tools...)
 
-	a.logger.Info("PrepareActivity: completed, errors=%v", errs)
+	a.logger.Info("PrepareActivity: completed, warnings=%v", warnings)
 
 	return &PrepareOutput{
 		Messages: prepResult.Messages,
 		Tools:    allTools,
 		Billing:  billingRes.out,
-		Limits:   limitsRes.out,
 		ToolDefs: toolsOut,
-		Errors:   errs,
+		Warnings: warnings,
 	}, nil
 }
 
-// runPrepChecks runs the concurrent billing/limits checks and inline tools/MCP validation.
-func (a *AgentActivities) runPrepChecks(ctx context.Context, input *PrepareInput) (billingRes billingResult, limitsRes limitsResult, toolsOut *PrepToolsOutput, mcpOut *PrepMCPOutput) {
+// runPrepChecks runs the billing check concurrently with inline tools/MCP
+// validation: billing is the one check that can deny the run, and it is a
+// remote call, so it overlaps with the local work.
+func (a *AgentActivities) runPrepChecks(ctx context.Context, input *PrepareInput) (billingRes billingResult, toolsOut *PrepToolsOutput, mcpOut *PrepMCPOutput) {
 	billingCh := make(chan billingResult, 1)
-	limitsCh := make(chan limitsResult, 1)
 
 	go func() {
 		billing, err := a.prepBilling(ctx, PrepBillingInput{
@@ -196,27 +192,18 @@ func (a *AgentActivities) runPrepChecks(ctx context.Context, input *PrepareInput
 		})
 		billingCh <- billingResult{billing, err}
 	}()
-	go func() {
-		limits := a.prepLimits(ctx, PrepLimitsInput{
-			MessageCount: len(input.History),
-			ModelRef:     input.Config.Model,
-		})
-		limitsCh <- limitsResult{limits}
-	}()
 
 	// Tool validation runs inline
 	toolsOut = a.prepTools(ctx, PrepToolsInput{Tools: input.Tools})
-
-	// Wait for concurrent checks
-	billingRes = <-billingCh
-	limitsRes = <-limitsCh
 
 	// MCP tool resolution runs in the prep pipeline
 	mcpOut = a.prepMCP(ctx, PrepMCPInput{
 		ServerConfigs: input.MCPServerConfigs,
 	})
 
-	return billingRes, limitsRes, toolsOut, mcpOut
+	billingRes = <-billingCh
+
+	return billingRes, toolsOut, mcpOut
 }
 
 // prepBilling validates account billing/quota.
@@ -247,14 +234,6 @@ func (a *AgentActivities) prepBilling(ctx context.Context, input PrepBillingInpu
 		Remaining: int(acct.Balance),
 		Currency:  acct.Currency,
 	}, nil
-}
-
-// prepLimits validates concurrent run limits (pass-through: no counter configured).
-func (a *AgentActivities) prepLimits(_ context.Context, _ PrepLimitsInput) *PrepLimitsOutput {
-	return &PrepLimitsOutput{
-		Approved:        true,
-		ConcurrentLimit: defaultConcurrentLimit,
-	}
 }
 
 // prepTools validates tool definitions and resolves any tool references.
@@ -294,8 +273,8 @@ func (a *AgentActivities) prepMCP(ctx context.Context, input PrepMCPInput) *Prep
 	tools, errs := a.mcpManager.EnsureConnected(ctx, input.ServerConfigs)
 
 	return &PrepMCPOutput{
-		Tools:  tools,
-		Errors: errs,
+		Tools:    tools,
+		Failures: errs,
 	}
 }
 
@@ -306,16 +285,31 @@ func (a *AgentActivities) prepMCP(ctx context.Context, input PrepMCPInput) *Prep
 func (a *AgentActivities) LLMStepActivity(ctx context.Context, input *LLMStepInput) (*LLMStepOutput, error) {
 	a.logger.Info("LLMStepActivity: started, model=%s messages=%d tools=%d", input.Config.Model, len(input.Messages), len(input.Tools))
 
+	// The non-stream path owes the same timeline as the streaming one: the
+	// completed assistant message is one delta plus the flush that closes
+	// it, so TEXT_MESSAGE_END — with its content — lands as a fact.
+	writer := &streamEventWriter{publish: a.newPublishWriter(input.AccountID, input.RunID, input.RunID)}
+
 	stopHeartbeat := startHeartbeatLoop(ctx, func() any {
-		return heartbeatProgress{Phase: "llm-inference"}
+		return heartbeatProgress{Phase: "llm-inference", WrittenEvents: writer.written.Load()}
 	})
 	defer stopHeartbeat()
 
 	result, err := retryRateLimited(ctx, func() (*agentuc.LLMStepResult, error) {
-		return a.agentUC.LLMStep(ctx, input.RunID, input.Messages, input.Tools, input.Config)
+		return a.agentUC.LLMStep(ctx, input.Messages, input.Tools, input.Config)
 	})
 	if err != nil {
 		return nil, toActivityError(fmt.Errorf("LLMStepActivity - LLMStep: %w", err))
+	}
+
+	if result.AssistantMsg.Content != "" {
+		if err := writer.WriteEvent(ctx, entity.NewTextDeltaEvent(result.AssistantMsg.Content, 0)); err != nil {
+			return nil, toActivityError(fmt.Errorf("LLMStepActivity - publish text: %w", err))
+		}
+	}
+
+	if err := writer.flush(ctx); err != nil {
+		return nil, toActivityError(fmt.Errorf("LLMStepActivity - flush text: %w", err))
 	}
 
 	a.logger.Info("LLMStepActivity: completed, finish_reason=%s tool_calls=%d", result.FinishReason, len(result.ToolCalls))
@@ -338,29 +332,63 @@ func (a *AgentActivities) LLMStepActivity(ctx context.Context, input *LLMStepInp
 // ToolExecActivity performs a single tool execution and returns the result.
 // Long-running tools (web scrape, code execution) are reported via
 // heartbeats with the tool name as progress detail.
-func (a *AgentActivities) ToolExecActivity(ctx context.Context, input ToolInput) (*ToolOutput, error) {
+func (a *AgentActivities) ToolExecActivity(ctx context.Context, input *ToolInput) (*ToolOutput, error) {
+	publish := a.newPublishWriter(input.AccountID, input.RunID, input.RunID)
+
 	stopHeartbeat := startHeartbeatLoop(ctx, func() any {
 		return heartbeatProgress{Phase: "tool-exec", ToolName: input.ToolName}
 	})
 	defer stopHeartbeat()
 
-	result, err := a.agentUC.ExecTool(ctx, input.RunID, entity.ToolCall{
-		ID:   input.ToolCallID,
-		Type: "function",
-		Function: entity.ToolCallFunction{
-			Name:      input.ToolName,
-			Arguments: "", // args passed separately via input.Args; re-marshal
-		},
-	})
+	// The tool-call arc is two facts, mirroring the streaming path; either
+	// persist failure fails the activity so the platform retries the
+	// idempotent appends.
+	if err := a.publishStreamEvent(ctx, publish, entity.NewToolExecStartEvent(input.ToolCallID, input.ToolName)); err != nil {
+		return nil, err
+	}
+
+	execStart := time.Now()
+	result, err := a.agentUC.ExecTool(ctx, input.identity(), input.toolCall())
+	durationMs := time.Since(execStart).Milliseconds()
+
 	if err != nil {
-		return nil, fmt.Errorf("ToolExecActivity - ExecTool: %w", err)
+		// No tool ran: the call could not be authorized as this run. That is a
+		// platform fault, so the run fails visibly instead of handing the model
+		// a tool error it would try to work around.
+		return nil, nonRetryableAfterSideEffect(fmt.Errorf("tool exec %s: %w", input.ToolName, err))
+	}
+
+	output, exitCode, isError := result.Output, result.ExitCode, result.IsError
+
+	finishErr := a.publishStreamEvent(ctx, publish, entity.NewToolExecFinishEvent(
+		input.ToolCallID, input.ToolName, output, exitCode, isError, durationMs,
+	))
+
+	// The finish fact is the record of what happened; losing it loses the
+	// run's history. The fact check comes first because a tool can fail
+	// after its side effect, so even a failed answer must not be retried.
+	if finishErr != nil {
+		return nil, nonRetryableAfterSideEffect(fmt.Errorf("ToolExecActivity - finish fact: %w", finishErr))
+	}
+
+	// A tool failure is the tool's answer, not the platform's: it reaches the
+	// model as a failed tool message, and the run decides what happens next.
+	// Returning it as an activity error would make the platform re-run a tool
+	// that may already have had its side effect.
+	if err != nil {
+		return &ToolOutput{
+			Output:     output,
+			ExitCode:   exitCode,
+			IsError:    isError,
+			DurationMs: durationMs,
+		}, nil
 	}
 
 	return &ToolOutput{
-		Output:     result.Output,
-		ExitCode:   result.ExitCode,
-		IsError:    result.IsError,
-		DurationMs: result.DurationMs,
+		Output:     output,
+		ExitCode:   exitCode,
+		IsError:    isError,
+		DurationMs: durationMs,
 	}, nil
 }
 
@@ -370,9 +398,15 @@ func (a *AgentActivities) ToolExecActivity(ctx context.Context, input ToolInput)
 func (a *AgentActivities) InitStreamActivity(ctx context.Context, input *InitStreamInput) (*InitStreamOutput, error) {
 	publish := a.newPublishWriter(input.AccountID, input.SessionID, input.RunID)
 
-	// Publish the start and prep-stage events onto the data plane (fail-open).
-	a.publishStreamEvent(ctx, publish, entity.NewAgentRunStartEvent(input.Message))
-	a.publishStreamEvent(ctx, publish, entity.NewPrepStageEvent("initializing", 0))
+	// Open the timeline and the first prep stage; RUN_STARTED is a fact, so a
+	// persist failure fails the activity and the platform retries the start.
+	if err := a.publishStreamEvent(ctx, publish, entity.NewAgentRunStartEvent(input.Message)); err != nil {
+		return nil, err
+	}
+
+	if err := a.publishStreamEvent(ctx, publish, entity.NewPrepStageEvent("initializing", 0)); err != nil {
+		return nil, err
+	}
 
 	prepResult, err := a.agentUC.Prep(ctx, &agentuc.PrepRequest{
 		SystemPrompt: input.SystemPrompt,
@@ -391,7 +425,9 @@ func (a *AgentActivities) InitStreamActivity(ctx context.Context, input *InitStr
 	allTools := prepResult.Tools
 	allTools = append(allTools, mcpOut.Tools...)
 
-	a.publishStreamEvent(ctx, publish, entity.NewPrepStageEvent("ready", prepCompletePercent))
+	if err := a.publishStreamEvent(ctx, publish, entity.NewPrepStageEvent("ready", prepCompletePercent)); err != nil {
+		return nil, err
+	}
 
 	return &InitStreamOutput{
 		Messages: prepResult.Messages,
@@ -415,11 +451,14 @@ func (a *AgentActivities) LLMStreamActivity(ctx context.Context, input *LLMStrea
 	defer stopHeartbeat()
 
 	result, err := retryRateLimited(ctx, func() (*agentuc.LLMStepResult, error) {
-		return a.agentUC.LLMStreamCall(ctx, input.RunID, input.Messages, input.Tools, input.Config, writer)
+		return a.agentUC.LLMStreamCall(ctx, input.Messages, input.Tools, input.Config, writer)
 	})
 	// Close any open message even if the stream was interrupted, so a
-	// text-only round still terminates its message on the timeline.
-	writer.flush(ctx)
+	// text-only round still terminates its message on the timeline; the
+	// TEXT_MESSAGE_END fact is as mandatory as the stream's own outcome.
+	if flushErr := writer.flush(ctx); flushErr != nil && err == nil {
+		err = flushErr
+	}
 
 	if err != nil {
 		return nil, toActivityError(fmt.Errorf("LLMStreamActivity - LLMStreamCall: %w", err))
@@ -441,8 +480,7 @@ func (a *AgentActivities) LLMStreamActivity(ctx context.Context, input *LLMStrea
 
 // ToolExecStreamActivity executes a tool and publishes start/finish events onto
 // the data plane.
-func (a *AgentActivities) ToolExecStreamActivity(ctx context.Context, input ToolInput) (*ToolOutput, error) {
-	runID := input.RunID
+func (a *AgentActivities) ToolExecStreamActivity(ctx context.Context, input *ToolInput) (*ToolOutput, error) {
 	publish := a.newPublishWriter(input.AccountID, input.RunID, input.RunID)
 
 	stopHeartbeat := startHeartbeatLoop(ctx, func() any {
@@ -450,32 +488,32 @@ func (a *AgentActivities) ToolExecStreamActivity(ctx context.Context, input Tool
 	})
 	defer stopHeartbeat()
 
-	// Publish ToolExecStart onto the data plane (fail-open).
-	a.publishStreamEvent(ctx, publish, entity.NewToolExecStartEvent(input.ToolCallID, input.ToolName))
+	// The tool-call arc is two facts; either persist failure fails the
+	// activity so the platform retries the idempotent appends.
+	if err := a.publishStreamEvent(ctx, publish, entity.NewToolExecStartEvent(input.ToolCallID, input.ToolName)); err != nil {
+		return nil, err
+	}
 
 	execStart := time.Now()
-	result, err := a.agentUC.ExecTool(ctx, runID, entity.ToolCall{
-		ID:   input.ToolCallID,
-		Type: "function",
-		Function: entity.ToolCallFunction{
-			Name:      input.ToolName,
-			Arguments: "", // args re-marshaled from input.Args
-		},
-	})
+	result, err := a.agentUC.ExecTool(ctx, input.identity(), input.toolCall())
 	durationMs := time.Since(execStart).Milliseconds()
+
+	if err != nil {
+		// No tool ran: the call could not be authorized as this run. The start
+		// fact is already published and the finish fact is not, which is what
+		// the timeline should show for a call that never reached a tool.
+		return nil, nonRetryableAfterSideEffect(fmt.Errorf("tool exec %s: %w", input.ToolName, err))
+	}
 
 	output := result.Output
 	exitCode := result.ExitCode
 	isError := result.IsError
 
-	if err != nil {
-		output = fmt.Sprintf("Error executing tool %q: %v", input.ToolName, err)
-		exitCode = 1
-		isError = true
+	// The finish fact records a tool that has already executed; a platform
+	// retry would execute it again.
+	if err := a.publishStreamEvent(ctx, publish, entity.NewToolExecFinishEvent(input.ToolCallID, input.ToolName, output, exitCode, isError, durationMs)); err != nil {
+		return nil, nonRetryableAfterSideEffect(fmt.Errorf("ToolExecStreamActivity - finish fact: %w", err))
 	}
-
-	// Publish ToolExecFinish onto the data plane (fail-open).
-	a.publishStreamEvent(ctx, publish, entity.NewToolExecFinishEvent(input.ToolCallID, input.ToolName, output, exitCode, isError, durationMs))
 
 	return &ToolOutput{
 		Output:     output,
@@ -485,21 +523,22 @@ func (a *AgentActivities) ToolExecStreamActivity(ctx context.Context, input Tool
 	}, nil
 }
 
-// FinishStreamActivity publishes the AgentRunFinish event onto the data plane
-// (fail-open) and returns the projection outcome as the milestone persists
-// through the bus → projector path.
+// FinishStreamActivity makes the AgentRunFinish milestone durable and mirrors
+// it onto the data plane. The fact write is the activity: a persist failure
+// fails it, and the platform's retry re-attempts the idempotent append.
 func (a *AgentActivities) FinishStreamActivity(ctx context.Context, input FinishStreamInput) error {
-	a.publishStreamEvent(ctx, a.newPublishWriter(input.AccountID, input.SessionID, input.RunID), input.Event)
-
-	return nil
+	return a.publishStreamEvent(ctx, a.newPublishWriter(input.AccountID, input.SessionID, input.RunID), input.Event)
 }
 
 // ——— Internal helpers ———
 
-// streamEventWriter implements usecase.StreamEventWriter by publishing each
-// event onto the data plane (fail-open: a bus hiccup never fails the stream).
-// written tracks the number of deltas delivered so the enclosing activity can
-// report stream progress in its heartbeats.
+// streamEventWriter implements usecase.StreamEventWriter by making each
+// milestone durable and publishing every event onto the data plane. The bus
+// publish is fail-open (a bus hiccup never fails the stream); a milestone
+// persist failure is returned so the enclosing activity — and therefore the
+// platform's retry — owns the fact. written tracks the number of events
+// delivered so the enclosing activity can report stream progress in its
+// heartbeats.
 type streamEventWriter struct {
 	publish *streamadapter.PublishWriter
 	written atomic.Int64
@@ -507,10 +546,8 @@ type streamEventWriter struct {
 
 func (w *streamEventWriter) WriteEvent(ctx context.Context, event entity.StreamEvent) error {
 	if w.publish != nil {
-		// fail-open: PublishWriter.WriteEvent always returns nil after logging
-		// transport errors internally; a bus hiccup never fails the run.
 		if err := w.publish.WriteEvent(ctx, event); err != nil {
-			return nil
+			return err
 		}
 	}
 
@@ -521,10 +558,13 @@ func (w *streamEventWriter) WriteEvent(ctx context.Context, event entity.StreamE
 
 // flush closes any open AG-UI message so a stream that ends without a
 // following non-content event still terminates its message on the timeline.
-func (w *streamEventWriter) flush(ctx context.Context) {
+// The TEXT_MESSAGE_END fact must land, so the error propagates.
+func (w *streamEventWriter) flush(ctx context.Context) error {
 	if w.publish != nil {
-		w.publish.Flush(ctx)
+		return w.publish.Flush(ctx)
 	}
+
+	return nil
 }
 
 // newPublishWriter builds the per-run data-plane writer for the streaming
@@ -538,29 +578,23 @@ func (a *AgentActivities) newPublishWriter(accountID, sessionID, runID string) *
 
 	writer := streamadapter.NewPublishWriter(a.streamPub, streamadapter.HandleForRun(accountID, runID), sessionID, runID, a.logger)
 
-	if a.runProjection != nil {
-		controller := a.runProjection
-
-		writer.WithEnsure(func(ctx context.Context, handle *agentosstream.Handle) error {
-			return controller.EnsureSubscribed(ctx, runID, handle)
-		})
+	if a.facts != nil {
+		writer = writer.WithFacts(a.facts)
 	}
 
 	return writer
 }
 
-// publishStreamEvent mirrors one runtime event onto the data plane, fail-open.
-// A nil writer (no publisher configured) is a no-op.
-func (a *AgentActivities) publishStreamEvent(ctx context.Context, w *streamadapter.PublishWriter, ev entity.StreamEvent) {
+// publishStreamEvent mirrors one runtime event onto the data plane. A nil
+// writer (no publisher configured) is a no-op. A returned error means a
+// milestone could not be made durable — the caller fails so the platform
+// retries the fact; bus-publish failures stay internal to the writer.
+func (a *AgentActivities) publishStreamEvent(ctx context.Context, w *streamadapter.PublishWriter, ev entity.StreamEvent) error {
 	if w == nil {
-		return
+		return nil
 	}
 
-	// fail-open: PublishWriter.WriteEvent always returns nil after logging
-	// transport errors internally; a bus hiccup never fails the run.
-	if err := w.WriteEvent(ctx, ev); err != nil {
-		return
-	}
+	return w.WriteEvent(ctx, ev)
 }
 
 // FinishStreamInput is the input for the streaming finish activity.

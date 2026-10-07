@@ -96,7 +96,7 @@ func AgentWorkflow(ctx workflow.Context, input *AgentWorkflowInput) (WorkflowRes
 	// Init phase: Prepare
 	messages, tools, baseRequestedAt, err := agentWorkflowInit(ctx, input, &status, historyRefVersion)
 	if err != nil {
-		return makeWorkflowResult(ctx, &status), err
+		return makeWorkflowResult(ctx, &status, input.Delegate.OwnTokensSpent), err
 	}
 
 	// Separate domain tools from meta-tools so delegate_to_agent
@@ -104,9 +104,7 @@ func AgentWorkflow(ctx workflow.Context, input *AgentWorkflowInput) (WorkflowRes
 	// (can invoke delegate_to_agent), but only domainTools are
 	// passable to delegate children.
 	domainTools := tools
-	allTools := make([]entity.ToolDef, 0, len(domainTools)+1)
-	allTools = append(allTools, domainTools...)
-	allTools = append(allTools, DelegateToolDef())
+	allTools := toolsWithDelegate(&input.Delegate, domainTools)
 
 	// Agent loop
 	for round := range maxToolRounds {
@@ -114,18 +112,23 @@ func AgentWorkflow(ctx workflow.Context, input *AgentWorkflowInput) (WorkflowRes
 		messages = updatedMessages
 
 		if err != nil {
-			return makeWorkflowResult(ctx, &status), err
+			return makeWorkflowResult(ctx, &status, input.Delegate.OwnTokensSpent), err
 		}
 
 		if done {
-			return makeWorkflowResult(ctx, &status), nil
+			return makeWorkflowResult(ctx, &status, input.Delegate.OwnTokensSpent), nil
 		}
 	}
 
+	// Reaching here means the loop hit its cap, not that the agent finished
+	// its work. The state is completed either way, but the reason says which:
+	// a run that stopped working and a run that ran out of rounds are
+	// different situations for whoever reads it.
 	status.LifecycleState = string(entity.LifecycleCompleted)
-	syncRunSearchAttributes(ctx, searchAttrsVersion, status.RunID, input.Config.Model, status.LifecycleState, maxToolRounds, "")
+	status.Reason = reasonMaxRounds
+	syncRunSearchAttributes(ctx, searchAttrsVersion, status.RunID, input.Config.Model, status.LifecycleState, maxToolRounds, status.Reason)
 
-	return makeWorkflowResult(ctx, &status), nil
+	return makeWorkflowResult(ctx, &status, input.Delegate.OwnTokensSpent), nil
 }
 
 // setupAgentActivityOptions configures activity options for the agent workflow.
@@ -150,13 +153,15 @@ func withRequiredActivityTaskQueue(ctx workflow.Context, taskQueue string) workf
 }
 
 // makeWorkflowResult builds a WorkflowResult from the current status.
-func makeWorkflowResult(ctx workflow.Context, status *RunStatus) WorkflowResult {
+func makeWorkflowResult(ctx workflow.Context, status *RunStatus, tokensSpent int64) WorkflowResult {
 	return WorkflowResult{
 		RunID:          status.RunID,
 		LifecycleState: status.LifecycleState,
+		Reason:         status.Reason,
 		Step:           status.Step,
 		CompletedAt:    workflow.Now(ctx),
 		Output:         status.Output,
+		TokensSpent:    tokensSpent,
 	}
 }
 
@@ -184,8 +189,8 @@ func agentWorkflowInit(ctx workflow.Context, input *AgentWorkflowInput, status *
 	if !prepResult.CanProceed() {
 		status.LifecycleState = string(entity.LifecycleFailed)
 
-		return nil, nil, time.Time{}, fmt.Errorf("%w: billing=%v limits=%v errors=%v",
-			ErrPrepChecksFailed, prepResult.Billing, prepResult.Limits, prepResult.Errors)
+		return nil, nil, time.Time{}, fmt.Errorf("%w: billing=%v warnings=%v",
+			ErrPrepChecksFailed, prepResult.Billing, prepResult.Warnings)
 	}
 
 	if historyRefVersion >= 1 && input.Continuation.HistoryRef != "" {
@@ -219,9 +224,14 @@ func executeAgentToolCalls(
 	domainTools []entity.ToolDef,
 ) (bool, error) {
 	for _, tc := range toolCalls {
-		if canceled, err := checkStreamSignal(signalCh, ctx); err != nil {
-			_ = err
-		} else if canceled {
+		canceled, err := checkStreamSignal(signalCh, ctx)
+		if err != nil {
+			status.LifecycleState = string(entity.LifecycleFailed)
+
+			return true, err
+		}
+
+		if canceled {
 			status.LifecycleState = string(entity.LifecycleCanceled)
 
 			return true, nil
@@ -231,17 +241,15 @@ func executeAgentToolCalls(
 		// instead of routing through ToolExecActivity, giving the
 		// sub-agent full conversational isolation.
 		if isDelegateToolCall(tc) {
-			resultContent, err := executeDelegateTool(ctx, tc, input.Config, input.AccountID, domainTools, input.MCPServerConfigs, &input.TaskQueues)
-			if err != nil {
-				resultContent = fmt.Sprintf("Error delegating task: %v", err)
-			}
-
-			toolMsg := entity.Message{
-				Role:       entity.RoleTool,
-				ToolCallID: tc.ID,
-				Content:    resultContent,
-			}
-			*messages = append(*messages, toolMsg)
+			*messages = append(*messages, handleDelegateToolCall(ctx, tc, &delegateParent{
+				budget:      &input.Delegate,
+				accountID:   input.AccountID,
+				projectID:   input.ProjectID,
+				config:      input.Config,
+				domainTools: domainTools,
+				mcpConfigs:  input.MCPServerConfigs,
+				taskQueues:  input.TaskQueues,
+			}))
 
 			continue
 		}
@@ -250,10 +258,12 @@ func executeAgentToolCalls(
 
 		toolCtx := withRequiredActivityTaskQueue(ctx, input.TaskQueues.NativeTool)
 		if err := workflow.ExecuteActivity(toolCtx, ToolExecActivityName, ToolInput{
+			AccountID:  input.AccountID,
+			ProjectID:  input.ProjectID,
 			RunID:      input.RunID,
 			ToolCallID: tc.ID,
 			ToolName:   tc.Function.Name,
-			Args:       parseArgsJSON(tc.Function.Arguments),
+			Args:       tc.Function.Arguments,
 		}).Get(ctx, &toolResult); err != nil {
 			status.LifecycleState = string(entity.LifecycleFailed)
 
@@ -380,6 +390,10 @@ func agentWorkflowRound(
 
 		return true, messages, err
 	}
+
+	// This workflow's own consumption joins the tree's running total, which
+	// is what the next delegation decision is measured against.
+	input.Delegate.OwnTokensSpent += int64(llmResult.Usage.TotalTokens)
 
 	messages = append(messages, assistantMsg)
 	status.Step++

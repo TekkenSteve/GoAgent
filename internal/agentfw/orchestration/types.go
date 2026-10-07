@@ -4,6 +4,7 @@ import (
 	"time"
 
 	"github.com/TekkenSteve/GoAgent/internal/entity"
+	agentuc "github.com/TekkenSteve/GoAgent/internal/usecase/agent"
 )
 
 // ——— Workflow type names ———
@@ -64,23 +65,27 @@ type PrepareOutput struct {
 	Messages []entity.Message
 	Tools    []entity.ToolDef
 	Billing  *PrepBillingOutput
-	Limits   *PrepLimitsOutput
 	ToolDefs *PrepToolsOutput
-	Errors   []string
+	// Warnings collects what failed without forbidding the run: an
+	// unreachable MCP server, a malformed tool definition, a billing lookup
+	// that errored. They are reported to operators, and a tool call that does
+	// fail reaches the model as a tool error it can react to.
+	Warnings []string
 }
 
-// CanProceed returns true if all mandatory checks passed.
-// Billing and limits gate execution; tool failures are non-fatal.
+// CanProceed reports whether execution may start.
+//
+// Billing gates it: it is the one check that says this run must not run at
+// all. Everything that merely failed is reported in Warnings and does not stop
+// the run — an agent that cannot reach one toolset can still answer with the
+// rest.
+//
+// Concurrency admission is deliberately absent: a limit enforced from a
+// process-local counter is not a limit on a fleet, and a gate that cannot deny
+// is worse than none. A real one needs a shared counter with leases and a
+// release path that survives a crashed worker.
 func (r *PrepareOutput) CanProceed() bool {
-	if r.Billing != nil && !r.Billing.Approved {
-		return false
-	}
-
-	if r.Limits != nil && !r.Limits.Approved {
-		return false
-	}
-
-	return len(r.Errors) == 0
+	return r.Billing == nil || r.Billing.Approved
 }
 
 // PrepBillingInput is the input for billing/quota validation.
@@ -94,21 +99,6 @@ type PrepBillingOutput struct {
 	Approved  bool
 	Remaining int
 	Currency  string
-}
-
-// PrepLimitsInput is the input for rate/context limit validation.
-type PrepLimitsInput struct {
-	AccountID    string
-	MessageCount int
-	ModelRef     string
-}
-
-// PrepLimitsOutput is the output of limit validation.
-type PrepLimitsOutput struct {
-	Approved        bool
-	ConcurrentLimit int
-	RunningCount    int
-	ErrorCode       string
 }
 
 // PrepToolsInput is the input for tool definition validation.
@@ -131,8 +121,10 @@ type PrepMCPInput struct {
 
 // PrepMCPOutput is the output of MCP tool resolution.
 type PrepMCPOutput struct {
-	Tools  []entity.ToolDef
-	Errors []string
+	Tools []entity.ToolDef
+	// Failures are the MCP servers that could not be connected. Advisory:
+	// their tools are simply absent from this run.
+	Failures []string
 }
 
 // LLMStepInput is the input for a single sync LLM call activity.
@@ -155,10 +147,41 @@ type LLMStepOutput struct {
 // ToolInput is the input for a single tool execution activity.
 type ToolInput struct {
 	AccountID  string
+	ProjectID  string
 	RunID      string
 	ToolCallID string
 	ToolName   string
-	Args       map[string]any
+	// Args is the JSON arguments string, verbatim as the model emitted it.
+	// It stays a string for the whole hop so no encoding round-trip can
+	// alter it: re-marshaling a decoded map rewrites number literals and
+	// silently corrupts values beyond float64 precision, and the tool sees
+	// exactly what the model sent or nothing at all.
+	Args string
+}
+
+// identity is the tenant and run this tool call belongs to. It travels with
+// the call because the tool pipeline authorizes the call as the run: an
+// identity that stops at the activity is an unauthorized call.
+func (in *ToolInput) identity() agentuc.RunIdentity {
+	return agentuc.RunIdentity{
+		RunID:     in.RunID,
+		AccountID: in.AccountID,
+		ProjectID: in.ProjectID,
+	}
+}
+
+// toolCall presents the input as the model's tool call. The activities hand
+// this to the executor, so the arguments the model emitted are the arguments
+// the tool receives.
+func (in *ToolInput) toolCall() entity.ToolCall {
+	return entity.ToolCall{
+		ID:   in.ToolCallID,
+		Type: "function",
+		Function: entity.ToolCallFunction{
+			Name:      in.ToolName,
+			Arguments: in.Args,
+		},
+	}
 }
 
 // ToolOutput is the output of a single tool execution activity.
@@ -172,6 +195,7 @@ type ToolOutput struct {
 // InitStreamInput is the input for the streaming init activity.
 type InitStreamInput struct {
 	AccountID        string
+	ProjectID        string
 	SessionID        string
 	RunID            string
 	SystemPrompt     string
@@ -181,6 +205,29 @@ type InitStreamInput struct {
 	Config           entity.LLMConfig
 	MCPServerConfigs []entity.MCPServerConfig
 	TaskQueues       WorkflowTaskQueues
+	// Delegate is the delegation tree's allowance, shared with the
+	// step-level agent loop.
+	Delegate DelegateBudget
+}
+
+// DelegateBudget is what a delegation tree may still spend. It travels down
+// with every child, so the limit is the tree's and not one workflow's.
+type DelegateBudget struct {
+	// Depth is how many delegation levels separate this workflow from the
+	// run's root. The root is 0.
+	Depth int
+	// MaxDepth bounds the tree. Zero takes defaultMaxDelegateDepth, and a
+	// child inherits the limit its parent resolved.
+	MaxDepth int
+	// TokenBudget bounds what the tree may spend; zero means no bound.
+	TokenBudget int64
+	// BaselineSpent is what the tree had spent before this workflow
+	// started: its ancestors plus their earlier children.
+	BaselineSpent int64
+	// OwnTokensSpent is what this workflow and its own children have spent.
+	// A child reports this as a delta, which is what keeps the tree's total
+	// linear instead of counting an ancestor's cost once per level.
+	OwnTokensSpent int64
 }
 
 // InitStreamOutput is the output of the streaming init activity.
@@ -232,14 +279,24 @@ type UserMessageSignal struct {
 type WorkflowResult struct {
 	RunID          string
 	LifecycleState string
-	Step           int32
-	CompletedAt    time.Time
-	Output         string // final assistant text output; populated for delegation
+	// Reason says why the run reached its state. A completed run that hit the
+	// round cap carries reasonMaxRounds; a run that finished its work carries
+	// none, and the two are different situations.
+	Reason      string
+	Step        int32
+	CompletedAt time.Time
+	Output      string // final assistant text output; populated for delegation
+	// TokensSpent is what this workflow and its delegation subtree consumed,
+	// not counting what the tree had already spent when it started. A parent
+	// adds it to its own running total, which is how a budget stays global
+	// across a delegation tree without double counting.
+	TokensSpent int64
 }
 
 // AgentWorkflowInput is the input for the step-level AgentWorkflow.
 type AgentWorkflowInput struct {
 	AccountID        string
+	ProjectID        string
 	RunID            string
 	SystemPrompt     string
 	Message          string
@@ -254,6 +311,10 @@ type AgentWorkflowInput struct {
 	// waits for user input indefinitely. Zero uses defaultAwaitUserInputTimeout.
 	AwaitUserInputTimeout time.Duration
 	TaskQueues            WorkflowTaskQueues
+
+	// Delegate is the delegation tree's allowance. Both agent loops carry
+	// it, so neither can recurse past the limit or past the budget.
+	Delegate DelegateBudget
 }
 
 // WorkflowInput wraps the business orchestration input with Temporal worker

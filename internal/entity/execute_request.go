@@ -15,19 +15,32 @@ type ExecuteRequest struct {
 	ToolSchemaVer  string `json:"tool_schema_ver"  example:"v1"`
 	SystemPrompt   string `json:"system_prompt"    example:"You are a helpful assistant."`
 	UserMessage    string `json:"user_message"     example:"Hello, can you help me?"`
-	IsNewThread    bool   `json:"is_new_thread"    example:"false"`
 	AwaitUserInput bool   `json:"await_user_input" example:"false"`
 	// AwaitUserInputTimeoutSeconds bounds how long a run waits for user input
 	// in the "waiting_input" state before completing with reason
 	// "awaiting_user_input_timed_out". Zero uses the platform default (24h).
 	AwaitUserInputTimeoutSeconds int64             `json:"await_user_input_timeout_seconds" example:"86400"`
-	BypassAdmission              bool              `json:"bypass_admission" example:"false"`
 	IdempotencyKey               string            `json:"idempotency_key"  example:"idem-550e8400-e29b-41d4-a716-446655440000"`
 	EventSchemaVer               string            `json:"event_schema_ver"  example:"v1"`
 	WorkflowVersion              int               `json:"workflow_version"  example:"1"`
 	MCPServerConfigs             []MCPServerConfig `json:"mcp_server_configs,omitempty"`
 	RequestedAt                  time.Time         `json:"requested_at"      example:"2026-01-01T00:00:00Z"`
+
+	// The native backend has two execution modes and the request says which:
+	// a run with a step queue or a team runs the step-queue interpreter, which
+	// starts one child agent run per agent step. Both modes are the same
+	// backend, so they share one request rather than one port per mode.
+	Steps          []Step         `json:"steps,omitempty"`
+	TeamSpec       *TeamSpec      `json:"team_spec,omitempty"`
+	MaxDepth       int            `json:"max_depth,omitempty"`
+	ContinuePolicy ContinuePolicy `json:"continue_policy,omitzero"`
 } // @name entity.ExecuteRequest
+
+// HasStepQueue reports whether the request asks for the step-queue execution
+// mode: a queue the caller authored, or a team the backend expands into one.
+func (r *ExecuteRequest) HasStepQueue() bool {
+	return len(r.Steps) > 0 || r.TeamSpec != nil
+}
 
 // RunIdentifiers are propagated across workflow, logs, events, and storage.
 type RunIdentifiers struct {

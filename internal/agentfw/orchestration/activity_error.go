@@ -39,6 +39,14 @@ func toActivityError(err error) error {
 	return err
 }
 
+// nonRetryableAfterSideEffect marks a failure that occurs after the guarded
+// operation has already run. The platform's retry would run it a second time —
+// a second email, a second write — so the run fails visibly instead: whoever
+// re-drives it issues a new call with a new identity.
+func nonRetryableAfterSideEffect(err error) error {
+	return temporal.NewNonRetryableApplicationError(err.Error(), "SIDE_EFFECT", err)
+}
+
 // retryRateLimited runs fn, retrying rate-limit failures (LLM_RATE_LIMIT) up
 // to llmRateLimitRetries extra times with exponential backoff + jitter. All
 // other errors — including context cancellation — are returned immediately.

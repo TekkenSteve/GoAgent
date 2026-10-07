@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	agentoscore "github.com/TekkenSteve/GoAgent/agentos/core"
 	"github.com/TekkenSteve/GoAgent/internal/entity"
 	"github.com/TekkenSteve/GoAgent/internal/repo"
 	"github.com/TekkenSteve/GoAgent/internal/usecase"
@@ -19,6 +20,9 @@ import (
 var (
 	// ErrAgentRepoNotAvailable is returned when the agent repository is not configured.
 	ErrAgentRepoNotAvailable = errors.New("agent repo not available")
+	// ErrInvalidRunIdentity is returned when a run's tenant is not known, which
+	// makes work that must be authorized under it impossible to authorize.
+	ErrInvalidRunIdentity = errors.New("invalid run identity")
 	// ErrAgentNotFound is returned when the requested agent does not exist.
 	ErrAgentNotFound = errors.New("agent not found")
 )
@@ -52,22 +56,21 @@ type StepResult struct {
 type UseCase struct {
 	llm        repo.LLMProvider
 	tools      repo.ToolExecutor
-	wal        repo.WALAppender
 	compressor repo.ContextCompressor
 	toolDefs   usecase.ToolDefProvider
 	agentRepo  repo.AgentRepo // optional; nil in tests or when agent management is not wired
 	log        logger.Interface
 }
 
-// SetLogger attaches a logger to the use case for best-effort WAL diagnostics.
-// Safe to call with nil — logging calls are no-ops when no logger is set.
+// SetLogger attaches a logger to the use case for diagnostics. Safe to call
+// with nil — logging calls are no-ops when no logger is set.
 func (uc *UseCase) SetLogger(l logger.Interface) {
 	uc.log = l
 }
 
 // New -.
-func New(llm repo.LLMProvider, tools repo.ToolExecutor, wal repo.WALAppender, compressor repo.ContextCompressor, toolDefs usecase.ToolDefProvider, agentRepo repo.AgentRepo) *UseCase {
-	return &UseCase{llm: llm, tools: tools, wal: wal, compressor: compressor, toolDefs: toolDefs, agentRepo: agentRepo}
+func New(llm repo.LLMProvider, tools repo.ToolExecutor, compressor repo.ContextCompressor, toolDefs usecase.ToolDefProvider, agentRepo repo.AgentRepo) *UseCase {
+	return &UseCase{llm: llm, tools: tools, compressor: compressor, toolDefs: toolDefs, agentRepo: agentRepo}
 }
 
 // ——— Fine-grained step types for Temporal-native orchestration ———
@@ -97,9 +100,10 @@ type ToolExecResult struct {
 	DurationMs int64
 }
 
-// LLMStep performs a single LLM call with optional compression.
-// It writes the assistant message to WAL and returns the result.
-func (uc *UseCase) LLMStep(ctx context.Context, runID string, messages []entity.Message, tools []entity.ToolDef, config entity.LLMConfig) (*LLMStepResult, error) {
+// LLMStep performs a single LLM call with optional compression. It computes;
+// durability belongs to the run's fact timeline (the writer's milestones), not
+// to this call.
+func (uc *UseCase) LLMStep(ctx context.Context, messages []entity.Message, tools []entity.ToolDef, config entity.LLMConfig) (*LLMStepResult, error) {
 	llmReq := entity.LLMRequest{
 		Messages: messages,
 		Tools:    tools,
@@ -119,9 +123,6 @@ func (uc *UseCase) LLMStep(ctx context.Context, runID string, messages []entity.
 		assistantMsg.ToolCalls = resp.ToolCalls
 	}
 
-	// Best-effort WAL append
-	uc.appendMessageToWAL(ctx, runID, assistantMsg)
-
 	return &LLMStepResult{
 		AssistantMsg: assistantMsg,
 		ToolCalls:    resp.ToolCalls,
@@ -129,20 +130,64 @@ func (uc *UseCase) LLMStep(ctx context.Context, runID string, messages []entity.
 	}, nil
 }
 
-// ExecTool executes a single tool call and writes results to WAL.
-func (uc *UseCase) ExecTool(ctx context.Context, runID string, tc entity.ToolCall) (*ToolExecResult, error) {
+// ExecTool executes a single tool call.
+// RunIdentity is the tenant a run belongs to, as everything the run does sees
+// it.
+//
+// It is a required parameter rather than an optional field because a tool call
+// that cannot name its tenant cannot be authorized: the pipeline builds the
+// principal from the account and the tenant scope from the project, and refuses
+// what is missing. A caller that forgets the identity fails here, with a
+// sentence that says so, instead of failing every tool call at runtime.
+type RunIdentity struct {
+	RunID     string
+	AccountID string
+	ProjectID string
+}
+
+// Validate reports whether the identity names a tenant and a run.
+func (i RunIdentity) Validate() error {
+	if i.RunID == "" {
+		return fmt.Errorf("%w: run id is required", ErrInvalidRunIdentity)
+	}
+
+	if _, err := agentoscore.NewTenantScope(i.AccountID, i.ProjectID); err != nil {
+		return fmt.Errorf("%w: %w", ErrInvalidRunIdentity, err)
+	}
+
+	return nil
+}
+
+// ExecTool executes one tool call as the run's tenant.
+//
+// It has two failure kinds and they mean different things:
+//
+//   - a tool that fails is the tool's answer: the result says IsError, carries
+//     the message the model should see, and the error is nil;
+//   - a call that cannot be authorized never reaches a tool, so there is no
+//     answer to report and the result is nil with an error — the caller must
+//     fail rather than tell the model a tool failed when none was called.
+func (uc *UseCase) ExecTool(ctx context.Context, identity RunIdentity, tc entity.ToolCall) (*ToolExecResult, error) {
+	if err := identity.Validate(); err != nil {
+		return nil, err
+	}
+
 	toolReq := entity.ToolRequest{
-		RunID:      runID,
+		RunID:      identity.RunID,
+		AccountID:  identity.AccountID,
+		ProjectID:  identity.ProjectID,
 		ToolCallID: tc.ID,
 		ToolName:   tc.Function.Name,
 		Args:       parseArgsJSON(tc.Function.Arguments),
+		// A tool call is identified by its id, so a platform-level retry of
+		// the enclosing activity can deduplicate against the first attempt
+		// instead of re-running a side effect.
+		IdempotencyKey: entity.ToolCallIdempotencyKey(tc.ID),
 	}
 
 	execStart := time.Now()
 	result, execErr := uc.tools.Execute(ctx, &toolReq)
 	durationMs := time.Since(execStart).Milliseconds()
-
-	uc.appendToolResultToWAL(ctx, runID, &result, tc)
 
 	output := ""
 	exitCode := 0
@@ -169,7 +214,6 @@ func (uc *UseCase) ExecTool(ctx context.Context, runID string, tc entity.ToolCal
 		ToolCallID: tc.ID,
 		Content:    content,
 	}
-	uc.appendMessageToWAL(ctx, runID, toolMsg)
 
 	return &ToolExecResult{
 		ToolMsg:    toolMsg,
@@ -324,7 +368,6 @@ func (uc *UseCase) ExecuteStep(ctx context.Context, req *StepRequest) (*StepResu
 		}
 
 		messages = append(messages, assistantMsg)
-		uc.appendMessageToWAL(ctx, req.RunID, assistantMsg)
 
 		if len(resp.ToolCalls) == 0 {
 			break
@@ -377,6 +420,10 @@ func (uc *UseCase) executeStepToolCall(ctx context.Context, runID string, tc ent
 		ToolCallID: tc.ID,
 		ToolName:   tc.Function.Name,
 		Args:       parseArgsJSON(tc.Function.Arguments),
+		// A tool call is identified by its id, so a platform-level retry of
+		// the enclosing activity can deduplicate against the first attempt
+		// instead of re-running a side effect.
+		IdempotencyKey: entity.ToolCallIdempotencyKey(tc.ID),
 	}
 
 	toolResult, execErr := uc.tools.Execute(ctx, &toolReq)
@@ -389,7 +436,6 @@ func (uc *UseCase) executeStepToolCall(ctx context.Context, runID string, tc ent
 	}
 
 	allToolResults = append(allToolResults, toolResult)
-	uc.appendToolResultToWAL(ctx, runID, &toolResult, tc)
 
 	content := ""
 	if execErr != nil {
@@ -404,7 +450,6 @@ func (uc *UseCase) executeStepToolCall(ctx context.Context, runID string, tc ent
 		Content:    content,
 	}
 	messages = append(messages, toolMsg)
-	uc.appendMessageToWAL(ctx, runID, toolMsg)
 
 	return allToolResults, messages
 }
@@ -493,56 +538,6 @@ func parseArgsJSON(raw string) map[string]any {
 	}
 
 	return args
-}
-
-// appendMessageToWAL best-effort appends a message record to the write-ahead log.
-func (uc *UseCase) appendMessageToWAL(ctx context.Context, runID string, msg entity.Message) {
-	if uc.wal == nil {
-		return
-	}
-
-	toolCallID := ""
-	if len(msg.ToolCalls) > 0 {
-		toolCallID = msg.ToolCalls[0].ID
-	}
-
-	if err := uc.wal.AppendMessage(ctx, runID, entity.MessageRecord{
-		RunID:      runID,
-		Role:       string(msg.Role),
-		Content:    msg.Content,
-		ToolCallID: toolCallID,
-	}); err != nil {
-		if uc.log != nil {
-			uc.log.Warn("WAL append message failed (run=%s, role=%s): %v", runID, msg.Role, err)
-		}
-	}
-}
-
-// appendToolResultToWAL best-effort appends a tool result record to the write-ahead log.
-func (uc *UseCase) appendToolResultToWAL(ctx context.Context, runID string, result *entity.ToolResult, tc entity.ToolCall) {
-	if uc.wal == nil {
-		return
-	}
-
-	var resultJSON string
-
-	if result.Output != nil {
-		b, err := json.Marshal(result.Output)
-		if err == nil {
-			resultJSON = string(b)
-		}
-	}
-
-	if err := uc.wal.AppendToolResult(ctx, runID, entity.ToolResultRecord{
-		RunID:      runID,
-		ToolCallID: tc.ID,
-		ToolName:   tc.Function.Name,
-		ResultJSON: resultJSON,
-	}); err != nil {
-		if uc.log != nil {
-			uc.log.Warn("WAL append tool result failed (run=%s, tool=%s): %v", runID, tc.Function.Name, err)
-		}
-	}
 }
 
 // hasConfigChanges checks whether the request would modify agent configuration.
