@@ -32,13 +32,6 @@ const docTemplate = `{
                 "parameters": [
                     {
                         "type": "string",
-                        "description": "Account ID",
-                        "name": "account_id",
-                        "in": "query",
-                        "required": true
-                    },
-                    {
-                        "type": "string",
                         "description": "Project ID",
                         "name": "project_id",
                         "in": "query",
@@ -187,13 +180,6 @@ const docTemplate = `{
                     },
                     {
                         "type": "string",
-                        "description": "Account ID",
-                        "name": "account_id",
-                        "in": "query",
-                        "required": true
-                    },
-                    {
-                        "type": "string",
                         "description": "Project ID",
                         "name": "project_id",
                         "in": "query",
@@ -248,13 +234,6 @@ const docTemplate = `{
                         "description": "Action ID",
                         "name": "action_id",
                         "in": "path",
-                        "required": true
-                    },
-                    {
-                        "type": "string",
-                        "description": "Account ID",
-                        "name": "account_id",
-                        "in": "query",
                         "required": true
                     },
                     {
@@ -326,13 +305,6 @@ const docTemplate = `{
                     },
                     {
                         "type": "string",
-                        "description": "Account ID",
-                        "name": "account_id",
-                        "in": "query",
-                        "required": true
-                    },
-                    {
-                        "type": "string",
                         "description": "Project ID",
                         "name": "project_id",
                         "in": "query",
@@ -396,13 +368,6 @@ const docTemplate = `{
                         "description": "Action ID",
                         "name": "action_id",
                         "in": "path",
-                        "required": true
-                    },
-                    {
-                        "type": "string",
-                        "description": "Account ID",
-                        "name": "account_id",
-                        "in": "query",
                         "required": true
                     },
                     {
@@ -474,13 +439,6 @@ const docTemplate = `{
                     },
                     {
                         "type": "string",
-                        "description": "Account ID",
-                        "name": "account_id",
-                        "in": "query",
-                        "required": true
-                    },
-                    {
-                        "type": "string",
                         "description": "Project ID",
                         "name": "project_id",
                         "in": "query",
@@ -539,13 +497,6 @@ const docTemplate = `{
                 "summary": "List AgentOS ledger entries",
                 "operationId": "agentos-list-ledger-entries",
                 "parameters": [
-                    {
-                        "type": "string",
-                        "description": "Account ID",
-                        "name": "account_id",
-                        "in": "query",
-                        "required": true
-                    },
                     {
                         "type": "string",
                         "description": "Project ID",
@@ -816,13 +767,6 @@ const docTemplate = `{
                     },
                     {
                         "type": "string",
-                        "description": "Account ID",
-                        "name": "account_id",
-                        "in": "query",
-                        "required": true
-                    },
-                    {
-                        "type": "string",
                         "description": "Project ID",
                         "name": "project_id",
                         "in": "query",
@@ -909,13 +853,6 @@ const docTemplate = `{
                     },
                     {
                         "type": "string",
-                        "description": "Account ID",
-                        "name": "account_id",
-                        "in": "query",
-                        "required": true
-                    },
-                    {
-                        "type": "string",
                         "description": "Project ID",
                         "name": "project_id",
                         "in": "query",
@@ -970,13 +907,6 @@ const docTemplate = `{
                         "description": "Plan ID",
                         "name": "plan_id",
                         "in": "path",
-                        "required": true
-                    },
-                    {
-                        "type": "string",
-                        "description": "Account ID",
-                        "name": "account_id",
-                        "in": "query",
                         "required": true
                     },
                     {
@@ -1062,13 +992,6 @@ const docTemplate = `{
                         "description": "Plan ID",
                         "name": "plan_id",
                         "in": "path",
-                        "required": true
-                    },
-                    {
-                        "type": "string",
-                        "description": "Account ID",
-                        "name": "account_id",
-                        "in": "query",
                         "required": true
                     },
                     {
@@ -1206,13 +1129,6 @@ const docTemplate = `{
                     },
                     {
                         "type": "string",
-                        "description": "Account ID",
-                        "name": "account_id",
-                        "in": "query",
-                        "required": true
-                    },
-                    {
-                        "type": "string",
                         "description": "Project ID",
                         "name": "project_id",
                         "in": "query",
@@ -1298,13 +1214,6 @@ const docTemplate = `{
                     },
                     {
                         "type": "string",
-                        "description": "Account ID",
-                        "name": "account_id",
-                        "in": "query",
-                        "required": true
-                    },
-                    {
-                        "type": "string",
                         "description": "Project ID",
                         "name": "project_id",
                         "in": "query",
@@ -1359,6 +1268,13 @@ const docTemplate = `{
                         "description": "Plan ID",
                         "name": "plan_id",
                         "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Project ID",
+                        "name": "project_id",
+                        "in": "query",
                         "required": true
                     },
                     {
@@ -1428,13 +1344,6 @@ const docTemplate = `{
                         "description": "Plan ID",
                         "name": "plan_id",
                         "in": "path",
-                        "required": true
-                    },
-                    {
-                        "type": "string",
-                        "description": "Account ID",
-                        "name": "account_id",
-                        "in": "query",
                         "required": true
                     },
                     {
@@ -1578,6 +1487,13 @@ const docTemplate = `{
                         "name": "plan_id",
                         "in": "path",
                         "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Project ID",
+                        "name": "project_id",
+                        "in": "query",
+                        "required": true
                     }
                 ],
                 "responses": {
@@ -1617,13 +1533,6 @@ const docTemplate = `{
                 "summary": "List AgentOS processes",
                 "operationId": "agentos-list-processes",
                 "parameters": [
-                    {
-                        "type": "string",
-                        "description": "Account ID",
-                        "name": "account_id",
-                        "in": "query",
-                        "required": true
-                    },
                     {
                         "type": "string",
                         "description": "Project ID",
@@ -1768,13 +1677,6 @@ const docTemplate = `{
                     },
                     {
                         "type": "string",
-                        "description": "Account ID",
-                        "name": "account_id",
-                        "in": "query",
-                        "required": true
-                    },
-                    {
-                        "type": "string",
                         "description": "Project ID",
                         "name": "project_id",
                         "in": "query",
@@ -1833,13 +1735,6 @@ const docTemplate = `{
                     },
                     {
                         "type": "string",
-                        "description": "Account ID",
-                        "name": "account_id",
-                        "in": "query",
-                        "required": true
-                    },
-                    {
-                        "type": "string",
                         "description": "Project ID",
                         "name": "project_id",
                         "in": "query",
@@ -1889,13 +1784,6 @@ const docTemplate = `{
                 "summary": "Get or list AgentOS resource projections",
                 "operationId": "agentos-resources",
                 "parameters": [
-                    {
-                        "type": "string",
-                        "description": "Account ID",
-                        "name": "account_id",
-                        "in": "query",
-                        "required": true
-                    },
                     {
                         "type": "string",
                         "description": "Project ID",
@@ -2311,13 +2199,6 @@ const docTemplate = `{
                 "parameters": [
                     {
                         "type": "string",
-                        "description": "Account ID",
-                        "name": "account_id",
-                        "in": "query",
-                        "required": true
-                    },
-                    {
-                        "type": "string",
                         "description": "Project ID",
                         "name": "project_id",
                         "in": "query",
@@ -2462,13 +2343,6 @@ const docTemplate = `{
                         "description": "Workset ID",
                         "name": "workset_id",
                         "in": "path",
-                        "required": true
-                    },
-                    {
-                        "type": "string",
-                        "description": "Account ID",
-                        "name": "account_id",
-                        "in": "query",
                         "required": true
                     },
                     {

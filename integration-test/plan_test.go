@@ -434,7 +434,6 @@ func controlAgentOSPlan(t *testing.T, planID string, operation agentoscore.Contr
 
 	body, err := json.Marshal(map[string]any{
 		"operation":       operation,
-		"account_id":      agentOSPlanAccountID,
 		"project_id":      agentOSPlanProjectID,
 		"idempotency_key": idempotencyKey,
 		"actor_id":        "integration-test",
@@ -489,9 +488,11 @@ func getAgentOSPlanJSON(t *testing.T, endpoint string, out any) {
 	}
 }
 
+// planScopedPath addresses a plan sub-resource inside a tenant scope. Only the
+// project is named: the account comes from the credential, and a request that
+// carried one would be a self-reported identity.
 func planScopedPath(planID, suffix string) string {
 	values := url.Values{}
-	values.Set("account_id", agentOSPlanAccountID)
 	values.Set("project_id", agentOSPlanProjectID)
 
 	return fmt.Sprintf("%s/agentos/plans/%s/%s?%s", basePathV1(), planID, suffix, values.Encode())

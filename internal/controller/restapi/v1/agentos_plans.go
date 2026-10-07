@@ -56,6 +56,7 @@ func (r *V1) startAgentOSPlan(ctx *fiber.Ctx) error {
 // @Accept      json
 // @Produce     json
 // @Param       plan_id path string true "Plan ID"
+// @Param       project_id query string true "Project ID"
 // @Success     200 {object} agentos.RunPlanStatus
 // @Failure     404 {object} response.Error
 // @Failure     500 {object} response.Error
@@ -79,7 +80,6 @@ func (r *V1) statusAgentOSPlan(ctx *fiber.Ctx) error {
 // @Accept      json
 // @Produce     json
 // @Param       plan_id path string true "Plan ID"
-// @Param       account_id query string true "Account ID"
 // @Param       project_id query string true "Project ID"
 // @Success     200 {object} agentos.RunPlanDescription
 // @Failure     400 {object} response.Error
@@ -308,7 +308,6 @@ func withQueryScope[T any, PT interface {
 // @Accept      json
 // @Produce     json
 // @Param       plan_id path string true "Plan ID"
-// @Param       account_id query string true "Account ID"
 // @Param       project_id query string true "Project ID"
 // @Param       node_id query string false "Node ID"
 // @Param       run_id query string false "Child run ID"
@@ -338,7 +337,6 @@ func (r *V1) listAgentOSPlanAudits(ctx *fiber.Ctx) error {
 // @Accept      json
 // @Produce     json
 // @Param       plan_id path string true "Plan ID"
-// @Param       account_id query string true "Account ID"
 // @Param       project_id query string true "Project ID"
 // @Param       node_id query string false "Node ID"
 // @Param       run_id query string false "Child run ID"
@@ -370,7 +368,6 @@ func (r *V1) listAgentOSPlanArtifacts(ctx *fiber.Ctx) error {
 // @Produce     json
 // @Param       plan_id path string true "Plan ID"
 // @Param       artifact_id path string true "Artifact ID"
-// @Param       account_id query string true "Account ID"
 // @Param       project_id query string true "Project ID"
 // @Success     200 {object} agentoscore.Artifact
 // @Failure     400 {object} response.Error
@@ -396,7 +393,6 @@ func (r *V1) getAgentOSPlanArtifact(ctx *fiber.Ctx) error {
 // @Accept      json
 // @Produce     json
 // @Param       plan_id path string true "Plan ID"
-// @Param       account_id query string true "Account ID"
 // @Param       project_id query string true "Project ID"
 // @Param       node_id query string false "Node ID"
 // @Param       run_id query string false "Child run ID"
@@ -423,7 +419,6 @@ func (r *V1) listAgentOSPlanEvents(ctx *fiber.Ctx) error {
 // @Accept      json
 // @Produce     json
 // @Param       plan_id path string true "Plan ID"
-// @Param       account_id query string true "Account ID"
 // @Param       project_id query string true "Project ID"
 // @Param       node_id query string false "Node ID"
 // @Param       run_id query string false "Child run ID"
@@ -451,6 +446,7 @@ func (r *V1) listAgentOSPlanDebugTraces(ctx *fiber.Ctx) error {
 // @Accept      json
 // @Produce     text/event-stream
 // @Param       plan_id path string true "Plan ID"
+// @Param       project_id query string true "Project ID"
 // @Param       node_id query string false "Node ID"
 // @Param       run_id query string false "Child run ID"
 // @Param       after_sequence query int false "Replay events after this sequence"

@@ -26,13 +26,6 @@
                 "parameters": [
                     {
                         "type": "string",
-                        "description": "Account ID",
-                        "name": "account_id",
-                        "in": "query",
-                        "required": true
-                    },
-                    {
-                        "type": "string",
                         "description": "Project ID",
                         "name": "project_id",
                         "in": "query",
@@ -181,13 +174,6 @@
                     },
                     {
                         "type": "string",
-                        "description": "Account ID",
-                        "name": "account_id",
-                        "in": "query",
-                        "required": true
-                    },
-                    {
-                        "type": "string",
                         "description": "Project ID",
                         "name": "project_id",
                         "in": "query",
@@ -242,13 +228,6 @@
                         "description": "Action ID",
                         "name": "action_id",
                         "in": "path",
-                        "required": true
-                    },
-                    {
-                        "type": "string",
-                        "description": "Account ID",
-                        "name": "account_id",
-                        "in": "query",
                         "required": true
                     },
                     {
@@ -320,13 +299,6 @@
                     },
                     {
                         "type": "string",
-                        "description": "Account ID",
-                        "name": "account_id",
-                        "in": "query",
-                        "required": true
-                    },
-                    {
-                        "type": "string",
                         "description": "Project ID",
                         "name": "project_id",
                         "in": "query",
@@ -390,13 +362,6 @@
                         "description": "Action ID",
                         "name": "action_id",
                         "in": "path",
-                        "required": true
-                    },
-                    {
-                        "type": "string",
-                        "description": "Account ID",
-                        "name": "account_id",
-                        "in": "query",
                         "required": true
                     },
                     {
@@ -468,13 +433,6 @@
                     },
                     {
                         "type": "string",
-                        "description": "Account ID",
-                        "name": "account_id",
-                        "in": "query",
-                        "required": true
-                    },
-                    {
-                        "type": "string",
                         "description": "Project ID",
                         "name": "project_id",
                         "in": "query",
@@ -533,13 +491,6 @@
                 "summary": "List AgentOS ledger entries",
                 "operationId": "agentos-list-ledger-entries",
                 "parameters": [
-                    {
-                        "type": "string",
-                        "description": "Account ID",
-                        "name": "account_id",
-                        "in": "query",
-                        "required": true
-                    },
                     {
                         "type": "string",
                         "description": "Project ID",
@@ -810,13 +761,6 @@
                     },
                     {
                         "type": "string",
-                        "description": "Account ID",
-                        "name": "account_id",
-                        "in": "query",
-                        "required": true
-                    },
-                    {
-                        "type": "string",
                         "description": "Project ID",
                         "name": "project_id",
                         "in": "query",
@@ -903,13 +847,6 @@
                     },
                     {
                         "type": "string",
-                        "description": "Account ID",
-                        "name": "account_id",
-                        "in": "query",
-                        "required": true
-                    },
-                    {
-                        "type": "string",
                         "description": "Project ID",
                         "name": "project_id",
                         "in": "query",
@@ -964,13 +901,6 @@
                         "description": "Plan ID",
                         "name": "plan_id",
                         "in": "path",
-                        "required": true
-                    },
-                    {
-                        "type": "string",
-                        "description": "Account ID",
-                        "name": "account_id",
-                        "in": "query",
                         "required": true
                     },
                     {
@@ -1056,13 +986,6 @@
                         "description": "Plan ID",
                         "name": "plan_id",
                         "in": "path",
-                        "required": true
-                    },
-                    {
-                        "type": "string",
-                        "description": "Account ID",
-                        "name": "account_id",
-                        "in": "query",
                         "required": true
                     },
                     {
@@ -1200,13 +1123,6 @@
                     },
                     {
                         "type": "string",
-                        "description": "Account ID",
-                        "name": "account_id",
-                        "in": "query",
-                        "required": true
-                    },
-                    {
-                        "type": "string",
                         "description": "Project ID",
                         "name": "project_id",
                         "in": "query",
@@ -1292,13 +1208,6 @@
                     },
                     {
                         "type": "string",
-                        "description": "Account ID",
-                        "name": "account_id",
-                        "in": "query",
-                        "required": true
-                    },
-                    {
-                        "type": "string",
                         "description": "Project ID",
                         "name": "project_id",
                         "in": "query",
@@ -1353,6 +1262,13 @@
                         "description": "Plan ID",
                         "name": "plan_id",
                         "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Project ID",
+                        "name": "project_id",
+                        "in": "query",
                         "required": true
                     },
                     {
@@ -1422,13 +1338,6 @@
                         "description": "Plan ID",
                         "name": "plan_id",
                         "in": "path",
-                        "required": true
-                    },
-                    {
-                        "type": "string",
-                        "description": "Account ID",
-                        "name": "account_id",
-                        "in": "query",
                         "required": true
                     },
                     {
@@ -1572,6 +1481,13 @@
                         "name": "plan_id",
                         "in": "path",
                         "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Project ID",
+                        "name": "project_id",
+                        "in": "query",
+                        "required": true
                     }
                 ],
                 "responses": {
@@ -1611,13 +1527,6 @@
                 "summary": "List AgentOS processes",
                 "operationId": "agentos-list-processes",
                 "parameters": [
-                    {
-                        "type": "string",
-                        "description": "Account ID",
-                        "name": "account_id",
-                        "in": "query",
-                        "required": true
-                    },
                     {
                         "type": "string",
                         "description": "Project ID",
@@ -1762,13 +1671,6 @@
                     },
                     {
                         "type": "string",
-                        "description": "Account ID",
-                        "name": "account_id",
-                        "in": "query",
-                        "required": true
-                    },
-                    {
-                        "type": "string",
                         "description": "Project ID",
                         "name": "project_id",
                         "in": "query",
@@ -1827,13 +1729,6 @@
                     },
                     {
                         "type": "string",
-                        "description": "Account ID",
-                        "name": "account_id",
-                        "in": "query",
-                        "required": true
-                    },
-                    {
-                        "type": "string",
                         "description": "Project ID",
                         "name": "project_id",
                         "in": "query",
@@ -1883,13 +1778,6 @@
                 "summary": "Get or list AgentOS resource projections",
                 "operationId": "agentos-resources",
                 "parameters": [
-                    {
-                        "type": "string",
-                        "description": "Account ID",
-                        "name": "account_id",
-                        "in": "query",
-                        "required": true
-                    },
                     {
                         "type": "string",
                         "description": "Project ID",
@@ -2305,13 +2193,6 @@
                 "parameters": [
                     {
                         "type": "string",
-                        "description": "Account ID",
-                        "name": "account_id",
-                        "in": "query",
-                        "required": true
-                    },
-                    {
-                        "type": "string",
                         "description": "Project ID",
                         "name": "project_id",
                         "in": "query",
@@ -2456,13 +2337,6 @@
                         "description": "Workset ID",
                         "name": "workset_id",
                         "in": "path",
-                        "required": true
-                    },
-                    {
-                        "type": "string",
-                        "description": "Account ID",
-                        "name": "account_id",
-                        "in": "query",
                         "required": true
                     },
                     {

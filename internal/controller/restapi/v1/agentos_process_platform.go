@@ -48,7 +48,6 @@ func (r *V1) startAgentOSProcess(ctx *fiber.Ctx) error {
 // @Tags        agentos
 // @Accept      json
 // @Produce     json
-// @Param       account_id query string true "Account ID"
 // @Param       project_id query string true "Project ID"
 // @Param       resource_kind query string false "Resource kind"
 // @Param       resource_id query string false "Resource ID"
@@ -82,7 +81,6 @@ func (r *V1) listAgentOSProcesses(ctx *fiber.Ctx) error {
 // @Accept      json
 // @Produce     json
 // @Param       process_id path string true "Process ID"
-// @Param       account_id query string true "Account ID"
 // @Param       project_id query string true "Project ID"
 // @Success     200 {object} agentosprocess.Description
 // @Failure     400 {object} response.Error
@@ -108,7 +106,6 @@ func (r *V1) describeAgentOSProcess(ctx *fiber.Ctx) error {
 // @Accept      json
 // @Produce     json
 // @Param       process_id path string true "Process ID"
-// @Param       account_id query string true "Account ID"
 // @Param       project_id query string true "Project ID"
 // @Success     200 {object} agentosprocess.Status
 // @Failure     400 {object} response.Error
@@ -161,7 +158,6 @@ func (r *V1) appendAgentOSLedgerEntry(ctx *fiber.Ctx) error {
 // @Tags        agentos
 // @Accept      json
 // @Produce     json
-// @Param       account_id query string true "Account ID"
 // @Param       project_id query string true "Project ID"
 // @Param       process_id query string false "Process ID"
 // @Param       resource_kind query string false "Resource kind"
@@ -219,7 +215,6 @@ func (r *V1) requestAgentOSAction(ctx *fiber.Ctx) error {
 // @Tags        agentos
 // @Accept      json
 // @Produce     json
-// @Param       account_id query string true "Account ID"
 // @Param       project_id query string true "Project ID"
 // @Param       process_id query string false "Process ID"
 // @Param       resource_kind query string false "Resource kind"
@@ -250,7 +245,6 @@ func (r *V1) listAgentOSActions(ctx *fiber.Ctx) error {
 // @Accept      json
 // @Produce     json
 // @Param       action_id path string true "Action ID"
-// @Param       account_id query string true "Account ID"
 // @Param       project_id query string true "Project ID"
 // @Success     200 {object} agentosprocess.GovernedActionStatus
 // @Failure     400 {object} response.Error
@@ -276,7 +270,6 @@ func (r *V1) statusAgentOSAction(ctx *fiber.Ctx) error {
 // @Accept      json
 // @Produce     json
 // @Param       action_id path string true "Action ID"
-// @Param       account_id query string true "Account ID"
 // @Param       project_id query string true "Project ID"
 // @Param       request body agentosprocess.ActionDryRunResult true "Dry-run result"
 // @Success     200 {object} agentosprocess.GovernedActionStatus
@@ -298,7 +291,6 @@ func (r *V1) recordAgentOSActionDryRun(ctx *fiber.Ctx) error {
 // @Accept      json
 // @Produce     json
 // @Param       action_id path string true "Action ID"
-// @Param       account_id query string true "Account ID"
 // @Param       project_id query string true "Project ID"
 // @Param       request body agentosprocess.ActionApprovalDecision true "Approval decision"
 // @Success     200 {object} agentosprocess.GovernedActionStatus
@@ -320,7 +312,6 @@ func (r *V1) resolveAgentOSActionApproval(ctx *fiber.Ctx) error {
 // @Accept      json
 // @Produce     json
 // @Param       action_id path string true "Action ID"
-// @Param       account_id query string true "Account ID"
 // @Param       project_id query string true "Project ID"
 // @Param       request body agentosprocess.ActionExecutionResult true "Execution result"
 // @Success     200 {object} agentosprocess.GovernedActionStatus
@@ -342,7 +333,6 @@ func (r *V1) completeAgentOSAction(ctx *fiber.Ctx) error {
 // @Accept      json
 // @Produce     json
 // @Param       action_id path string true "Action ID"
-// @Param       account_id query string true "Account ID"
 // @Param       project_id query string true "Project ID"
 // @Param       request body agentosprocess.ActionCancelRequest true "Cancel request"
 // @Success     200 {object} agentosprocess.GovernedActionStatus
@@ -391,7 +381,6 @@ func (r *V1) startAgentOSWorkset(ctx *fiber.Ctx) error {
 // @Tags        agentos
 // @Accept      json
 // @Produce     json
-// @Param       account_id query string true "Account ID"
 // @Param       project_id query string true "Project ID"
 // @Param       process_id query string false "Process ID"
 // @Param       resource_kind query string false "Resource kind"
@@ -422,7 +411,6 @@ func (r *V1) listAgentOSWorksets(ctx *fiber.Ctx) error {
 // @Accept      json
 // @Produce     json
 // @Param       workset_id path string true "Workset ID"
-// @Param       account_id query string true "Account ID"
 // @Param       project_id query string true "Project ID"
 // @Success     200 {object} agentosprocess.WorksetStatus
 // @Failure     400 {object} response.Error
@@ -447,7 +435,6 @@ func (r *V1) statusAgentOSWorkset(ctx *fiber.Ctx) error {
 // @Tags        agentos
 // @Accept      json
 // @Produce     json
-// @Param       account_id query string true "Account ID"
 // @Param       project_id query string true "Project ID"
 // @Param       resource_kind query string false "Resource kind"
 // @Param       resource_id query string false "Resource ID"

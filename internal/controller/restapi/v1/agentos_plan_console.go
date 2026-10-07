@@ -40,7 +40,6 @@ const (
 // @Accept      json
 // @Produce     html
 // @Param       plan_id path string true "Plan ID"
-// @Param       account_id query string true "Account ID"
 // @Param       project_id query string true "Project ID"
 // @Param       event_limit query int false "Maximum events"
 // @Param       audit_limit query int false "Maximum audit records"
@@ -186,7 +185,6 @@ func agentOSPlanConsoleLimit(name string, requested, defaultValue, maxValue int)
 
 type agentOSPlanConsoleView struct {
 	PlanID              string
-	AccountID           string
 	ProjectID           string
 	Status              agentOSPlanConsoleStatusView
 	Nodes               []agentOSPlanConsoleNodeView
@@ -315,7 +313,6 @@ func newAgentOSPlanConsoleView(ref *agentos.PlanRef, description *agentos.RunPla
 
 	return agentOSPlanConsoleView{
 		PlanID:              ref.PlanID,
-		AccountID:           ref.AccountID,
 		ProjectID:           ref.ProjectID,
 		Status:              newAgentOSPlanConsoleStatusView(&status),
 		Nodes:               newAgentOSPlanConsoleNodeViews(description.Topology.Nodes),
@@ -559,9 +556,12 @@ func newAgentOSPlanConsoleAuditViews(audits []agentos.PlanAuditRecord) []agentOS
 	return views
 }
 
+// agentOSPlanConsoleScopeQuery builds the tenant scope the console's endpoint
+// links carry. It names the project only: the account is the caller's
+// credential, and a link that carried one would send a tenant the server
+// ignores.
 func agentOSPlanConsoleScopeQuery(ref *agentos.PlanRef) string {
 	values := url.Values{}
-	values.Set("account_id", ref.AccountID)
 
 	if ref.ProjectID != "" {
 		values.Set("project_id", ref.ProjectID)
@@ -927,7 +927,6 @@ pre {
 </style>
 </head>
 <body
-  data-account-id="{{ .AccountID }}"
   data-project-id="{{ .ProjectID }}"
   data-control-endpoint="{{ .ControlEndpoint }}"
   data-signal-endpoint="{{ .SignalEndpoint }}"
@@ -1263,7 +1262,6 @@ pre {
 
   function scopedPayload() {
     const payload = {
-      account_id: root.accountId,
       actor_id: actorID(),
     };
     if (root.projectId) {
