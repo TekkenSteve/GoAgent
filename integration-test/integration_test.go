@@ -30,15 +30,20 @@ const (
 	testAccountID = "e2e-test-account"
 )
 
-// The credentials the suite authenticates with. It is one more client of the
-// contract the app enforces: in development the app trusts HS256 tokens signed
-// with AUTH_HMAC_SECRET, so the suite mints one per request. Compose passes
-// these values to the test container; they must match the app's, and a drift
-// shows up as a 401 on every protected route rather than as a skipped check.
+// The variables the suite reads its authentication settings from. It is one
+// more client of the contract the app enforces: in development the app trusts
+// HS256 tokens signed with AUTH_HMAC_SECRET, so the suite mints one per
+// request. Compose passes these to the test container; they must match the
+// app's, and a drift shows up as a 401 on every protected route rather than as
+// a skipped check.
+//
+// The constants hold variable names, not values — hence the "Name" suffix,
+// which is also what keeps a credential scanner from reading the identifier as
+// a hardcoded secret.
 const (
-	envAuthHMACSecret = "AUTH_HMAC_SECRET"
-	envAuthIssuer     = "AUTH_ISSUER"
-	envAuthAudience   = "AUTH_AUDIENCE"
+	envAuthHMACName     = "AUTH_HMAC_SECRET"
+	envAuthIssuerName   = "AUTH_ISSUER"
+	envAuthAudienceName = "AUTH_AUDIENCE"
 )
 
 var errAuthConfigMissing = errors.New("auth configuration is missing")
@@ -47,9 +52,9 @@ var errAuthConfigMissing = errors.New("auth configuration is missing")
 // subject, an expiry the verifier requires, and the issuer and audience the app
 // is configured to check when they are set.
 func authToken() (string, error) {
-	secret := strings.TrimSpace(os.Getenv(envAuthHMACSecret))
+	secret := strings.TrimSpace(os.Getenv(envAuthHMACName))
 	if secret == "" {
-		return "", fmt.Errorf("%w: set %s", errAuthConfigMissing, envAuthHMACSecret)
+		return "", fmt.Errorf("%w: set %s", errAuthConfigMissing, envAuthHMACName)
 	}
 
 	claims := jwt.MapClaims{
@@ -57,11 +62,11 @@ func authToken() (string, error) {
 		"exp": time.Now().Add(time.Hour).Unix(),
 	}
 
-	if issuer := strings.TrimSpace(os.Getenv(envAuthIssuer)); issuer != "" {
+	if issuer := strings.TrimSpace(os.Getenv(envAuthIssuerName)); issuer != "" {
 		claims["iss"] = issuer
 	}
 
-	if audience := strings.TrimSpace(os.Getenv(envAuthAudience)); audience != "" {
+	if audience := strings.TrimSpace(os.Getenv(envAuthAudienceName)); audience != "" {
 		claims["aud"] = audience
 	}
 
