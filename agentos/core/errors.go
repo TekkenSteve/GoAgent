@@ -59,4 +59,14 @@ var (
 	ErrInvalidTrigger = errors.New("agentos: invalid trigger")
 	// ErrInvalidTriggerScope reports an invalid trigger scope.
 	ErrInvalidTriggerScope = errors.New("agentos: invalid trigger scope")
+	// ErrInvalidTenantScope reports a missing or malformed tenant identity.
+	ErrInvalidTenantScope = errors.New("agentos: invalid tenant scope")
+	// ErrInvalidPrincipal reports an incomplete or unknown-source principal.
+	ErrInvalidPrincipal = errors.New("agentos: invalid principal")
+	// ErrInvalidAuthorizationRequest reports an incomplete authorization decision.
+	ErrInvalidAuthorizationRequest = errors.New("agentos: invalid authorization request")
+	// ErrUnauthenticated reports a request that carried no usable identity.
+	ErrUnauthenticated = errors.New("agentos: unauthenticated")
+	// ErrForbidden reports an authenticated request that authorization denied.
+	ErrForbidden = errors.New("agentos: forbidden")
 )
