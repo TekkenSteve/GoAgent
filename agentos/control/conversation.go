@@ -37,6 +37,12 @@ const (
 	ConversationOutcomeNormal    = "normal"
 	ConversationOutcomeInterrupt = "interrupt"
 	ConversationOutcomeCanceled  = "canceled"
+	// ConversationOutcomeAbandoned records a run the platform terminated
+	// because it stopped producing facts: the backend that owned it died, or
+	// its terminal event was lost. It is distinct from canceled (nobody asked
+	// for it to stop) and from interrupt (nobody is waiting for input), and
+	// naming it is what lets an operator tell a dead run from a slow one.
+	ConversationOutcomeAbandoned = "abandoned"
 )
 
 // ConversationRuntime manages durable conversation runs, events, and threads.

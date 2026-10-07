@@ -307,6 +307,12 @@ func applyEventProjection(ctx context.Context, tx pgx.Tx, run *agentos.Conversat
 		}
 
 		_, err := tx.Exec(ctx, `UPDATE agentos_conversation_runs SET status = 'running', started_at = $2 WHERE run_id = $1`, run.RunID, event.OccurredAt)
+		if isUniqueViolation(err) {
+			// idx_agentos_conversation_runs_running: another run on this thread
+			// is already streaming. Admission let both rows in; the stream is
+			// the scarce resource, so the collision surfaces here.
+			return ErrRunAlreadyActive
+		}
 
 		return wrapProjectionError(err)
 	}
@@ -351,6 +357,46 @@ func requireRunStatus(run *agentos.ConversationRun, event *agentos.ExternalConve
 	return nil
 }
 
+// lookupMessage reads a message row by id: the run that owns it, its thread,
+// and its lifecycle status. Message ids are unique across the store, so the
+// thread tells a replay apart from a cross-thread collision.
+func lookupMessage(ctx context.Context, tx pgx.Tx, messageID string) (ownerRunID, threadID, status string, found bool, err error) {
+	err = tx.QueryRow(ctx, `
+		SELECT run_id, thread_id, status FROM agentos_messages WHERE message_id = $1`, messageID).
+		Scan(&ownerRunID, &threadID, &status)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return "", "", "", false, nil
+	}
+
+	if err != nil {
+		return "", "", "", false, fmt.Errorf("agentos conversation: read message: %w", err)
+	}
+
+	return ownerRunID, threadID, status, true, nil
+}
+
+// replayedMessage reports whether the event addresses a message another run of
+// the same thread owns. LangGraph re-emits a resumed thread's messages with
+// their original ids, so a replay is a normal delivery the record applies
+// idempotently — the message is already durable history.
+func replayedMessage(
+	ctx context.Context,
+	tx pgx.Tx,
+	run *agentos.ConversationRun,
+	messageID string,
+) (ownerRunID string, isReplay bool, err error) {
+	ownerRunID, threadID, status, found, err := lookupMessage(ctx, tx, messageID)
+	if err != nil || !found {
+		return "", false, err
+	}
+
+	if threadID != run.ThreadID || ownerRunID == run.RunID {
+		return "", false, nil
+	}
+
+	return status, true, nil
+}
+
 func startMessage(ctx context.Context, tx pgx.Tx, run *agentos.ConversationRun, event *agentos.ExternalConversationEvent) error {
 	messageID := stringPayload(event.Payload, "message_id")
 
@@ -364,16 +410,29 @@ func startMessage(ctx context.Context, tx pgx.Tx, run *agentos.ConversationRun, 
 		return fmt.Errorf("%w: message metadata", ErrInvalidConversation)
 	}
 
-	_, err = tx.Exec(ctx, `
+	tag, err := tx.Exec(ctx, `
 		INSERT INTO agentos_messages (
 			message_id, thread_id, run_id, process_id, role, status, metadata, created_at
-		) VALUES ($1, $2, $3, $4, $5, 'streaming', $6, $7)`,
+		) VALUES ($1, $2, $3, $4, $5, 'streaming', $6, $7)
+		ON CONFLICT (message_id) DO NOTHING`,
 		messageID, run.ThreadID, run.RunID, run.ProcessID, role, metadata, event.OccurredAt)
-	if isUniqueViolation(err) {
-		return fmt.Errorf("%w: duplicate message start", ErrInvalidTransition)
+	if err != nil {
+		return wrapProjectionError(err)
 	}
 
-	return wrapProjectionError(err)
+	if tag.RowsAffected() == 1 {
+		return nil
+	}
+
+	// The id is taken: a replay of an earlier run's message is idempotent, a
+	// second start inside one run is the anomaly this guard exists for.
+	if _, replayed, err := replayedMessage(ctx, tx, run, messageID); err != nil {
+		return err
+	} else if replayed {
+		return nil
+	}
+
+	return fmt.Errorf("%w: duplicate message start", ErrInvalidTransition)
 }
 
 func appendMessageContent(ctx context.Context, tx pgx.Tx, run *agentos.ConversationRun, event *agentos.ExternalConversationEvent) error {
@@ -392,6 +451,14 @@ func appendMessageContent(ctx context.Context, tx pgx.Tx, run *agentos.Conversat
 	}
 
 	if result.RowsAffected() != 1 {
+		// A message owned by an earlier run of this thread is being replayed;
+		// its final content arrives with the replay's end event.
+		if _, replayed, err := replayedMessage(ctx, tx, run, messageID); err != nil {
+			return err
+		} else if replayed {
+			return nil
+		}
+
 		return fmt.Errorf("%w: message content without active message", ErrInvalidTransition)
 	}
 
@@ -426,17 +493,57 @@ func endMessage(ctx context.Context, tx pgx.Tx, run *agentos.ConversationRun, ev
 	}
 
 	if result.RowsAffected() != 1 {
+		status, replayed, err := replayedMessage(ctx, tx, run, messageID)
+		if err != nil {
+			return err
+		}
+
+		if replayed {
+			// The replay closes a message a superseded run left streaming, so a
+			// canceled turn leaves no half-open row; an already completed
+			// message needs nothing.
+			return completeReplayedMessage(ctx, tx, event, messageID, status)
+		}
+
 		return fmt.Errorf("%w: message end without active message", ErrInvalidTransition)
 	}
 
 	return nil
 }
 
+// completeReplayedMessage closes a message a superseded run left streaming. The
+// replay carries the message's final text, so the record ends complete instead
+// of keeping a half-open row.
+func completeReplayedMessage(ctx context.Context, tx pgx.Tx, event *agentos.ExternalConversationEvent, messageID, status string) error {
+	if status != "streaming" {
+		return nil
+	}
+
+	content, hasContent := event.Payload["content"].(string)
+
+	var err error
+	if hasContent {
+		_, err = tx.Exec(ctx, `
+			UPDATE agentos_messages SET content = $2, status = 'completed', completed_at = $3
+			WHERE message_id = $1 AND status = 'streaming'`, messageID, content, event.OccurredAt)
+	} else {
+		_, err = tx.Exec(ctx, `
+			UPDATE agentos_messages SET status = 'completed', completed_at = $2
+			WHERE message_id = $1 AND status = 'streaming'`, messageID, event.OccurredAt)
+	}
+
+	return wrapProjectionError(err)
+}
+
 func finishRun(ctx context.Context, tx pgx.Tx, run *agentos.ConversationRun, event *agentos.ExternalConversationEvent) error {
 	outcome := stringPayload(event.Payload, "outcome")
 	status := ""
 
-	var interruptJSON any
+	var (
+		interruptJSON any
+		errorCode     string
+		errorMessage  string
+	)
 
 	switch outcome {
 	case agentos.ConversationOutcomeNormal:
@@ -452,13 +559,26 @@ func finishRun(ctx context.Context, tx pgx.Tx, run *agentos.ConversationRun, eve
 		}
 
 		interruptJSON = encoded
+	case agentos.ConversationOutcomeAbandoned:
+		// The run stopped producing facts and was terminated by the platform.
+		// It is an error state because nothing completed and nobody asked it
+		// to stop, and the reason is carried explicitly so an operator reading
+		// the run can tell why.
+		status = agentos.ConversationRunError
+		errorCode = "lease_expired"
+		errorMessage = stringPayload(event.Payload, "termination_reason")
+
+		if errorMessage == "" {
+			errorMessage = "run abandoned: no activity within its lease"
+		}
 	default:
 		return fmt.Errorf("%w: unsupported run outcome %q", ErrInvalidConversation, outcome)
 	}
 
 	_, err := tx.Exec(ctx, `
-		UPDATE agentos_conversation_runs SET status = $2, outcome = $3, interrupt = $4, completed_at = $5
-		WHERE run_id = $1`, run.RunID, status, outcome, interruptJSON, event.OccurredAt)
+		UPDATE agentos_conversation_runs
+		SET status = $2, outcome = $3, interrupt = $4, completed_at = $5, error_code = $6, error_message = $7
+		WHERE run_id = $1`, run.RunID, status, outcome, interruptJSON, event.OccurredAt, errorCode, errorMessage)
 
 	return wrapProjectionError(err)
 }
@@ -495,7 +615,7 @@ func prepareInterrupt(ctx context.Context, tx pgx.Tx, runID string, payload map[
 	return encoded, nil
 }
 
-func appendEvent(ctx context.Context, tx pgx.Tx, threadID, runID, processID, sourceEventID string, sourceSequence int64, eventType core.EventType, occurredAt time.Time, payload map[string]any) (agentos.ConversationEvent, error) {
+func (r *Runtime) appendEvent(ctx context.Context, tx pgx.Tx, threadID, runID, processID, sourceEventID string, sourceSequence int64, eventType core.EventType, occurredAt time.Time, payload map[string]any) (agentos.ConversationEvent, error) {
 	var sequence int64
 
 	err := tx.QueryRow(ctx, `
@@ -523,12 +643,38 @@ func appendEvent(ctx context.Context, tx pgx.Tx, threadID, runID, processID, sou
 		return agentos.ConversationEvent{}, fmt.Errorf("agentos conversation: insert event: %w", err)
 	}
 
+	if err := r.enqueueEventOutbox(ctx, tx, threadID, sequence); err != nil {
+		return agentos.ConversationEvent{}, err
+	}
+
 	return agentos.ConversationEvent{
 		SchemaVersion: agentos.ConversationSchemaVersion,
 		EventID:       eventID, ThreadID: threadID, RunID: runID, ProcessID: processID,
 		Sequence: sequence, SourceEventID: sourceEventID, SourceSequence: sourceSequence,
 		EventType: eventType, OccurredAt: occurredAt, Payload: cloneMap(payload),
 	}, nil
+}
+
+// enqueueEventOutbox records an event's publication intent in the same
+// transaction that made the event durable, which is what turns "write to
+// Postgres and publish to the log" from a dual write into a derived one.
+//
+// The row is a claim check: it carries the event's identity and nothing else,
+// so the payload is never stored twice and the drainer reads it from
+// agentos_conversation_events when it publishes.
+func (r *Runtime) enqueueEventOutbox(ctx context.Context, tx pgx.Tx, threadID string, sequence int64) error {
+	if !r.eventOutbox {
+		return nil
+	}
+
+	_, err := tx.Exec(ctx, `
+		INSERT INTO agentos_conversation_event_outbox (thread_id, sequence)
+		VALUES ($1, $2)`, threadID, sequence)
+	if err != nil {
+		return fmt.Errorf("agentos conversation: enqueue event outbox: %w", err)
+	}
+
+	return nil
 }
 
 func eventBySource(ctx context.Context, tx pgx.Tx, threadID, sourceEventID string) (agentos.ConversationEvent, bool, error) {

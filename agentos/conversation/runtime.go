@@ -14,6 +14,7 @@ import (
 	agentos "github.com/TekkenSteve/GoAgent/agentos/control"
 	"github.com/TekkenSteve/GoAgent/agentos/core"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
@@ -43,17 +44,50 @@ type Config struct {
 	PostgresURL  string
 	MaxConns     int32
 	PollInterval time.Duration
+	// EventOutbox records every persisted event in the conversation event
+	// outbox, in the same transaction as the event itself, so a backbone
+	// drainer can publish it to the event log afterwards.
+	//
+	// It stays opt-in because the outbox is a queue with exactly one reader: a
+	// deployment that never starts the drainer would accumulate rows nothing
+	// consumes. Turn it on together with the drainer, never before.
+	EventOutbox bool
+
+	// OnSerializationRetry observes a replayed transaction: which attempt it
+	// was, and the serialization failure that caused the replay. Replays are
+	// normal under concurrency — they are how a serializable runtime keeps its
+	// promises — but a rate that climbs is the first sign of contention, so a
+	// deployment counts them. Optional; nil observes nothing.
+	OnSerializationRetry func(attempt int, err error)
+
+	// RunLease is how long a running run may go without producing a fact
+	// before the sweeper abandons it. Zero takes the default; it exists as a
+	// setting because "long enough" depends on the deployment's slowest tool.
+	RunLease time.Duration
+	// LeaseSweepInterval is how often the sweeper looks for expired runs and
+	// parked projections. Zero takes the default.
+	LeaseSweepInterval time.Duration
+
+	// OnSweepError observes a sweep that could not run. The sweeper retries on
+	// its next tick, so this is for the operator's log rather than for control
+	// flow. Optional; nil observes nothing.
+	OnSweepError func(err error)
 }
 
 // Runtime is the durable Postgres-backed conversation runtime. Subscribers
 // catch up by polling the durable event stream; there is no live transport.
 type Runtime struct {
-	pool         *pgxpool.Pool
-	pollInterval time.Duration
-	closeCtx     context.Context
-	closeCancel  context.CancelFunc
-	workers      sync.WaitGroup
-	closeOnce    sync.Once
+	pool                 *pgxpool.Pool
+	pollInterval         time.Duration
+	eventOutbox          bool
+	onSerializationRetry func(attempt int, err error)
+	runLease             time.Duration
+	leaseSweepInterval   time.Duration
+	onSweepError         func(err error)
+	closeCtx             context.Context
+	closeCancel          context.CancelFunc
+	workers              sync.WaitGroup
+	closeOnce            sync.Once
 }
 
 const (
@@ -102,10 +136,59 @@ func newRuntime(ctx context.Context, config Config) (*Runtime, error) {
 		pollInterval = defaultPollInterval
 	}
 
-	r := &Runtime{pool: pool, pollInterval: pollInterval}
+	runLease := config.RunLease
+	if runLease <= 0 {
+		runLease = defaultRunLease
+	}
+
+	sweepInterval := config.LeaseSweepInterval
+	if sweepInterval <= 0 {
+		sweepInterval = defaultLeaseSweepInterval
+	}
+
+	r := &Runtime{
+		pool:                 pool,
+		pollInterval:         pollInterval,
+		eventOutbox:          config.EventOutbox,
+		onSerializationRetry: config.OnSerializationRetry,
+		runLease:             runLease,
+		leaseSweepInterval:   sweepInterval,
+		onSweepError:         config.OnSweepError,
+	}
 	r.closeCtx, r.closeCancel = context.WithCancel(context.Background())
+	r.startLeaseSweeper()
 
 	return r, nil
+}
+
+// startLeaseSweeper runs the loop that abandons dead runs and starts the turns
+// that were waiting for them. It owns a goroutine for the runtime's lifetime,
+// and stops with the runtime's context.
+func (r *Runtime) startLeaseSweeper() {
+	r.workers.Add(1)
+
+	go func() {
+		defer r.workers.Done()
+
+		ticker := time.NewTicker(r.leaseSweepInterval)
+		defer ticker.Stop()
+
+		for {
+			select {
+			case <-r.closeCtx.Done():
+				return
+			case <-ticker.C:
+				// A sweep failure is logged, not fatal: the next tick retries,
+				// and a runtime that stopped serving conversations because one
+				// sweep could not run would be worse than the condition it
+				// guards against.
+				_, _, sweepErr := r.sweepOnce(r.closeCtx)
+				if sweepErr != nil && r.closeCtx.Err() == nil && r.onSweepError != nil {
+					r.onSweepError(sweepErr)
+				}
+			}
+		}
+	}()
 }
 
 // Close cancels background workers and closes the Postgres pool. Close is
@@ -154,15 +237,31 @@ func (r *Runtime) persistStartRun(ctx context.Context, tx pgx.Tx, prepared *agen
 		return existing, err
 	}
 
-	if err := insertConversationRun(ctx, tx, prepared); err != nil {
+	inserted, err := insertConversationRun(ctx, tx, prepared)
+	if err != nil {
 		return agentos.ConversationRun{}, err
+	}
+
+	if !inserted {
+		// A concurrent admission under the same idempotency key won the insert;
+		// the run it created is this request's run.
+		existing, found, err := getRunByIdempotency(ctx, tx, prepared.ThreadID, prepared.IdempotencyKey)
+		if err != nil {
+			return agentos.ConversationRun{}, err
+		}
+
+		if !found {
+			return agentos.ConversationRun{}, fmt.Errorf("%w: run %q is neither inserted nor readable", ErrInvalidConversation, prepared.RunID)
+		}
+
+		return existing, nil
 	}
 
 	if err := insertUserMessage(ctx, tx, prepared); err != nil {
 		return agentos.ConversationRun{}, err
 	}
 
-	if err := appendUserMessageEvents(ctx, tx, prepared); err != nil {
+	if err := r.appendUserMessageEvents(ctx, tx, prepared); err != nil {
 		return agentos.ConversationRun{}, err
 	}
 
@@ -190,10 +289,15 @@ func prepareNewRun(ctx context.Context, tx pgx.Tx, spec *agentos.StartConversati
 	return agentos.ConversationRun{}, false, nil
 }
 
-func insertConversationRun(ctx context.Context, tx pgx.Tx, spec *agentos.StartConversationRunSpec) error {
+// insertConversationRun admits a run as pending and reports whether this call
+// created it. The idempotency key is the admission identity: a concurrent
+// duplicate yields false instead of an error so the caller can return the run
+// that request already produced. A run already streaming is not a conflict
+// here — idx_agentos_conversation_runs_running guards RUN_STARTED instead.
+func insertConversationRun(ctx context.Context, tx pgx.Tx, spec *agentos.StartConversationRunSpec) (bool, error) {
 	metadata, err := marshalJSON(spec.RunMetadata)
 	if err != nil {
-		return fmt.Errorf("%w: run metadata: %w", ErrInvalidConversation, err)
+		return false, fmt.Errorf("%w: run metadata: %w", ErrInvalidConversation, err)
 	}
 
 	resumeID := ""
@@ -201,22 +305,19 @@ func insertConversationRun(ctx context.Context, tx pgx.Tx, spec *agentos.StartCo
 		resumeID = spec.Resume.InterruptID
 	}
 
-	_, err = tx.Exec(ctx, `
+	tag, err := tx.Exec(ctx, `
 		INSERT INTO agentos_conversation_runs (
 			run_id, thread_id, process_id, account_id, project_id, status,
 			idempotency_key, resume_interrupt_id, metadata, created_at
-		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
+		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+		ON CONFLICT (thread_id, idempotency_key) DO NOTHING`,
 		spec.RunID, spec.ThreadID, spec.ProcessID, spec.AccountID, spec.ProjectID,
 		agentos.ConversationRunPending, spec.IdempotencyKey, resumeID, metadata, spec.RequestedAt)
-	if isUniqueViolation(err) {
-		return ErrRunAlreadyActive
-	}
-
 	if err != nil {
-		return fmt.Errorf("agentos conversation: insert run: %w", err)
+		return false, fmt.Errorf("agentos conversation: insert run: %w", err)
 	}
 
-	return nil
+	return tag.RowsAffected() == 1, nil
 }
 
 func insertUserMessage(ctx context.Context, tx pgx.Tx, spec *agentos.StartConversationRunSpec) error {
@@ -244,7 +345,7 @@ func insertUserMessage(ctx context.Context, tx pgx.Tx, spec *agentos.StartConver
 	return nil
 }
 
-func appendUserMessageEvents(ctx context.Context, tx pgx.Tx, spec *agentos.StartConversationRunSpec) error {
+func (r *Runtime) appendUserMessageEvents(ctx context.Context, tx pgx.Tx, spec *agentos.StartConversationRunSpec) error {
 	events := []struct {
 		typeName core.EventType
 		payload  map[string]any
@@ -254,7 +355,7 @@ func appendUserMessageEvents(ctx context.Context, tx pgx.Tx, spec *agentos.Start
 		{agentos.ConversationEventTextMessageEnd, map[string]any{"message_id": spec.MessageID, "role": "user", "content": spec.UserMessage}},
 	}
 	for _, event := range events {
-		if _, err := appendEvent(ctx, tx, spec.ThreadID, spec.RunID, spec.ProcessID, "", 0, event.typeName, spec.RequestedAt, event.payload); err != nil {
+		if _, err := r.appendEvent(ctx, tx, spec.ThreadID, spec.RunID, spec.ProcessID, "", 0, event.typeName, spec.RequestedAt, event.payload); err != nil {
 			return err
 		}
 	}
@@ -274,47 +375,238 @@ func (r *Runtime) IngestEvent(ctx context.Context, incoming *agentos.ExternalCon
 	})
 }
 
+// conversationTxRetries bounds how many times a serializable transaction is
+// replayed after Postgres aborts it. Serializable isolation is what lets the
+// runtime promise ordered, once-only ingestion under concurrent writers, and a
+// serialization failure is that promise being kept: the transaction is rolled
+// back whole, so replaying it cannot duplicate anything, and the durable
+// guards (source event id, run sequence) make the replay produce the same
+// state. Surfacing the abort instead would hand a caller a 500 for a
+// concurrency level the runtime is designed to handle.
+const conversationTxRetries = 3
+
+// conversationTxRetryBackoff is the pause before the first replay; each
+// further attempt doubles it, because the cause is contention and an instant
+// retry is the least likely to succeed.
+const conversationTxRetryBackoff = 5 * time.Millisecond
+
 func persistConversationChange[T any](ctx context.Context, runtime *Runtime, operation func(pgx.Tx) (T, error)) (T, error) {
 	options := pgx.TxOptions{IsoLevel: pgx.Serializable}
 
-	return withConversationTx(ctx, runtime.pool, &options, operation)
+	return retrySerializable(ctx, runtime.onSerializationRetry, func() (T, error) {
+		return withConversationTx(ctx, runtime.pool, &options, operation)
+	})
 }
 
+// retrySerializable runs a transaction body, replaying it while Postgres aborts
+// it for a reason a replay can resolve. The runner is a parameter so the
+// policy can be exercised without a database.
+func retrySerializable[T any](ctx context.Context, onRetry func(attempt int, err error), run func() (T, error)) (T, error) {
+	var zero T
+
+	for attempt := 0; ; attempt++ {
+		result, err := run()
+		if err == nil {
+			return result, nil
+		}
+
+		if !isRetryableTxFailure(err) || attempt >= conversationTxRetries {
+			return zero, err
+		}
+
+		if onRetry != nil {
+			onRetry(attempt+1, err)
+		}
+
+		if waitErr := waitForRetry(ctx, attempt); waitErr != nil {
+			// The caller's context ended while waiting: report the failure
+			// that started the replay, not the wait.
+			return zero, err
+		}
+	}
+}
+
+// waitForRetry pauses before the next attempt, honoring the caller's context.
+func waitForRetry(ctx context.Context, attempt int) error {
+	delay := conversationTxRetryBackoff << attempt
+
+	timer := time.NewTimer(delay)
+	defer timer.Stop()
+
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-timer.C:
+		return nil
+	}
+}
+
+// isRetryableTxFailure reports whether Postgres aborted the transaction for a
+// reason a replay can resolve:
+//
+//   - a serialization failure (40001) under serializable isolation, or a
+//     deadlock (40P01): the abort is the isolation level doing its job;
+//   - a unique violation (23505) on the source-event id: ingestion reads for
+//     an existing event and then inserts, and two deliveries of the same
+//     upstream event can both find nothing. The database adjudicates that
+//     race, and the replay finds the winner's row and returns it — which is
+//     what the source event id promises in the first place.
+//
+// A violation that is not a race fails the same way on every attempt, so the
+// bound is what keeps a genuine constraint violation visible to the caller.
+func isRetryableTxFailure(err error) bool {
+	var pgErr *pgconn.PgError
+	if !errors.As(err, &pgErr) {
+		return false
+	}
+
+	switch pgErr.Code {
+	case pgSerializationFailure, pgDeadlockDetected, pgUniqueViolation:
+		return true
+	default:
+		return false
+	}
+}
+
+const (
+	// pgSerializationFailure is SQLSTATE 40001.
+	pgSerializationFailure = "40001"
+	// pgDeadlockDetected is SQLSTATE 40P01.
+	pgDeadlockDetected = "40P01"
+	// pgUniqueViolation is SQLSTATE 23505.
+	pgUniqueViolation = "23505"
+)
+
 func (r *Runtime) persistEvent(ctx context.Context, tx pgx.Tx, event *agentos.ExternalConversationEvent) (agentos.ConversationEvent, error) {
-	run, lastSourceSequence, err := lockRun(ctx, tx, event.RunID)
+	run, replayed, err := admitEvent(ctx, tx, event)
 	if err != nil {
 		return agentos.ConversationEvent{}, err
 	}
 
-	if err := validateEventRunScope(&run, event); err != nil {
-		return agentos.ConversationEvent{}, err
+	if replayed != nil {
+		return *replayed, nil
 	}
 
-	if existing, found, err := eventBySource(ctx, tx, event.ThreadID, event.SourceEventID); err != nil {
-		return agentos.ConversationEvent{}, err
-	} else if found {
-		return existing, nil
+	parked, projectionErr := projectionIsParked(event, applyEventProjectionIsolated(ctx, tx, &run, event))
+	if projectionErr != nil && !parked {
+		return agentos.ConversationEvent{}, projectionErr
 	}
 
-	if event.SourceSequence <= lastSourceSequence {
-		return agentos.ConversationEvent{}, fmt.Errorf("%w: got %d after %d", ErrOutOfOrderSourceEvent, event.SourceSequence, lastSourceSequence)
-	}
-
-	if err := applyEventProjection(ctx, tx, &run, event); err != nil {
-		return agentos.ConversationEvent{}, err
-	}
-
-	stored, err := appendEvent(ctx, tx, event.ThreadID, event.RunID, run.ProcessID, event.SourceEventID, event.SourceSequence, event.EventType, event.OccurredAt, event.Payload)
+	stored, err := r.appendEvent(ctx, tx, event.ThreadID, event.RunID, run.ProcessID, event.SourceEventID, event.SourceSequence, event.EventType, event.OccurredAt, event.Payload)
 	if err != nil {
 		return agentos.ConversationEvent{}, err
 	}
 
-	_, err = tx.Exec(ctx, `UPDATE agentos_conversation_runs SET last_source_sequence = $2 WHERE run_id = $1`, event.RunID, event.SourceSequence)
-	if err != nil {
-		return agentos.ConversationEvent{}, fmt.Errorf("agentos conversation: update source cursor: %w", err)
+	// The fact is durable either way; only its projection can be waiting.
+	// Before, the caller was told the turn failed and the fact was lost with
+	// it, which is how a steer turn disappeared silently.
+	if parked {
+		if err := deferProjection(ctx, tx, event.ThreadID, stored.Sequence, event.RunID, string(event.EventType)); err != nil {
+			return agentos.ConversationEvent{}, err
+		}
+	}
+
+	if err := advanceRunCursor(ctx, tx, event); err != nil {
+		return agentos.ConversationEvent{}, err
 	}
 
 	return stored, nil
+}
+
+// admitEvent runs the guards every incoming fact passes before it is stored:
+// the run exists and is this producer's, the delivery is new, and it arrives in
+// order. A delivery already stored comes back as the fact to answer with, which
+// is what makes ingestion idempotent on the producer's event id.
+func admitEvent(ctx context.Context, tx pgx.Tx, event *agentos.ExternalConversationEvent) (agentos.ConversationRun, *agentos.ConversationEvent, error) {
+	run, lastSourceSequence, err := lockRun(ctx, tx, event.RunID)
+	if err != nil {
+		return agentos.ConversationRun{}, nil, err
+	}
+
+	if err := validateEventRunScope(&run, event); err != nil {
+		return agentos.ConversationRun{}, nil, err
+	}
+
+	existing, found, err := eventBySource(ctx, tx, event.ThreadID, event.SourceEventID)
+	if err != nil {
+		return agentos.ConversationRun{}, nil, err
+	}
+
+	if found {
+		return run, &existing, nil
+	}
+
+	if event.SourceSequence <= lastSourceSequence {
+		return agentos.ConversationRun{}, nil, fmt.Errorf("%w: got %d after %d", ErrOutOfOrderSourceEvent, event.SourceSequence, lastSourceSequence)
+	}
+
+	return run, nil, nil
+}
+
+// projectionIsParked reports whether a projection failure means "wait for the
+// thread" rather than "reject this event": only a run's start waits, and only
+// because another run holds the thread.
+func projectionIsParked(event *agentos.ExternalConversationEvent, projectionErr error) (bool, error) {
+	parked := event.EventType == agentos.ConversationEventRunStarted && errors.Is(projectionErr, ErrRunAlreadyActive)
+
+	return parked, projectionErr
+}
+
+// advanceRunCursor records how far the run's source stream has been read, and
+// when it last produced a fact — the lease the sweeper reads.
+func advanceRunCursor(ctx context.Context, tx pgx.Tx, event *agentos.ExternalConversationEvent) error {
+	_, err := tx.Exec(ctx, `
+		UPDATE agentos_conversation_runs
+		SET last_source_sequence = $2, last_activity_at = $3
+		WHERE run_id = $1`, event.RunID, event.SourceSequence, event.OccurredAt)
+	if err != nil {
+		return fmt.Errorf("agentos conversation: update source cursor: %w", err)
+	}
+
+	return nil
+}
+
+// applyEventProjectionIsolated applies a projection so that a failure leaves the
+// surrounding transaction usable.
+//
+// It matters for exactly one case: taking the thread's turn is a unique-index
+// violation when another run already holds it, and Postgres aborts the whole
+// transaction on that error — every later statement in it would fail with
+// "current transaction is aborted". The projection therefore runs in a
+// savepoint: a refusal rolls back to it, and the fact that could not take the
+// turn is still recorded, queued, and applied later.
+func applyEventProjectionIsolated(ctx context.Context, tx pgx.Tx, run *agentos.ConversationRun, event *agentos.ExternalConversationEvent) error {
+	nested, err := tx.Begin(ctx)
+	if err != nil {
+		return fmt.Errorf("agentos conversation: projection savepoint: %w", err)
+	}
+
+	if projectionErr := applyEventProjection(ctx, nested, run, event); projectionErr != nil {
+		if rollbackErr := nested.Rollback(ctx); rollbackErr != nil && !errors.Is(rollbackErr, pgx.ErrTxClosed) {
+			return errors.Join(projectionErr, fmt.Errorf("agentos conversation: projection rollback: %w", rollbackErr))
+		}
+
+		return projectionErr
+	}
+
+	if err := nested.Commit(ctx); err != nil {
+		return fmt.Errorf("agentos conversation: projection savepoint commit: %w", err)
+	}
+
+	return nil
+}
+
+// deferProjection queues an event whose projection cannot be applied yet.
+func deferProjection(ctx context.Context, tx pgx.Tx, threadID string, sequence int64, runID, eventType string) error {
+	_, err := tx.Exec(ctx, `
+		INSERT INTO agentos_conversation_deferred_projections (thread_id, sequence, run_id, event_type)
+		VALUES ($1, $2, $3, $4)
+		ON CONFLICT (thread_id, sequence) DO NOTHING`, threadID, sequence, runID, eventType)
+	if err != nil {
+		return fmt.Errorf("agentos conversation: defer projection: %w", err)
+	}
+
+	return nil
 }
 
 func validateEventRunScope(run *agentos.ConversationRun, event *agentos.ExternalConversationEvent) error {
