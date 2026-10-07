@@ -1,3 +1,5 @@
+// Package memory provides the process-local AgentOS run index: run ownership
+// and idempotency checks for in-process runtimes that have no database.
 package memory
 
 import (

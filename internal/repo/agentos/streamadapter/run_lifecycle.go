@@ -31,39 +31,34 @@ const (
 // steps for a backend that owns no byte stream. Usage for such runs rides the
 // ingest endpoint, not the milestone.
 //
-// Publishing is fail-open by design — a bus hiccup must never break the run,
-// mirroring PublishWriter. A nil publisher degrades the adapter to a no-op. A
-// run's scope is retained until a terminal milestone is published, so the
-// milestone is sent at most once; abandoned runs hold their scope for the
-// process lifetime, mirroring the run backend index.
+// Milestones are facts first: when a recorder is attached, each one is made
+// durable before it is announced, and a persist failure is returned so the
+// enclosing activity fails and the platform retries — the run's scope is kept
+// so the retry re-attempts the same terminal. The bus publish stays fail-open
+// (a nil publisher degrades the mirror to a no-op); the milestone is already
+// durable. A run's scope is retained until a terminal milestone is durable,
+// so the milestone is recorded at most once; abandoned runs hold their scope
+// for the process lifetime, mirroring the run backend index.
 type RunLifecycle struct {
 	pub    stream.Publisher
+	facts  *MilestoneRecorder
 	logger logger.Interface
-
-	// ensure is an optional projection-attach hook fired once per run before
-	// its first publish, mirroring PublishWriter.WithEnsure. It takes the run's
-	// id and handle so the caller can attach per-run (runprojection's
-	// EnsureSubscribed needs both).
-	ensure func(context.Context, string, *stream.Handle) error
 
 	mu     sync.Mutex
 	scopes map[string]*runScope
 }
 
-// runScope is one started run's data-plane identity plus its per-run ensure
-// latch. The scope is dropped once a terminal milestone is published, which
-// also serves as the dedup marker: a later terminal Status has no scope to
-// look up and is a no-op.
+// runScope is one started run's data-plane identity. The scope is dropped once
+// a terminal milestone is durable, which also serves as the dedup marker: a
+// later terminal Status has no scope to look up and is a no-op.
 type runScope struct {
-	handle     *stream.Handle
-	threadID   string
-	runID      string
-	ensure     func(context.Context, string, *stream.Handle) error
-	ensureOnce sync.Once
+	handle   *stream.Handle
+	threadID string
+	runID    string
 }
 
 // NewRunLifecycle creates a lifecycle adapter. The logger may be nil;
-// publishing failures are then dropped silently.
+// bus-publish failures are then dropped silently.
 func NewRunLifecycle(pub stream.Publisher, l logger.Interface) *RunLifecycle {
 	return &RunLifecycle{
 		pub:    pub,
@@ -72,11 +67,10 @@ func NewRunLifecycle(pub stream.Publisher, l logger.Interface) *RunLifecycle {
 	}
 }
 
-// WithEnsure installs an optional projection-attach hook fired once per run
-// before its first publish, mirroring PublishWriter.WithEnsure. A failing hook
-// is logged and the next publish retries.
-func (l *RunLifecycle) WithEnsure(fn func(context.Context, string, *stream.Handle) error) *RunLifecycle {
-	l.ensure = fn
+// WithFacts attaches the milestone recorder that makes each lifecycle
+// milestone durable before it is announced on the bus.
+func (l *RunLifecycle) WithFacts(recorder *MilestoneRecorder) *RunLifecycle {
+	l.facts = recorder
 
 	return l
 }
@@ -84,65 +78,95 @@ func (l *RunLifecycle) WithEnsure(fn func(context.Context, string, *stream.Handl
 // PublishStarted opens a run's timeline after Start succeeds. It records the
 // run's data-plane scope for later terminal milestones, publishes RUN_STARTED,
 // and — when the remote already reports a terminal state at start — the
-// terminal milestone too.
-func (l *RunLifecycle) PublishStarted(ctx context.Context, spec *agentos.RunSpec, status *agentos.RunStatus) {
+// terminal milestone too. A returned error means a milestone could not be made
+// durable; the caller must fail so the platform retries the start.
+func (l *RunLifecycle) PublishStarted(ctx context.Context, spec *agentos.RunSpec, status *agentos.RunStatus) error {
 	if spec == nil || spec.RunID == "" {
-		return
+		return nil
 	}
 
 	scope := &runScope{
 		handle:   HandleForRun(spec.AccountID, spec.RunID),
 		threadID: spec.ThreadID,
 		runID:    spec.RunID,
-		ensure:   l.ensure,
 	}
 
 	l.mu.Lock()
 	l.scopes[spec.RunID] = scope
 	l.mu.Unlock()
 
-	l.publish(ctx, scope, stream.NewRunStarted(spec.ThreadID, spec.RunID))
-	l.publishTerminal(ctx, scope, status)
+	started := stream.NewRunStarted(spec.ThreadID, spec.RunID)
+
+	if err := l.record(ctx, scope, started); err != nil {
+		return err
+	}
+
+	l.announce(ctx, scope, started)
+
+	return l.emitTerminal(ctx, scope, status)
 }
 
 // PublishStatus mirrors a Status observation. It publishes the terminal
 // milestone exactly once per run; non-terminal states and repeats are no-ops.
-func (l *RunLifecycle) PublishStatus(ctx context.Context, runID string, status *agentos.RunStatus) {
+// The error semantics match PublishStarted.
+func (l *RunLifecycle) PublishStatus(ctx context.Context, runID string, status *agentos.RunStatus) error {
 	scope := l.lookup(runID)
 	if scope == nil {
-		return
+		return nil
 	}
 
-	l.publishTerminal(ctx, scope, status)
+	return l.emitTerminal(ctx, scope, status)
 }
 
-// publishTerminal publishes the AG-UI terminal milestone matching a terminal
-// lifecycle state, then releases the run's scope so the milestone is sent at
-// most once. The check-and-release is atomic under l.mu; only the caller that
-// wins it publishes.
-func (l *RunLifecycle) publishTerminal(ctx context.Context, scope *runScope, status *agentos.RunStatus) {
+// emitTerminal makes the AG-UI terminal milestone matching a terminal
+// lifecycle state durable, then releases the run's scope and announces it on
+// the bus. The scope is the at-most-once latch: the caller that removes it
+// owns the terminal. A persist failure puts the scope back so a retry
+// re-attempts the same milestone instead of losing it — a release-then-publish
+// order would drop a terminal silently whenever the store hiccuped.
+func (l *RunLifecycle) emitTerminal(ctx context.Context, scope *runScope, status *agentos.RunStatus) error {
 	if status == nil {
-		return
+		return nil
 	}
 
 	ev := terminalEvent(scope, status)
 	if ev == nil {
-		return
+		return nil
 	}
 
 	l.mu.Lock()
 
-	_, published := l.scopes[scope.runID]
-	if published {
+	_, owned := l.scopes[scope.runID]
+	if owned {
 		delete(l.scopes, scope.runID)
 	}
+
 	l.mu.Unlock()
 
-	if !published {
-		return
+	if !owned {
+		return nil
 	}
 
-	l.publish(ctx, scope, ev)
+	if err := l.record(ctx, scope, ev); err != nil {
+		l.restore(scope)
+
+		return err
+	}
+
+	l.announce(ctx, scope, ev)
+
+	return nil
+}
+
+// restore puts a scope back after a failed terminal record, unless a newer
+// scope for the same run appeared meanwhile.
+func (l *RunLifecycle) restore(scope *runScope) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+
+	if _, exists := l.scopes[scope.runID]; !exists {
+		l.scopes[scope.runID] = scope
+	}
 }
 
 func (l *RunLifecycle) lookup(runID string) *runScope {
@@ -152,20 +176,21 @@ func (l *RunLifecycle) lookup(runID string) *runScope {
 	return l.scopes[runID]
 }
 
-// publish sends one event to the bus, fail-open on transport errors. Before
-// the first publish of the run it fires the optional projection-attach hook.
-func (l *RunLifecycle) publish(ctx context.Context, scope *runScope, ev *stream.Event) {
+// record makes one milestone durable when a recorder is attached; without one
+// the adapter is a pure mirror and nothing can fail.
+func (l *RunLifecycle) record(ctx context.Context, scope *runScope, ev *stream.Event) error {
+	if l.facts == nil {
+		return nil
+	}
+
+	return l.facts.Record(ctx, scope.handle, ev)
+}
+
+// announce sends one event to the bus, fail-open on transport errors.
+func (l *RunLifecycle) announce(ctx context.Context, scope *runScope, ev *stream.Event) {
 	if l.pub == nil {
 		return
 	}
-
-	scope.ensureOnce.Do(func() {
-		if scope.ensure != nil {
-			if err := scope.ensure(ctx, scope.runID, scope.handle); err != nil {
-				l.warnf("streamadapter: ensure projection subscribe: %v (fail-open)", err)
-			}
-		}
-	})
 
 	if err := l.pub.Publish(ctx, scope.handle, ev); err != nil {
 		l.warnf("streamadapter: publish %s: %v (fail-open)", ev.Type, err)

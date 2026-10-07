@@ -22,6 +22,12 @@ func run() error {
 
 	runtime, err := agentosconversation.NewRuntime(ctx, agentosconversation.Config{
 		PostgresURL: os.Getenv("AGENTOS_PG_URL"),
+		// An embedded host shares the deployment's Postgres, so it is a
+		// producer on the event backbone's conversation outbox: enabling this
+		// records every event for the deployment's drainer to publish. Leave
+		// AGENTFW_NATS_URL unset and the outbox stays untouched, which is the
+		// right setting when no drainer is running.
+		EventOutbox: os.Getenv("AGENTFW_NATS_URL") != "",
 	})
 	if err != nil {
 		return err

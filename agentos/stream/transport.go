@@ -26,10 +26,15 @@ type Subscriber interface {
 	Subscribe(ctx context.Context, handle *Handle, after int64) (*Subscription, error)
 }
 
-// Projector is the control plane's consumption role: it reads the same
-// channel the frontend subscribes to and reduces the stream to its durable
-// projection. NewProjector promotes any Subscriber into a Projector;
-// ProjectToCore is the pure milestone mapping.
+// Projector promotes a Subscriber into a channel reducer: it reads the same
+// live channel the frontend subscribes to and hands the caller the stored
+// events, so a process can reduce a run's timeline as it happens.
+//
+// It is not the durable milestone path. Facts are made durable by the writer
+// (streamadapter.MilestoneRecorder, before the bus publish) and the read model
+// is rebuilt by consuming the fact log (runprojection.LogProjector), because a
+// projection that depends on the UI channel inherits the channel's failures.
+// ProjectToCore is the pure milestone mapping both roles share.
 type Projector interface {
 	Consume(ctx context.Context, handle *Handle, after int64) (*Subscription, error)
 }

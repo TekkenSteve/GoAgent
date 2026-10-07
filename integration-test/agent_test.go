@@ -18,7 +18,9 @@ const waitingInput = "waiting_input"
 type runStatus struct {
 	RunID          string `json:"run_id"`
 	LifecycleState string `json:"lifecycle_state"`
-	Step           int    `json:"step,omitempty"`
+	Progress       struct {
+		Current int `json:"current"`
+	} `json:"progress"`
 }
 
 // executeAgentRun creates an agent run and returns the run status.
@@ -122,7 +124,7 @@ func TestHTTPAgentOSStartV1(t *testing.T) {
 			runID:       "",
 			accountID:   "e2e-test-account",
 			message:     "Hello",
-			expected:    http.StatusAccepted,
+			expected:    http.StatusBadRequest,
 		},
 		{
 			description: "empty account_id",
@@ -202,7 +204,7 @@ func TestHTTPAgentOSStatusV1(t *testing.T) {
 		t.Errorf("Expected lifecycle_state waiting_input, got %q", status.LifecycleState)
 	}
 
-	if status.Step == 0 {
+	if status.Progress.Current == 0 {
 		t.Error("Expected non-zero step count")
 	}
 
@@ -214,12 +216,14 @@ func agentOSStartBody(runID, accountID, message string) string {
 	return fmt.Sprintf(`{
 		"run_id": "%s",
 		"account_id": "%s",
+		"project_id": "e2e-test-project",
+		"idempotency_key": "%s-start",
 		"user_message": "%s",
 		"backend": {
 			"kind": "native",
 			"name": "goagent-native"
 		}
-	}`, runID, accountID, message)
+	}`, runID, accountID, runID, message)
 }
 
 func signalAgentOSUserMessage(t *testing.T, runID, content string) {

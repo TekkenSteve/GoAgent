@@ -4,8 +4,9 @@ import (
 	"context"
 	"errors"
 
+	agentos "github.com/TekkenSteve/GoAgent/agentos/control"
 	"github.com/TekkenSteve/GoAgent/internal/agentfw/orchestration"
-	"github.com/TekkenSteve/GoAgent/internal/repo/agentos/runprojection"
+	"github.com/nexus-rpc/sdk-go/nexus"
 	"go.temporal.io/sdk/activity"
 	"go.temporal.io/sdk/workflow"
 )
@@ -16,10 +17,10 @@ type WorkerKit struct {
 	planActivities        *PlanActivities
 	processActivities     *ProcessActivities
 	planCommandReconciler *planCommandReconciler
-	// runProjection is the optional data-plane projection consumer (nil when
-	// the Centrifugo bus is not configured). Closed before the Postgres pool.
-	runProjection *runprojection.RunEventProjector
-	closeFns      []func() error
+	// runBackendResolver is optional: when set, process workers also host the
+	// run supervisor that owns external-backend runs.
+	runBackendResolver BackendResolver
+	closeFns           []func() error
 }
 
 // PlanWorkerKit owns only the durable RunPlan workload. Applications that use
@@ -63,6 +64,96 @@ type WorkerSet struct {
 	NativeLLM       WorkloadRegistrar
 	NativeTool      WorkloadRegistrar
 	Stream          WorkloadRegistrar
+}
+
+// NexusWorkloadRegistrar installs a Nexus service into a worker. The Temporal
+// worker.Worker satisfies it; test fakes implement it as a no-op.
+type NexusWorkloadRegistrar interface {
+	RegisterNexusService(*nexus.Service)
+}
+
+// NexusControlRegistrar is the plan-control worker capability the Nexus run
+// bridge needs: it hosts the service, the run-operation workflow, and nothing
+// else. worker.Worker satisfies it.
+type NexusControlRegistrar interface {
+	WorkloadRegistrar
+	NexusWorkloadRegistrar
+}
+
+// RegisterNexusRunService installs the AgentOS Nexus service and its backing
+// run-operation workflow onto the router worker. The deployment's Nexus
+// endpoint must target that worker's task queue.
+func RegisterNexusRunService(control NexusControlRegistrar, runtime agentos.Runtime, activityTaskQueue string) error {
+	if control == nil {
+		return errWorkerKitNilWorker
+	}
+
+	service, err := NewNexusRunService(runtime, activityTaskQueue)
+	if err != nil {
+		return err
+	}
+
+	control.RegisterNexusService(service)
+	control.RegisterWorkflowWithOptions(NexusRunOperationWorkflow, workflow.RegisterOptions{
+		Name: NexusRunOperationWorkflowName,
+	})
+
+	return nil
+}
+
+// RegisterRunSupervisor installs the run supervisor workflow and its
+// activities onto one worker. Supervisors live beside the process plane they
+// own, and their activities reach backends through resolver — the undecorated
+// view, so applying a control cannot re-enter the supervisor that issued it.
+func RegisterRunSupervisor(worker WorkloadRegistrar, resolver BackendResolver) error {
+	if worker == nil {
+		return errWorkerKitNilWorker
+	}
+
+	activities, err := NewRunSupervisorActivities(resolver.ResolveBackend)
+	if err != nil {
+		return err
+	}
+
+	worker.RegisterWorkflowWithOptions(RunSupervisorWorkflow, workflow.RegisterOptions{
+		Name: RunSupervisorWorkflowName,
+	})
+	worker.RegisterActivityWithOptions(activities.ReadStatusActivity, activity.RegisterOptions{
+		Name: RunSupervisorStatusActivityName,
+	})
+	worker.RegisterActivityWithOptions(activities.ApplySignalActivity, activity.RegisterOptions{
+		Name: RunSupervisorSignalActivityName,
+	})
+	worker.RegisterActivityWithOptions(activities.ApplyControlActivity, activity.RegisterOptions{
+		Name: RunSupervisorControlActivityName,
+	})
+
+	return nil
+}
+
+// RegisterNexusRunActivities installs the Nexus run activities onto the
+// plan-activity worker. planStarter may be nil for a bridge-only deployment.
+func RegisterNexusRunActivities(activityWorker WorkloadRegistrar, runtime agentos.Runtime, planStarter PlanNodeStarter) error {
+	if activityWorker == nil {
+		return errWorkerKitNilWorker
+	}
+
+	runActivities, err := NewNexusRunActivities(runtime, planStarter)
+	if err != nil {
+		return err
+	}
+
+	activityWorker.RegisterActivityWithOptions(runActivities.StartRunActivity, activity.RegisterOptions{
+		Name: NexusStartRunActivityName,
+	})
+	activityWorker.RegisterActivityWithOptions(runActivities.StatusRunActivity, activity.RegisterOptions{
+		Name: NexusStatusRunActivityName,
+	})
+	activityWorker.RegisterActivityWithOptions(runActivities.CancelRunActivity, activity.RegisterOptions{
+		Name: NexusCancelRunActivityName,
+	})
+
+	return nil
 }
 
 // RegisterPlanWorkflow installs the AgentOS RunPlan workflow into an existing worker.
@@ -220,6 +311,12 @@ func (k *WorkerKit) registerProcessWorkloads(workers *WorkerSet) error {
 
 	if err := RegisterProcessWorkflow(workers.ProcessControl); err != nil {
 		return err
+	}
+
+	if k.runBackendResolver != nil {
+		if err := RegisterRunSupervisor(workers.ProcessControl, k.runBackendResolver); err != nil {
+			return err
+		}
 	}
 
 	return RegisterProcessActivities(workers.ProcessActivity, k.processActivities)

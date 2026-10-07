@@ -69,6 +69,7 @@ const (
 // match the AG-UI wire format verbatim — the frontend SDKs read these as-is.
 const (
 	FieldDelta   = "delta"   // text/reasoning/args increment
+	FieldContent = "content" // completed message text, on the TEXT_MESSAGE_END fact only
 	FieldResult  = "result"  // completed tool result
 	FieldMeta    = "meta"    // tool-owned presentation payload (opaque JSON)
 	FieldError   = "error"   // structured error

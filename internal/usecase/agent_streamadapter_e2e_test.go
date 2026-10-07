@@ -55,7 +55,7 @@ func TestAgentStreamAdapterE2E(t *testing.T) {
 	close(ch)
 	mockLLM.EXPECT().ChatStream(gomock.Any(), gomock.Any()).Return(ch, nil)
 
-	uc := agent.New(mockLLM, nil, nil, nil, nil, nil)
+	uc := agent.New(mockLLM, nil, nil, nil, nil)
 
 	bus := memstream.New()
 	handle := streamadapter.HandleForRun("acme", "run-1")
@@ -63,7 +63,6 @@ func TestAgentStreamAdapterE2E(t *testing.T) {
 
 	res, err := uc.LLMStreamCall(
 		t.Context(),
-		"run-1",
 		[]entity.Message{{Role: entity.RoleUser, Content: "Hi"}},
 		nil,
 		entity.LLMConfig{Model: "gpt-4o"},

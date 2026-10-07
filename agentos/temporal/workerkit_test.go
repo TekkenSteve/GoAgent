@@ -25,25 +25,11 @@ func TestNewWorkerKitRequiresPostgresURL(t *testing.T) {
 	}
 }
 
-func TestNewWorkerKitRequiresRedisURL(t *testing.T) {
-	t.Parallel()
-
-	cfg := WorkerConfig{
-		PostgresURL: "postgres://localhost:5432/testdb",
-	}
-
-	_, err := NewWorkerKit(context.Background(), &cfg)
-	if !errors.Is(err, ErrWorkerRedisURLRequired) {
-		t.Fatalf("NewWorkerKit error = %v, want %v", err, ErrWorkerRedisURLRequired)
-	}
-}
-
 func TestNewWorkerKitRequiresArtifactStoreBackend(t *testing.T) {
 	t.Parallel()
 
 	cfg := WorkerConfig{
 		PostgresURL:        "postgres://localhost:5432/testdb",
-		RedisURL:           "redis://localhost:6379",
 		TemporalTaskQueues: DefaultTaskQueues(),
 	}
 
@@ -58,7 +44,6 @@ func TestNewWorkerKitRequiresLocalArtifactStoreRoot(t *testing.T) {
 
 	cfg := WorkerConfig{
 		PostgresURL:        "postgres://localhost:5432/testdb",
-		RedisURL:           "redis://localhost:6379",
 		TemporalTaskQueues: DefaultTaskQueues(),
 		ArtifactStore: ArtifactStoreConfig{
 			Backend: ArtifactStoreBackendLocal,
@@ -76,7 +61,6 @@ func TestNewWorkerKitRequiresS3ArtifactStoreBucket(t *testing.T) {
 
 	cfg := WorkerConfig{
 		PostgresURL:        "postgres://localhost:5432/testdb",
-		RedisURL:           "redis://localhost:6379",
 		TemporalTaskQueues: DefaultTaskQueues(),
 		ArtifactStore: ArtifactStoreConfig{
 			Backend: ArtifactStoreBackendS3,
@@ -298,8 +282,9 @@ func newTestProcessActivities(t *testing.T) *ProcessActivities {
 }
 
 type fakeWorker struct {
-	workflows  []string
-	activities []string
+	workflows     []string
+	activities    []string
+	nexusServices []*nexus.Service
 }
 
 func (w *fakeWorker) RegisterWorkflow(any) {}
@@ -314,7 +299,9 @@ func (w *fakeWorker) RegisterActivityWithOptions(_ any, options activity.Registe
 	w.activities = append(w.activities, options.Name)
 }
 
-func (w *fakeWorker) RegisterNexusService(*nexus.Service) {}
+func (w *fakeWorker) RegisterNexusService(svc *nexus.Service) {
+	w.nexusServices = append(w.nexusServices, svc)
+}
 
 func (w *fakeWorker) Start() error { return nil }
 
@@ -328,6 +315,10 @@ func (w *fakeWorker) workflowRegistered(name string) bool {
 
 func (w *fakeWorker) activityRegistered(name string) bool {
 	return slices.Contains(w.activities, name)
+}
+
+func (w *fakeWorker) nexusServiceCount() int {
+	return len(w.nexusServices)
 }
 
 type fakeWorkers struct {

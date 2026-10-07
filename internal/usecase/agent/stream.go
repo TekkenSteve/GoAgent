@@ -11,7 +11,7 @@ import (
 // LLMStreamCall performs a single streaming LLM call, writing delta events
 // to the writer as chunks arrive. It returns the accumulated result (tool calls,
 // usage, finish reason) for workflow-level decision making.
-func (uc *UseCase) LLMStreamCall(ctx context.Context, runID string, messages []entity.Message, tools []entity.ToolDef, config entity.LLMConfig, writer usecase.StreamEventWriter) (*LLMStepResult, error) {
+func (uc *UseCase) LLMStreamCall(ctx context.Context, messages []entity.Message, tools []entity.ToolDef, config entity.LLMConfig, writer usecase.StreamEventWriter) (*LLMStepResult, error) {
 	streamLLM, ok := uc.llm.(repo.LLMStreamProvider)
 	if !ok {
 		return nil, &entity.AgentError{
@@ -43,8 +43,6 @@ func (uc *UseCase) LLMStreamCall(ctx context.Context, runID string, messages []e
 	if len(toolCalls) > 0 {
 		assistantMsg.ToolCalls = toolCalls
 	}
-
-	uc.appendMessageToWAL(ctx, runID, assistantMsg)
 
 	return &LLMStepResult{
 		AssistantMsg: assistantMsg,

@@ -7,6 +7,7 @@ package streamconformance
 
 import (
 	"context"
+	"strconv"
 	"testing"
 	"time"
 
@@ -21,14 +22,19 @@ const (
 	closedTimeout = 500 * time.Millisecond
 )
 
-// ConformanceCase describes how to build the bus under test. New is
-// called once per sub-test so every scenario starts from a clean channel — a
-// bus that carries history from one scenario into the next would mask
-// delivery bugs.
+// ConformanceCase describes how to build the bus under test. New is called once
+// per sub-test, and every scenario runs on its own channel derived from Handle,
+// so each one starts from a clean channel.
+//
+// The per-scenario, per-run channel is what lets this suite run against a real
+// broker, where history lives in the server and outlives the test process. That
+// is not only tidiness: a bus that leaked history would *pass*
+// publish-then-replay by replaying a previous run's identical timeline, which is
+// exactly the kind of masking the suite exists to prevent.
 type ConformanceCase struct {
 	Name string
-	// Handle is the channel to run scenarios against. May be shared across
-	// sub-tests: each New() builds a fresh bus with empty history.
+	// Handle is the channel the scenarios are derived from; the suite appends
+	// the scenario name to it, so one Handle covers the whole run.
 	Handle *stream.Handle
 	// New returns a fresh Publisher+Subscriber pair per sub-test.
 	New func() (stream.Publisher, stream.Subscriber)
@@ -50,13 +56,42 @@ func RunStreamConformance(t *testing.T, tc *ConformanceCase) {
 		t.Fatalf("invalid stream handle: %v", err)
 	}
 
-	t.Run(tc.Name+"/publish-then-replay", func(t *testing.T) { publishThenReplay(t, tc) })
-	t.Run(tc.Name+"/subscribe-then-live", func(t *testing.T) { subscribeThenLive(t, tc) })
-	t.Run(tc.Name+"/replay-after-cursor", func(t *testing.T) { replayAfterCursor(t, tc) })
-	t.Run(tc.Name+"/replay-plus-live-order", func(t *testing.T) { replayPlusLiveOrder(t, tc) })
-	t.Run(tc.Name+"/projection-reduces-to-milestones", func(t *testing.T) { projectionReducesToMilestones(t, tc) })
-	t.Run(tc.Name+"/validation", func(t *testing.T) { validation(t, tc) })
-	t.Run(tc.Name+"/close-stops-delivery", func(t *testing.T) { closeStopsDelivery(t, tc) })
+	// A run token keeps this execution from reading a previous one's history,
+	// which against a real broker is still there: its history is in the server,
+	// not in this process, and it outlives the run by its retention.
+	runToken := strconv.FormatInt(time.Now().UnixNano(), 36)
+
+	t.Run(tc.Name+"/publish-then-replay", func(t *testing.T) {
+		publishThenReplay(t, tc, scenarioHandle(tc.Handle, runToken, "publish-then-replay"))
+	})
+	t.Run(tc.Name+"/subscribe-then-live", func(t *testing.T) {
+		subscribeThenLive(t, tc, scenarioHandle(tc.Handle, runToken, "subscribe-then-live"))
+	})
+	t.Run(tc.Name+"/replay-after-cursor", func(t *testing.T) {
+		replayAfterCursor(t, tc, scenarioHandle(tc.Handle, runToken, "replay-after-cursor"))
+	})
+	t.Run(tc.Name+"/replay-plus-live-order", func(t *testing.T) {
+		replayPlusLiveOrder(t, tc, scenarioHandle(tc.Handle, runToken, "replay-plus-live-order"))
+	})
+	t.Run(tc.Name+"/projection-reduces-to-milestones", func(t *testing.T) {
+		projectionReducesToMilestones(t, tc, scenarioHandle(tc.Handle, runToken, "projection-reduces-to-milestones"))
+	})
+	t.Run(tc.Name+"/validation", func(t *testing.T) {
+		validation(t, tc, scenarioHandle(tc.Handle, runToken, "validation"))
+	})
+	t.Run(tc.Name+"/close-stops-delivery", func(t *testing.T) {
+		closeStopsDelivery(t, tc, scenarioHandle(tc.Handle, runToken, "close-stops-delivery"))
+	})
+}
+
+// scenarioHandle derives the channel one scenario of one run uses, carrying the
+// base handle's vocabulary and batching hint over.
+func scenarioHandle(base *stream.Handle, runToken, scenario string) *stream.Handle {
+	isolated := stream.NewHandle(base.Channel + "-" + runToken + "-" + scenario)
+	isolated.Vocabulary = base.Vocabulary
+	isolated.BatchMs = base.BatchMs
+
+	return isolated
 }
 
 // timeline is the canonical mixed event script the conformance suite publishes
@@ -165,67 +200,67 @@ func subscribe(t *testing.T, subscriber stream.Subscriber, handle *stream.Handle
 	return sub
 }
 
-func publishThenReplay(t *testing.T, tc *ConformanceCase) {
+func publishThenReplay(t *testing.T, tc *ConformanceCase, handle *stream.Handle) {
 	t.Helper()
 
 	publisher, subscriber := tc.New()
 
-	publishAll(t, publisher, tc.Handle, timeline())
-	sub := subscribe(t, subscriber, tc.Handle, 0)
+	publishAll(t, publisher, handle, timeline())
+	sub := subscribe(t, subscriber, handle, 0)
 
 	got := drain(t, sub, len(timeline()))
 	assertSequences(t, got, 1)
 	assertTypes(t, got, timeline())
 }
 
-func subscribeThenLive(t *testing.T, tc *ConformanceCase) {
+func subscribeThenLive(t *testing.T, tc *ConformanceCase, handle *stream.Handle) {
 	t.Helper()
 
 	publisher, subscriber := tc.New()
 
-	sub := subscribe(t, subscriber, tc.Handle, stream.LiveOnly)
+	sub := subscribe(t, subscriber, handle, stream.LiveOnly)
 
 	events := timeline()
-	publishAll(t, publisher, tc.Handle, events)
+	publishAll(t, publisher, handle, events)
 
 	got := drain(t, sub, len(events))
 	assertSequences(t, got, 1)
 	assertTypes(t, got, events)
 }
 
-func replayAfterCursor(t *testing.T, tc *ConformanceCase) {
+func replayAfterCursor(t *testing.T, tc *ConformanceCase, handle *stream.Handle) {
 	t.Helper()
 
 	publisher, subscriber := tc.New()
 
 	prefix := timeline()
-	publishAll(t, publisher, tc.Handle, prefix)
+	publishAll(t, publisher, handle, prefix)
 
 	tail := timeline()
-	publishAll(t, publisher, tc.Handle, tail)
+	publishAll(t, publisher, handle, tail)
 
-	sub := subscribe(t, subscriber, tc.Handle, int64(len(prefix)))
+	sub := subscribe(t, subscriber, handle, int64(len(prefix)))
 
 	got := drain(t, sub, len(tail))
 	assertSequences(t, got, int64(len(prefix)+1))
 	assertTypes(t, got, tail)
 }
 
-func replayPlusLiveOrder(t *testing.T, tc *ConformanceCase) {
+func replayPlusLiveOrder(t *testing.T, tc *ConformanceCase, handle *stream.Handle) {
 	t.Helper()
 
 	publisher, subscriber := tc.New()
 
 	prefix := timeline()
-	publishAll(t, publisher, tc.Handle, prefix)
+	publishAll(t, publisher, handle, prefix)
 
 	// Subscribe after the second-to-last prefix event (seq = len-1): exactly
 	// the last prefix event replays, everything after it arrives live — the
 	// ordering across the replay→live bridge is what this test locks.
-	sub := subscribe(t, subscriber, tc.Handle, int64(len(prefix)-1))
+	sub := subscribe(t, subscriber, handle, int64(len(prefix)-1))
 
 	tail := timeline()
-	publishAll(t, publisher, tc.Handle, tail)
+	publishAll(t, publisher, handle, tail)
 
 	total := 1 + len(tail)
 	got := drain(t, sub, total)
@@ -235,17 +270,17 @@ func replayPlusLiveOrder(t *testing.T, tc *ConformanceCase) {
 	assertTypes(t, got, append(prefix[len(prefix)-1:], tail...))
 }
 
-func projectionReducesToMilestones(t *testing.T, tc *ConformanceCase) {
+func projectionReducesToMilestones(t *testing.T, tc *ConformanceCase, handle *stream.Handle) {
 	t.Helper()
 
 	publisher, subscriber := tc.New()
 
 	events := timeline()
-	publishAll(t, publisher, tc.Handle, events)
+	publishAll(t, publisher, handle, events)
 
 	projector := stream.NewProjector(subscriber)
 
-	sub, err := projector.Consume(context.Background(), tc.Handle, 0)
+	sub, err := projector.Consume(context.Background(), handle, 0)
 	if err != nil {
 		t.Fatalf("Consume: %v", err)
 	}
@@ -257,7 +292,7 @@ func projectionReducesToMilestones(t *testing.T, tc *ConformanceCase) {
 	var projected []*agentoscore.Event
 
 	for i := range got {
-		ev, ok := stream.ProjectToCore(tc.Handle, &got[i])
+		ev, ok := stream.ProjectToCore(handle, &got[i])
 		if ok {
 			projected = append(projected, ev)
 		}
@@ -273,23 +308,23 @@ func projectionReducesToMilestones(t *testing.T, tc *ConformanceCase) {
 			t.Fatalf("projected[%d] type = %q, want %q", i, ev.EventType, want[i])
 		}
 
-		if ev.Source != tc.Handle.Channel {
-			t.Fatalf("projected[%d] source = %q, want %q", i, ev.Source, tc.Handle.Channel)
+		if ev.Source != handle.Channel {
+			t.Fatalf("projected[%d] source = %q, want %q", i, ev.Source, handle.Channel)
 		}
 	}
 }
 
-func validation(t *testing.T, tc *ConformanceCase) {
+func validation(t *testing.T, tc *ConformanceCase, handle *stream.Handle) {
 	t.Helper()
 
 	publisher, _ := tc.New()
 	ctx := context.Background()
 
-	if err := publisher.Publish(ctx, tc.Handle, stream.NewEvent("")); err == nil {
+	if err := publisher.Publish(ctx, handle, stream.NewEvent("")); err == nil {
 		t.Fatal("publish with empty event type: want error")
 	}
 
-	if err := publisher.Publish(ctx, tc.Handle, stream.NewEvent(stream.EventCustom)); err == nil {
+	if err := publisher.Publish(ctx, handle, stream.NewEvent(stream.EventCustom)); err == nil {
 		t.Fatal("publish CUSTOM without name: want error")
 	}
 
@@ -298,31 +333,31 @@ func validation(t *testing.T, tc *ConformanceCase) {
 	}
 }
 
-func closeStopsDelivery(t *testing.T, tc *ConformanceCase) {
+func closeStopsDelivery(t *testing.T, tc *ConformanceCase, handle *stream.Handle) {
 	t.Helper()
 
 	publisher, subscriber := tc.New()
 
-	sub, err := subscriber.Subscribe(context.Background(), tc.Handle, 0)
+	sub, err := subscriber.Subscribe(context.Background(), handle, 0)
 	if err != nil {
 		t.Fatalf("Subscribe: %v", err)
 	}
 
-	publishAll(t, publisher, tc.Handle, timeline()[:1])
+	publishAll(t, publisher, handle, timeline()[:1])
 
 	got := drain(t, sub, 1)
 	if got[0].Event.Type != stream.EventRunStarted {
 		t.Fatalf("first event type = %q", got[0].Event.Type)
 	}
 
-	publishAll(t, publisher, tc.Handle, timeline()[1:2])
+	publishAll(t, publisher, handle, timeline()[1:2])
 	drain(t, sub, 1) // pump now in live mode; e2 delivered
 
 	sub.Close()
 
 	// After Close the subscriber is out of the fan-out: a further publish must
 	// not be delivered, and the channel must close on its own.
-	publishAll(t, publisher, tc.Handle, timeline()[2:3])
+	publishAll(t, publisher, handle, timeline()[2:3])
 
 	select {
 	case _, ok := <-sub.C:

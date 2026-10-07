@@ -2,7 +2,6 @@ package streamadapter
 
 import (
 	"context"
-	"sync/atomic"
 	"testing"
 	"time"
 
@@ -26,9 +25,9 @@ func TestRunLifecyclePublishesStartedThenTerminal(t *testing.T) {
 	spec := &agentos.RunSpec{RunID: "run-1", ThreadID: "thread-1", AccountID: "acme"}
 	ctx := context.Background()
 
-	lifecycle.PublishStarted(ctx, spec, &agentos.RunStatus{LifecycleState: "running"})
-	lifecycle.PublishStatus(ctx, "run-1", &agentos.RunStatus{LifecycleState: "completed"})
-	lifecycle.PublishStatus(ctx, "run-1", &agentos.RunStatus{LifecycleState: "completed"})
+	require.NoError(t, lifecycle.PublishStarted(ctx, spec, &agentos.RunStatus{LifecycleState: "running"}))
+	require.NoError(t, lifecycle.PublishStatus(ctx, "run-1", &agentos.RunStatus{LifecycleState: "completed"}))
+	require.NoError(t, lifecycle.PublishStatus(ctx, "run-1", &agentos.RunStatus{LifecycleState: "completed"}))
 
 	requireLifecycleType(t, sub, stream.EventRunStarted)
 	requireLifecycleType(t, sub, stream.EventRunFinished)
@@ -61,8 +60,8 @@ func TestRunLifecycleTerminalSpellings(t *testing.T) {
 			sub := lifecycleSubscribe(t, bus, HandleForRun("", "run-1"))
 
 			spec := &agentos.RunSpec{RunID: "run-1", ThreadID: "thread-1"}
-			lifecycle.PublishStarted(t.Context(), spec, &agentos.RunStatus{LifecycleState: "running"})
-			lifecycle.PublishStatus(t.Context(), "run-1", &agentos.RunStatus{LifecycleState: tc.state})
+			require.NoError(t, lifecycle.PublishStarted(t.Context(), spec, &agentos.RunStatus{LifecycleState: "running"}))
+			require.NoError(t, lifecycle.PublishStatus(t.Context(), "run-1", &agentos.RunStatus{LifecycleState: tc.state}))
 
 			requireLifecycleType(t, sub, stream.EventRunStarted)
 			requireLifecycleType(t, sub, tc.want)
@@ -80,8 +79,8 @@ func TestRunLifecycleRunErrorCarriesReason(t *testing.T) {
 	lifecycle := NewRunLifecycle(bus, nil)
 	sub := lifecycleSubscribe(t, bus, HandleForRun("", "run-1"))
 
-	lifecycle.PublishStarted(t.Context(), &agentos.RunSpec{RunID: "run-1"}, &agentos.RunStatus{LifecycleState: "running"})
-	lifecycle.PublishStatus(t.Context(), "run-1", &agentos.RunStatus{LifecycleState: "failed", Reason: "boom"})
+	require.NoError(t, lifecycle.PublishStarted(t.Context(), &agentos.RunSpec{RunID: "run-1"}, &agentos.RunStatus{LifecycleState: "running"}))
+	require.NoError(t, lifecycle.PublishStatus(t.Context(), "run-1", &agentos.RunStatus{LifecycleState: "failed", Reason: "boom"}))
 
 	requireLifecycleType(t, sub, stream.EventRunStarted)
 	stored := requireLifecycleEvent(t, sub)
@@ -98,7 +97,7 @@ func TestRunLifecycleTerminalAtStart(t *testing.T) {
 	lifecycle := NewRunLifecycle(bus, nil)
 	sub := lifecycleSubscribe(t, bus, HandleForRun("", "run-1"))
 
-	lifecycle.PublishStarted(t.Context(), &agentos.RunSpec{RunID: "run-1"}, &agentos.RunStatus{LifecycleState: "completed"})
+	require.NoError(t, lifecycle.PublishStarted(t.Context(), &agentos.RunSpec{RunID: "run-1"}, &agentos.RunStatus{LifecycleState: "completed"}))
 
 	requireLifecycleType(t, sub, stream.EventRunStarted)
 	requireLifecycleType(t, sub, stream.EventRunFinished)
@@ -114,11 +113,11 @@ func TestRunLifecycleNonTerminalStatusIsNoOp(t *testing.T) {
 	lifecycle := NewRunLifecycle(bus, nil)
 	sub := lifecycleSubscribe(t, bus, HandleForRun("", "run-1"))
 
-	lifecycle.PublishStarted(t.Context(), &agentos.RunSpec{RunID: "run-1"}, &agentos.RunStatus{LifecycleState: "running"})
+	require.NoError(t, lifecycle.PublishStarted(t.Context(), &agentos.RunSpec{RunID: "run-1"}, &agentos.RunStatus{LifecycleState: "running"}))
 	requireLifecycleType(t, sub, stream.EventRunStarted)
 
-	lifecycle.PublishStatus(t.Context(), "run-1", &agentos.RunStatus{LifecycleState: "running"})
-	lifecycle.PublishStatus(t.Context(), "run-1", &agentos.RunStatus{LifecycleState: "created"})
+	require.NoError(t, lifecycle.PublishStatus(t.Context(), "run-1", &agentos.RunStatus{LifecycleState: "running"}))
+	require.NoError(t, lifecycle.PublishStatus(t.Context(), "run-1", &agentos.RunStatus{LifecycleState: "created"}))
 	requireLifecycleQuiet(t, sub)
 }
 
@@ -131,12 +130,13 @@ func TestRunLifecycleUnknownRunIsNoOp(t *testing.T) {
 	lifecycle := NewRunLifecycle(bus, nil)
 	sub := lifecycleSubscribe(t, bus, HandleForRun("", "run-1"))
 
-	lifecycle.PublishStatus(t.Context(), "ghost", &agentos.RunStatus{LifecycleState: "completed"})
+	require.NoError(t, lifecycle.PublishStatus(t.Context(), "ghost", &agentos.RunStatus{LifecycleState: "completed"}))
 	requireLifecycleQuiet(t, sub)
 }
 
 // TestRunLifecycleRejectsInvalidSpec guards the adapter against a nil or
 // id-less spec without panicking.
+// TestRunLifecycleRejectsInvalidSpec rejects specs without an identity.
 func TestRunLifecycleRejectsInvalidSpec(t *testing.T) {
 	t.Parallel()
 
@@ -144,8 +144,8 @@ func TestRunLifecycleRejectsInvalidSpec(t *testing.T) {
 	lifecycle := NewRunLifecycle(bus, nil)
 	sub := lifecycleSubscribe(t, bus, HandleForRun("", "run-1"))
 
-	lifecycle.PublishStarted(t.Context(), nil, &agentos.RunStatus{})
-	lifecycle.PublishStarted(t.Context(), &agentos.RunSpec{}, &agentos.RunStatus{})
+	require.NoError(t, lifecycle.PublishStarted(t.Context(), nil, &agentos.RunStatus{}))
+	require.NoError(t, lifecycle.PublishStarted(t.Context(), &agentos.RunSpec{}, &agentos.RunStatus{}))
 	requireLifecycleQuiet(t, sub)
 }
 
@@ -156,38 +156,38 @@ func TestRunLifecycleNilPublisherIsNoOp(t *testing.T) {
 
 	lifecycle := NewRunLifecycle(nil, nil)
 
-	lifecycle.PublishStarted(t.Context(), &agentos.RunSpec{RunID: "run-1"}, &agentos.RunStatus{LifecycleState: "running"})
-	lifecycle.PublishStatus(t.Context(), "run-1", &agentos.RunStatus{LifecycleState: "completed"})
+	require.NoError(t, lifecycle.PublishStarted(t.Context(), &agentos.RunSpec{RunID: "run-1"}, &agentos.RunStatus{LifecycleState: "running"}))
+	require.NoError(t, lifecycle.PublishStatus(t.Context(), "run-1", &agentos.RunStatus{LifecycleState: "completed"}))
 }
 
-// TestRunLifecycleEnsureFiresOncePerRun verifies the projection-attach hook is
-// fired once per run with the run's identity and channel handle.
-func TestRunLifecycleEnsureFiresOncePerRun(t *testing.T) {
+// TestRunLifecycleFactsFailHardAndRestoreTerminalClaim locks the fact-first
+// contract and its rollback: a terminal whose durable append fails surfaces
+// the error and gives the terminal claim back, so the retry (the platform's
+// or the next poll's) announces it instead of silently dropping it.
+func TestRunLifecycleFactsFailHardAndRestoreTerminalClaim(t *testing.T) {
 	t.Parallel()
 
 	bus := memstream.New()
-
-	var ensured atomic.Int64
-
-	lifecycle := NewRunLifecycle(bus, nil).WithEnsure(func(_ context.Context, runID string, handle *stream.Handle) error {
-		ensured.Add(1)
-		require.Equal(t, "run-1", runID)
-		require.Equal(t, HandleForRun("acme", "run-1").Channel, handle.Channel)
-
-		return nil
-	})
-
 	sub := lifecycleSubscribe(t, bus, HandleForRun("acme", "run-1"))
+
+	failing := &factStore{appendErr: errBusDown}
+	recorder, err := NewMilestoneRecorder(failing, nil)
+	require.NoError(t, err)
+
+	lifecycle := NewRunLifecycle(bus, nil).WithFacts(recorder)
 	spec := &agentos.RunSpec{RunID: "run-1", ThreadID: "thread-1", AccountID: "acme"}
 
-	// Three publishes on the same run: the hook fires once.
-	lifecycle.PublishStarted(t.Context(), spec, &agentos.RunStatus{LifecycleState: "running"})
-	lifecycle.PublishStatus(t.Context(), "run-1", &agentos.RunStatus{LifecycleState: "completed"})
-	lifecycle.PublishStatus(t.Context(), "run-1", &agentos.RunStatus{LifecycleState: "completed"})
+	require.ErrorIs(t, lifecycle.PublishStarted(t.Context(), spec, &agentos.RunStatus{LifecycleState: "running"}), errBusDown)
+	require.ErrorIs(t, lifecycle.PublishStatus(t.Context(), "run-1", &agentos.RunStatus{LifecycleState: "completed"}), errBusDown)
+	requireLifecycleQuiet(t, sub)
 
-	requireLifecycleType(t, sub, stream.EventRunStarted)
+	// Recovery: the store accepts again, and the retried terminal both lands
+	// as a fact and reaches the bus — the claim was restored, not lost.
+	failing.appendErr = nil
+
+	require.NoError(t, lifecycle.PublishStatus(t.Context(), "run-1", &agentos.RunStatus{LifecycleState: "completed"}))
 	requireLifecycleType(t, sub, stream.EventRunFinished)
-	require.Equal(t, int64(1), ensured.Load())
+	require.Positive(t, failing.appends, "the terminal fact landed")
 }
 
 func lifecycleSubscribe(t *testing.T, bus *memstream.Bus, handle *stream.Handle) *stream.Subscription {

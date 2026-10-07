@@ -27,12 +27,15 @@ type EventSubscriber interface {
 // (HTTP / gRPC / temporal_external) own no local byte stream, so the only
 // AG-UI events they can produce are the lifecycle milestones they observe:
 // Start success → RUN_STARTED, a terminal Status → RUN_FINISHED / RUN_ERROR /
-// RUN_CANCELED. Publishing is fail-open: a bus hiccup never fails the run.
-// Statuses pass by pointer because RunStatus is heavy (~112 bytes); a nil
-// status is a no-op.
+// RUN_CANCELED.
+//
+// Milestones are facts: an error means one could not be made durable, and the
+// caller must fail its operation so the platform retries it — the bus mirror
+// itself stays fail-open inside the implementation. Statuses pass by pointer
+// because RunStatus is heavy (~112 bytes); a nil status is a no-op.
 type LifecyclePublisher interface {
-	PublishStarted(ctx context.Context, spec *agentos.RunSpec, status *agentos.RunStatus)
-	PublishStatus(ctx context.Context, runID string, status *agentos.RunStatus)
+	PublishStarted(ctx context.Context, spec *agentos.RunSpec, status *agentos.RunStatus) error
+	PublishStatus(ctx context.Context, runID string, status *agentos.RunStatus) error
 }
 
 // BackendCapabilities exposes optional backend features without forcing every

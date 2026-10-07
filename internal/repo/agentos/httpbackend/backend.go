@@ -76,7 +76,9 @@ func (b *Backend) Start(ctx context.Context, spec *agentos.RunSpec) (agentos.Run
 		status.RunID = spec.RunID
 	}
 
-	b.publishStarted(ctx, spec, &status)
+	if err := b.publishStarted(ctx, spec, &status); err != nil {
+		return agentos.RunStatus{}, err
+	}
 
 	return status, nil
 }
@@ -134,7 +136,9 @@ func (b *Backend) Status(ctx context.Context, runID string) (agentos.RunStatus, 
 		status.RunID = runID
 	}
 
-	b.publishStatus(ctx, runID, &status)
+	if err := b.publishStatus(ctx, runID, &status); err != nil {
+		return agentos.RunStatus{}, err
+	}
 
 	return status, nil
 }
@@ -161,23 +165,25 @@ func (b *Backend) Capabilities() agentosruntime.BackendCapabilities {
 }
 
 // publishStarted mirrors a successful Start onto the data plane. A nil
-// lifecycle adapter (unwired backend) degrades to a no-op.
-func (b *Backend) publishStarted(ctx context.Context, spec *agentos.RunSpec, status *agentos.RunStatus) {
+// lifecycle adapter (unwired backend) degrades to a no-op. The error means the
+// RUN_STARTED milestone could not be made durable and the caller must fail.
+func (b *Backend) publishStarted(ctx context.Context, spec *agentos.RunSpec, status *agentos.RunStatus) error {
 	if b.lifecycle == nil {
-		return
+		return nil
 	}
 
-	b.lifecycle.PublishStarted(ctx, spec, status)
+	return b.lifecycle.PublishStarted(ctx, spec, status)
 }
 
 // publishStatus mirrors a Status observation onto the data plane, publishing
-// the run's terminal milestone once the remote reports one.
-func (b *Backend) publishStatus(ctx context.Context, runID string, status *agentos.RunStatus) {
+// the run's terminal milestone once the remote reports one. The error
+// semantics match publishStarted.
+func (b *Backend) publishStatus(ctx context.Context, runID string, status *agentos.RunStatus) error {
 	if b.lifecycle == nil {
-		return
+		return nil
 	}
 
-	b.lifecycle.PublishStatus(ctx, runID, status)
+	return b.lifecycle.PublishStatus(ctx, runID, status)
 }
 
 const maxResponseBodySize = 4096

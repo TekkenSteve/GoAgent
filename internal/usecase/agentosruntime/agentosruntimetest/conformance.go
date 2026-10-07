@@ -145,7 +145,7 @@ type LifecycleProbe struct {
 }
 
 // PublishStarted implements LifecyclePublisher.
-func (p *LifecycleProbe) PublishStarted(_ context.Context, spec *agentos.RunSpec, status *agentos.RunStatus) {
+func (p *LifecycleProbe) PublishStarted(_ context.Context, spec *agentos.RunSpec, status *agentos.RunStatus) error {
 	if spec != nil {
 		p.startedSpec = *spec
 	}
@@ -153,13 +153,17 @@ func (p *LifecycleProbe) PublishStarted(_ context.Context, spec *agentos.RunSpec
 	if status != nil {
 		p.startedStatus = *status
 	}
+
+	return nil
 }
 
 // PublishStatus implements LifecyclePublisher.
-func (p *LifecycleProbe) PublishStatus(_ context.Context, _ string, status *agentos.RunStatus) {
+func (p *LifecycleProbe) PublishStatus(_ context.Context, _ string, status *agentos.RunStatus) error {
 	if status != nil {
 		p.statuses = append(p.statuses, *status)
 	}
+
+	return nil
 }
 
 // LastStartedSpec returns the run spec of the last PublishStarted call.

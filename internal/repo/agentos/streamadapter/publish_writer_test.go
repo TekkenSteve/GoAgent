@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	agentoscore "github.com/TekkenSteve/GoAgent/agentos/core"
 	"github.com/TekkenSteve/GoAgent/agentos/stream"
 	"github.com/TekkenSteve/GoAgent/internal/entity"
 	"github.com/TekkenSteve/GoAgent/internal/repo/stream/memstream"
@@ -130,51 +131,126 @@ func TestPublishWriterFlushClosesOpenMessages(t *testing.T) {
 	require.NoError(t, w.WriteEvent(t.Context(), &entity.TextDeltaEvent{BaseEvent: base(), Content: "a"}))
 	require.Equal(t, 2, pub.calls, "START + CONTENT")
 
-	w.Flush(t.Context())
+	require.NoError(t, w.Flush(t.Context()))
 	require.Equal(t, 3, pub.calls, "flush closes the open text message")
 
-	w.Flush(t.Context())
+	require.NoError(t, w.Flush(t.Context()))
 	require.Equal(t, 3, pub.calls, "second flush is a no-op")
 }
 
-// TestPublishWriterEnsureFiresOnce locks the once-per-writer projection attach:
-// a writer publishing several events triggers the ensure hook exactly once,
-// even though every publish passes through the same guard.
-func TestPublishWriterEnsureFiresOnce(t *testing.T) {
-	t.Parallel()
-
-	pub := &failingPublisher{err: nil}
-	handle := HandleForRun("acme", "run-1")
-	ensures := 0
-	w := NewPublishWriter(pub, handle, "sess-1", "run-1", nil).
-		WithEnsure(func(context.Context, *stream.Handle) error {
-			ensures++
-
-			return nil
-		})
-
-	require.NoError(t, w.WriteEvent(t.Context(), &entity.TextDeltaEvent{BaseEvent: base(), Content: "a"}))
-	require.NoError(t, w.WriteEvent(t.Context(), &entity.ToolCallFinishEvent{BaseEvent: base(), ToolCallID: "call-1", Arguments: `{}`}))
-	require.Equal(t, 1, ensures, "ensure fires once per writer instance")
+// factStore is the in-memory milestone sink the fact-path tests write to.
+type factStore struct {
+	appendErr error
+	appends   int
+	events    []*agentoscore.Event
 }
 
-// TestPublishWriterEnsureFailOpen locks the fail-open contract of the attach
-// hook: a failing ensure (projector subscribe unavailable) is logged and the
-// publish still proceeds — the run never depends on the projection being up.
-func TestPublishWriterEnsureFailOpen(t *testing.T) {
+func (s *factStore) LastRunEventSequence(_ context.Context, _ string) (int64, error) {
+	return 0, nil
+}
+
+func (s *factStore) AppendRunEvent(_ context.Context, ev *agentoscore.Event) error {
+	s.appends++
+	s.events = append(s.events, ev)
+
+	return s.appendErr
+}
+
+// TestPublishWriterFactsFailHard locks the fail-hard contract of the fact
+// path: a milestone whose durable append fails surfaces as the writer's
+// error and never reaches the bus — the fact is the run's outcome, so it
+// must not be announced before it exists.
+func TestPublishWriterFactsFailHard(t *testing.T) {
 	t.Parallel()
 
+	store := &factStore{appendErr: errBusDown}
 	pub := &failingPublisher{err: nil}
 	handle := HandleForRun("acme", "run-1")
-	w := NewPublishWriter(pub, handle, "sess-1", "run-1", nil).
-		WithEnsure(func(context.Context, *stream.Handle) error {
-			return errBusDown
-		})
 
+	recorder, err := NewMilestoneRecorder(store, nil)
+	require.NoError(t, err)
+
+	w := NewPublishWriter(pub, handle, "sess-1", "run-1", nil).WithFacts(recorder)
+
+	// RUN_STARTED is a milestone: its persist failure must surface.
+	require.ErrorIs(t, w.WriteEvent(t.Context(), &entity.AgentRunStartEvent{BaseEvent: base()}), errBusDown)
+	require.Zero(t, pub.calls, "no milestone announcement before the fact lands")
+}
+
+// TestPublishWriterFactsSkipNonMilestones locks the reduction boundary on the
+// writer path: a content-only event appends nothing, and a flush that closes
+// an open text message appends exactly the TEXT_MESSAGE_END fact.
+func TestPublishWriterFactsSkipNonMilestones(t *testing.T) {
+	t.Parallel()
+
+	store := &factStore{}
+	pub := &failingPublisher{err: nil}
+	handle := HandleForRun("acme", "run-1")
+
+	recorder, err := NewMilestoneRecorder(store, nil)
+	require.NoError(t, err)
+
+	w := NewPublishWriter(pub, handle, "sess-1", "run-1", nil).WithFacts(recorder)
+
+	require.NoError(t, w.WriteEvent(t.Context(), &entity.AgentRunStartEvent{BaseEvent: base()}))
 	require.NoError(t, w.WriteEvent(t.Context(), &entity.TextDeltaEvent{BaseEvent: base(), Content: "a"}))
-	require.Equal(t, 2, pub.calls, "START + CONTENT published despite failing ensure")
-	require.NoError(t, w.WriteEvent(t.Context(), &entity.ToolCallFinishEvent{BaseEvent: base(), ToolCallID: "call-1", Arguments: `{}`}))
-	require.Equal(t, 4, pub.calls, "later publishes unaffected by failing ensure")
+	require.Equal(t, 1, store.appends, "only RUN_STARTED appended so far")
+
+	require.NoError(t, w.Flush(t.Context()))
+	require.Equal(t, 2, store.appends, "flush appends the TEXT_MESSAGE_END fact")
+	require.Equal(t, 4, pub.calls, "bus still mirrors every event, fail-open")
+}
+
+// TestPublishWriterEndFactCarriesContent locks the durability contract for
+// message prose: the TEXT_MESSAGE_END fact carries the accumulated message
+// text — symmetric with TOOL_CALL_RESULT carrying the full result — so the
+// timeline answers "what was said", while the bus copy stays byte-free
+// because the live channel already carried the deltas. A second message must
+// start from an empty buffer.
+func TestPublishWriterEndFactCarriesContent(t *testing.T) {
+	t.Parallel()
+
+	bus := memstream.New()
+	store := &factStore{}
+	handle := HandleForRun("acme", "run-1")
+
+	recorder, err := NewMilestoneRecorder(store, nil)
+	require.NoError(t, err)
+
+	w := NewPublishWriter(bus, handle, "sess-1", "run-1", nil).WithFacts(recorder)
+
+	ctx := t.Context()
+	for _, ev := range []entity.StreamEvent{
+		&entity.TextDeltaEvent{BaseEvent: base(), Content: "Hel"},
+		&entity.TextDeltaEvent{BaseEvent: base(), Content: "lo"},
+		// A non-content event closes the first message.
+		&entity.ToolCallStartEvent{BaseEvent: base(), ToolCallID: "call-1", ToolName: "bash"},
+		&entity.TextDeltaEvent{BaseEvent: base(), Content: "again"},
+	} {
+		require.NoError(t, w.WriteEvent(ctx, ev), "write %s", ev.EventType())
+	}
+
+	require.NoError(t, w.Flush(ctx), "flush closes the second message")
+
+	var ends []*agentoscore.Event
+
+	for _, ev := range store.events {
+		if ev.EventType == agentoscore.EventAgentMessageCompleted {
+			ends = append(ends, ev)
+		}
+	}
+
+	require.Len(t, ends, 2, "one END fact per message")
+	require.Equal(t, "Hello", ends[0].Payload[stream.FieldContent], "first message carries its accumulated text")
+	require.Equal(t, "again", ends[1].Payload[stream.FieldContent], "second message restarts from an empty buffer")
+
+	// The bus copy of END stays byte-free: the deltas already crossed it.
+	live := subscribeAll(t, bus, handle, 8)
+	for _, ev := range live {
+		if ev.Type == stream.EventTextMessageEnd {
+			require.NotContains(t, ev.Payload, stream.FieldContent, "bus END stays byte-free")
+		}
+	}
 }
 
 // subscribeAll replays the bus history for the run channel, since the run is
