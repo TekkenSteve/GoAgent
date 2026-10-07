@@ -87,3 +87,28 @@ for sa in $SEARCH_ATTRIBUTES; do
     exit 1
   fi
 done
+
+# Nexus endpoint routing Nexus callers to the AgentOS run bridge
+# (agentos/temporal/nexus_run.go). The handler is a router worker polling its
+# own queue, so the endpoint targets that queue rather than a workload queue.
+# Idempotent like everything above.
+echo 'Creating AgentOS Nexus endpoint...'
+
+# Names come from the same env vars the application reads, so the endpoint and
+# its target queue stay in one place.
+NEXUS_ENDPOINT_NAME=${AGENTFW_TEMPORAL_NEXUS_ENDPOINT:-agentos}
+NEXUS_TASK_QUEUE=${AGENTFW_TEMPORAL_NEXUS_TASK_QUEUE:-agentos-nexus}
+
+if temporal operator nexus endpoint get --name "$NEXUS_ENDPOINT_NAME" --address "$TEMPORAL_ADDRESS" >/dev/null 2>&1; then
+  echo "Nexus endpoint '$NEXUS_ENDPOINT_NAME' already exists"
+elif temporal operator nexus endpoint create \
+  --name "$NEXUS_ENDPOINT_NAME" \
+  --target-namespace "$NAMESPACE" \
+  --target-task-queue "$NEXUS_TASK_QUEUE" \
+  --description "AgentOS run-control bridge. Service 'AgentOS' with operations: run (async, completes at terminal run state), run.signal, run.control, run.status." \
+  --address "$TEMPORAL_ADDRESS" >/dev/null 2>&1; then
+  echo "Nexus endpoint '$NEXUS_ENDPOINT_NAME' created targeting task queue '$NEXUS_TASK_QUEUE'"
+else
+  echo "Failed to create Nexus endpoint '$NEXUS_ENDPOINT_NAME'"
+  exit 1
+fi

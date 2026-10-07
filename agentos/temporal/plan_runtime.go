@@ -31,6 +31,8 @@ type planRuntime struct {
 	auditStore     agentosplan.AuditStore
 	taskQueue      string
 	taskQueues     *TaskQueues
+	nexusEndpoint  string
+	nexusPeers     map[string]string
 }
 
 var (
@@ -148,6 +150,8 @@ func newPlanRuntimeWithClient(ctx context.Context, cfg *RuntimeConfig, c planTem
 		closeTemporal:  closeTemporal,
 		taskQueue:      fwTemporal.TaskQueues.PlanControl,
 		taskQueues:     &cfg.TemporalTaskQueues,
+		nexusEndpoint:  fwTemporal.NexusEndpoint,
+		nexusPeers:     fwTemporal.NexusPeers,
 	}
 
 	// The live plan event tail rides the assembled data-plane bus (planbus).
@@ -741,7 +745,7 @@ func (r *planRuntime) RecoverPlanCommands(ctx context.Context, limit int) (PlanC
 		return PlanCommandRecoveryResult{}, errPlanRuntimeNotConfigured
 	}
 
-	reconciler := newPlanCommandReconciler(r.temporalClient, r.taskQueues, r.commandStore, r.auditStore, r.planIndex)
+	reconciler := newPlanCommandReconciler(r.temporalClient, r.taskQueues, r.nexusEndpoint, r.nexusPeers, r.commandStore, r.auditStore, r.planIndex)
 
 	return reconciler.Recover(ctx, limit)
 }
@@ -805,10 +809,18 @@ func planWorkflowID(planID string) string {
 }
 
 func (r *planRuntime) executePlanWorkflow(ctx context.Context, spec *agentos.RunPlanSpec) error {
-	return executePlanWorkflow(ctx, r.temporalClient, r.taskQueue, r.taskQueues, spec)
+	return executePlanWorkflow(ctx, r.temporalClient, r.taskQueue, r.taskQueues, r.nexusEndpoint, r.nexusPeers, spec)
 }
 
-func executePlanWorkflow(ctx context.Context, temporalClient planTemporalClient, taskQueue string, taskQueues *TaskQueues, spec *agentos.RunPlanSpec) error {
+func executePlanWorkflow(
+	ctx context.Context,
+	temporalClient planTemporalClient,
+	taskQueue string,
+	taskQueues *TaskQueues,
+	nexusEndpoint string,
+	nexusPeers map[string]string,
+	spec *agentos.RunPlanSpec,
+) error {
 	if temporalClient == nil {
 		return errPlanRuntimeTemporalClientNotConfigured
 	}
@@ -829,6 +841,8 @@ func executePlanWorkflow(ctx context.Context, temporalClient planTemporalClient,
 		TaskQueues: agentfwTaskQueues{
 			PlanActivity: taskQueues.PlanActivity,
 		},
+		NexusEndpoint: nexusEndpoint,
+		NexusPeers:    nexusPeers,
 	})
 	if err != nil && !sdktemporal.IsWorkflowExecutionAlreadyStartedError(err) {
 		return fmt.Errorf("agentos temporal plan runtime - start plan workflow: %w", err)

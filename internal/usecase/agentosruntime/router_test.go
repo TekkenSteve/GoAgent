@@ -2,6 +2,7 @@ package agentosruntime
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
 
@@ -57,7 +58,7 @@ func TestRouterRequiresExplicitBackendRef(t *testing.T) {
 		t.Fatalf("new router: %v", err)
 	}
 
-	_, err = startRun(context.Background(), router, &agentos.RunSpec{RunID: "run-1", AccountID: "acct-1", ProjectID: "proj-1", IdempotencyKey: "run-start-1"})
+	_, err = startRun(context.Background(), router, &agentos.RunSpec{RunID: runFixtureID, AccountID: "acct-1", ProjectID: "proj-1", IdempotencyKey: "run-start-1"})
 	if err == nil {
 		t.Fatal("expected error")
 	}
@@ -271,7 +272,7 @@ func TestRouterStatusNormalizesBackendRunID(t *testing.T) {
 		t.Fatalf("new router: %v", err)
 	}
 
-	status, err := router.Status(ctx, spec.RunID)
+	status, err := router.Status(ctx, agentos.RunRef{RunID: spec.RunID, AccountID: spec.AccountID})
 	if err != nil {
 		t.Fatalf("Status: %v", err)
 	}
@@ -313,7 +314,7 @@ func TestRouterStatusRejectsBackendRunIDDrift(t *testing.T) {
 		t.Fatalf("new router: %v", err)
 	}
 
-	_, err = router.Status(ctx, spec.RunID)
+	_, err = router.Status(ctx, agentos.RunRef{RunID: spec.RunID})
 	if err == nil {
 		t.Fatal("Status succeeded, want run id drift error")
 	}
@@ -421,12 +422,12 @@ func TestRouterSignalAndControlDoNotShareCallerOwnedData(t *testing.T) {
 	}
 
 	signal := agentoscore.Signal{Type: agentoscore.SignalUserMessage, Payload: map[string]any{"message": storedValue}}
-	if err := router.Signal(ctx, spec.RunID, &signal); err != nil {
+	if err := router.Signal(ctx, agentos.RunRef{RunID: spec.RunID}, &signal); err != nil {
 		t.Fatalf("Signal: %v", err)
 	}
 
 	control := agentoscore.ControlRequest{Operation: agentoscore.ControlCancel, Metadata: map[string]string{"reason": storedValue}}
-	if err := router.Control(ctx, spec.RunID, &control); err != nil {
+	if err := router.Control(ctx, agentos.RunRef{RunID: spec.RunID}, &control); err != nil {
 		t.Fatalf("Control: %v", err)
 	}
 
@@ -687,7 +688,7 @@ func assertRoutesRunOperations(
 ) {
 	t.Helper()
 
-	if _, err := router.Status(ctx, runID); err != nil {
+	if _, err := router.Status(ctx, agentos.RunRef{RunID: runID}); err != nil {
 		t.Fatalf("status %s: %v", runID, err)
 	}
 
@@ -773,13 +774,13 @@ func startPlanNode(
 func controlRun(ctx context.Context, router *Router, runID string, operation agentoscore.ControlOperation) error {
 	control := agentoscore.ControlRequest{Operation: operation}
 
-	return router.Control(ctx, runID, &control)
+	return router.Control(ctx, agentos.RunRef{RunID: runID}, &control)
 }
 
 func signalRun(ctx context.Context, router *Router, runID string, signalType agentoscore.SignalType) error {
 	signal := agentoscore.Signal{Type: signalType}
 
-	return router.Signal(ctx, runID, &signal)
+	return router.Signal(ctx, agentos.RunRef{RunID: runID}, &signal)
 }
 
 type stubRunIndex struct {
@@ -936,4 +937,162 @@ func (b *stubBackend) Status(_ context.Context, runID string) (agentos.RunStatus
 
 func (b *stubBackend) Subscribe(context.Context, agentoscore.StreamScope) (agentoscore.Subscription, error) {
 	return nil, nil
+}
+
+// TestRouterConfinesRunOperationsToTheOwningAccount is the boundary the
+// control plane relies on: knowing a run id is not authority to reach it.
+// Status, signal and control all resolve the run through the same check, so
+// each is asserted separately.
+func TestRouterConfinesRunOperationsToTheOwningAccount(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	router, index, ref := routerWithOwnedRun(t)
+
+	_ = index
+
+	foreign := agentos.RunRef{RunID: runFixtureID, AccountID: "acct-2"}
+
+	if _, err := router.Status(ctx, foreign); !errors.Is(err, agentoscore.ErrRunRouteNotFound) {
+		t.Fatalf("Status error = %v, want ErrRunRouteNotFound", err)
+	}
+
+	signal := agentoscore.Signal{Type: agentoscore.SignalUserMessage}
+	if err := router.Signal(ctx, foreign, &signal); !errors.Is(err, agentoscore.ErrRunRouteNotFound) {
+		t.Fatalf("Signal error = %v, want ErrRunRouteNotFound", err)
+	}
+
+	control := agentoscore.ControlRequest{Operation: agentoscore.ControlCancel}
+	if err := router.Control(ctx, foreign, &control); !errors.Is(err, agentoscore.ErrRunRouteNotFound) {
+		t.Fatalf("Control error = %v, want ErrRunRouteNotFound", err)
+	}
+
+	// The owning account still reaches the same run.
+	if _, err := router.Status(ctx, agentos.RunRef{RunID: runFixtureID, AccountID: runFixtureAccount}); err != nil {
+		t.Fatalf("Status for the owning account: %v", err)
+	}
+
+	if got := backendRefFor(t, index, "run-1"); got != ref {
+		t.Fatalf("route = %#v, want %#v", got, ref)
+	}
+}
+
+// TestRouterTreatsAnUnknownRunAndAnotherAccountsRunAlike pins that the answer
+// does not disclose existence.
+func TestRouterTreatsAnUnknownRunAndAnotherAccountsRunAlike(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	router, _, _ := routerWithOwnedRun(t)
+
+	_, foreignErr := router.Status(ctx, agentos.RunRef{RunID: runFixtureID, AccountID: "acct-2"})
+	_, missingErr := router.Status(ctx, agentos.RunRef{RunID: "run-does-not-exist", AccountID: "acct-2"})
+
+	if !errors.Is(foreignErr, agentoscore.ErrRunRouteNotFound) || !errors.Is(missingErr, agentoscore.ErrRunRouteNotFound) {
+		t.Fatalf("errors = %v / %v, want the same not-found answer", foreignErr, missingErr)
+	}
+}
+
+// TestRouterNarrowsToTheProjectWhenTheCallerNamesOne covers the second half of
+// the reference: a caller that knows the project can only reach that project.
+func TestRouterNarrowsToTheProjectWhenTheCallerNamesOne(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	router, _, _ := routerWithOwnedRun(t)
+
+	wrongProject := agentos.RunRef{RunID: runFixtureID, AccountID: "acct-1", ProjectID: "proj-2"}
+	if _, err := router.Status(ctx, wrongProject); !errors.Is(err, agentoscore.ErrRunRouteNotFound) {
+		t.Fatalf("Status error = %v, want ErrRunRouteNotFound", err)
+	}
+
+	rightProject := agentos.RunRef{RunID: runFixtureID, AccountID: runFixtureAccount, ProjectID: runFixtureProject}
+	if _, err := router.Status(ctx, rightProject); err != nil {
+		t.Fatalf("Status for the owning project: %v", err)
+	}
+}
+
+// TestRouterAllowsInProcessCallersToOmitTheAccount documents the trusted-caller
+// case: plan activities and the supervisor act on runs whose ownership they
+// already resolved, and say so with an empty account rather than asserting one.
+func TestRouterAllowsInProcessCallersToOmitTheAccount(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	router, _, _ := routerWithOwnedRun(t)
+
+	if _, err := router.Status(ctx, agentos.RunRef{RunID: runFixtureID}); err != nil {
+		t.Fatalf("Status without an account: %v", err)
+	}
+}
+
+// TestRouterRejectsAnEmptyRunID keeps the reference itself honest: the check
+// cannot be skipped by omitting what it addresses.
+func TestRouterRejectsAnEmptyRunID(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	router, _, _ := routerWithOwnedRun(t)
+
+	if _, err := router.Status(ctx, agentos.RunRef{AccountID: "acct-1"}); err == nil {
+		t.Fatal("Status accepted a reference with no run id")
+	}
+}
+
+// runFixtureAccount and runFixtureProject are the tenant the ownership-check
+// tests bind runs to.
+const (
+	runFixtureID      = "run-1"
+	runFixtureAccount = "acct-1"
+	runFixtureProject = "proj-1"
+)
+
+// routerWithOwnedRun registers one backend and binds runFixtureID to it for
+// the fixture tenant, so ownership tests start from a recorded run.
+func routerWithOwnedRun(t *testing.T) (*Router, *stubRunIndex, agentos.BackendRef) {
+	t.Helper()
+
+	runID := runFixtureID
+
+	ctx := context.Background()
+	ref := agentos.BackendRef{Kind: agentos.BackendKindNative, Name: agentos.BackendNameGoAgentNative}
+	stub := &stubBackend{statusStatus: agentos.RunStatus{LifecycleState: "running"}}
+
+	registry := NewRegistry()
+	if err := registry.Register(ref, stub); err != nil {
+		t.Fatalf("register backend: %v", err)
+	}
+
+	index := newStubRunIndex()
+
+	spec := agentos.RunSpec{
+		RunID:          runID,
+		AccountID:      runFixtureAccount,
+		ProjectID:      runFixtureProject,
+		Backend:        ref,
+		IdempotencyKey: runID + "-start",
+	}
+
+	boundStatus := agentos.RunStatus{RunID: runID, LifecycleState: "running"}
+	if err := index.Bind(ctx, &spec, &boundStatus); err != nil {
+		t.Fatalf("Bind: %v", err)
+	}
+
+	router, err := NewRouter(registry, index)
+	if err != nil {
+		t.Fatalf("new router: %v", err)
+	}
+
+	return router, index, ref
+}
+
+func backendRefFor(t *testing.T, index *stubRunIndex, runID string) agentos.BackendRef {
+	t.Helper()
+
+	record, found, err := index.GetRunBackend(context.Background(), runID)
+	if err != nil || !found {
+		t.Fatalf("GetRunBackend(%q) = found %v, err %v", runID, found, err)
+	}
+
+	return record.Backend
 }

@@ -380,6 +380,12 @@ func (r fakeWorkflowRun) GetRunID() string {
 	return r.runID
 }
 
+// GetFirstExecutionRunID satisfies the SDK's WorkflowRun contract; these fakes
+// model a single execution, so it matches GetRunID.
+func (r fakeWorkflowRun) GetFirstExecutionRunID() string {
+	return r.runID
+}
+
 func (r fakeWorkflowRun) Get(context.Context, any) error {
 	return nil
 }

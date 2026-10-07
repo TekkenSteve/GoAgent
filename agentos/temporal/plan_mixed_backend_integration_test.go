@@ -47,6 +47,8 @@ func TestPlanWorkflowRunsThroughMixedBackendAdapters(t *testing.T) {
 	env.RegisterActivityWithOptions(adapter.activities.ControlPlanNodeActivity, activity.RegisterOptions{Name: ControlPlanNodeActivityName})
 	env.RegisterActivityWithOptions(adapter.activities.PublishPlanArtifactsActivity, activity.RegisterOptions{Name: PublishPlanArtifactsActivityName})
 
+	registerNexusRunChain(t, env, adapter.activities.Runtime, adapter.activities.PlanNodeStarter)
+
 	createPlanForWorkflowTest(t, adapter.planStore, &adapter.spec)
 	env.ExecuteWorkflow(PlanWorkflow, planWorkflowInputForTest(&adapter.spec))
 
@@ -179,16 +181,16 @@ func (r routerRuntime) StartPlanNode(ctx context.Context, planID, nodeID string,
 	return r.router.StartPlanNode(ctx, planID, nodeID, spec)
 }
 
-func (r routerRuntime) Signal(ctx context.Context, runID string, signal *agentoscore.Signal) error {
-	return r.router.Signal(ctx, runID, signal)
+func (r routerRuntime) Signal(ctx context.Context, ref agentos.RunRef, signal *agentoscore.Signal) error {
+	return r.router.Signal(ctx, ref, signal)
 }
 
-func (r routerRuntime) Status(ctx context.Context, runID string) (agentos.RunStatus, error) {
-	return r.router.Status(ctx, runID)
+func (r routerRuntime) Status(ctx context.Context, ref agentos.RunRef) (agentos.RunStatus, error) {
+	return r.router.Status(ctx, ref)
 }
 
-func (r routerRuntime) Control(ctx context.Context, runID string, control *agentoscore.ControlRequest) error {
-	return r.router.Control(ctx, runID, control)
+func (r routerRuntime) Control(ctx context.Context, ref agentos.RunRef, control *agentoscore.ControlRequest) error {
+	return r.router.Control(ctx, ref, control)
 }
 
 func (r routerRuntime) Subscribe(ctx context.Context, scope agentoscore.StreamScope) (agentoscore.Subscription, error) {
@@ -476,6 +478,12 @@ func (r mixedAdapterWorkflowRun) GetID() string {
 }
 
 func (r mixedAdapterWorkflowRun) GetRunID() string {
+	return r.runID
+}
+
+// GetFirstExecutionRunID satisfies the SDK's WorkflowRun contract; these fakes
+// model a single execution, so it matches GetRunID.
+func (r mixedAdapterWorkflowRun) GetFirstExecutionRunID() string {
 	return r.runID
 }
 

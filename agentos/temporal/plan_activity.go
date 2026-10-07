@@ -469,7 +469,9 @@ func (a *PlanActivities) EvaluatePlanExpansionActivity(ctx context.Context, inpu
 }
 
 type statusPlanNodeInput struct {
-	RunID string
+	RunID     string
+	AccountID string
+	ProjectID string
 }
 
 // StatusPlanNodeOutput carries the queried child run status.
@@ -483,7 +485,13 @@ func (a *PlanActivities) StatusPlanNodeActivity(ctx context.Context, input statu
 		return StatusPlanNodeOutput{}, fmt.Errorf("%w: plan activity runtime is required", agentoscore.ErrInvalidRunPlan)
 	}
 
-	status, err := a.Runtime.Status(ctx, input.RunID)
+	// The plan's own tenant travels with the node run: a plan may only reach
+	// the child runs it started.
+	status, err := a.Runtime.Status(ctx, agentos.RunRef{
+		RunID:     input.RunID,
+		AccountID: input.AccountID,
+		ProjectID: input.ProjectID,
+	})
 	if err != nil {
 		return StatusPlanNodeOutput{}, err
 	}
@@ -492,8 +500,10 @@ func (a *PlanActivities) StatusPlanNodeActivity(ctx context.Context, input statu
 }
 
 type controlPlanNodeInput struct {
-	RunID   string
-	Control agentoscore.ControlRequest
+	RunID     string
+	AccountID string
+	ProjectID string
+	Control   agentoscore.ControlRequest
 }
 
 // ControlPlanNodeActivity sends lifecycle control to one child run.
@@ -502,12 +512,18 @@ func (a *PlanActivities) ControlPlanNodeActivity(ctx context.Context, input *con
 		return fmt.Errorf("%w: plan activity runtime is required", agentoscore.ErrInvalidRunPlan)
 	}
 
-	return a.Runtime.Control(ctx, input.RunID, &input.Control)
+	return a.Runtime.Control(ctx, agentos.RunRef{
+		RunID:     input.RunID,
+		AccountID: input.AccountID,
+		ProjectID: input.ProjectID,
+	}, &input.Control)
 }
 
 type signalPlanNodeInput struct {
-	RunID  string
-	Signal agentoscore.Signal
+	RunID     string
+	AccountID string
+	ProjectID string
+	Signal    agentoscore.Signal
 }
 
 // SignalPlanNodeActivity delivers a non-control signal to one child run.
@@ -516,5 +532,9 @@ func (a *PlanActivities) SignalPlanNodeActivity(ctx context.Context, input *sign
 		return fmt.Errorf("%w: plan activity runtime is required", agentoscore.ErrInvalidRunPlan)
 	}
 
-	return a.Runtime.Signal(ctx, input.RunID, &input.Signal)
+	return a.Runtime.Signal(ctx, agentos.RunRef{
+		RunID:     input.RunID,
+		AccountID: input.AccountID,
+		ProjectID: input.ProjectID,
+	}, &input.Signal)
 }

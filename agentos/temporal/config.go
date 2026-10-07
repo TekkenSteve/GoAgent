@@ -6,7 +6,8 @@ import (
 	agentos "github.com/TekkenSteve/GoAgent/agentos/control"
 	agentoscore "github.com/TekkenSteve/GoAgent/agentos/core"
 	agentosstream "github.com/TekkenSteve/GoAgent/agentos/stream"
-	"github.com/TekkenSteve/GoAgent/internal/repo/agentos/runprojection"
+	"github.com/TekkenSteve/GoAgent/internal/repo/agentos/streamadapter"
+	mcp "github.com/TekkenSteve/GoAgent/internal/repo/mcp"
 	"github.com/TekkenSteve/GoAgent/internal/usecase/agentosplan"
 	agentosruntime "github.com/TekkenSteve/GoAgent/internal/usecase/agentosruntime"
 	"github.com/TekkenSteve/GoAgent/pkg/logger"
@@ -17,6 +18,17 @@ type RuntimeConfig struct {
 	TemporalAddress    string
 	TemporalNamespace  string
 	TemporalTaskQueues TaskQueues
+	// NexusEndpoint overrides the default Nexus endpoint name callers use to
+	// reach the AgentOS run service. Empty keeps the framework default.
+	NexusEndpoint string
+	// NexusPeers maps a peer town to the Nexus endpoint that reaches it, so a
+	// plan node can run in another town. Empty keeps every node local.
+	NexusPeers map[string]string
+	// RunBackendResolver lets the worker supervise external-backend runs
+	// (HTTP, gRPC, DSH): their signal/control/status then run through a
+	// Temporal workflow instead of backend I/O. Optional — embedders that do
+	// not expose their run backends keep the direct control path.
+	RunBackendResolver BackendResolver
 	PostgresURL        string
 	PostgresPoolMax    int
 	Subscriber         agentosstream.Subscriber
@@ -26,11 +38,12 @@ type RuntimeConfig struct {
 	// RUN_CANCELED. Nil degrades external backends to no-op lifecycle
 	// publishing — the run still works, its milestones just never reach the bus.
 	Publisher agentosstream.Publisher
-	// ProjectionController optionally attaches the run milestone projector to
-	// external-backend runs' channels, so their lifecycle milestones persist to
-	// Postgres like the native path's do. Nil leaves external-run milestones on
-	// the bus live tail only.
-	ProjectionController runprojection.Controller
+	// Facts optionally makes every external-backend lifecycle milestone durable
+	// at the writer (RUN_STARTED and the terminal event, each with its fact-log
+	// publication intent) before it reaches the bus. A persist failure fails
+	// the enclosing operation so the platform retries it. Nil leaves
+	// external-run milestones on the bus live tail only.
+	Facts *streamadapter.MilestoneRecorder
 	// Logger reports data-plane publish failures from the external-backend
 	// lifecycle adapters. Nil drops those diagnostics.
 	Logger                   logger.Interface
@@ -40,6 +53,7 @@ type RuntimeConfig struct {
 	TemporalExternalBackends []ExternalBackendConfig
 	HTTPBackends             []HTTPBackendConfig
 	GRPCBackends             []GRPCBackendConfig
+	DSHBackends              []DSHBackendConfig
 }
 
 // ExternalBackendConfig configures a temporal_external AgentOS backend.
@@ -64,6 +78,16 @@ type HTTPBackendConfig struct {
 	Name     string
 	Endpoint string
 	Headers  map[string]string
+}
+
+// DSHBackendConfig configures a DeepSeek Harness SDK AgentOS backend.
+type DSHBackendConfig struct {
+	Name       string
+	Command    string
+	Profile    string
+	Args       []string
+	Env        []string
+	WorkingDir string
 }
 
 // GRPCBackendConfig configures a gRPC AgentOS backend.
@@ -155,9 +179,19 @@ type WorkerConfig struct {
 	TemporalAddress    string
 	TemporalNamespace  string
 	TemporalTaskQueues TaskQueues
+	// NexusEndpoint overrides the default Nexus endpoint name callers use to
+	// reach the AgentOS run service. Empty keeps the framework default.
+	NexusEndpoint string
+	// NexusPeers maps a peer town to the Nexus endpoint that reaches it, so a
+	// plan node can run in another town. Empty keeps every node local.
+	NexusPeers map[string]string
+	// RunBackendResolver lets the worker supervise external-backend runs
+	// (HTTP, gRPC, DSH): their signal/control/status then run through a
+	// Temporal workflow instead of backend I/O. Optional — embedders that do
+	// not expose their run backends keep the direct control path.
+	RunBackendResolver BackendResolver
 	PostgresURL        string
 	PostgresPoolMax    int
-	RedisURL           string
 	LLMConfigPath      string
 	LogLevel           string
 	ArtifactStore      ArtifactStoreConfig
@@ -165,11 +199,17 @@ type WorkerConfig struct {
 	TemporalExternalBackends []ExternalBackendConfig
 	HTTPBackends             []HTTPBackendConfig
 	GRPCBackends             []GRPCBackendConfig
+	DSHBackends              []DSHBackendConfig
 	Capabilities             []agentos.Capability
 	ArtifactSchemas          []agentos.ArtifactSchema
 
 	RegisterEnvTools      bool
 	EnsureDefaultTemplate bool
+	// MCPTransportPolicy governs what an MCP server configuration may make
+	// this host do: which executables launch, which environment keys a
+	// subprocess receives, and which hosts a network transport may reach.
+	// Nil is fail-closed — nothing launches, nothing dials anywhere private.
+	MCPTransportPolicy *mcp.TransportPolicy
 
 	// StreamCentrifugo configures the Centrifugo data-plane bus the streaming
 	// activities mirror their AG-UI timeline onto — the default transport. Leave
@@ -186,4 +226,10 @@ type WorkerConfig struct {
 type StreamCentrifugoConfig struct {
 	BaseURL string
 	APIKey  string
+	// EventOutbox enqueues every milestone the projector persists for
+	// publication to the run.timeline domain of the fact log — the log-first
+	// half of the data plane. It sits with the transport config because the
+	// projector store is part of the data plane; enable it exactly when the
+	// deployment runs a backbone drainer, otherwise rows pile up undrained.
+	EventOutbox bool
 }

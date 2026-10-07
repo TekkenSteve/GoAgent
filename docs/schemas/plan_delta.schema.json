@@ -15,6 +15,9 @@
           "capability": {
             "type": "string"
           },
+          "peer": {
+            "type": "string"
+          },
           "run": {
             "type": "object",
             "properties": {

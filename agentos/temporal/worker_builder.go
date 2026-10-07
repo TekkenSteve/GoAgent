@@ -8,8 +8,8 @@ import (
 
 	"github.com/TekkenSteve/GoAgent/internal/agentfw/orchestration"
 	agenttool "github.com/TekkenSteve/GoAgent/internal/agentfw/tool"
+	"github.com/TekkenSteve/GoAgent/internal/authz"
 	"github.com/TekkenSteve/GoAgent/internal/pkg/postgres"
-	goredis "github.com/TekkenSteve/GoAgent/internal/pkg/redis"
 	"github.com/TekkenSteve/GoAgent/internal/repo/agentos/planstream"
 	artifactrepo "github.com/TekkenSteve/GoAgent/internal/repo/artifact"
 	"github.com/TekkenSteve/GoAgent/internal/repo/cached"
@@ -17,7 +17,6 @@ import (
 	"github.com/TekkenSteve/GoAgent/internal/repo/framework"
 	mcpRepo "github.com/TekkenSteve/GoAgent/internal/repo/mcp"
 	temporalrepo "github.com/TekkenSteve/GoAgent/internal/repo/persistent"
-	pipelinepkg "github.com/TekkenSteve/GoAgent/internal/repo/pipeline"
 	"github.com/TekkenSteve/GoAgent/internal/repo/toolkit"
 	"github.com/TekkenSteve/GoAgent/internal/repo/webapi"
 	"github.com/TekkenSteve/GoAgent/internal/usecase/agent"
@@ -33,8 +32,6 @@ var (
 	ErrWorkerConfigRequired = errors.New("agentos temporal worker: config is required")
 	// ErrWorkerPostgresURLRequired reports a missing Postgres URL in the worker config.
 	ErrWorkerPostgresURLRequired = errors.New("agentos temporal worker: postgres url is required")
-	// ErrWorkerRedisURLRequired reports a missing Redis URL in the worker config.
-	ErrWorkerRedisURLRequired = errors.New("agentos temporal worker: redis url is required")
 	// ErrWorkerArtifactStoreBackendRequired reports a missing artifact store backend in the worker config.
 	ErrWorkerArtifactStoreBackendRequired = errors.New("agentos temporal worker: artifact store backend is required")
 	// ErrWorkerArtifactStoreBackendUnknown reports an unknown artifact store backend in the worker config.
@@ -52,19 +49,19 @@ var (
 )
 
 func newWorkerKit(ctx context.Context, cfg *WorkerConfig) (*WorkerKit, error) {
-	resources, err := openWorkerResources(ctx, cfg)
+	resources, err := openWorkerResources(cfg)
 	if err != nil {
 		return nil, err
 	}
 
-	dataPlane, err := newWorkerDataPlane(ctx, cfg, resources)
+	dataPlane, err := newWorkerDataPlane(cfg, resources)
 	if err != nil {
 		resources.close()
 
 		return nil, err
 	}
 
-	kit, batchWriter, err := buildWorkerKit(ctx, resources.dependencies(), dataPlane)
+	kit, err := buildWorkerKit(ctx, resources.dependencies(), dataPlane)
 	if err != nil {
 		dataPlane.Close()
 		resources.close()
@@ -80,7 +77,7 @@ func newWorkerKit(ctx context.Context, cfg *WorkerConfig) (*WorkerKit, error) {
 		return nil, err
 	}
 
-	configureWorkerPlanRuntime(kit, cfg, resources, batchWriter, infra)
+	configureWorkerPlanRuntime(kit, cfg, resources, infra)
 
 	return kit, nil
 }
@@ -88,12 +85,12 @@ func newWorkerKit(ctx context.Context, cfg *WorkerConfig) (*WorkerKit, error) {
 // NewPlanWorkerKit creates the minimal worker registration kit required by
 // the AgentOS RunPlan control plane.
 func NewPlanWorkerKit(ctx context.Context, cfg *WorkerConfig) (*PlanWorkerKit, error) {
-	resources, err := openWorkerResources(ctx, cfg)
+	resources, err := openWorkerResources(cfg)
 	if err != nil {
 		return nil, err
 	}
 
-	dataPlane, err := newWorkerDataPlane(ctx, cfg, resources)
+	dataPlane, err := newWorkerDataPlane(cfg, resources)
 	if err != nil {
 		resources.close()
 
@@ -110,7 +107,7 @@ func NewPlanWorkerKit(ctx context.Context, cfg *WorkerConfig) (*PlanWorkerKit, e
 
 	return &PlanWorkerKit{
 		planActivities:        infra.planActivities,
-		planCommandReconciler: newPlanCommandReconciler(newPlanTemporalClient(resources.temporalClient), &cfg.TemporalTaskQueues, infra.planStore, infra.planStore, infra.planStore),
+		planCommandReconciler: newPlanCommandReconciler(newPlanTemporalClient(resources.temporalClient), &cfg.TemporalTaskQueues, workerNexusEndpoint(cfg), cfg.NexusPeers, infra.planStore, infra.planStore, infra.planStore),
 		closeFns: []func() error{
 			infra.planClose,
 			dataPlane.Close,
@@ -127,21 +124,16 @@ type workerResources struct {
 	cfg            *WorkerConfig
 	logger         *logger.Logger
 	postgres       *postgres.Postgres
-	redis          *goredis.Redis
 	temporalClient client.Client
 }
 
-func openWorkerResources(ctx context.Context, cfg *WorkerConfig) (*workerResources, error) {
+func openWorkerResources(cfg *WorkerConfig) (*workerResources, error) {
 	if cfg == nil {
 		return nil, ErrWorkerConfigRequired
 	}
 
 	if cfg.PostgresURL == "" {
 		return nil, ErrWorkerPostgresURLRequired
-	}
-
-	if cfg.RedisURL == "" {
-		return nil, ErrWorkerRedisURLRequired
 	}
 
 	if err := cfg.TemporalTaskQueues.Validate(); err != nil {
@@ -159,13 +151,6 @@ func openWorkerResources(ctx context.Context, cfg *WorkerConfig) (*workerResourc
 		return nil, fmt.Errorf("agentos temporal worker - postgres: %w", err)
 	}
 
-	rdb, err := goredis.New(ctx, cfg.RedisURL)
-	if err != nil {
-		pg.Close()
-
-		return nil, fmt.Errorf("agentos temporal worker - redis: %w", err)
-	}
-
 	fwTemporal := temporalConfig(&RuntimeConfig{
 		TemporalAddress:    cfg.TemporalAddress,
 		TemporalNamespace:  cfg.TemporalNamespace,
@@ -179,28 +164,27 @@ func openWorkerResources(ctx context.Context, cfg *WorkerConfig) (*workerResourc
 	if err != nil {
 		pg.Close()
 
-		return nil, errors.Join(fmt.Errorf("agentos temporal worker - temporal client: %w", err), rdb.Close())
+		return nil, fmt.Errorf("agentos temporal worker - temporal client: %w", err)
 	}
 
 	return &workerResources{
 		cfg:            cfg,
 		logger:         l,
 		postgres:       pg,
-		redis:          rdb,
 		temporalClient: temporalClient,
 	}, nil
 }
 
 // newWorkerDataPlane assembles the shared data-plane bus (Centrifugo by
 // default, degrading to the in-process memstream bus when no base URL is
-// configured) plus the run-event projector. The single instance feeds both the
-// run activities' publisher and the plan runtime's subscriber/plan bus, so
-// in-process subscribers see the activities' publishes.
-func newWorkerDataPlane(ctx context.Context, cfg *WorkerConfig, resources *workerResources) (*StreamingDataPlane, error) {
-	return NewStreamingDataPlane(ctx, StreamCentrifugoConfig{
-		BaseURL: cfg.StreamCentrifugo.BaseURL,
-		APIKey:  cfg.StreamCentrifugo.APIKey,
-	}, resources.postgres, resources.logger)
+// configured) plus the milestone recorder. The single instance feeds the run
+// activities' publisher and fact recorder and the plan runtime's
+// subscriber/plan bus, so in-process subscribers see the activities'
+// publishes.
+func newWorkerDataPlane(cfg *WorkerConfig, resources *workerResources) (*StreamingDataPlane, error) {
+	// The whole config travels: EventOutbox decides whether the recorder's
+	// milestones are queued for the fact log alongside being persisted.
+	return NewStreamingDataPlane(cfg.StreamCentrifugo, resources.postgres, resources.logger)
 }
 
 func (r *workerResources) dependencies() *workerDependencies {
@@ -208,7 +192,6 @@ func (r *workerResources) dependencies() *workerDependencies {
 		cfg:            r.cfg,
 		logger:         r.logger,
 		postgres:       r.postgres,
-		redis:          r.redis,
 		temporalClient: r.temporalClient,
 	}
 }
@@ -216,42 +199,21 @@ func (r *workerResources) dependencies() *workerDependencies {
 func (r *workerResources) close() {
 	r.temporalClient.Close()
 
-	if err := r.redis.Close(); err != nil {
-		r.logger.Error("worker - close redis", err)
-	}
-
 	r.postgres.Close()
 }
 
-func configureWorkerPlanRuntime(kit *WorkerKit, cfg *WorkerConfig, resources *workerResources, batchWriter *pipelinepkg.BatchWriter, infra *workerPlanRuntime) {
+func configureWorkerPlanRuntime(kit *WorkerKit, cfg *WorkerConfig, resources *workerResources, infra *workerPlanRuntime) {
 	kit.planActivities = infra.planActivities
 	kit.processActivities = infra.processActivities
-	kit.planCommandReconciler = newPlanCommandReconciler(newPlanTemporalClient(resources.temporalClient), &cfg.TemporalTaskQueues, infra.planStore, infra.planStore, infra.planStore)
+	kit.planCommandReconciler = newPlanCommandReconciler(newPlanTemporalClient(resources.temporalClient), &cfg.TemporalTaskQueues, workerNexusEndpoint(cfg), cfg.NexusPeers, infra.planStore, infra.planStore, infra.planStore)
 	kit.closeFns = append(
 		kit.closeFns,
-		func() error {
-			if batchWriter != nil {
-				batchWriter.Stop()
-			}
-
-			return nil
-		},
 		func() error {
 			resources.temporalClient.Close()
 
 			return nil
 		},
 		infra.planClose,
-		func() error {
-			return resources.redis.Close()
-		},
-		func() error {
-			if kit.runProjection != nil {
-				kit.runProjection.Close()
-			}
-
-			return nil
-		},
 		func() error {
 			resources.postgres.Close()
 
@@ -302,10 +264,11 @@ func initWorkerPlanRuntime(ctx context.Context, cfg *WorkerConfig, pg *postgres.
 		TemporalExternalBackends: cfg.TemporalExternalBackends,
 		HTTPBackends:             cfg.HTTPBackends,
 		GRPCBackends:             cfg.GRPCBackends,
+		DSHBackends:              cfg.DSHBackends,
 		ArtifactStore:            cfg.ArtifactStore,
 		Subscriber:               dataPlane.Subscriber,
 		Publisher:                dataPlane.Publisher,
-		ProjectionController:     dataPlane.Projector,
+		Facts:                    dataPlane.Facts,
 		Logger:                   l,
 		PlanEventPublisher:       planEventStream,
 		PlanEventSubscriber:      planEventStream,
@@ -374,12 +337,10 @@ type workerDependencies struct {
 	cfg            *WorkerConfig
 	logger         *logger.Logger
 	postgres       *postgres.Postgres
-	redis          *goredis.Redis
 	temporalClient client.Client
 }
 
-func buildWorkerKit(ctx context.Context, deps *workerDependencies, dataPlane *StreamingDataPlane) (*WorkerKit, *pipelinepkg.BatchWriter, error) {
-	messageRepo := temporalrepo.NewMessageRepo(deps.postgres)
+func buildWorkerKit(ctx context.Context, deps *workerDependencies, dataPlane *StreamingDataPlane) (*WorkerKit, error) {
 	persistentAgentRepo := temporalrepo.NewAgentRepo(deps.postgres)
 	agentRepo := cached.NewAgentRepo(persistentAgentRepo)
 	templateRepo := temporalrepo.NewWorkflowTemplateRepo(deps.postgres)
@@ -387,12 +348,12 @@ func buildWorkerKit(ctx context.Context, deps *workerDependencies, dataPlane *St
 
 	llmResult, err := webapi.LoadLLMProviders(deps.cfg.LLMConfigPath)
 	if err != nil {
-		return nil, nil, fmt.Errorf("agentos temporal worker - load llm providers: %w", err)
+		return nil, fmt.Errorf("agentos temporal worker - load llm providers: %w", err)
 	}
 
 	llmProvider, err := newBifrostProvider(deps.cfg.LLMConfigPath, llmResult, deps.logger)
 	if err != nil {
-		return nil, nil, err
+		return nil, err
 	}
 
 	billingRepo := temporalrepo.NewBillingRepo(deps.postgres)
@@ -403,27 +364,38 @@ func buildWorkerKit(ctx context.Context, deps *workerDependencies, dataPlane *St
 		registerEnvTools(deps.logger, toolRegistry)
 	}
 
-	toolPipe := agenttool.Pipeline{Executor: toolRegistry}
-	toolExecutor := framework.NewToolPipeline(&toolPipe)
-	agentCompressor := compressor.New(compressor.Config{LLM: llmProvider})
-	wal := pipelinepkg.NewWriteAheadLog(deps.redis.GeneralClient)
-	dlq := pipelinepkg.NewDeadLetterQueue(deps.redis.GeneralClient)
-	batchWriter := pipelinepkg.NewBatchWriter(wal, dlq, messageRepo, deps.logger)
-	batchWriter.Start()
+	// Every protective stage is present, or the worker refuses to start.
+	toolPipe, err := agenttool.NewPipeline(&agenttool.PipelineConfig{
+		Authorizer: &agenttool.TenantAuthorizer{
+			Authorizer: authz.TenantAuthorizer{},
+			Audit:      agenttool.NewLoggerAuditSink(deps.logger),
+		},
+		Executor:    toolRegistry,
+		Redactor:    agenttool.NewRedactor(nil),
+		Policies:    &agenttool.DefaultPolicyProvider{},
+		Idempotency: temporalrepo.NewToolIdempotencyStore(deps.postgres),
+	})
+	if err != nil {
+		return nil, fmt.Errorf("agentfw worker - tool pipeline: %w", err)
+	}
 
-	agentUC := agent.New(llmProvider, toolExecutor, wal, agentCompressor, toolRegistry, agentRepo)
+	toolExecutor := framework.NewToolPipeline(toolPipe)
+	agentCompressor := compressor.New(compressor.Config{LLM: llmProvider})
+	agentUC := agent.New(llmProvider, toolExecutor, agentCompressor, toolRegistry, agentRepo)
 	agentUC.SetLogger(deps.logger)
 
-	mcpManager := mcpRepo.NewManager()
+	// Nil policy here is fail-closed: an embedder that declares no MCP
+	// allowlist gets a manager that launches nothing.
+	mcpManager := mcpRepo.NewManager(deps.cfg.MCPTransportPolicy)
 	mcpManager.SetRegistry(toolRegistry)
 
 	activities := orchestration.NewAgentActivities(agentUC, deps.logger).
 		WithMCPManager(mcpManager).
 		WithBilling(billingUC)
 
-	kit := &WorkerKit{activities: activities}
+	kit := &WorkerKit{activities: activities, runBackendResolver: deps.cfg.RunBackendResolver}
 
-	configureStreamingProjection(activities, kit, dataPlane)
+	configureStreamingProjection(activities, dataPlane)
 
 	registerToolsOnRegistry(deps.logger, toolRegistry)
 
@@ -433,23 +405,22 @@ func buildWorkerKit(ctx context.Context, deps *workerDependencies, dataPlane *St
 		}
 	}
 
-	return kit, batchWriter, nil
+	return kit, nil
 }
 
 // configureStreamingProjection wires the shared data plane onto the run
-// activities: the publisher mirrors the AG-UI timeline and the projector
-// controller attaches the durable milestone projection. The data plane is
+// activities: the publisher mirrors the AG-UI timeline and the milestone
+// recorder makes each fact durable before its publish. The data plane is
 // assembled once by the kit entry points (Centrifugo by default, degrading to
 // the in-process memstream bus when no base URL is configured), so a worker
 // always has a live transport.
-func configureStreamingProjection(activities *orchestration.AgentActivities, kit *WorkerKit, dataPlane *StreamingDataPlane) {
+func configureStreamingProjection(activities *orchestration.AgentActivities, dataPlane *StreamingDataPlane) {
 	if dataPlane == nil {
 		return
 	}
 
 	activities.WithStreamPublisher(dataPlane.Publisher)
-	activities.WithRunProjectionController(dataPlane.Projector)
-	kit.runProjection = dataPlane.Projector
+	activities.WithMilestoneRecorder(dataPlane.Facts)
 }
 
 func registerToolsOnRegistry(l *logger.Logger, toolRegistry *toolkit.ToolRegistry) {

@@ -1,6 +1,7 @@
 package config
 
 import (
+	"maps"
 	"testing"
 
 	agentos "github.com/TekkenSteve/GoAgent/agentos/control"
@@ -256,5 +257,68 @@ func TestAgentOSArtifactSchemas(t *testing.T) {
 	got := schemas[0]
 	if got.Ref != "schema:summary" || got.Description != "Summary artifact" || len(got.Schema) == 0 {
 		t.Fatalf("unexpected schema config: %#v", got)
+	}
+}
+
+func TestNexusPeersParsesTowns(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name string
+		json string
+		want map[string]string
+	}{
+		{
+			name: "a peer map resolves towns to endpoints",
+			json: `{"townb":"agentos-townb","townc":"agentos-townc"}`,
+			want: map[string]string{"townb": "agentos-townb", "townc": "agentos-townc"},
+		},
+		{
+			name: "an empty map means every node runs here",
+			json: `{}`,
+			want: map[string]string{},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			cfg := AgentFW{NexusPeersJSON: tt.json}
+
+			peers, err := cfg.NexusPeers()
+			if err != nil {
+				t.Fatalf("NexusPeers: %v", err)
+			}
+
+			if !maps.Equal(peers, tt.want) {
+				t.Fatalf("peers = %#v, want %#v", peers, tt.want)
+			}
+		})
+	}
+}
+
+func TestNexusPeersRejectsIncompleteEntries(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name string
+		json string
+	}{
+		{name: "a peer without an endpoint", json: `{"townb":""}`},
+		{name: "an endpoint without a peer name", json: `{"":"agentos-townb"}`},
+		{name: "malformed json", json: `{`},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			cfg := AgentFW{NexusPeersJSON: tt.json}
+
+			if _, err := cfg.NexusPeers(); err == nil {
+				t.Fatal("expected an error")
+			}
+		})
 	}
 }

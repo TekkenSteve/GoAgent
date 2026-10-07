@@ -17,6 +17,8 @@ type TaskQueues struct {
 	NativeLLM       string
 	NativeTool      string
 	Stream          string
+	// Nexus is the router queue hosting the AgentOS Nexus service.
+	Nexus string
 }
 
 // ErrTemporalTaskQueuesInvalid reports missing or invalid Temporal task queues.
@@ -57,6 +59,7 @@ func (q *TaskQueues) agentFWTaskQueues() agentfwconfig.TaskQueues {
 		NativeLLM:       q.NativeLLM,
 		NativeTool:      q.NativeTool,
 		Stream:          q.Stream,
+		Nexus:           q.Nexus,
 	}
 }
 
@@ -74,5 +77,6 @@ func taskQueuesFromAgentFW(q *agentfwconfig.TaskQueues) TaskQueues {
 		NativeLLM:       q.NativeLLM,
 		NativeTool:      q.NativeTool,
 		Stream:          q.Stream,
+		Nexus:           q.Nexus,
 	}
 }

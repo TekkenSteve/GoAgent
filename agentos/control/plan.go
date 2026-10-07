@@ -34,8 +34,11 @@ type PlanRef struct {
 
 // PlanNodeSpec describes one backend-owned child run in a RunPlan.
 type PlanNodeSpec struct {
-	NodeID     string         `json:"node_id"`
-	Capability string         `json:"capability,omitempty"`
+	NodeID     string `json:"node_id"`
+	Capability string `json:"capability,omitempty"`
+	// Peer names the town this node's run happens in, resolved through the
+	// deployment's peer → Nexus endpoint map. Empty runs it here.
+	Peer       string         `json:"peer,omitempty"`
 	Run        RunSpec        `json:"run"`
 	Inputs     []InputMapping `json:"inputs,omitempty"`
 	Outputs    []ArtifactSpec `json:"outputs,omitempty"`
