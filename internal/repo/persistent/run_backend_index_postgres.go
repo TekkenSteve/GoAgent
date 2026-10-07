@@ -2,29 +2,32 @@ package persistent
 
 import (
 	"context"
-	"database/sql"
 	"errors"
 	"fmt"
 
-	sq "github.com/Masterminds/squirrel"
 	agentos "github.com/TekkenSteve/GoAgent/agentos/control"
 	agentoscore "github.com/TekkenSteve/GoAgent/agentos/core"
 	"github.com/TekkenSteve/GoAgent/internal/entity"
 	"github.com/TekkenSteve/GoAgent/internal/pkg/postgres"
+	"github.com/TekkenSteve/GoAgent/internal/repo/persistent/sqlcgen"
 	"github.com/TekkenSteve/GoAgent/internal/usecase/agentosruntime"
-	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgtype"
 )
 
-// RunBackendIndexRepo persists run ownership for AgentOS routing.
+// RunBackendIndexRepo persists run ownership for AgentOS routing. Statements
+// and bindings come from queries/run_backend_index.sql; this file owns the
+// idempotency protocol around them, not the SQL.
 type RunBackendIndexRepo struct {
 	*postgres.Postgres
+
+	queries *sqlcgen.Queries
 }
 
 var errRunBackendIndexRecordRequired = errors.New("run backend index record is required")
 
 // NewRunBackendIndexRepo creates a Postgres-backed run backend index.
 func NewRunBackendIndexRepo(pg *postgres.Postgres) *RunBackendIndexRepo {
-	return &RunBackendIndexRepo{pg}
+	return &RunBackendIndexRepo{Postgres: pg, queries: sqlcgen.New(pg.Pool)}
 }
 
 // Bind records run backend ownership for a run.
@@ -63,21 +66,16 @@ func (r *RunBackendIndexRepo) Resolve(ctx context.Context, runID string) (agento
 
 // Get loads the run backend index record for the given run ID.
 func (r *RunBackendIndexRepo) Get(ctx context.Context, runID string) (entity.RunBackendIndexRecord, bool, error) {
-	query, args, err := r.Builder.
-		Select(runBackendIndexColumns()...).
-		From("run_backend_index").
-		Where(sq.Eq{_colRunID: runID}).
-		ToSql()
-	if err != nil {
-		return entity.RunBackendIndexRecord{}, false, fmt.Errorf("RunBackendIndexRepo - Get - builder: %w", err)
+	row, err := r.queries.GetRunBackendIndex(ctx, runID)
+	if missingRow(err) {
+		return entity.RunBackendIndexRecord{}, false, nil
 	}
 
-	record, exists, err := scanRunBackendIndexRecord(r.Pool.QueryRow(ctx, query, args...))
 	if err != nil {
 		return entity.RunBackendIndexRecord{}, false, fmt.Errorf("RunBackendIndexRepo - Get - query: %w", err)
 	}
 
-	return record, exists, nil
+	return runBackendIndexRecordFromRow(&row), true, nil
 }
 
 // GetRunBackend loads the backend ownership for the given run ID.
@@ -96,25 +94,40 @@ func (r *RunBackendIndexRepo) runByIdempotencyKey(ctx context.Context, record *e
 		return entity.RunBackendIndexRecord{}, false, fmt.Errorf("%w: run backend idempotency key is required", agentoscore.ErrInvalidRunSpec)
 	}
 
-	query, args, err := r.Builder.
-		Select(runBackendIndexColumns()...).
-		From("run_backend_index").
-		Where(sq.Eq{
-			_colAccountID:      record.AccountID,
-			_colProjectID:      record.ProjectID,
-			_colIDempotencyKey: idempotencyKey,
-		}).
-		ToSql()
-	if err != nil {
-		return entity.RunBackendIndexRecord{}, false, fmt.Errorf("RunBackendIndexRepo - runByIdempotencyKey - builder: %w", err)
+	row, err := r.queries.GetRunBackendIndexByIdempotencyKey(ctx, sqlcgen.GetRunBackendIndexByIdempotencyKeyParams{
+		AccountID:      record.AccountID,
+		ProjectID:      record.ProjectID,
+		IdempotencyKey: idempotencyKey,
+	})
+	if missingRow(err) {
+		return entity.RunBackendIndexRecord{}, false, nil
 	}
 
-	found, exists, err := scanRunBackendIndexRecord(r.Pool.QueryRow(ctx, query, args...))
 	if err != nil {
 		return entity.RunBackendIndexRecord{}, false, fmt.Errorf("RunBackendIndexRepo - runByIdempotencyKey - query: %w", err)
 	}
 
-	return found, exists, nil
+	return runBackendIndexRecordFromIdempotencyRow(&row), true, nil
+}
+
+// runBackendIndexRecordFromIdempotencyRow is the by-key twin of
+// runBackendIndexRecordFromRow: the two lookups project the same columns but
+// generate distinct row types.
+func runBackendIndexRecordFromIdempotencyRow(row *sqlcgen.GetRunBackendIndexByIdempotencyKeyRow) entity.RunBackendIndexRecord {
+	return entity.RunBackendIndexRecord{
+		RunID:          row.RunID,
+		PlanID:         row.PlanID,
+		NodeID:         row.NodeID,
+		ThreadID:       row.ThreadID,
+		AccountID:      row.AccountID,
+		ProjectID:      row.ProjectID,
+		BackendKind:    row.BackendKind,
+		BackendName:    row.BackendName,
+		IdempotencyKey: row.IdempotencyKey,
+		LifecycleState: row.LifecycleState,
+		CreatedAt:      row.CreatedAt,
+		UpdatedAt:      row.UpdatedAt,
+	}
 }
 
 func (r *RunBackendIndexRepo) upsert(ctx context.Context, record *entity.RunBackendIndexRecord, requireIdempotencyKey bool) error {
@@ -133,17 +146,23 @@ func (r *RunBackendIndexRepo) upsert(ctx context.Context, record *entity.RunBack
 		return err
 	}
 
-	query, args, err := buildRunBackendIndexUpsertSQL(r.Builder, record)
+	inserted, err := r.queries.InsertRunBackendIndex(ctx, sqlcgen.InsertRunBackendIndexParams{
+		RunID:          record.RunID,
+		PlanID:         nullableText(record.PlanID),
+		NodeID:         nullableText(record.NodeID),
+		ThreadID:       record.ThreadID,
+		AccountID:      record.AccountID,
+		ProjectID:      record.ProjectID,
+		BackendKind:    record.BackendKind,
+		BackendName:    record.BackendName,
+		IdempotencyKey: record.IdempotencyKey,
+		LifecycleState: record.LifecycleState,
+	})
 	if err != nil {
-		return fmt.Errorf("RunBackendIndexRepo - upsert - builder: %w", err)
+		return r.handleUpsertExecError(ctx, err, record)
 	}
 
-	tag, execErr := r.Pool.Exec(ctx, query, args...)
-	if execErr != nil {
-		return r.handleUpsertExecError(ctx, execErr, record)
-	}
-
-	if tag.RowsAffected() == 0 {
+	if inserted == 0 {
 		return r.handleUpsertConflict(ctx, record)
 	}
 
@@ -169,37 +188,6 @@ func (r *RunBackendIndexRepo) upsertByIdempotencyKey(ctx context.Context, record
 	}
 
 	return r.updateLifecycle(ctx, &existing, record)
-}
-
-func buildRunBackendIndexUpsertSQL(builder sq.StatementBuilderType, record *entity.RunBackendIndexRecord) (query string, args []any, err error) {
-	return builder.
-		Insert("run_backend_index").
-		Columns(
-			_colRunID,
-			_colPlanID,
-			"node_id",
-			"thread_id",
-			_colAccountID,
-			_colProjectID,
-			"backend_kind",
-			"backend_name",
-			_colIDempotencyKey,
-			"lifecycle_state",
-		).
-		Values(
-			record.RunID,
-			nullableString(record.PlanID),
-			nullableString(record.NodeID),
-			record.ThreadID,
-			record.AccountID,
-			record.ProjectID,
-			record.BackendKind,
-			record.BackendName,
-			record.IdempotencyKey,
-			record.LifecycleState,
-		).
-		Suffix("ON CONFLICT (run_id) DO NOTHING").
-		ToSql()
 }
 
 func (r *RunBackendIndexRepo) handleUpsertExecError(ctx context.Context, execErr error, record *entity.RunBackendIndexRecord) error {
@@ -271,29 +259,24 @@ func validatePlanNodeOwnershipRecord(record *entity.RunBackendIndexRecord) error
 type planNodeOwner struct {
 	accountID string
 	projectID string
-	nodeID    sql.NullString
-	runID     sql.NullString
+	nodeID    pgtype.Text
+	runID     pgtype.Text
 }
 
 func (r *RunBackendIndexRepo) planNodeOwner(ctx context.Context, planID, nodeID string) (planNodeOwner, error) {
-	var owner planNodeOwner
+	row, err := r.queries.GetPlanNodeOwner(ctx, sqlcgen.GetPlanNodeOwnerParams{
+		PlanID: planID,
+		NodeID: nodeID,
+	})
+	if missingRow(err) {
+		return planNodeOwner{}, fmt.Errorf("%w: %s", agentoscore.ErrPlanRouteNotFound, planID)
+	}
 
-	err := r.Pool.QueryRow(ctx, `
-SELECT p.account_id, p.project_id, n.node_id, n.run_id
-FROM plans p
-LEFT JOIN plan_nodes n
-    ON n.plan_id = p.plan_id
-   AND n.node_id = $2
-WHERE p.plan_id = $1`, planID, nodeID).Scan(&owner.accountID, &owner.projectID, &owner.nodeID, &owner.runID)
 	if err != nil {
-		if errors.Is(err, pgx.ErrNoRows) {
-			return planNodeOwner{}, fmt.Errorf("%w: %s", agentoscore.ErrPlanRouteNotFound, planID)
-		}
-
 		return planNodeOwner{}, fmt.Errorf("RunBackendIndexRepo - validatePlanNodeOwnership - query: %w", err)
 	}
 
-	return owner, nil
+	return planNodeOwner{accountID: row.AccountID, projectID: row.ProjectID, nodeID: row.NodeID, runID: row.RunID}, nil
 }
 
 func (o *planNodeOwner) validate(record *entity.RunBackendIndexRecord) error {
@@ -322,11 +305,10 @@ func (r *RunBackendIndexRepo) updateLifecycle(ctx context.Context, existing, req
 		return nil
 	}
 
-	_, err := r.Pool.Exec(ctx, `
-UPDATE run_backend_index
-SET lifecycle_state = $2,
-    updated_at = NOW()
-WHERE run_id = $1`, existing.RunID, lifecycle)
+	err := r.queries.UpdateRunBackendLifecycle(ctx, sqlcgen.UpdateRunBackendLifecycleParams{
+		RunID:          existing.RunID,
+		LifecycleState: lifecycle,
+	})
 	if err != nil {
 		return fmt.Errorf("RunBackendIndexRepo - updateLifecycle - exec: %w", err)
 	}
@@ -334,59 +316,29 @@ WHERE run_id = $1`, existing.RunID, lifecycle)
 	return nil
 }
 
-func runBackendIndexColumns() []string {
-	return []string{
-		_colRunID,
-		"COALESCE(plan_id, '') AS plan_id",
-		"COALESCE(node_id, '') AS node_id",
-		"thread_id",
-		_colAccountID,
-		_colProjectID,
-		"backend_kind",
-		"backend_name",
-		_colIDempotencyKey,
-		"lifecycle_state",
-		"created_at",
-		"updated_at",
+// runBackendIndexRecordFromRow shapes a generated by-run-id row into the
+// domain record. The nullable plan/node columns read as empty strings — the
+// record is a flat ownership fact, and "no plan" is the same fact as "empty
+// plan".
+func runBackendIndexRecordFromRow(row *sqlcgen.GetRunBackendIndexRow) entity.RunBackendIndexRecord {
+	return entity.RunBackendIndexRecord{
+		RunID:          row.RunID,
+		PlanID:         row.PlanID,
+		NodeID:         row.NodeID,
+		ThreadID:       row.ThreadID,
+		AccountID:      row.AccountID,
+		ProjectID:      row.ProjectID,
+		BackendKind:    row.BackendKind,
+		BackendName:    row.BackendName,
+		IdempotencyKey: row.IdempotencyKey,
+		LifecycleState: row.LifecycleState,
+		CreatedAt:      row.CreatedAt,
+		UpdatedAt:      row.UpdatedAt,
 	}
 }
 
-type runBackendIndexScanner interface {
-	Scan(dest ...any) error
-}
-
-func scanRunBackendIndexRecord(scanner runBackendIndexScanner) (entity.RunBackendIndexRecord, bool, error) {
-	var record entity.RunBackendIndexRecord
-
-	err := scanner.Scan(
-		&record.RunID,
-		&record.PlanID,
-		&record.NodeID,
-		&record.ThreadID,
-		&record.AccountID,
-		&record.ProjectID,
-		&record.BackendKind,
-		&record.BackendName,
-		&record.IdempotencyKey,
-		&record.LifecycleState,
-		&record.CreatedAt,
-		&record.UpdatedAt,
-	)
-	if err != nil {
-		if errors.Is(err, pgx.ErrNoRows) {
-			return entity.RunBackendIndexRecord{}, false, nil
-		}
-
-		return entity.RunBackendIndexRecord{}, false, err
-	}
-
-	return record, true, nil
-}
-
-func nullableString(value string) any {
-	if value == "" {
-		return nil
-	}
-
-	return value
+// nullableText turns an empty string into SQL NULL for the index's nullable
+// plan/node columns: standalone runs have no plan row to point at.
+func nullableText(value string) pgtype.Text {
+	return pgtype.Text{String: value, Valid: value != ""}
 }

@@ -27,8 +27,11 @@ import (
 
 const (
 	postgresIdentifierMaxBytes             = 63
-	postgresIntegrationDatabasePrefix      = "goagent_plan_"
 	postgresIntegrationDatabaseTokenLength = 12
+	// agentosPlanPostgresIntegrationPrefix names the throwaway databases the
+	// plan persistence tests create. Each suite carries its own prefix so a
+	// leaked database says which suite leaked it.
+	agentosPlanPostgresIntegrationPrefix = "goagent_plan_"
 )
 
 func TestAgentOSPlanPostgresDurablePersistence(t *testing.T) {
@@ -873,13 +876,13 @@ func TestAgentOSPlanPostgresPlanEventIdempotencyDoesNotAdvanceSequence(t *testin
 	assertPostgresPlanEventInsertRejected(t, pg, spec, "plan-event-json-payload-"+suffix, 101, map[string]any{"state": "wrong"}, mismatchedPayload)
 
 	missingIdentityJSON, err := json.Marshal(map[string]any{
-		"event_type":  string(first.EventType),
-		_colPlanID:    spec.PlanID,
-		_colAccountID: spec.AccountID,
-		_colProjectID: spec.ProjectID,
-		"sequence":    102,
-		"timestamp":   first.Timestamp,
-		"payload":     first.Payload,
+		"event_type": string(first.EventType),
+		"plan_id":    spec.PlanID,
+		"account_id": spec.AccountID,
+		"project_id": spec.ProjectID,
+		"sequence":   102,
+		"timestamp":  first.Timestamp,
+		"payload":    first.Payload,
 	})
 	if err != nil {
 		t.Fatalf("marshal missing identity event json: %v", err)
@@ -1078,7 +1081,7 @@ func TestAgentOSPlanPostgresPlanEventIdempotencyIndexIsTenantScoped(t *testing.T
 	_, pg, _ := newAgentOSPlanPostgresIntegrationDB(t)
 
 	columns := postgresIndexColumns(t, pg, "idx_plan_events_idempotency_key")
-	want := []string{_colAccountID, _colProjectID, _colPlanID, _colIDempotencyKey}
+	want := []string{"account_id", "project_id", "plan_id", "idempotency_key"}
 	if !slices.Equal(columns, want) {
 		t.Fatalf("idx_plan_events_idempotency_key columns = %#v, want %#v", columns, want)
 	}
@@ -1568,11 +1571,11 @@ func newAgentOSPlanPostgresIntegrationDB(t *testing.T) (context.Context, *postgr
 	if pgURL == "" {
 		t.Fatal("GOAGENT_POSTGRES_TEST_URL is required for postgres_integration tests")
 	}
-	suffix := postgresIntegrationSuffix(t)
+	suffix := postgresIntegrationSuffix(t, agentosPlanPostgresIntegrationPrefix)
 	isolatedURL, cleanup := createPostgresIntegrationDatabase(
 		t,
 		pgURL,
-		postgresIntegrationDatabasePrefix+suffix,
+		agentosPlanPostgresIntegrationPrefix+suffix,
 	)
 	t.Cleanup(cleanup)
 
@@ -1638,14 +1641,17 @@ WHERE datname = $1 AND pid <> pg_backend_pid()`, dbName)
 	return parsed.String(), cleanup
 }
 
-func postgresIntegrationSuffix(t *testing.T) string {
+// postgresIntegrationSuffix derives a unique, identifier-safe suffix for one
+// test's throwaway database. The prefix is a parameter because the budget
+// Postgres allows a name (NAMEDATALEN-1) is shared between the two.
+func postgresIntegrationSuffix(t *testing.T, prefix string) string {
 	t.Helper()
 
 	replacer := strings.NewReplacer("/", "_", "-", "_", ".", "_")
 	name := strings.ToLower(replacer.Replace(t.Name()))
 	token := strings.ReplaceAll(uuid.NewString(), "-", "")[:postgresIntegrationDatabaseTokenLength]
 	nameBudget := postgresIdentifierMaxBytes -
-		len(postgresIntegrationDatabasePrefix) -
+		len(prefix) -
 		1 -
 		postgresIntegrationDatabaseTokenLength
 	if len(name) > nameBudget {
@@ -1690,6 +1696,7 @@ func applyAgentOSPlanMigrations(t *testing.T, pg *postgres.Postgres) {
 		"20260620000021_constrain_plan_record_tenants.up.sql",
 		"20260621000001_create_agentos_processes.up.sql",
 		"20260621000002_create_agentos_process_platform_stores.up.sql",
+		"20261009000001_audit_hash_chain.up.sql",
 	} {
 		path := filepath.Join("..", "..", "..", "migrations", migration)
 		data, err := os.ReadFile(path)

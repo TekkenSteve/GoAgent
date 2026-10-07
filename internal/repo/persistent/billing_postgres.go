@@ -4,11 +4,11 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strconv"
 
-	sq "github.com/Masterminds/squirrel"
 	"github.com/TekkenSteve/GoAgent/internal/entity"
 	"github.com/TekkenSteve/GoAgent/internal/pkg/postgres"
-	"github.com/jackc/pgx/v5"
+	"github.com/TekkenSteve/GoAgent/internal/repo/persistent/sqlcgen"
 )
 
 // Sentinel errors.
@@ -17,49 +17,38 @@ var (
 	ErrNegativeLimitOffset = errors.New("limit and offset must be non-negative")
 )
 
-// BillingRepo implements repo.CreditManager with Postgres.
+// BillingRepo implements repo.CreditManager with Postgres. Statements and
+// bindings come from queries/billing.sql; NUMERIC columns bind as float64 to
+// match the Go money types.
 type BillingRepo struct {
 	*postgres.Postgres
+
+	queries *sqlcgen.Queries
 }
 
 // NewBillingRepo creates a Postgres-backed credit manager.
 func NewBillingRepo(pg *postgres.Postgres) *BillingRepo {
-	return &BillingRepo{pg}
+	return &BillingRepo{Postgres: pg, queries: sqlcgen.New(pg.Pool)}
 }
 
 // GetBalance returns the current credit balance for an account.
 // Returns zero balance if the account has no row yet (soft-create).
 func (r *BillingRepo) GetBalance(ctx context.Context, accountID string) (entity.CreditAccount, error) {
-	sql, args, err := r.Builder.
-		Select(_colAccountID, "balance", "currency", "version", "updated_at").
-		From("credit_accounts").
-		Where(sq.Eq{_colAccountID: accountID}).
-		ToSql()
-	if err != nil {
-		return entity.CreditAccount{}, fmt.Errorf("BillingRepo - GetBalance - builder: %w", err)
+	row, err := r.queries.GetCreditAccount(ctx, accountID)
+	if missingRow(err) {
+		return entity.CreditAccount{AccountID: accountID, Balance: 0, Currency: "USD"}, nil
 	}
 
-	var (
-		acct    entity.CreditAccount
-		version int64
-	)
-
-	err = r.Pool.QueryRow(ctx, sql, args...).Scan(
-		&acct.AccountID, &acct.Balance, &acct.Currency, &version, &acct.UpdatedAt,
-	)
 	if err != nil {
-		if errors.Is(err, pgx.ErrNoRows) {
-			return entity.CreditAccount{
-				AccountID: accountID,
-				Balance:   0,
-				Currency:  "USD",
-			}, nil
-		}
-
 		return entity.CreditAccount{}, fmt.Errorf("BillingRepo - GetBalance - query: %w", err)
 	}
 
-	return acct, nil
+	return entity.CreditAccount{
+		AccountID: row.AccountID,
+		Balance:   entity.Money(row.Balance),
+		Currency:  row.Currency,
+		UpdatedAt: row.UpdatedAt,
+	}, nil
 }
 
 // Deduct decreases the account balance by amount. Returns the transaction record.
@@ -67,35 +56,32 @@ func (r *BillingRepo) GetBalance(ctx context.Context, accountID string) (entity.
 func (r *BillingRepo) Deduct(ctx context.Context, accountID string, amount entity.Money, description string) (entity.CreditTransaction, error) {
 	amountFloat := float64(amount)
 
-	// Optimistic-lock update: balance -= amount, version++
-	tag, err := r.Pool.Exec(ctx, `
-		UPDATE credit_accounts
-		SET balance = balance - $2, version = version + 1, updated_at = NOW()
-		WHERE account_id = $1 AND balance >= $2
-	`, accountID, amountFloat)
+	// The WHERE clause is the sufficiency guard: zero affected rows is the
+	// insufficient-balance case, so the check cannot race with the debit.
+	deducted, err := r.queries.DeductCreditBalance(ctx, sqlcgen.DeductCreditBalanceParams{
+		AccountID: accountID,
+		Balance:   amountFloat,
+	})
 	if err != nil {
 		return entity.CreditTransaction{}, fmt.Errorf("BillingRepo - Deduct - update: %w", err)
 	}
 
-	if tag.RowsAffected() == 0 {
+	if deducted == 0 {
 		return entity.CreditTransaction{}, fmt.Errorf("BillingRepo - Deduct - %w: %s", ErrInsufficientBalance, accountID)
 	}
 
-	// Record in ledger
-	var txn entity.CreditTransaction
-
-	err = r.Pool.QueryRow(ctx, `
-		INSERT INTO credit_ledger (account_id, amount, type, description)
-		VALUES ($1, $2, $3, $4)
-		RETURNING id, account_id, amount, type, description, created_at
-	`, accountID, -amountFloat, entity.TxnUsage, description).Scan(
-		&txn.TransactionID, &txn.AccountID, &txn.Amount, &txn.Type, &txn.Description, &txn.CreatedAt,
-	)
+	// Record in ledger with the direction carried by the sign.
+	row, err := r.queries.InsertCreditLedger(ctx, sqlcgen.InsertCreditLedgerParams{
+		AccountID:   accountID,
+		Amount:      -amountFloat,
+		Type:        entity.TxnUsage,
+		Description: description,
+	})
 	if err != nil {
 		return entity.CreditTransaction{}, fmt.Errorf("BillingRepo - Deduct - insert ledger: %w", err)
 	}
 
-	return txn, nil
+	return creditTransactionFromRow(&row), nil
 }
 
 // AddCredits increases the account balance by amount. Returns the transaction record.
@@ -103,16 +89,10 @@ func (r *BillingRepo) Deduct(ctx context.Context, accountID string, amount entit
 func (r *BillingRepo) AddCredits(ctx context.Context, accountID string, amount entity.Money, description string) (entity.CreditTransaction, error) {
 	amountFloat := float64(amount)
 
-	// Upsert: insert if not exists, otherwise update balance
-	_, err := r.Pool.Exec(ctx, `
-		INSERT INTO credit_accounts (account_id, balance, currency)
-		VALUES ($1, $2, 'USD')
-		ON CONFLICT (account_id)
-		DO UPDATE SET balance = credit_accounts.balance + $2,
-		              version = credit_accounts.version + 1,
-		              updated_at = NOW()
-	`, accountID, amountFloat)
-	if err != nil {
+	if err := r.queries.UpsertCreditAccount(ctx, sqlcgen.UpsertCreditAccountParams{
+		AccountID: accountID,
+		Balance:   amountFloat,
+	}); err != nil {
 		return entity.CreditTransaction{}, fmt.Errorf("BillingRepo - AddCredits - upsert: %w", err)
 	}
 
@@ -122,20 +102,17 @@ func (r *BillingRepo) AddCredits(ctx context.Context, accountID string, amount e
 		txnType = entity.TxnAdjust
 	}
 
-	var txn entity.CreditTransaction
-
-	err = r.Pool.QueryRow(ctx, `
-		INSERT INTO credit_ledger (account_id, amount, type, description)
-		VALUES ($1, $2, $3, $4)
-		RETURNING id, account_id, amount, type, description, created_at
-	`, accountID, amountFloat, txnType, description).Scan(
-		&txn.TransactionID, &txn.AccountID, &txn.Amount, &txn.Type, &txn.Description, &txn.CreatedAt,
-	)
+	row, err := r.queries.InsertCreditLedger(ctx, sqlcgen.InsertCreditLedgerParams{
+		AccountID:   accountID,
+		Amount:      amountFloat,
+		Type:        txnType,
+		Description: description,
+	})
 	if err != nil {
 		return entity.CreditTransaction{}, fmt.Errorf("BillingRepo - AddCredits - insert ledger: %w", err)
 	}
 
-	return txn, nil
+	return creditTransactionFromRow(&row), nil
 }
 
 // GetHistory retrieves credit transactions for an account, newest first.
@@ -144,39 +121,26 @@ func (r *BillingRepo) GetHistory(ctx context.Context, accountID string, limit, o
 		return nil, ErrNegativeLimitOffset
 	}
 
-	sql, args, err := r.Builder.
-		Select("id", _colAccountID, "amount", "type", "description", "created_at").
-		From("credit_ledger").
-		Where(sq.Eq{_colAccountID: accountID}).
-		OrderBy("created_at DESC").
-		Limit(uint64(limit)).
-		Offset(uint64(offset)).
-		ToSql()
-	if err != nil {
-		return nil, fmt.Errorf("BillingRepo - GetHistory - builder: %w", err)
-	}
-
-	rows, err := r.Pool.Query(ctx, sql, args...)
+	rows, err := r.queries.ListCreditHistory(ctx, sqlcgen.ListCreditHistoryParams{
+		AccountID: accountID,
+		Limit:     clampInt32(limit),
+		Offset:    clampInt32(offset),
+	})
 	if err != nil {
 		return nil, fmt.Errorf("BillingRepo - GetHistory - query: %w", err)
 	}
-	defer rows.Close()
 
-	var txns []entity.CreditTransaction
+	txns := make([]entity.CreditTransaction, 0, len(rows))
 
-	for rows.Next() {
-		var txn entity.CreditTransaction
-		if err := rows.Scan(
-			&txn.TransactionID, &txn.AccountID, &txn.Amount, &txn.Type, &txn.Description, &txn.CreatedAt,
-		); err != nil {
-			return nil, fmt.Errorf("BillingRepo - GetHistory - scan: %w", err)
-		}
-
-		txns = append(txns, txn)
-	}
-
-	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("BillingRepo - GetHistory - rows: %w", err)
+	for i := range rows {
+		txns = append(txns, entity.CreditTransaction{
+			TransactionID: strconv.FormatInt(rows[i].ID, 10),
+			AccountID:     rows[i].AccountID,
+			Amount:        entity.Money(rows[i].Amount),
+			Type:          rows[i].Type,
+			Description:   rows[i].Description,
+			CreatedAt:     rows[i].CreatedAt,
+		})
 	}
 
 	return txns, nil
@@ -184,14 +148,34 @@ func (r *BillingRepo) GetHistory(ctx context.Context, accountID string, limit, o
 
 // CreateUsageRecord persists an LLM usage record for audit and billing history.
 func (r *BillingRepo) CreateUsageRecord(ctx context.Context, record *entity.UsageRecord) error {
-	_, err := r.Pool.Exec(ctx, `
-		INSERT INTO usage_records (record_id, run_id, account_id, model_id, prompt_tokens, completion_tokens, total_tokens, cost)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
-	`, record.RecordID, record.RunID, record.AccountID, record.ModelID,
-		record.PromptTokens, record.CompletionTokens, record.TotalTokens, float64(record.Cost))
+	err := r.queries.InsertUsageRecord(ctx, sqlcgen.InsertUsageRecordParams{
+		RecordID:         record.RecordID,
+		RunID:            record.RunID,
+		AccountID:        record.AccountID,
+		ModelID:          record.ModelID,
+		PromptTokens:     clampInt32(record.PromptTokens),
+		CompletionTokens: clampInt32(record.CompletionTokens),
+		TotalTokens:      clampInt32(record.TotalTokens),
+		Cost:             float64(record.Cost),
+	})
 	if err != nil {
 		return fmt.Errorf("BillingRepo - CreateUsageRecord - insert: %w", err)
 	}
 
 	return nil
+}
+
+// creditTransactionFromRow shapes a ledger row into the domain transaction.
+// The generated row type is the one the RETURNING clause produces, so the
+// mapping lives once here instead of in every scan call site the builder
+// version repeated.
+func creditTransactionFromRow(row *sqlcgen.CreditLedger) entity.CreditTransaction {
+	return entity.CreditTransaction{
+		TransactionID: strconv.FormatInt(row.ID, 10),
+		AccountID:     row.AccountID,
+		Amount:        entity.Money(row.Amount),
+		Type:          row.Type,
+		Description:   row.Description,
+		CreatedAt:     row.CreatedAt,
+	}
 }
