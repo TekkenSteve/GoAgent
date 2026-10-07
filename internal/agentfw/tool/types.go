@@ -6,29 +6,22 @@ import (
 	"time"
 )
 
-// Tier is a subscription tier used by tool authorization policy.
-type Tier string
-
-// TierFree, TierPro, and TierEnterprise are the subscription tiers used by
-// tool authorization policy.
-const (
-	TierFree       Tier = "free"
-	TierPro        Tier = "pro"
-	TierEnterprise Tier = "enterprise"
-)
-
 // Request describes a single tool call request.
 type Request struct {
-	RunID          string
-	ToolCallID     string
-	ToolName       string
-	AccountID      string
-	ProjectID      string
-	Tier           Tier
+	RunID      string
+	ToolCallID string
+	ToolName   string
+	AccountID  string
+	ProjectID  string
+	// IdempotencyKey identifies this call across attempts. A tool that is
+	// retried — by the pipeline or by the platform — carries the same key, so
+	// a store can answer with the first attempt's result instead of running
+	// the side effect twice.
 	IdempotencyKey string
-	ConflictDomain string
-	SideEffecting  bool
-	Args           map[string]any
+	// SideEffecting marks a call that changes something outside this process.
+	// It is what keeps the pipeline from retrying it.
+	SideEffecting bool
+	Args          map[string]any
 }
 
 // RawResult is the executor output before normalization.
@@ -36,34 +29,28 @@ type RawResult struct {
 	Payload map[string]any
 }
 
-// IsolationLevel indicates the execution isolation semantics.
-type IsolationLevel string
-
-// IsolationNone, IsolationReadCommitted, and IsolationSerializable are the
-// execution isolation semantics available to tools.
-const (
-	IsolationNone          IsolationLevel = "none"
-	IsolationReadCommitted IsolationLevel = "read_committed"
-	IsolationSerializable  IsolationLevel = "serializable"
-)
-
-// Result is normalized tool execution output.
+// Result is a finished tool call.
 type Result struct {
-	RunID              string
-	ToolCallID         string
-	ToolName           string
-	Output             map[string]any
-	PersistedRef       string
-	FromIdempotent     bool
-	Attempts           int
-	ExecutionIsolation ExecutionIsolation
+	RunID          string
+	ToolCallID     string
+	ToolName       string
+	Output         map[string]any
+	FromIdempotent bool
+	Attempts       int
 }
 
 // Policy defines per-tool timeout/retry/idempotency rules.
 type Policy struct {
-	Timeout          time.Duration
-	MaxAttempts      int
-	RetryBackoff     time.Duration
+	// Timeout bounds one attempt.
+	Timeout time.Duration
+	// MaxAttempts bounds how many times the executor runs. One is the
+	// default: retrying a call that may already have had its side effect is
+	// how a transient failure becomes a duplicate.
+	MaxAttempts int
+	// RetryBackoff waits between attempts.
+	RetryBackoff time.Duration
+	// EnableIdempotent makes the pipeline consult the idempotency store
+	// before executing, so a repeated key answers with the recorded result.
 	EnableIdempotent bool
 }
 
@@ -82,16 +69,6 @@ type Executor interface {
 	Execute(ctx context.Context, req *Request) (RawResult, error)
 }
 
-// Normalizer converts raw executor payload into standard output.
-type Normalizer interface {
-	Normalize(ctx context.Context, req *Request, raw RawResult) (map[string]any, error)
-}
-
-// Persister stores normalized output and returns a reference id.
-type Persister interface {
-	Persist(ctx context.Context, req *Request, normalized map[string]any) (string, error)
-}
-
 // PolicyProvider returns per-tool policy.
 type PolicyProvider interface {
 	GetPolicy(toolName string) Policy
@@ -106,7 +83,7 @@ type IdempotencyStore interface {
 // ErrValidation indicates the request payload is invalid.
 var ErrValidation = errors.New("tool validation failed")
 
-// ErrAuthorization indicates tier/policy denied execution.
+// ErrAuthorization indicates a policy denied execution.
 var ErrAuthorization = errors.New("tool authorization failed")
 
 // ErrExecution indicates the tool call itself failed.

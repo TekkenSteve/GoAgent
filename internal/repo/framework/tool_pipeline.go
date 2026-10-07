@@ -27,9 +27,7 @@ func (a *ToolPipeline) Execute(ctx context.Context, req *entity.ToolRequest) (en
 		ToolName:       req.ToolName,
 		AccountID:      req.AccountID,
 		ProjectID:      req.ProjectID,
-		Tier:           agenttool.Tier(req.Tier),
 		IdempotencyKey: req.IdempotencyKey,
-		ConflictDomain: req.ConflictDomain,
 		SideEffecting:  req.SideEffecting,
 		Args:           req.Args,
 	}
@@ -40,13 +38,11 @@ func (a *ToolPipeline) Execute(ctx context.Context, req *entity.ToolRequest) (en
 	}
 
 	return entity.ToolResult{
-		RunID:              result.RunID,
-		ToolCallID:         result.ToolCallID,
-		ToolName:           result.ToolName,
-		Output:             result.Output,
-		PersistedRef:       result.PersistedRef,
-		FromIdempotent:     result.FromIdempotent,
-		Attempts:           result.Attempts,
-		ExecutionIsolation: entity.ExecutionIsolation(result.ExecutionIsolation),
+		RunID:          result.RunID,
+		ToolCallID:     result.ToolCallID,
+		ToolName:       result.ToolName,
+		Output:         result.Output,
+		FromIdempotent: result.FromIdempotent,
+		Attempts:       result.Attempts,
 	}, nil
 }

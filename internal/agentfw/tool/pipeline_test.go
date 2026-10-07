@@ -3,7 +3,6 @@ package tool
 import (
 	"context"
 	"errors"
-	"fmt"
 	"sync"
 	"testing"
 	"time"
@@ -12,80 +11,53 @@ import (
 )
 
 var (
-	errTestMissingQuery = errors.New("missing query")
 	errTestTemporary    = errors.New("temporary")
+	errTestMissingQuery = errors.New("missing query")
 )
 
-type allowAllAuthorizer struct{}
+// ——— test doubles ———
 
-func (allowAllAuthorizer) Authorize(_ context.Context, _ *Request) error { return nil }
-
-type requiredArgValidator struct{}
-
-func (requiredArgValidator) Validate(_ context.Context, req *Request) error {
-	if _, ok := req.Args["query"]; !ok {
-		return errTestMissingQuery
-	}
-
-	return nil
-}
-
-type passthroughNormalizer struct{}
-
-func (passthroughNormalizer) Normalize(_ context.Context, _ *Request, raw RawResult) (map[string]any, error) {
-	return raw.Payload, nil
-}
-
-type mapPersister struct {
-	mu      sync.Mutex
-	data    map[string]map[string]any
-	counter int
-}
-
-func newMapPersister() *mapPersister {
-	return &mapPersister{data: map[string]map[string]any{}}
-}
-
-func (p *mapPersister) Persist(_ context.Context, _ *Request, normalized map[string]any) (string, error) {
-	p.mu.Lock()
-	defer p.mu.Unlock()
-
-	p.counter++
-	ref := fmt.Sprintf("persist-%d", p.counter)
-	p.data[ref] = normalized
-
-	return ref, nil
-}
-
-type staticPolicyProvider struct {
-	policy Policy
-}
-
-func (s staticPolicyProvider) GetPolicy(_ string) Policy { return s.policy }
-
-type transientError struct{ error }
-
+// flakyExecutor fails its first failFirst calls, then succeeds.
 type flakyExecutor struct {
-	mu            sync.Mutex
-	calls         int
-	failFirst     int
-	lastArgsToken string
+	mu        sync.Mutex
+	calls     int
+	failFirst int
 }
 
-func (e *flakyExecutor) Execute(_ context.Context, req *Request) (RawResult, error) {
+func (e *flakyExecutor) Execute(_ context.Context, _ *Request) (RawResult, error) {
 	e.mu.Lock()
 	defer e.mu.Unlock()
 
 	e.calls++
-	if e.calls <= e.failFirst {
-		return RawResult{}, transientError{error: errTestTemporary}
-	}
 
-	if token, ok := req.Args["api_token"].(string); ok {
-		e.lastArgsToken = token
+	if e.calls <= e.failFirst {
+		return RawResult{}, errTestTemporary
 	}
 
 	return RawResult{Payload: map[string]any{"value": "ok", "api_token": "secret-token"}}, nil
+}
+
+// alwaysFailExecutor fails every attempt, the way a genuinely broken tool or a
+// dead dependency does.
+type alwaysFailExecutor struct {
+	mu    sync.Mutex
+	calls int
+}
+
+func (e *alwaysFailExecutor) Execute(_ context.Context, _ *Request) (RawResult, error) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+
+	e.calls++
+
+	return RawResult{Payload: map[string]any{"partial": "garbage"}}, errTestTemporary
+}
+
+func (e *alwaysFailExecutor) callCount() int {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+
+	return e.calls
 }
 
 type mapIdempotency struct {
@@ -115,65 +87,125 @@ func (m *mapIdempotency) Put(_ context.Context, key string, result *Result) erro
 	return nil
 }
 
-type auditSink struct {
-	mu      sync.Mutex
-	records []AuditRecord
-}
+type requiredArgValidator struct{}
 
-func (a *auditSink) Write(_ context.Context, record *AuditRecord) error {
-	a.mu.Lock()
-	defer a.mu.Unlock()
-
-	a.records = append(a.records, *record)
+func (requiredArgValidator) Validate(_ context.Context, req *Request) error {
+	if _, ok := req.Args["query"]; !ok {
+		return errTestMissingQuery
+	}
 
 	return nil
 }
 
-func TestPipelineValidateAuthorizeExecuteNormalizePersist(t *testing.T) {
+type staticPolicyProvider struct{ policy Policy }
+
+func (s staticPolicyProvider) GetPolicy(_ string) Policy { return s.policy }
+
+func testPipelineWith(t *testing.T, executor Executor, policies PolicyProvider) *Pipeline {
+	t.Helper()
+
+	return testPipeline(t, &PipelineConfig{
+		Validator:  requiredArgValidator{},
+		Authorizer: allowAllAuthorizer{},
+		Executor:   executor,
+		Policies:   policies,
+	})
+}
+
+// ——— tests ———
+
+func TestPipelineValidatesAuthorizesExecutesAndRedacts(t *testing.T) {
 	t.Parallel()
 
 	executor := &flakyExecutor{}
-	persister := newMapPersister()
+	pipeline := testPipelineWith(t, executor, &DefaultPolicyProvider{})
 
-	p := Pipeline{
-		Validator:   requiredArgValidator{},
-		Authorizer:  allowAllAuthorizer{},
-		Executor:    executor,
-		Normalizer:  passthroughNormalizer{},
-		Persister:   persister,
-		Policies:    staticPolicyProvider{policy: Policy{Timeout: time.Second, MaxAttempts: 1}},
-		Isolation:   SideEffectIsolationPolicy{},
-		Redactor:    DefaultSecretRedactor{},
-		Idempotency: newMapIdempotency(),
-	}
-
-	result, err := p.Execute(context.Background(), &Request{
+	result, err := pipeline.Execute(context.Background(), &Request{
 		RunID:      "run-1",
 		ToolCallID: "call-1",
 		ToolName:   "search",
 		Args:       map[string]any{"query": "hello"},
 	})
 	require.NoError(t, err)
+
 	require.Equal(t, "call-1", result.ToolCallID)
 	require.Equal(t, 1, result.Attempts)
-	require.NotEmpty(t, result.PersistedRef)
+	require.Equal(t, "ok", result.Output["value"])
 	require.Equal(t, "[REDACTED]", result.Output["api_token"])
 }
 
-func TestPipelineRetryAndIdempotency(t *testing.T) {
+func TestPipelineValidationFailureStopsBeforeTheExecutor(t *testing.T) {
+	t.Parallel()
+
+	executor := &flakyExecutor{}
+	pipeline := testPipelineWith(t, executor, &DefaultPolicyProvider{})
+
+	_, err := pipeline.Execute(context.Background(), &Request{ToolName: "search", Args: map[string]any{}})
+
+	require.ErrorIs(t, err, ErrValidation)
+	require.Zero(t, executor.calls, "an invalid call must not reach the tool")
+}
+
+// A tool that fails every attempt must surface as an error carrying the
+// attempt count. It once returned the last attempt's payload with a nil error,
+// which recorded a tool result that never happened.
+func TestPipelineExhaustedRetriesFails(t *testing.T) {
+	t.Parallel()
+
+	executor := &alwaysFailExecutor{}
+	pipeline := testPipelineWith(t, executor, staticPolicyProvider{
+		policy: Policy{Timeout: time.Second, MaxAttempts: 3, RetryBackoff: time.Millisecond},
+	})
+
+	result, err := pipeline.Execute(context.Background(), &Request{
+		ToolName: "search",
+		Args:     map[string]any{"query": "go"},
+	})
+	require.Error(t, err)
+	require.ErrorIs(t, err, ErrExecution)
+	require.Contains(t, err.Error(), "3 attempt(s)")
+	require.Empty(t, result.Output, "a failed call has no output to record")
+	require.Equal(t, 3, executor.callCount())
+}
+
+// The baseline policy runs a tool once. Retrying a call that may already have
+// had its side effect is how a transient failure becomes a duplicate.
+func TestDefaultPolicyDoesNotRetry(t *testing.T) {
+	t.Parallel()
+
+	executor := &alwaysFailExecutor{}
+	pipeline := testPipelineWith(t, executor, &DefaultPolicyProvider{})
+
+	_, err := pipeline.Execute(context.Background(), &Request{
+		ToolName: "payments.charge",
+		Args:     map[string]any{"query": "charge"},
+	})
+	require.Error(t, err)
+	require.Equal(t, 1, executor.callCount(), "the baseline makes one attempt")
+}
+
+func TestDefaultPolicyOverridePerTool(t *testing.T) {
+	t.Parallel()
+
+	provider := &DefaultPolicyProvider{
+		Policies: map[string]Policy{
+			"flaky_search": {Timeout: time.Second, MaxAttempts: 3, RetryBackoff: time.Millisecond},
+		},
+	}
+
+	require.Equal(t, 3, provider.GetPolicy("flaky_search").MaxAttempts)
+	require.Equal(t, 1, provider.GetPolicy("payments.charge").MaxAttempts)
+	require.Equal(t, defaultToolTimeout, provider.GetPolicy("payments.charge").Timeout)
+}
+
+// The same key answers with the recorded result, so the tool runs once.
+func TestPipelineIdempotencyAnswersWithTheRecordedResult(t *testing.T) {
 	t.Parallel()
 
 	executor := &flakyExecutor{failFirst: 1}
-	p := Pipeline{
-		Validator:   requiredArgValidator{},
-		Authorizer:  allowAllAuthorizer{},
-		Executor:    executor,
-		Normalizer:  passthroughNormalizer{},
-		Persister:   newMapPersister(),
-		Policies:    staticPolicyProvider{policy: Policy{Timeout: time.Second, MaxAttempts: 3, RetryBackoff: time.Millisecond, EnableIdempotent: true}},
-		Idempotency: newMapIdempotency(),
-		Redactor:    DefaultSecretRedactor{},
-	}
+	pipeline := testPipelineWith(t, executor, staticPolicyProvider{
+		policy: Policy{Timeout: time.Second, MaxAttempts: 3, RetryBackoff: time.Millisecond, EnableIdempotent: true},
+	})
 
 	req := Request{
 		RunID:          "run-1",
@@ -183,62 +215,37 @@ func TestPipelineRetryAndIdempotency(t *testing.T) {
 		Args:           map[string]any{"query": "a"},
 	}
 
-	first, err := p.Execute(context.Background(), &req)
+	first, err := pipeline.Execute(context.Background(), &req)
 	require.NoError(t, err)
 	require.Equal(t, 2, first.Attempts)
+	require.False(t, first.FromIdempotent)
 
-	second, err := p.Execute(context.Background(), &req)
+	second, err := pipeline.Execute(context.Background(), &req)
 	require.NoError(t, err)
 	require.True(t, second.FromIdempotent)
-	require.Equal(t, 2, executor.calls)
+	require.Equal(t, first.Output, second.Output)
+	require.Equal(t, 2, executor.calls, "the second call must not touch the tool")
 }
 
-func TestConflictDomainScheduling(t *testing.T) {
+// Without the idempotency flag the pipeline executes every call: repeating a
+// tool is the tool's business unless a policy says otherwise.
+func TestPipelineWithoutIdempotentPolicyReexecutes(t *testing.T) {
 	t.Parallel()
 
-	batches := BuildExecutionPlan([]Request{
-		{ToolCallID: "1", ConflictDomain: "db"},
-		{ToolCallID: "2", ConflictDomain: "db"},
-		{ToolCallID: "3", ConflictDomain: "cache"},
-		{ToolCallID: "4", ConflictDomain: ""},
-	}, 3)
+	executor := &flakyExecutor{}
+	pipeline := testPipelineWith(t, executor, &DefaultPolicyProvider{})
 
-	require.Len(t, batches, 2)
-	require.Len(t, batches[0].Requests, 3)
-	require.Len(t, batches[1].Requests, 1)
-	require.Equal(t, "2", batches[1].Requests[0].ToolCallID)
-}
-
-func TestTierAuthorizationAndAudit(t *testing.T) {
-	t.Parallel()
-
-	audit := &auditSink{}
-	auth := TierAuthorizer{
-		Policy: StaticTierPolicy{
-			Allow: map[Tier]map[string]struct{}{
-				TierPro: {"search": {}},
-			},
-		},
-		Audit: audit,
+	req := Request{
+		ToolName:       "search",
+		IdempotencyKey: "idem-1",
+		Args:           map[string]any{"query": "a"},
 	}
 
-	err := auth.Authorize(context.Background(), &Request{
-		RunID:     "run-2",
-		AccountID: "acc",
-		ProjectID: "proj",
-		ToolName:  "admin-tool",
-		Tier:      TierFree,
-	})
-	require.Error(t, err)
-	require.ErrorIs(t, err, ErrAuthorization)
-	require.Len(t, audit.records, 1)
-	require.False(t, audit.records[0].Allowed)
-}
+	_, err := pipeline.Execute(context.Background(), &req)
+	require.NoError(t, err)
 
-func TestIsolationRouting(t *testing.T) {
-	t.Parallel()
+	_, err = pipeline.Execute(context.Background(), &req)
+	require.NoError(t, err)
 
-	policy := SideEffectIsolationPolicy{}
-	require.Equal(t, ExecutionIsolationShared, policy.Resolve(&Request{ToolName: "search"}))
-	require.Equal(t, ExecutionIsolationIsolated, policy.Resolve(&Request{ToolName: "write-db", SideEffecting: true}))
+	require.Equal(t, 2, executor.calls)
 }

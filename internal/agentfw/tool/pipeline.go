@@ -2,26 +2,101 @@ package tool
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
 )
 
 const defaultToolTimeout = 10 * time.Second
 
-// Pipeline executes standardized tool stages.
+// Pipeline runs a tool call through its stages: validate, authorize, resolve
+// idempotency, execute, redact, record.
+//
+// Build it with NewPipeline. The stages that protect the host are not optional
+// — an authorization check that is silently absent, or a side-effecting call
+// that silently loses its idempotency, is worse than a service that refuses to
+// start, because nothing about a running service says the check is missing.
 type Pipeline struct {
 	Validator   Validator
 	Authorizer  Authorizer
 	Executor    Executor
-	Normalizer  Normalizer
-	Persister   Persister
+	Redactor    SecretRedactor
 	Policies    PolicyProvider
 	Idempotency IdempotencyStore
-	Isolation   IsolationPolicy
-	Redactor    SecretRedactor
 }
 
-// Execute runs validate -> authorize -> execute -> normalize -> persist.
+// PipelineConfig is the assembly input for NewPipeline.
+type PipelineConfig struct {
+	// Validator checks the request's arguments. Optional: the tool's own
+	// schema is the primary check, and a deployment without extra rules
+	// passes nil.
+	Validator Validator
+	// Authorizer decides whether this call may run. Required.
+	Authorizer Authorizer
+	// Executor performs the call. Required.
+	Executor Executor
+	// Redactor masks credentials in the recorded output. Required.
+	Redactor SecretRedactor
+	// Policies supplies per-tool rules. Required; DefaultPolicyProvider is
+	// the conservative baseline.
+	Policies PolicyProvider
+	// Idempotency resolves a repeated call to its first result. Required:
+	// without it, a retried side effect runs twice.
+	Idempotency IdempotencyStore
+}
+
+// pipelineRequiredStages is how many protective stages NewPipeline insists on.
+const pipelineRequiredStages = 5
+
+// ErrPipelineAssembly reports a pipeline built without a stage that protects
+// the host.
+var ErrPipelineAssembly = errors.New("tool pipeline assembly incomplete")
+
+// NewPipeline assembles the execution pipeline, refusing to build one whose
+// protective stages are missing.
+func NewPipeline(cfg *PipelineConfig) (*Pipeline, error) {
+	if cfg == nil {
+		return nil, fmt.Errorf("%w: no configuration", ErrPipelineAssembly)
+	}
+
+	// Five stages must be present; the slice is sized for them.
+	missing := make([]string, 0, pipelineRequiredStages)
+
+	if cfg.Authorizer == nil {
+		missing = append(missing, "Authorizer")
+	}
+
+	if cfg.Executor == nil {
+		missing = append(missing, "Executor")
+	}
+
+	if cfg.Redactor == nil {
+		missing = append(missing, "Redactor")
+	}
+
+	if cfg.Policies == nil {
+		missing = append(missing, "Policies")
+	}
+
+	if cfg.Idempotency == nil {
+		missing = append(missing, "Idempotency")
+	}
+
+	if len(missing) > 0 {
+		return nil, fmt.Errorf("%w: %v", ErrPipelineAssembly, missing)
+	}
+
+	return &Pipeline{
+		Validator:   cfg.Validator,
+		Authorizer:  cfg.Authorizer,
+		Executor:    cfg.Executor,
+		Redactor:    cfg.Redactor,
+		Policies:    cfg.Policies,
+		Idempotency: cfg.Idempotency,
+	}, nil
+}
+
+// Execute runs validate -> authorize -> idempotency -> execute -> redact -> record.
 func (p *Pipeline) Execute(ctx context.Context, req *Request) (Result, error) {
 	if p.Validator != nil {
 		if err := p.Validator.Validate(ctx, req); err != nil {
@@ -29,10 +104,8 @@ func (p *Pipeline) Execute(ctx context.Context, req *Request) (Result, error) {
 		}
 	}
 
-	if p.Authorizer != nil {
-		if err := p.Authorizer.Authorize(ctx, req); err != nil {
-			return Result{}, err
-		}
+	if err := p.Authorizer.Authorize(ctx, req); err != nil {
+		return Result{}, err
 	}
 
 	if result, err := p.checkIdempotency(ctx, req); err != nil {
@@ -46,16 +119,25 @@ func (p *Pipeline) Execute(ctx context.Context, req *Request) (Result, error) {
 		return Result{}, err
 	}
 
-	return p.buildResult(ctx, req, raw, attempts)
-}
-
-func (p *Pipeline) checkIdempotency(ctx context.Context, req *Request) (*Result, error) {
-	if p.Policies == nil {
-		return nil, nil
+	result := Result{
+		RunID:      req.RunID,
+		ToolCallID: req.ToolCallID,
+		ToolName:   req.ToolName,
+		Output:     p.Redactor.Redact(raw.Payload),
+		Attempts:   attempts,
 	}
 
-	policy := p.Policies.GetPolicy(req.ToolName)
-	if !policy.EnableIdempotent || req.IdempotencyKey == "" || p.Idempotency == nil {
+	if err := p.cacheResultIfNeeded(ctx, req, &result); err != nil {
+		return Result{}, err
+	}
+
+	return result, nil
+}
+
+// checkIdempotency returns the recorded result of a repeated call, so the
+// executor does not run again.
+func (p *Pipeline) checkIdempotency(ctx context.Context, req *Request) (*Result, error) {
+	if !p.Policies.GetPolicy(req.ToolName).EnableIdempotent || req.IdempotencyKey == "" {
 		return nil, nil
 	}
 
@@ -74,11 +156,7 @@ func (p *Pipeline) checkIdempotency(ctx context.Context, req *Request) (*Result,
 }
 
 func (p *Pipeline) executeStep(ctx context.Context, req *Request) (RawResult, int, error) {
-	policy := Policy{Timeout: defaultToolTimeout, MaxAttempts: 1}
-	if p.Policies != nil {
-		policy = p.Policies.GetPolicy(req.ToolName)
-	}
-
+	policy := p.Policies.GetPolicy(req.ToolName)
 	if policy.MaxAttempts <= 0 {
 		policy.MaxAttempts = 1
 	}
@@ -87,20 +165,22 @@ func (p *Pipeline) executeStep(ctx context.Context, req *Request) (RawResult, in
 		policy.Timeout = defaultToolTimeout
 	}
 
-	var raw RawResult
+	var (
+		raw     RawResult
+		lastErr error
+	)
 
 	attempts := 0
+
 	for i := 0; i < policy.MaxAttempts; i++ {
 		attempts = i + 1
 		attemptCtx, cancel := context.WithTimeout(ctx, policy.Timeout)
 
-		var execErr error
-
-		raw, execErr = p.Executor.Execute(attemptCtx, req)
+		raw, lastErr = p.Executor.Execute(attemptCtx, req)
 
 		cancel()
 
-		if execErr == nil {
+		if lastErr == nil {
 			break
 		}
 
@@ -108,99 +188,53 @@ func (p *Pipeline) executeStep(ctx context.Context, req *Request) (RawResult, in
 			select {
 			case <-time.After(policy.RetryBackoff):
 			case <-ctx.Done():
-				return RawResult{}, 0, fmt.Errorf("%w: %w", ErrExecution, ctx.Err())
+				return RawResult{}, attempts, fmt.Errorf("%w: %w", ErrExecution, ctx.Err())
 			}
 		}
+	}
+
+	// Exhausted attempts is a failure, not a zero-valued success: whatever
+	// raw holds is the corpse of the last attempt, and letting it flow on
+	// would record a tool result that never happened.
+	if lastErr != nil {
+		return RawResult{}, attempts, fmt.Errorf("%w after %d attempt(s): %w", ErrExecution, attempts, lastErr)
 	}
 
 	return raw, attempts, nil
 }
 
-func (p *Pipeline) buildResult(ctx context.Context, req *Request, raw RawResult, attempts int) (Result, error) {
-	normalized, err := p.normalizeResult(ctx, req, raw)
-	if err != nil {
-		return Result{}, err
-	}
-
-	ref, err := p.persistResult(ctx, req, normalized)
-	if err != nil {
-		return Result{}, err
-	}
-
-	isolation := p.resolveIsolation(req)
-
-	result := Result{
-		RunID:              req.RunID,
-		ToolCallID:         req.ToolCallID,
-		ToolName:           req.ToolName,
-		Output:             normalized,
-		PersistedRef:       ref,
-		FromIdempotent:     false,
-		Attempts:           attempts,
-		ExecutionIsolation: isolation,
-	}
-
-	if err := p.cacheResultIfNeeded(ctx, req, &result); err != nil {
-		return Result{}, err
-	}
-
-	return result, nil
-}
-
-// normalizeResult applies the normalizer and redactor stages sequentially.
-func (p *Pipeline) normalizeResult(ctx context.Context, req *Request, raw RawResult) (map[string]any, error) {
-	normalized := raw.Payload
-	if p.Normalizer != nil {
-		norm, err := p.Normalizer.Normalize(ctx, req, raw)
-		if err != nil {
-			return nil, err
-		}
-
-		normalized = norm
-	}
-
-	if p.Redactor != nil {
-		normalized = p.Redactor.Redact(normalized)
-	}
-
-	return normalized, nil
-}
-
-// persistResult persists the normalized output and returns the reference.
-func (p *Pipeline) persistResult(ctx context.Context, req *Request, normalized map[string]any) (string, error) {
-	if p.Persister == nil {
-		return "", nil
-	}
-
-	ref, err := p.Persister.Persist(ctx, req, normalized)
-	if err != nil {
-		return "", err
-	}
-
-	return ref, nil
-}
-
-// resolveIsolation returns the isolation policy for the request, or the shared default.
-func (p *Pipeline) resolveIsolation(req *Request) ExecutionIsolation {
-	if p.Isolation != nil {
-		return p.Isolation.Resolve(req)
-	}
-
-	return ExecutionIsolationShared
-}
-
-// cacheResultIfNeeded stores the result in the idempotency store if the policy requires it.
+// cacheResultIfNeeded records the result so a repeated key answers with it.
 func (p *Pipeline) cacheResultIfNeeded(ctx context.Context, req *Request, result *Result) error {
-	policy := Policy{Timeout: defaultToolTimeout, MaxAttempts: 1}
-	if p.Policies != nil {
-		policy = p.Policies.GetPolicy(req.ToolName)
+	if !p.Policies.GetPolicy(req.ToolName).EnableIdempotent || req.IdempotencyKey == "" {
+		return nil
 	}
 
-	if policy.EnableIdempotent && req.IdempotencyKey != "" && p.Idempotency != nil {
-		if err := p.Idempotency.Put(ctx, req.IdempotencyKey, result); err != nil {
-			return err
-		}
+	return p.Idempotency.Put(ctx, req.IdempotencyKey, result)
+}
+
+// DefaultPolicyProvider is the conservative per-tool baseline.
+//
+// One attempt, always: the pipeline does not re-run a call that may already
+// have had its side effect. A tool that is safe to repeat — or that the
+// deployment has declared so — carries the same idempotency key across
+// attempts, and enabling idempotency is what makes a retry safe for it.
+type DefaultPolicyProvider struct {
+	// Policies overrides the baseline per tool name.
+	Policies map[string]Policy
+	// Timeout bounds one attempt when a tool has no entry.
+	Timeout time.Duration
+}
+
+// GetPolicy returns the tool's policy, or the baseline.
+func (p *DefaultPolicyProvider) GetPolicy(toolName string) Policy {
+	if policy, ok := p.Policies[toolName]; ok {
+		return policy
 	}
 
-	return nil
+	timeout := p.Timeout
+	if timeout <= 0 {
+		timeout = defaultToolTimeout
+	}
+
+	return Policy{Timeout: timeout, MaxAttempts: 1}
 }
