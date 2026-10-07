@@ -2,6 +2,7 @@ package temporal
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"time"
@@ -11,6 +12,7 @@ import (
 	agentosstream "github.com/TekkenSteve/GoAgent/agentos/stream"
 	"github.com/TekkenSteve/GoAgent/internal/agentfw/orchestration"
 	"github.com/TekkenSteve/GoAgent/internal/entity"
+	"github.com/TekkenSteve/GoAgent/internal/repo/agentos/dshbackend"
 	"github.com/TekkenSteve/GoAgent/internal/repo/agentos/grpcbackend"
 	"github.com/TekkenSteve/GoAgent/internal/repo/agentos/httpbackend"
 	"github.com/TekkenSteve/GoAgent/internal/repo/agentos/streamadapter"
@@ -24,7 +26,28 @@ type runtime struct {
 	temporalClient client.Client
 	closeTemporal  bool
 	router         *agentosruntime.Router
-	closers        []func() error
+	// backends is the supervised view the router resolves runs through;
+	// rawBackends keeps the undecorated backends the run supervisor activities
+	// use, so applying a control cannot route back into the supervisor that
+	// issued it.
+	backends    *agentosruntime.Registry
+	rawBackends *agentosruntime.Registry
+	closers     []func() error
+}
+
+// BackendResolver resolves a backend ref to its undecorated implementation.
+// Run supervisor activities use it to reach the backend directly.
+type BackendResolver interface {
+	ResolveBackend(ref agentos.BackendRef) (agentosruntime.AgentBackend, error)
+}
+
+// ResolveBackend returns the undecorated backend registered for ref.
+func (r *runtime) ResolveBackend(ref agentos.BackendRef) (agentosruntime.AgentBackend, error) {
+	if r == nil || r.rawBackends == nil {
+		return nil, errRuntimeNotConfigured
+	}
+
+	return r.rawBackends.Get(ref)
 }
 
 type runtimeRunBackendIndexFactory func(cfg *RuntimeConfig) (RunBackendIndex, func() error, error)
@@ -158,28 +181,28 @@ func (r *runtime) StartPlanNode(ctx context.Context, planID, nodeID string, spec
 	return r.router.StartPlanNode(ctx, planID, nodeID, spec)
 }
 
-func (r *runtime) Signal(ctx context.Context, runID string, signal *agentoscore.Signal) error {
+func (r *runtime) Signal(ctx context.Context, ref agentos.RunRef, signal *agentoscore.Signal) error {
 	if r == nil || r.router == nil {
 		return errRuntimeNotConfigured
 	}
 
-	return r.router.Signal(ctx, runID, signal)
+	return r.router.Signal(ctx, ref, signal)
 }
 
-func (r *runtime) Status(ctx context.Context, runID string) (agentos.RunStatus, error) {
+func (r *runtime) Status(ctx context.Context, ref agentos.RunRef) (agentos.RunStatus, error) {
 	if r == nil || r.router == nil {
 		return agentos.RunStatus{}, errRuntimeNotConfigured
 	}
 
-	return r.router.Status(ctx, runID)
+	return r.router.Status(ctx, ref)
 }
 
-func (r *runtime) Control(ctx context.Context, runID string, control *agentoscore.ControlRequest) error {
+func (r *runtime) Control(ctx context.Context, ref agentos.RunRef, control *agentoscore.ControlRequest) error {
 	if r == nil || r.router == nil {
 		return errRuntimeNotConfigured
 	}
 
-	return r.router.Control(ctx, runID, control)
+	return r.router.Control(ctx, ref, control)
 }
 
 func (r *runtime) Subscribe(ctx context.Context, scope agentoscore.StreamScope) (agentoscore.Subscription, error) {
@@ -192,27 +215,44 @@ func (r *runtime) Subscribe(ctx context.Context, scope agentoscore.StreamScope) 
 
 func (r *runtime) configureRouter(temporalClient client.Client, cfg *RuntimeConfig, opts runtimeOptions, executor *temporalrepo.ExecutorTemporal, subscriber agentosstream.Subscriber) error {
 	registry := agentosruntime.NewRegistry()
+	rawRegistry := agentosruntime.NewRegistry()
+	r.backends = registry
+	r.rawBackends = rawRegistry
+
+	supervisor, err := NewSupervisorClient(temporalClient, temporalConfig(cfg).TaskQueues.ProcessControl)
+	if err != nil {
+		return err
+	}
+
+	backends := supervisedRegistrar{raw: rawRegistry, supervised: registry, supervisor: supervisor}
 	agentosSubscriber := newAgentOSSubscriber(subscriber)
 
 	lifecycle := streamadapter.NewRunLifecycle(cfg.Publisher, cfg.Logger)
-	if cfg.ProjectionController != nil {
-		lifecycle = lifecycle.WithEnsure(cfg.ProjectionController.EnsureSubscribed)
+	if cfg.Facts != nil {
+		lifecycle = lifecycle.WithFacts(cfg.Facts)
 	}
 
-	native := newTemporalNativeBackend(executor, agentosSubscriber)
-	if err := registry.Register(agentos.BackendRef{
+	native := newTemporalNativeBackend(executor, agentosSubscriber, lifecycle)
+	if err := (supervisedRegistrar{raw: rawRegistry, supervised: registry}).registerPlain(agentos.BackendRef{
 		Kind: agentos.BackendKindNative,
 		Name: agentos.BackendNameGoAgentNative,
 	}, native); err != nil {
 		return err
 	}
 
-	closers, err := registerExternalBackends(registry, temporalClient, agentosSubscriber, lifecycle, cfg)
+	closers, err := registerExternalBackends(backends, temporalClient, agentosSubscriber, lifecycle, cfg)
 	if err != nil {
 		return err
 	}
 
 	r.closers = append(r.closers, closers...)
+
+	dshClosers, err := registerDSHBackends(backends, agentosSubscriber, cfg)
+	if err != nil {
+		return err
+	}
+
+	r.closers = append(r.closers, dshClosers...)
 
 	if opts.runBackendIndex == nil {
 		return errRuntimeRunBackendIndexRequired
@@ -232,7 +272,44 @@ func (r *runtime) configureRouter(temporalClient client.Client, cfg *RuntimeConf
 	return nil
 }
 
-func registerExternalBackends(registry *agentosruntime.Registry, temporalClient client.Client, agentosSubscriber *agentOSSubscriber, lifecycle agentosruntime.LifecyclePublisher, cfg *RuntimeConfig) ([]func() error, error) {
+// supervisedRegistrar registers each backend twice: undecorated for the run
+// supervisor activities, and wrapped for the router. Backends whose runs are
+// already Temporal workflows (native, temporal_external) keep the same value in
+// both views — their control path is Temporal primitives already.
+type supervisedRegistrar struct {
+	raw        *agentosruntime.Registry
+	supervised *agentosruntime.Registry
+	supervisor RunSupervisor
+}
+
+// registerPlain registers one backend in both views unchanged: its control path
+// is already served by Temporal primitives.
+func (r supervisedRegistrar) registerPlain(ref agentos.BackendRef, backend agentosruntime.AgentBackend) error {
+	if err := r.raw.Register(ref, backend); err != nil {
+		return err
+	}
+
+	return r.supervised.Register(ref, backend)
+}
+
+func (r supervisedRegistrar) register(ref agentos.BackendRef, backend agentosruntime.AgentBackend) error {
+	if err := r.raw.Register(ref, backend); err != nil {
+		return err
+	}
+
+	if r.supervisor == nil {
+		return r.supervised.Register(ref, backend)
+	}
+
+	wrapped, err := NewSupervisedBackend(ref, backend, r.supervisor)
+	if err != nil {
+		return err
+	}
+
+	return r.supervised.Register(ref, wrapped)
+}
+
+func registerExternalBackends(backends supervisedRegistrar, temporalClient client.Client, agentosSubscriber *agentOSSubscriber, lifecycle agentosruntime.LifecyclePublisher, cfg *RuntimeConfig) ([]func() error, error) {
 	var closers []func() error
 
 	for i := range cfg.TemporalExternalBackends {
@@ -243,7 +320,7 @@ func registerExternalBackends(registry *agentosruntime.Registry, temporalClient 
 			return nil, err
 		}
 
-		if err := registry.Register(internalConfig.Ref(), external); err != nil {
+		if err := backends.registerPlain(internalConfig.Ref(), external); err != nil {
 			return nil, err
 		}
 	}
@@ -256,7 +333,7 @@ func registerExternalBackends(registry *agentosruntime.Registry, temporalClient 
 			return nil, err
 		}
 
-		if err := registry.Register(internalConfig.Ref(), httpBackend); err != nil {
+		if err := backends.register(internalConfig.Ref(), httpBackend); err != nil {
 			return nil, err
 		}
 	}
@@ -269,7 +346,7 @@ func registerExternalBackends(registry *agentosruntime.Registry, temporalClient 
 			return nil, err
 		}
 
-		if err := registry.Register(internalConfig.Ref(), grpcBackend); err != nil {
+		if err := backends.register(internalConfig.Ref(), grpcBackend); err != nil {
 			return nil, errors.Join(err, grpcBackend.Close())
 		}
 
@@ -314,6 +391,42 @@ func buildRuntimeOptions(options []RuntimeOption) runtimeOptions {
 	}
 
 	return opts
+}
+
+// registerDSHBackends wires configured DeepSeek Harness SDK backends into the
+// registry. Unlike the external pollers, each dsh backend publishes its run
+// stream directly onto the data-plane bus (Publisher/Facts), so its
+// registration closes the shared SDK subprocess on runtime shutdown.
+func registerDSHBackends(backends supervisedRegistrar, agentosSubscriber *agentOSSubscriber, cfg *RuntimeConfig) ([]func() error, error) {
+	var closers []func() error
+
+	for i := range cfg.DSHBackends {
+		internalConfig := dshBackendConfig(&cfg.DSHBackends[i])
+
+		dshBackend, err := dshbackend.NewBackend(agentosSubscriber, cfg.Publisher, cfg.Facts, cfg.Logger, &internalConfig)
+		if err != nil {
+			return nil, err
+		}
+
+		if err := backends.register(internalConfig.Ref(), dshBackend); err != nil {
+			return nil, errors.Join(err, dshBackend.Close())
+		}
+
+		closers = append(closers, dshBackend.Close)
+	}
+
+	return closers, nil
+}
+
+func dshBackendConfig(cfg *DSHBackendConfig) dshbackend.Config {
+	return dshbackend.Config{
+		Name:       cfg.Name,
+		Command:    cfg.Command,
+		Profile:    cfg.Profile,
+		Args:       cfg.Args,
+		Env:        cfg.Env,
+		WorkingDir: cfg.WorkingDir,
+	}
 }
 
 func httpBackendConfig(cfg *HTTPBackendConfig) httpbackend.Config {
@@ -372,6 +485,7 @@ func (r *runtime) Close() error {
 type temporalNativeBackend struct {
 	executor   nativeExecutor
 	subscriber agentosruntime.EventSubscriber
+	lifecycle  agentosruntime.LifecyclePublisher
 }
 
 type nativeExecutor interface {
@@ -381,12 +495,22 @@ type nativeExecutor interface {
 	Resume(ctx context.Context, runID string) error
 	Cancel(ctx context.Context, runID string) error
 	SignalUserMessage(ctx context.Context, runID string, message *orchestration.UserMessageSignal) error
+	// The step-queue mode is driven by these two: a queue that can be changed
+	// while it runs, and a step that waits for an outside event. Without them
+	// the mode the control plane can start would be one it cannot talk to.
+	SignalStepModify(ctx context.Context, runID string, mutation *entity.StepMutation) error
+	SignalExternalEvent(ctx context.Context, runID string, event map[string]any) error
 }
 
-func newTemporalNativeBackend(executor nativeExecutor, subscriber agentosruntime.EventSubscriber) *temporalNativeBackend {
+func newTemporalNativeBackend(
+	executor nativeExecutor,
+	subscriber agentosruntime.EventSubscriber,
+	lifecycle agentosruntime.LifecyclePublisher,
+) *temporalNativeBackend {
 	return &temporalNativeBackend{
 		executor:   executor,
 		subscriber: subscriber,
+		lifecycle:  lifecycle,
 	}
 }
 
@@ -401,7 +525,18 @@ func (b *temporalNativeBackend) Start(ctx context.Context, spec *agentos.RunSpec
 		return agentos.RunStatus{}, err
 	}
 
-	return runStatusFromEntity(&status), nil
+	runStatus := runStatusFromEntity(&status)
+
+	// RUN_STARTED is a fact like on every other backend: a persist failure
+	// fails the start so the platform retries it — SignalWithStart is
+	// idempotent on the workflow id, so the retry is safe.
+	if b.lifecycle != nil {
+		if err := b.lifecycle.PublishStarted(ctx, spec, &runStatus); err != nil {
+			return agentos.RunStatus{}, err
+		}
+	}
+
+	return runStatus, nil
 }
 
 func (b *temporalNativeBackend) Signal(ctx context.Context, runID string, signal *agentoscore.Signal) error {
@@ -409,19 +544,16 @@ func (b *temporalNativeBackend) Signal(ctx context.Context, runID string, signal
 		return fmt.Errorf("%w: type is required", agentoscore.ErrInvalidSignal)
 	}
 
+	if operation, isControl := nativeControlOperation(signal.Type); isControl {
+		control := controlRequestFromSignal(operation, signal)
+
+		return b.Control(ctx, runID, &control)
+	}
+
 	switch signal.Type {
-	case agentoscore.SignalControlPause:
-		control := controlRequestFromSignal(agentoscore.ControlPause, signal)
-
-		return b.Control(ctx, runID, &control)
-	case agentoscore.SignalControlResume:
-		control := controlRequestFromSignal(agentoscore.ControlResume, signal)
-
-		return b.Control(ctx, runID, &control)
-	case agentoscore.SignalControlCancel:
-		control := controlRequestFromSignal(agentoscore.ControlCancel, signal)
-
-		return b.Control(ctx, runID, &control)
+	case agentoscore.SignalControlPause, agentoscore.SignalControlResume, agentoscore.SignalControlCancel:
+		// Handled above, by the control operation the signal carries.
+		return nil
 	case agentoscore.SignalUserMessage:
 		message, err := userMessageSignalToNative(signal)
 		if err != nil {
@@ -429,14 +561,44 @@ func (b *temporalNativeBackend) Signal(ctx context.Context, runID string, signal
 		}
 
 		return b.executor.SignalUserMessage(ctx, runID, &message)
+	case agentoscore.SignalStepModify:
+		mutation, err := stepMutationFromSignal(signal)
+		if err != nil {
+			return err
+		}
+
+		return b.executor.SignalStepModify(ctx, runID, mutation)
+	case agentoscore.SignalExternalEvent:
+		return b.executor.SignalExternalEvent(ctx, runID, signal.Payload)
 	case agentoscore.SignalPlanNodeRetry, agentoscore.SignalPlanApprove, agentoscore.SignalPlanReject,
-		agentoscore.SignalUserApproval, agentoscore.SignalUserReject,
-		agentoscore.SignalToolResult, agentoscore.SignalHumanFeedback, agentoscore.SignalConfigPatch,
-		agentoscore.SignalMemoryPatch:
-		return fmt.Errorf("%w: unsupported by temporal native backend: %s", agentoscore.ErrInvalidSignal, signal.Type)
-	default:
+		agentoscore.SignalUserApproval, agentoscore.SignalUserReject, agentoscore.SignalToolResult,
+		agentoscore.SignalHumanFeedback, agentoscore.SignalConfigPatch, agentoscore.SignalMemoryPatch:
 		return fmt.Errorf("%w: unsupported by temporal native backend: %s", agentoscore.ErrInvalidSignal, signal.Type)
 	}
+
+	return fmt.Errorf("%w: unsupported by temporal native backend: %s", agentoscore.ErrInvalidSignal, signal.Type)
+}
+
+// nativeControlOperation maps a control-plane signal to the control operation
+// it carries, and reports whether it carries one at all.
+// nativeControlOperation maps a control-plane signal to the control operation
+// it carries, and reports whether it carries one at all.
+func nativeControlOperation(signalType agentoscore.SignalType) (agentoscore.ControlOperation, bool) {
+	switch signalType {
+	case agentoscore.SignalControlPause:
+		return agentoscore.ControlPause, true
+	case agentoscore.SignalControlResume:
+		return agentoscore.ControlResume, true
+	case agentoscore.SignalControlCancel:
+		return agentoscore.ControlCancel, true
+	case agentoscore.SignalPlanNodeRetry, agentoscore.SignalPlanApprove, agentoscore.SignalPlanReject,
+		agentoscore.SignalUserMessage, agentoscore.SignalUserApproval, agentoscore.SignalUserReject,
+		agentoscore.SignalToolResult, agentoscore.SignalHumanFeedback, agentoscore.SignalConfigPatch,
+		agentoscore.SignalStepModify, agentoscore.SignalExternalEvent, agentoscore.SignalMemoryPatch:
+		return "", false
+	}
+
+	return "", false
 }
 
 func (b *temporalNativeBackend) Control(ctx context.Context, runID string, control *agentoscore.ControlRequest) error {
@@ -467,7 +629,18 @@ func (b *temporalNativeBackend) Status(ctx context.Context, runID string) (agent
 		return agentos.RunStatus{}, err
 	}
 
-	return runStatusFromEntity(&status), nil
+	runStatus := runStatusFromEntity(&status)
+
+	// Terminal milestones ride the status poll, exactly like the external
+	// backends: the lifecycle latch makes them at-most-once, and a persist
+	// failure fails the poll so the next one retries the milestone.
+	if b.lifecycle != nil {
+		if err := b.lifecycle.PublishStatus(ctx, runID, &runStatus); err != nil {
+			return agentos.RunStatus{}, err
+		}
+	}
+
+	return runStatus, nil
 }
 
 func (b *temporalNativeBackend) Subscribe(ctx context.Context, scope agentoscore.StreamScope) (agentoscore.Subscription, error) {
@@ -495,6 +668,29 @@ func controlRequestFromSignal(operation agentoscore.ControlOperation, signal *ag
 		IdempotencyKey: signal.IdempotencyKey,
 		RequestedAt:    signal.SentAt,
 	}
+}
+
+// stepMutationFromSignal reads a queue mutation from a control-plane signal.
+//
+// The mutation travels as a payload, so it is decoded through the same
+// encoder-decoder every other request body goes through: a signal that does not
+// name a mutation is refused rather than applied as a no-op.
+func stepMutationFromSignal(signal *agentoscore.Signal) (*entity.StepMutation, error) {
+	encoded, err := json.Marshal(signal.Payload)
+	if err != nil {
+		return nil, fmt.Errorf("%w: step mutation cannot be read: %w", agentoscore.ErrInvalidSignal, err)
+	}
+
+	var mutation entity.StepMutation
+	if err := json.Unmarshal(encoded, &mutation); err != nil {
+		return nil, fmt.Errorf("%w: step mutation cannot be read: %w", agentoscore.ErrInvalidSignal, err)
+	}
+
+	if mutation.IsEmpty() {
+		return nil, fmt.Errorf("%w: step mutation must change something", agentoscore.ErrInvalidSignal)
+	}
+
+	return &mutation, nil
 }
 
 func userMessageSignalToNative(signal *agentoscore.Signal) (orchestration.UserMessageSignal, error) {

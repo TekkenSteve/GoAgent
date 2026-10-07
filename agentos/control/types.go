@@ -20,7 +20,10 @@ type RunSpec struct {
 	RequestedAt    time.Time         `json:"requested_at,omitzero" schema:"optional"`
 	Metadata       map[string]string `json:"metadata,omitempty"`
 	Backend        BackendRef        `json:"backend"`
-	Input          map[string]any    `json:"input,omitempty"`
+	// Input is backend-owned and carried opaquely: each backend reads the key
+	// it owns (the native backend reads "native") and ignores the rest, so a
+	// caller may keep its own metadata here without a backend tripping over it.
+	Input map[string]any `json:"input,omitempty"`
 }
 
 // BackendKind identifies the execution substrate used by an agent backend.

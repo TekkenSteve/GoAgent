@@ -39,6 +39,12 @@ const (
 	SignalHumanFeedback SignalType = "human.feedback"
 	// SignalConfigPatch applies a configuration patch to a running agent.
 	SignalConfigPatch SignalType = "config.patch"
+	// SignalStepModify changes a native step queue while it runs: the engine
+	// applies the mutation and continues with the queue it produced.
+	SignalStepModify SignalType = "step.modify"
+	// SignalExternalEvent delivers an outside event to whatever is waiting for
+	// one — a native wait step, or a step that asked to be woken by name.
+	SignalExternalEvent SignalType = "event.external"
 	// SignalMemoryPatch applies a memory patch to a running agent.
 	SignalMemoryPatch SignalType = "memory.patch"
 )

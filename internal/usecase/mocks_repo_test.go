@@ -17,324 +17,6 @@ import (
 	gomock "go.uber.org/mock/gomock"
 )
 
-// MockWarmStateRepo is a mock of WarmStateRepo interface.
-type MockWarmStateRepo struct {
-	ctrl     *gomock.Controller
-	recorder *MockWarmStateRepoMockRecorder
-	isgomock struct{}
-}
-
-// MockWarmStateRepoMockRecorder is the mock recorder for MockWarmStateRepo.
-type MockWarmStateRepoMockRecorder struct {
-	mock *MockWarmStateRepo
-}
-
-// NewMockWarmStateRepo creates a new mock instance.
-func NewMockWarmStateRepo(ctrl *gomock.Controller) *MockWarmStateRepo {
-	mock := &MockWarmStateRepo{ctrl: ctrl}
-	mock.recorder = &MockWarmStateRepoMockRecorder{mock}
-	return mock
-}
-
-// EXPECT returns an object that allows the caller to indicate expected use.
-func (m *MockWarmStateRepo) EXPECT() *MockWarmStateRepoMockRecorder {
-	return m.recorder
-}
-
-// GetMessage mocks base method.
-func (m *MockWarmStateRepo) GetMessage(ctx context.Context, ref string) (entity.MessageRecord, bool, error) {
-	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "GetMessage", ctx, ref)
-	ret0, _ := ret[0].(entity.MessageRecord)
-	ret1, _ := ret[1].(bool)
-	ret2, _ := ret[2].(error)
-	return ret0, ret1, ret2
-}
-
-// GetMessage indicates an expected call of GetMessage.
-func (mr *MockWarmStateRepoMockRecorder) GetMessage(ctx, ref any) *gomock.Call {
-	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetMessage", reflect.TypeOf((*MockWarmStateRepo)(nil).GetMessage), ctx, ref)
-}
-
-// GetToolResult mocks base method.
-func (m *MockWarmStateRepo) GetToolResult(ctx context.Context, ref string) (entity.ToolResultRecord, bool, error) {
-	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "GetToolResult", ctx, ref)
-	ret0, _ := ret[0].(entity.ToolResultRecord)
-	ret1, _ := ret[1].(bool)
-	ret2, _ := ret[2].(error)
-	return ret0, ret1, ret2
-}
-
-// GetToolResult indicates an expected call of GetToolResult.
-func (mr *MockWarmStateRepoMockRecorder) GetToolResult(ctx, ref any) *gomock.Call {
-	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetToolResult", reflect.TypeOf((*MockWarmStateRepo)(nil).GetToolResult), ctx, ref)
-}
-
-// ListMessagesByRun mocks base method.
-func (m *MockWarmStateRepo) ListMessagesByRun(ctx context.Context, runID string, limit, offset uint64) ([]entity.MessageRecord, error) {
-	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "ListMessagesByRun", ctx, runID, limit, offset)
-	ret0, _ := ret[0].([]entity.MessageRecord)
-	ret1, _ := ret[1].(error)
-	return ret0, ret1
-}
-
-// ListMessagesByRun indicates an expected call of ListMessagesByRun.
-func (mr *MockWarmStateRepoMockRecorder) ListMessagesByRun(ctx, runID, limit, offset any) *gomock.Call {
-	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ListMessagesByRun", reflect.TypeOf((*MockWarmStateRepo)(nil).ListMessagesByRun), ctx, runID, limit, offset)
-}
-
-// ListToolResultsByRun mocks base method.
-func (m *MockWarmStateRepo) ListToolResultsByRun(ctx context.Context, runID string, limit, offset uint64) ([]entity.ToolResultRecord, error) {
-	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "ListToolResultsByRun", ctx, runID, limit, offset)
-	ret0, _ := ret[0].([]entity.ToolResultRecord)
-	ret1, _ := ret[1].(error)
-	return ret0, ret1
-}
-
-// ListToolResultsByRun indicates an expected call of ListToolResultsByRun.
-func (mr *MockWarmStateRepoMockRecorder) ListToolResultsByRun(ctx, runID, limit, offset any) *gomock.Call {
-	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ListToolResultsByRun", reflect.TypeOf((*MockWarmStateRepo)(nil).ListToolResultsByRun), ctx, runID, limit, offset)
-}
-
-// PersistMessage mocks base method.
-func (m *MockWarmStateRepo) PersistMessage(ctx context.Context, record entity.MessageRecord) (string, error) {
-	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "PersistMessage", ctx, record)
-	ret0, _ := ret[0].(string)
-	ret1, _ := ret[1].(error)
-	return ret0, ret1
-}
-
-// PersistMessage indicates an expected call of PersistMessage.
-func (mr *MockWarmStateRepoMockRecorder) PersistMessage(ctx, record any) *gomock.Call {
-	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "PersistMessage", reflect.TypeOf((*MockWarmStateRepo)(nil).PersistMessage), ctx, record)
-}
-
-// PersistToolResult mocks base method.
-func (m *MockWarmStateRepo) PersistToolResult(ctx context.Context, record entity.ToolResultRecord) (string, error) {
-	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "PersistToolResult", ctx, record)
-	ret0, _ := ret[0].(string)
-	ret1, _ := ret[1].(error)
-	return ret0, ret1
-}
-
-// PersistToolResult indicates an expected call of PersistToolResult.
-func (mr *MockWarmStateRepoMockRecorder) PersistToolResult(ctx, record any) *gomock.Call {
-	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "PersistToolResult", reflect.TypeOf((*MockWarmStateRepo)(nil).PersistToolResult), ctx, record)
-}
-
-// MockColdStateRepo is a mock of ColdStateRepo interface.
-type MockColdStateRepo struct {
-	ctrl     *gomock.Controller
-	recorder *MockColdStateRepoMockRecorder
-	isgomock struct{}
-}
-
-// MockColdStateRepoMockRecorder is the mock recorder for MockColdStateRepo.
-type MockColdStateRepoMockRecorder struct {
-	mock *MockColdStateRepo
-}
-
-// NewMockColdStateRepo creates a new mock instance.
-func NewMockColdStateRepo(ctrl *gomock.Controller) *MockColdStateRepo {
-	mock := &MockColdStateRepo{ctrl: ctrl}
-	mock.recorder = &MockColdStateRepoMockRecorder{mock}
-	return mock
-}
-
-// EXPECT returns an object that allows the caller to indicate expected use.
-func (m *MockColdStateRepo) EXPECT() *MockColdStateRepoMockRecorder {
-	return m.recorder
-}
-
-// GetArchive mocks base method.
-func (m *MockColdStateRepo) GetArchive(ctx context.Context, ref string) (entity.ArchiveRecord, bool, error) {
-	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "GetArchive", ctx, ref)
-	ret0, _ := ret[0].(entity.ArchiveRecord)
-	ret1, _ := ret[1].(bool)
-	ret2, _ := ret[2].(error)
-	return ret0, ret1, ret2
-}
-
-// GetArchive indicates an expected call of GetArchive.
-func (mr *MockColdStateRepoMockRecorder) GetArchive(ctx, ref any) *gomock.Call {
-	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetArchive", reflect.TypeOf((*MockColdStateRepo)(nil).GetArchive), ctx, ref)
-}
-
-// PersistArchive mocks base method.
-func (m *MockColdStateRepo) PersistArchive(ctx context.Context, record entity.ArchiveRecord) (string, error) {
-	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "PersistArchive", ctx, record)
-	ret0, _ := ret[0].(string)
-	ret1, _ := ret[1].(error)
-	return ret0, ret1
-}
-
-// PersistArchive indicates an expected call of PersistArchive.
-func (mr *MockColdStateRepoMockRecorder) PersistArchive(ctx, record any) *gomock.Call {
-	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "PersistArchive", reflect.TypeOf((*MockColdStateRepo)(nil).PersistArchive), ctx, record)
-}
-
-// MockWorkflowStateRepo is a mock of WorkflowStateRepo interface.
-type MockWorkflowStateRepo struct {
-	ctrl     *gomock.Controller
-	recorder *MockWorkflowStateRepoMockRecorder
-	isgomock struct{}
-}
-
-// MockWorkflowStateRepoMockRecorder is the mock recorder for MockWorkflowStateRepo.
-type MockWorkflowStateRepoMockRecorder struct {
-	mock *MockWorkflowStateRepo
-}
-
-// NewMockWorkflowStateRepo creates a new mock instance.
-func NewMockWorkflowStateRepo(ctrl *gomock.Controller) *MockWorkflowStateRepo {
-	mock := &MockWorkflowStateRepo{ctrl: ctrl}
-	mock.recorder = &MockWorkflowStateRepoMockRecorder{mock}
-	return mock
-}
-
-// EXPECT returns an object that allows the caller to indicate expected use.
-func (m *MockWorkflowStateRepo) EXPECT() *MockWorkflowStateRepoMockRecorder {
-	return m.recorder
-}
-
-// GetArchive mocks base method.
-func (m *MockWorkflowStateRepo) GetArchive(ctx context.Context, ref string) (entity.ArchiveRecord, bool, error) {
-	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "GetArchive", ctx, ref)
-	ret0, _ := ret[0].(entity.ArchiveRecord)
-	ret1, _ := ret[1].(bool)
-	ret2, _ := ret[2].(error)
-	return ret0, ret1, ret2
-}
-
-// GetArchive indicates an expected call of GetArchive.
-func (mr *MockWorkflowStateRepoMockRecorder) GetArchive(ctx, ref any) *gomock.Call {
-	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetArchive", reflect.TypeOf((*MockWorkflowStateRepo)(nil).GetArchive), ctx, ref)
-}
-
-// GetMessage mocks base method.
-func (m *MockWorkflowStateRepo) GetMessage(ctx context.Context, ref string) (entity.MessageRecord, bool, error) {
-	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "GetMessage", ctx, ref)
-	ret0, _ := ret[0].(entity.MessageRecord)
-	ret1, _ := ret[1].(bool)
-	ret2, _ := ret[2].(error)
-	return ret0, ret1, ret2
-}
-
-// GetMessage indicates an expected call of GetMessage.
-func (mr *MockWorkflowStateRepoMockRecorder) GetMessage(ctx, ref any) *gomock.Call {
-	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetMessage", reflect.TypeOf((*MockWorkflowStateRepo)(nil).GetMessage), ctx, ref)
-}
-
-// GetToolResult mocks base method.
-func (m *MockWorkflowStateRepo) GetToolResult(ctx context.Context, ref string) (entity.ToolResultRecord, bool, error) {
-	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "GetToolResult", ctx, ref)
-	ret0, _ := ret[0].(entity.ToolResultRecord)
-	ret1, _ := ret[1].(bool)
-	ret2, _ := ret[2].(error)
-	return ret0, ret1, ret2
-}
-
-// GetToolResult indicates an expected call of GetToolResult.
-func (mr *MockWorkflowStateRepoMockRecorder) GetToolResult(ctx, ref any) *gomock.Call {
-	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetToolResult", reflect.TypeOf((*MockWorkflowStateRepo)(nil).GetToolResult), ctx, ref)
-}
-
-// ListMessagesByRun mocks base method.
-func (m *MockWorkflowStateRepo) ListMessagesByRun(ctx context.Context, runID string, limit, offset uint64) ([]entity.MessageRecord, error) {
-	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "ListMessagesByRun", ctx, runID, limit, offset)
-	ret0, _ := ret[0].([]entity.MessageRecord)
-	ret1, _ := ret[1].(error)
-	return ret0, ret1
-}
-
-// ListMessagesByRun indicates an expected call of ListMessagesByRun.
-func (mr *MockWorkflowStateRepoMockRecorder) ListMessagesByRun(ctx, runID, limit, offset any) *gomock.Call {
-	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ListMessagesByRun", reflect.TypeOf((*MockWorkflowStateRepo)(nil).ListMessagesByRun), ctx, runID, limit, offset)
-}
-
-// ListToolResultsByRun mocks base method.
-func (m *MockWorkflowStateRepo) ListToolResultsByRun(ctx context.Context, runID string, limit, offset uint64) ([]entity.ToolResultRecord, error) {
-	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "ListToolResultsByRun", ctx, runID, limit, offset)
-	ret0, _ := ret[0].([]entity.ToolResultRecord)
-	ret1, _ := ret[1].(error)
-	return ret0, ret1
-}
-
-// ListToolResultsByRun indicates an expected call of ListToolResultsByRun.
-func (mr *MockWorkflowStateRepoMockRecorder) ListToolResultsByRun(ctx, runID, limit, offset any) *gomock.Call {
-	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ListToolResultsByRun", reflect.TypeOf((*MockWorkflowStateRepo)(nil).ListToolResultsByRun), ctx, runID, limit, offset)
-}
-
-// PersistArchive mocks base method.
-func (m *MockWorkflowStateRepo) PersistArchive(ctx context.Context, record entity.ArchiveRecord) (string, error) {
-	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "PersistArchive", ctx, record)
-	ret0, _ := ret[0].(string)
-	ret1, _ := ret[1].(error)
-	return ret0, ret1
-}
-
-// PersistArchive indicates an expected call of PersistArchive.
-func (mr *MockWorkflowStateRepoMockRecorder) PersistArchive(ctx, record any) *gomock.Call {
-	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "PersistArchive", reflect.TypeOf((*MockWorkflowStateRepo)(nil).PersistArchive), ctx, record)
-}
-
-// PersistMessage mocks base method.
-func (m *MockWorkflowStateRepo) PersistMessage(ctx context.Context, record entity.MessageRecord) (string, error) {
-	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "PersistMessage", ctx, record)
-	ret0, _ := ret[0].(string)
-	ret1, _ := ret[1].(error)
-	return ret0, ret1
-}
-
-// PersistMessage indicates an expected call of PersistMessage.
-func (mr *MockWorkflowStateRepoMockRecorder) PersistMessage(ctx, record any) *gomock.Call {
-	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "PersistMessage", reflect.TypeOf((*MockWorkflowStateRepo)(nil).PersistMessage), ctx, record)
-}
-
-// PersistToolResult mocks base method.
-func (m *MockWorkflowStateRepo) PersistToolResult(ctx context.Context, record entity.ToolResultRecord) (string, error) {
-	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "PersistToolResult", ctx, record)
-	ret0, _ := ret[0].(string)
-	ret1, _ := ret[1].(error)
-	return ret0, ret1
-}
-
-// PersistToolResult indicates an expected call of PersistToolResult.
-func (mr *MockWorkflowStateRepoMockRecorder) PersistToolResult(ctx, record any) *gomock.Call {
-	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "PersistToolResult", reflect.TypeOf((*MockWorkflowStateRepo)(nil).PersistToolResult), ctx, record)
-}
-
 // MockAgentRepo is a mock of AgentRepo interface.
 type MockAgentRepo struct {
 	ctrl     *gomock.Controller
@@ -596,58 +278,6 @@ func (mr *MockToolExecutorMockRecorder) Execute(ctx, req any) *gomock.Call {
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Execute", reflect.TypeOf((*MockToolExecutor)(nil).Execute), ctx, req)
 }
 
-// MockWALAppender is a mock of WALAppender interface.
-type MockWALAppender struct {
-	ctrl     *gomock.Controller
-	recorder *MockWALAppenderMockRecorder
-	isgomock struct{}
-}
-
-// MockWALAppenderMockRecorder is the mock recorder for MockWALAppender.
-type MockWALAppenderMockRecorder struct {
-	mock *MockWALAppender
-}
-
-// NewMockWALAppender creates a new mock instance.
-func NewMockWALAppender(ctrl *gomock.Controller) *MockWALAppender {
-	mock := &MockWALAppender{ctrl: ctrl}
-	mock.recorder = &MockWALAppenderMockRecorder{mock}
-	return mock
-}
-
-// EXPECT returns an object that allows the caller to indicate expected use.
-func (m *MockWALAppender) EXPECT() *MockWALAppenderMockRecorder {
-	return m.recorder
-}
-
-// AppendMessage mocks base method.
-func (m *MockWALAppender) AppendMessage(ctx context.Context, runID string, record entity.MessageRecord) error {
-	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "AppendMessage", ctx, runID, record)
-	ret0, _ := ret[0].(error)
-	return ret0
-}
-
-// AppendMessage indicates an expected call of AppendMessage.
-func (mr *MockWALAppenderMockRecorder) AppendMessage(ctx, runID, record any) *gomock.Call {
-	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "AppendMessage", reflect.TypeOf((*MockWALAppender)(nil).AppendMessage), ctx, runID, record)
-}
-
-// AppendToolResult mocks base method.
-func (m *MockWALAppender) AppendToolResult(ctx context.Context, runID string, record entity.ToolResultRecord) error {
-	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "AppendToolResult", ctx, runID, record)
-	ret0, _ := ret[0].(error)
-	return ret0
-}
-
-// AppendToolResult indicates an expected call of AppendToolResult.
-func (mr *MockWALAppenderMockRecorder) AppendToolResult(ctx, runID, record any) *gomock.Call {
-	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "AppendToolResult", reflect.TypeOf((*MockWALAppender)(nil).AppendToolResult), ctx, runID, record)
-}
-
 // MockContextCompressor is a mock of ContextCompressor interface.
 type MockContextCompressor struct {
 	ctrl     *gomock.Controller
@@ -686,132 +316,6 @@ func (m *MockContextCompressor) Compress(ctx context.Context, messages []entity.
 func (mr *MockContextCompressorMockRecorder) Compress(ctx, messages, config any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Compress", reflect.TypeOf((*MockContextCompressor)(nil).Compress), ctx, messages, config)
-}
-
-// MockExecutorRepo is a mock of ExecutorRepo interface.
-type MockExecutorRepo struct {
-	ctrl     *gomock.Controller
-	recorder *MockExecutorRepoMockRecorder
-	isgomock struct{}
-}
-
-// MockExecutorRepoMockRecorder is the mock recorder for MockExecutorRepo.
-type MockExecutorRepoMockRecorder struct {
-	mock *MockExecutorRepo
-}
-
-// NewMockExecutorRepo creates a new mock instance.
-func NewMockExecutorRepo(ctrl *gomock.Controller) *MockExecutorRepo {
-	mock := &MockExecutorRepo{ctrl: ctrl}
-	mock.recorder = &MockExecutorRepoMockRecorder{mock}
-	return mock
-}
-
-// EXPECT returns an object that allows the caller to indicate expected use.
-func (m *MockExecutorRepo) EXPECT() *MockExecutorRepoMockRecorder {
-	return m.recorder
-}
-
-// Cancel mocks base method.
-func (m *MockExecutorRepo) Cancel(ctx context.Context, runID string) error {
-	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "Cancel", ctx, runID)
-	ret0, _ := ret[0].(error)
-	return ret0
-}
-
-// Cancel indicates an expected call of Cancel.
-func (mr *MockExecutorRepoMockRecorder) Cancel(ctx, runID any) *gomock.Call {
-	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Cancel", reflect.TypeOf((*MockExecutorRepo)(nil).Cancel), ctx, runID)
-}
-
-// GetOrchestrationStatus mocks base method.
-func (m *MockExecutorRepo) GetOrchestrationStatus(ctx context.Context, runID string) (entity.RunStatus, error) {
-	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "GetOrchestrationStatus", ctx, runID)
-	ret0, _ := ret[0].(entity.RunStatus)
-	ret1, _ := ret[1].(error)
-	return ret0, ret1
-}
-
-// GetOrchestrationStatus indicates an expected call of GetOrchestrationStatus.
-func (mr *MockExecutorRepoMockRecorder) GetOrchestrationStatus(ctx, runID any) *gomock.Call {
-	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetOrchestrationStatus", reflect.TypeOf((*MockExecutorRepo)(nil).GetOrchestrationStatus), ctx, runID)
-}
-
-// GetStatus mocks base method.
-func (m *MockExecutorRepo) GetStatus(ctx context.Context, runID string) (entity.RunStatus, error) {
-	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "GetStatus", ctx, runID)
-	ret0, _ := ret[0].(entity.RunStatus)
-	ret1, _ := ret[1].(error)
-	return ret0, ret1
-}
-
-// GetStatus indicates an expected call of GetStatus.
-func (mr *MockExecutorRepoMockRecorder) GetStatus(ctx, runID any) *gomock.Call {
-	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetStatus", reflect.TypeOf((*MockExecutorRepo)(nil).GetStatus), ctx, runID)
-}
-
-// Pause mocks base method.
-func (m *MockExecutorRepo) Pause(ctx context.Context, runID string) error {
-	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "Pause", ctx, runID)
-	ret0, _ := ret[0].(error)
-	return ret0
-}
-
-// Pause indicates an expected call of Pause.
-func (mr *MockExecutorRepoMockRecorder) Pause(ctx, runID any) *gomock.Call {
-	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Pause", reflect.TypeOf((*MockExecutorRepo)(nil).Pause), ctx, runID)
-}
-
-// Resume mocks base method.
-func (m *MockExecutorRepo) Resume(ctx context.Context, runID string) error {
-	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "Resume", ctx, runID)
-	ret0, _ := ret[0].(error)
-	return ret0
-}
-
-// Resume indicates an expected call of Resume.
-func (mr *MockExecutorRepoMockRecorder) Resume(ctx, runID any) *gomock.Call {
-	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Resume", reflect.TypeOf((*MockExecutorRepo)(nil).Resume), ctx, runID)
-}
-
-// StartExecution mocks base method.
-func (m *MockExecutorRepo) StartExecution(ctx context.Context, req *entity.ExecuteRequest) (entity.RunStatus, error) {
-	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "StartExecution", ctx, req)
-	ret0, _ := ret[0].(entity.RunStatus)
-	ret1, _ := ret[1].(error)
-	return ret0, ret1
-}
-
-// StartExecution indicates an expected call of StartExecution.
-func (mr *MockExecutorRepoMockRecorder) StartExecution(ctx, req any) *gomock.Call {
-	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "StartExecution", reflect.TypeOf((*MockExecutorRepo)(nil).StartExecution), ctx, req)
-}
-
-// StartOrchestration mocks base method.
-func (m *MockExecutorRepo) StartOrchestration(ctx context.Context, input *entity.OrchestrationInput) (entity.RunStatus, error) {
-	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "StartOrchestration", ctx, input)
-	ret0, _ := ret[0].(entity.RunStatus)
-	ret1, _ := ret[1].(error)
-	return ret0, ret1
-}
-
-// StartOrchestration indicates an expected call of StartOrchestration.
-func (mr *MockExecutorRepoMockRecorder) StartOrchestration(ctx, input any) *gomock.Call {
-	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "StartOrchestration", reflect.TypeOf((*MockExecutorRepo)(nil).StartOrchestration), ctx, input)
 }
 
 // MockWorkflowTemplateRepo is a mock of WorkflowTemplateRepo interface.
@@ -854,23 +358,23 @@ func (mr *MockWorkflowTemplateRepoMockRecorder) Create(ctx, req any) *gomock.Cal
 }
 
 // Delete mocks base method.
-func (m *MockWorkflowTemplateRepo) Delete(ctx context.Context, templateID string) error {
+func (m *MockWorkflowTemplateRepo) Delete(ctx context.Context, accountID, templateID string) error {
 	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "Delete", ctx, templateID)
+	ret := m.ctrl.Call(m, "Delete", ctx, accountID, templateID)
 	ret0, _ := ret[0].(error)
 	return ret0
 }
 
 // Delete indicates an expected call of Delete.
-func (mr *MockWorkflowTemplateRepoMockRecorder) Delete(ctx, templateID any) *gomock.Call {
+func (mr *MockWorkflowTemplateRepoMockRecorder) Delete(ctx, accountID, templateID any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Delete", reflect.TypeOf((*MockWorkflowTemplateRepo)(nil).Delete), ctx, templateID)
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Delete", reflect.TypeOf((*MockWorkflowTemplateRepo)(nil).Delete), ctx, accountID, templateID)
 }
 
 // Get mocks base method.
-func (m *MockWorkflowTemplateRepo) Get(ctx context.Context, templateID string) (entity.WorkflowTemplate, bool, error) {
+func (m *MockWorkflowTemplateRepo) Get(ctx context.Context, accountID, templateID string) (entity.WorkflowTemplate, bool, error) {
 	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "Get", ctx, templateID)
+	ret := m.ctrl.Call(m, "Get", ctx, accountID, templateID)
 	ret0, _ := ret[0].(entity.WorkflowTemplate)
 	ret1, _ := ret[1].(bool)
 	ret2, _ := ret[2].(error)
@@ -878,9 +382,9 @@ func (m *MockWorkflowTemplateRepo) Get(ctx context.Context, templateID string) (
 }
 
 // Get indicates an expected call of Get.
-func (mr *MockWorkflowTemplateRepoMockRecorder) Get(ctx, templateID any) *gomock.Call {
+func (mr *MockWorkflowTemplateRepoMockRecorder) Get(ctx, accountID, templateID any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Get", reflect.TypeOf((*MockWorkflowTemplateRepo)(nil).Get), ctx, templateID)
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Get", reflect.TypeOf((*MockWorkflowTemplateRepo)(nil).Get), ctx, accountID, templateID)
 }
 
 // ListByAccount mocks base method.
@@ -899,18 +403,18 @@ func (mr *MockWorkflowTemplateRepoMockRecorder) ListByAccount(ctx, accountID any
 }
 
 // Update mocks base method.
-func (m *MockWorkflowTemplateRepo) Update(ctx context.Context, templateID string, req entity.UpdateWorkflowTemplateRequest) (entity.WorkflowTemplate, error) {
+func (m *MockWorkflowTemplateRepo) Update(ctx context.Context, accountID, templateID string, req entity.UpdateWorkflowTemplateRequest) (entity.WorkflowTemplate, error) {
 	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "Update", ctx, templateID, req)
+	ret := m.ctrl.Call(m, "Update", ctx, accountID, templateID, req)
 	ret0, _ := ret[0].(entity.WorkflowTemplate)
 	ret1, _ := ret[1].(error)
 	return ret0, ret1
 }
 
 // Update indicates an expected call of Update.
-func (mr *MockWorkflowTemplateRepoMockRecorder) Update(ctx, templateID, req any) *gomock.Call {
+func (mr *MockWorkflowTemplateRepoMockRecorder) Update(ctx, accountID, templateID, req any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Update", reflect.TypeOf((*MockWorkflowTemplateRepo)(nil).Update), ctx, templateID, req)
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Update", reflect.TypeOf((*MockWorkflowTemplateRepo)(nil).Update), ctx, accountID, templateID, req)
 }
 
 // MockCreditManager is a mock of CreditManager interface.

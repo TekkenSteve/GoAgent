@@ -10,22 +10,6 @@ import (
 type (
 	// --- Input ports (implemented by use cases, called by controllers) ---.
 
-	// AgentExecutor is the business interface for agent workflow execution.
-	AgentExecutor interface {
-		Execute(ctx context.Context, req *entity.ExecuteRequest) (entity.RunStatus, error)
-		GetStatus(ctx context.Context, runID string) (entity.RunStatus, error)
-		Control(ctx context.Context, runID string, op entity.ControlOperation) error
-	}
-	// HistoryQuery is the business interface for querying agent run history.
-	HistoryQuery interface {
-		ListMessages(ctx context.Context, runID string, limit, offset uint64) ([]entity.MessageRecord, error)
-		ListToolResults(ctx context.Context, runID string, limit, offset uint64) ([]entity.ToolResultRecord, error)
-	}
-	// OrchestrationExecutor starts and manages orchestration workflows.
-	OrchestrationExecutor interface {
-		ExecuteOrchestration(ctx context.Context, input *entity.OrchestrationInput) (entity.RunStatus, error)
-		GetOrchestrationStatus(ctx context.Context, runID string) (entity.RunStatus, error)
-	}
 	// StreamEventWriter is the destination for streaming events.
 	// Implementations write to Redis Stream, channel, etc.
 	StreamEventWriter interface {
@@ -41,9 +25,12 @@ type (
 	TemplateManager interface {
 		Create(ctx context.Context, req *entity.CreateWorkflowTemplateRequest) (entity.WorkflowTemplate, error)
 		CreateFromYAML(ctx context.Context, accountID string, yamlData []byte) (entity.WorkflowTemplate, error)
-		Get(ctx context.Context, templateID string) (entity.WorkflowTemplate, error)
-		Update(ctx context.Context, templateID string, req entity.UpdateWorkflowTemplateRequest) (entity.WorkflowTemplate, error)
-		Delete(ctx context.Context, templateID string) error
+		// Get, Update and Delete name the owning account: a template is its
+		// account's, so the account is part of the lookup rather than a check
+		// applied afterwards.
+		Get(ctx context.Context, accountID, templateID string) (entity.WorkflowTemplate, error)
+		Update(ctx context.Context, accountID, templateID string, req entity.UpdateWorkflowTemplateRequest) (entity.WorkflowTemplate, error)
+		Delete(ctx context.Context, accountID, templateID string) error
 		ListByAccount(ctx context.Context, accountID string) ([]entity.WorkflowTemplate, error)
 	}
 )

@@ -2,6 +2,7 @@ package v1
 
 import (
 	agentos "github.com/TekkenSteve/GoAgent/agentos/control"
+	agentoscore "github.com/TekkenSteve/GoAgent/agentos/core"
 	agentosplatform "github.com/TekkenSteve/GoAgent/agentos/platform"
 	"github.com/TekkenSteve/GoAgent/internal/agentfw/eventing"
 	"github.com/TekkenSteve/GoAgent/internal/usecase"
@@ -13,7 +14,7 @@ import (
 // NewRoutes registers all v1 API routes under the given router group.
 // Matches go-clean-template pattern: single entry point, all usecase interfaces
 // passed as parameters, all route groups registered inside.
-func NewRoutes(apiV1Group fiber.Router, t usecase.AgentExecutor, o usecase.OrchestrationExecutor, l logger.Interface,
+func NewRoutes(apiV1Group fiber.Router, l logger.Interface,
 	cancelWorkflow CancelWorkflowFn, signalWorkflow SignalWorkflowFn,
 	m usecase.TemplateManager,
 	eventIngest *eventing.Service,
@@ -21,16 +22,14 @@ func NewRoutes(apiV1Group fiber.Router, t usecase.AgentExecutor, o usecase.Orche
 	planRuntime agentos.PlanRuntime,
 	platformRuntime agentosplatform.Runtime,
 	runEventReader RunEventReader,
+	authorizer agentoscore.Authorizer,
 ) {
-	r := newV1(t, o, l, cancelWorkflow, signalWorkflow, eventIngest, agentOSRuntime, planRuntime, platformRuntime, runEventReader)
+	r := newV1(l, cancelWorkflow, signalWorkflow, eventIngest, agentOSRuntime, planRuntime, platformRuntime, runEventReader, authorizer)
 	registerTemplateRoutes(apiV1Group, m, l)
-	registerOrchestrationRoutes(apiV1Group, r, o)
 	registerAgentOSRoutes(apiV1Group, r, eventIngest, agentOSRuntime, planRuntime, platformRuntime, runEventReader)
 }
 
 func newV1(
-	t usecase.AgentExecutor,
-	o usecase.OrchestrationExecutor,
 	l logger.Interface,
 	cancelWorkflow CancelWorkflowFn,
 	signalWorkflow SignalWorkflowFn,
@@ -39,10 +38,9 @@ func newV1(
 	planRuntime agentos.PlanRuntime,
 	platformRuntime agentosplatform.Runtime,
 	runEventReader RunEventReader,
+	authorizer agentoscore.Authorizer,
 ) *V1 {
 	return &V1{
-		t:              t,
-		o:              o,
 		l:              l,
 		v:              validator.New(validator.WithRequiredStructEnabled()),
 		cancelWorkflow: cancelWorkflow, signalWorkflow: signalWorkflow,
@@ -51,6 +49,7 @@ func newV1(
 		planRuntime:     planRuntime,
 		platformRuntime: platformRuntime,
 		runEventReader:  runEventReader,
+		authorizer:      authorizer,
 	}
 }
 
@@ -62,13 +61,6 @@ func registerTemplateRoutes(apiV1Group fiber.Router, m usecase.TemplateManager, 
 		tplGroup.Get("/", tpl.list)
 		tplGroup.Get("/:template_id", tpl.get)
 		tplGroup.Delete("/:template_id", tpl.delete)
-	}
-}
-
-func registerOrchestrationRoutes(apiV1Group fiber.Router, r *V1, o usecase.OrchestrationExecutor) {
-	if o != nil {
-		apiV1Group.Post("/orchestration/execute", r.orchestrate)
-		apiV1Group.Get("/orchestration/status/:run_id", r.orchestrationStatus)
 	}
 }
 

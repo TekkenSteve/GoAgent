@@ -10,6 +10,7 @@ import (
 	"syscall"
 	"time"
 
+	agentosroot "github.com/TekkenSteve/GoAgent/agentos"
 	agentos "github.com/TekkenSteve/GoAgent/agentos/control"
 	agentoscore "github.com/TekkenSteve/GoAgent/agentos/core"
 	agentosplatform "github.com/TekkenSteve/GoAgent/agentos/platform"
@@ -21,6 +22,8 @@ import (
 	"github.com/TekkenSteve/GoAgent/internal/agentfw/orchestration"
 	agentfwruntime "github.com/TekkenSteve/GoAgent/internal/agentfw/runtime"
 	"github.com/TekkenSteve/GoAgent/internal/agentfw/tool"
+	"github.com/TekkenSteve/GoAgent/internal/authn"
+	"github.com/TekkenSteve/GoAgent/internal/authz"
 	"github.com/TekkenSteve/GoAgent/internal/controller/restapi"
 	restapiv1 "github.com/TekkenSteve/GoAgent/internal/controller/restapi/v1"
 	"github.com/TekkenSteve/GoAgent/internal/pkg/postgres"
@@ -32,11 +35,9 @@ import (
 	"github.com/TekkenSteve/GoAgent/internal/repo/framework"
 	mcpRepo "github.com/TekkenSteve/GoAgent/internal/repo/mcp"
 	temporalrepo "github.com/TekkenSteve/GoAgent/internal/repo/persistent"
-	pipelinepkg "github.com/TekkenSteve/GoAgent/internal/repo/pipeline"
 	repostream "github.com/TekkenSteve/GoAgent/internal/repo/stream"
 	"github.com/TekkenSteve/GoAgent/internal/repo/toolkit"
 	"github.com/TekkenSteve/GoAgent/internal/repo/webapi"
-	"github.com/TekkenSteve/GoAgent/internal/usecase"
 	"github.com/TekkenSteve/GoAgent/internal/usecase/agent"
 	"github.com/TekkenSteve/GoAgent/internal/usecase/agentosaction"
 	"github.com/TekkenSteve/GoAgent/internal/usecase/agentosbatch"
@@ -45,7 +46,6 @@ import (
 	"github.com/TekkenSteve/GoAgent/internal/usecase/agentosprojection"
 	agentosruntime "github.com/TekkenSteve/GoAgent/internal/usecase/agentosruntime"
 	billingpkg "github.com/TekkenSteve/GoAgent/internal/usecase/billing"
-	agentfwusecase "github.com/TekkenSteve/GoAgent/internal/usecase/executor"
 	templatepkg "github.com/TekkenSteve/GoAgent/internal/usecase/template"
 	"github.com/TekkenSteve/GoAgent/pkg/httpserver"
 	"github.com/TekkenSteve/GoAgent/pkg/logger"
@@ -53,10 +53,11 @@ import (
 )
 
 var (
-	errAppRunAgentOSRuntimeRequired          = errors.New("app - Run - agentos runtime is required for agent execution")
 	errAppRunPlanCmdRecoveryNoImplementation = errors.New("app - Run - agentos plan command recovery: plan runtime does not implement recovery")
 	errAppRunPlanWorkerQueueUnconfigured     = errors.New("app - Run - agentos plan worker task queue is not configured")
 	errAppProcessWorkerQueueUnconfigured     = errors.New("app - Run - agentos process worker task queue is not configured")
+	errAppRunNexusWorkerQueueUnconfigured    = errors.New("app - Run - agentos nexus worker task queue is not configured")
+	errAppRunBackendResolverUnsupported      = errors.New("app - Run - agentos runtime does not expose backend resolution for run supervision")
 )
 
 type appInfrastructure struct {
@@ -64,7 +65,6 @@ type appInfrastructure struct {
 	rdb             *goredis.Redis
 	eventIngest     *eventing.Service
 	dataPlane       *agentostemporal.StreamingDataPlane
-	messageRepo     *temporalrepo.MessageRepo
 	agentRepo       *cached.AgentRepo
 	templateRepo    *temporalrepo.WorkflowTemplateRepo
 	runBackendIndex *temporalrepo.RunBackendIndexRepo
@@ -80,7 +80,14 @@ func initInfrastructure(cfg *config.Config, l *logger.Logger) *appInfrastructure
 		l.Fatal(fmt.Errorf("app - Run - postgres.New: %w", err))
 	}
 
-	messageRepo := temporalrepo.NewMessageRepo(pg)
+	// Refuse to serve against a schema this build does not cover. A library
+	// newer than its database fails in ways that do not name the cause; this
+	// names it before the first request.
+	if status, schemaErr := agentosroot.CheckSchema(context.Background(), pg.Pool); schemaErr != nil {
+		pg.Close()
+		l.Fatal(fmt.Errorf("app - Run - agentos.CheckSchema (database at version %d, dirty=%t): %w", status.Version, status.Dirty, schemaErr))
+	}
+
 	persistentAgentRepo := temporalrepo.NewAgentRepo(pg)
 	agentRepo := cached.NewAgentRepo(persistentAgentRepo)
 	templateRepo := temporalrepo.NewWorkflowTemplateRepo(pg)
@@ -99,10 +106,14 @@ func initInfrastructure(cfg *config.Config, l *logger.Logger) *appInfrastructure
 	// The data plane is the single live transport: Centrifugo by default,
 	// degrading to the in-process memstream bus when no base URL is configured
 	// (a warning is logged). It feeds the run activities' publisher, the
-	// run/plan subscriptions, and the durable projection.
-	dataPlane, err := agentostemporal.NewStreamingDataPlane(context.Background(), agentostemporal.StreamCentrifugoConfig{
+	// run/plan subscriptions, and the milestone recorder (the durable facts).
+	dataPlane, err := agentostemporal.NewStreamingDataPlane(agentostemporal.StreamCentrifugoConfig{
 		BaseURL: cfg.StreamCentrifugo.BaseURL,
 		APIKey:  cfg.StreamCentrifugo.APIKey,
+		// The recorder's milestones queue for the fact log exactly when the
+		// backbone drainer is running to publish them — the same condition
+		// startAppEventBackbone disables the backbone under.
+		EventOutbox: cfg.AgentFW.NatsURL != "",
 	}, pg, l)
 	if err != nil {
 		if closeErr := rdb.Close(); closeErr != nil {
@@ -127,7 +138,7 @@ func initInfrastructure(cfg *config.Config, l *logger.Logger) *appInfrastructure
 
 	return &appInfrastructure{
 		pg: pg, rdb: rdb, eventIngest: eventIngest, dataPlane: dataPlane,
-		messageRepo: messageRepo, agentRepo: agentRepo, templateRepo: templateRepo,
+		agentRepo: agentRepo, templateRepo: templateRepo,
 		runBackendIndex: runBackendIndex, templateUC: templateUC,
 		fwCfg: fwCfg,
 	}
@@ -187,7 +198,11 @@ func Run(cfg *config.Config) {
 		}
 	}()
 
-	tc := initTemporalComponents(l, cfg, &infra.fwCfg, infra.pg, infra.rdb, infra.messageRepo, infra.agentRepo, infra.runBackendIndex, infra.templateUC, infra.dataPlane)
+	// Drain domain outboxes into the event log; registered ahead of the Temporal
+	// components so shutdown stops producers, then the drainer, then the pools.
+	defer startAppEventBackbone(ctx, l, cfg, infra.pg)()
+
+	tc := initTemporalComponents(l, cfg, &infra.fwCfg, infra.pg, infra.agentRepo, infra.runBackendIndex, infra.templateUC, infra.dataPlane)
 	if tc != nil {
 		defer tc.Stop(l)
 
@@ -200,15 +215,14 @@ func Run(cfg *config.Config) {
 		signalWorkflow = tc.signalWorkflow
 	}
 
-	// Use-Case
-	agentExecutor, orchExecutor, err := initAgentExecutor(temporalRuntime, agentOSRuntime, &infra.fwCfg)
-	if err != nil {
-		l.Fatal(fmt.Errorf("app - Run - init agent executor: %w", err))
-	}
+	// Bridge friend-cell facts into Temporal. A deployment with no ingress
+	// routes starts nothing here; one that declares routes needs a Temporal to
+	// deliver into, which is the client the runtime owns. Registered after
+	// tc.Stop, so shutdown stops consuming before the client it calls goes away.
+	defer startAppIngressForComponents(ctx, l, cfg, tc)()
 
-	if agentExecutor == nil {
-		l.Fatal(errAppRunAgentOSRuntimeRequired)
-	}
+	// The control plane drives the native backend directly: there is no second,
+	// tenant-less executor path in front of it.
 
 	switch {
 	case temporalRuntime != nil:
@@ -220,35 +234,42 @@ func Run(cfg *config.Config) {
 	}
 
 	runEventReader := temporalrepo.NewAgentOSRunEventRepo(infra.pg)
-	runHTTPServer(cfg, l, agentExecutor, orchExecutor, cancelWorkflow, signalWorkflow, infra.templateUC, infra.eventIngest, agentOSRuntime, planRuntime, platformRuntime, temporalRuntime, runEventReader)
+	runHTTPServer(cfg, l, cancelWorkflow, signalWorkflow, infra.templateUC, infra.eventIngest, agentOSRuntime, planRuntime, platformRuntime, temporalRuntime, runEventReader)
 }
 
-func initAgentExecutor(temporalRuntime *agentfwruntime.TemporalRuntime, agentOSRuntime agentos.Runtime, fwCfg *agentfwconfig.Config) (usecase.AgentExecutor, usecase.OrchestrationExecutor, error) {
-	var (
-		agentExecutor usecase.AgentExecutor
-		orchExecutor  usecase.OrchestrationExecutor
-	)
+// initAuth builds the HTTP surface's authentication and authorization
+// components. config.NewConfig has already refused a configuration without a
+// usable key source; this step materializes it, and surfaces a key-source
+// failure (an unreachable JWK Set, say) as a startup error rather than a 500 in
+// production. The tenant authorizer is the built-in account-boundary decision;
+// a deployment with a policy engine replaces it here without touching callers.
+func initAuth(ctx context.Context, cfg *config.Config) (restapi.AuthDeps, error) {
+	verifierConfig := cfg.Auth.VerifierConfig()
 
-	if temporalRuntime != nil {
-		temporalRepo, err := temporalrepo.NewExecutorTemporal(temporalRuntime.Client, &fwCfg.Temporal)
-		if err != nil {
-			return nil, nil, err
-		}
-
-		orchExecutor = agentfwusecase.New(temporalRepo)
-
-		if agentOSRuntime != nil {
-			agentExecutor = newAgentOSExecutor(agentOSRuntime)
-		}
+	verifier, err := authn.New(ctx, &verifierConfig)
+	if err != nil {
+		return restapi.AuthDeps{}, err
 	}
 
-	return agentExecutor, orchExecutor, nil
+	return restapi.AuthDeps{
+		Verifier:    verifier,
+		Authorizer:  authz.TenantAuthorizer{},
+		PublicPaths: cfg.Auth.ResolvedPublicPaths(),
+	}, nil
 }
 
-func runHTTPServer(cfg *config.Config, l *logger.Logger, agentExecutor usecase.AgentExecutor, orchExecutor usecase.OrchestrationExecutor, cancelWorkflow restapiv1.CancelWorkflowFn, signalWorkflow restapiv1.SignalWorkflowFn, templateUC *templatepkg.UseCase, eventIngest *eventing.Service, agentOSRuntime agentos.Runtime, planRuntime agentos.PlanRuntime, platformRuntime agentosplatform.Runtime, temporalRuntime *agentfwruntime.TemporalRuntime, runEventReader restapiv1.RunEventReader) {
+func runHTTPServer(cfg *config.Config, l *logger.Logger, cancelWorkflow restapiv1.CancelWorkflowFn, signalWorkflow restapiv1.SignalWorkflowFn, templateUC *templatepkg.UseCase, eventIngest *eventing.Service, agentOSRuntime agentos.Runtime, planRuntime agentos.PlanRuntime, platformRuntime agentosplatform.Runtime, temporalRuntime *agentfwruntime.TemporalRuntime, runEventReader restapiv1.RunEventReader) {
+	// Authentication is built here, before the server starts: nothing can serve
+	// a request until this returns, and a deployment that cannot authenticate
+	// must not start at all.
+	authDeps, err := initAuth(context.Background(), cfg)
+	if err != nil {
+		l.Fatal(fmt.Errorf("app - runHTTPServer - initAuth: %w", err))
+	}
+
 	httpServer := httpserver.New(l, httpserver.Port(cfg.HTTP.Port), httpserver.Prefork(cfg.HTTP.UsePreforkMode))
-	restapi.NewRouter(httpServer.App, cfg, agentExecutor, orchExecutor, l,
-		cancelWorkflow, signalWorkflow, templateUC, eventIngest, agentOSRuntime, planRuntime, platformRuntime, runEventReader)
+	restapi.NewRouter(httpServer.App, cfg, l,
+		cancelWorkflow, signalWorkflow, templateUC, eventIngest, agentOSRuntime, planRuntime, platformRuntime, runEventReader, authDeps)
 	httpServer.Start()
 
 	interrupt := make(chan os.Signal, 1)
@@ -280,7 +301,6 @@ type temporalComponents struct {
 	closeProcessRuntime func() error
 	planRecovery        *agentostemporal.PlanCommandRecoveryLoop
 	planMetrics         *agentosplan.PlanMetricsExporterLoop
-	batchWriter         *pipelinepkg.BatchWriter
 	agentUC             *agent.UseCase
 	toolRegistry        *toolkit.ToolRegistry
 	cancelWorkflow      restapiv1.CancelWorkflowFn
@@ -294,10 +314,6 @@ type temporalComponents struct {
 func (c *temporalComponents) Stop(l logger.Interface) {
 	if c == nil {
 		return
-	}
-
-	if c.batchWriter != nil {
-		c.batchWriter.Stop()
 	}
 
 	if c.planMetrics != nil {
@@ -400,9 +416,20 @@ func setupPlanRuntime(agentOSRuntime agentos.Runtime, planStore *temporalrepo.Ag
 	}
 
 	planRuntimeCfg := cfg.AgentOS.ArtifactStoreConfig()
+
+	nexusPeers, err := cfg.AgentFW.NexusPeers()
+	if err != nil {
+		l.Fatal(fmt.Errorf("app - Run - nexus peers: %w", err))
+	}
+
 	planRuntimeConfig := agentostemporal.RuntimeConfig{
-		TemporalAddress:     fwCfg.Temporal.Address,
-		TemporalNamespace:   fwCfg.Temporal.Namespace,
+		TemporalAddress:   fwCfg.Temporal.Address,
+		TemporalNamespace: fwCfg.Temporal.Namespace,
+		// The plan caller must address the endpoint this deployment actually
+		// registered; leaving it empty silently falls back to the framework
+		// default and breaks every plan node when the endpoint differs.
+		NexusEndpoint:       fwCfg.Temporal.NexusEndpoint,
+		NexusPeers:          nexusPeers,
 		TemporalTaskQueues:  agentOSTemporalTaskQueues(&fwCfg.Temporal.TaskQueues),
 		PostgresURL:         cfg.PG.URL,
 		PostgresPoolMax:     cfg.PG.PoolMax,
@@ -490,8 +517,8 @@ func newAgentOSProjectionRuntime(l *logger.Logger, stores agentOSProcessPlatform
 	return projectionRuntime
 }
 
-func initTemporalComponents(l *logger.Logger, cfg *config.Config, fwCfg *agentfwconfig.Config, pg *postgres.Postgres, rdb *goredis.Redis,
-	messageRepo *temporalrepo.MessageRepo, agentRepo *cached.AgentRepo,
+func initTemporalComponents(l *logger.Logger, cfg *config.Config, fwCfg *agentfwconfig.Config, pg *postgres.Postgres,
+	agentRepo *cached.AgentRepo,
 	runBackendIndex *temporalrepo.RunBackendIndexRepo, templateUC *templatepkg.UseCase, dataPlane *agentostemporal.StreamingDataPlane,
 ) *temporalComponents {
 	runtime, err := agentfwruntime.NewTemporalRuntime(&fwCfg.Temporal)
@@ -504,7 +531,7 @@ func initTemporalComponents(l *logger.Logger, cfg *config.Config, fwCfg *agentfw
 		l.Fatal(fmt.Errorf("app - Run - LoadLLMProviders: %w", err))
 	}
 
-	comp := initAgentComponents(l, cfg, pg, rdb, llmResult, messageRepo, agentRepo, dataPlane)
+	comp := initAgentComponents(l, cfg, pg, llmResult, agentRepo, dataPlane)
 	registerToolsOnRegistry(l, comp.toolRegistry)
 
 	if err := templateUC.EnsureDefault(context.Background()); err != nil {
@@ -533,7 +560,6 @@ func initTemporalComponents(l *logger.Logger, cfg *config.Config, fwCfg *agentfw
 		closeProcessRuntime: processPlatform.closeProcessRuntime,
 		planRecovery:        planRecovery,
 		planMetrics:         planMetrics,
-		batchWriter:         comp.batchWriter,
 		agentUC:             comp.agentUC,
 		toolRegistry:        comp.toolRegistry,
 		cancelWorkflow:      cancelWorkflow,
@@ -550,11 +576,12 @@ func newAgentOSControlRuntime(l logger.Interface, cfg *config.Config, fwCfg *age
 			TemporalTaskQueues:       agentOSTemporalTaskQueues(&fwCfg.Temporal.TaskQueues),
 			Subscriber:               dataPlane.Subscriber,
 			Publisher:                dataPlane.Publisher,
-			ProjectionController:     dataPlane.Projector,
+			Facts:                    dataPlane.Facts,
 			Logger:                   l,
 			TemporalExternalBackends: temporalExternalBackends(l, cfg),
 			HTTPBackends:             httpBackends(l, cfg),
 			GRPCBackends:             grpcBackends(l, cfg),
+			DSHBackends:              dshBackends(l, cfg),
 		}, runtime.Client,
 		agentostemporal.WithRunBackendIndex(runBackendIndex),
 		agentostemporal.WithRunBackendSelector(backendSelector(l, cfg)),
@@ -692,12 +719,42 @@ func (r agentOSRegistrar) RegisterWorkflows(rt *agentfwruntime.TemporalRuntime) 
 		return err
 	}
 
+	// The Nexus run bridge is a router: it owns its own queue so Nexus routing
+	// scales and deploys independently of plan execution, and its endpoint
+	// (AGENTFW_TEMPORAL_NEXUS_ENDPOINT) targets that queue. Run starts still
+	// execute on the plan-activity queue.
+	nexusWorker, ok := rt.WorkerFor(rt.TaskQueues.Nexus)
+	if !ok || nexusWorker == nil {
+		return fmt.Errorf("%w: nexus task queue %q", errAppRunNexusWorkerQueueUnconfigured, rt.TaskQueues.Nexus)
+	}
+
+	if err := agentostemporal.RegisterNexusRunService(nexusWorker, r.planActivities.Runtime, rt.TaskQueues.PlanActivity); err != nil {
+		return err
+	}
+
+	return r.registerProcessWorkloads(rt)
+}
+
+// registerProcessWorkloads installs the process workflow and the run
+// supervisor that owns external-backend runs (HTTP, gRPC, DSH), so their
+// control plane is Temporal primitives instead of backend I/O on the caller's
+// path.
+func (r agentOSRegistrar) registerProcessWorkloads(rt *agentfwruntime.TemporalRuntime) error {
 	processWorker, ok := rt.WorkerFor(rt.TaskQueues.ProcessControl)
 	if !ok || processWorker == nil {
 		return fmt.Errorf("%w: process control task queue %q", errAppProcessWorkerQueueUnconfigured, rt.TaskQueues.ProcessControl)
 	}
 
-	return agentostemporal.RegisterProcessWorkflow(processWorker)
+	if err := agentostemporal.RegisterProcessWorkflow(processWorker); err != nil {
+		return err
+	}
+
+	resolver, ok := r.planActivities.Runtime.(agentostemporal.BackendResolver)
+	if !ok {
+		return errAppRunBackendResolverUnsupported
+	}
+
+	return agentostemporal.RegisterRunSupervisor(processWorker, resolver)
 }
 
 func (r agentOSRegistrar) RegisterActivities(rt *agentfwruntime.TemporalRuntime) error {
@@ -711,6 +768,10 @@ func (r agentOSRegistrar) RegisterActivities(rt *agentfwruntime.TemporalRuntime)
 	}
 
 	if err := agentostemporal.RegisterPlanActivities(planWorker, r.planActivities); err != nil {
+		return err
+	}
+
+	if err := agentostemporal.RegisterNexusRunActivities(planWorker, r.planActivities.Runtime, r.planActivities.PlanNodeStarter); err != nil {
 		return err
 	}
 
@@ -754,6 +815,7 @@ func agentOSTemporalTaskQueues(taskQueues *agentfwconfig.TaskQueues) agentostemp
 		NativeLLM:       taskQueues.NativeLLM,
 		NativeTool:      taskQueues.NativeTool,
 		Stream:          taskQueues.Stream,
+		Nexus:           taskQueues.Nexus,
 	}
 }
 
@@ -838,6 +900,28 @@ func grpcBackends(l logger.Interface, cfg *config.Config) []agentostemporal.GRPC
 	return result
 }
 
+func dshBackends(l logger.Interface, cfg *config.Config) []agentostemporal.DSHBackendConfig {
+	backends, err := cfg.AgentFW.DSHBackends()
+	if err != nil {
+		l.Fatal(fmt.Errorf("app - Run - dsh backends: %w", err))
+	}
+
+	result := make([]agentostemporal.DSHBackendConfig, 0, len(backends))
+	for i := range backends {
+		backend := &backends[i]
+		result = append(result, agentostemporal.DSHBackendConfig{
+			Name:       backend.Name,
+			Command:    backend.Command,
+			Profile:    backend.Profile,
+			Args:       backend.Args,
+			Env:        backend.Env,
+			WorkingDir: backend.WorkingDir,
+		})
+	}
+
+	return result
+}
+
 func backendSelector(l logger.Interface, cfg *config.Config) agentostemporal.RunBackendSelector {
 	rules, err := cfg.AgentFW.BackendSelectionRules()
 	if err != nil {
@@ -906,14 +990,13 @@ func configureStreamingActivities(activities *orchestration.AgentActivities, dat
 	}
 
 	activities.WithStreamPublisher(dataPlane.Publisher)
-	activities.WithRunProjectionController(dataPlane.Projector)
+	activities.WithMilestoneRecorder(dataPlane.Facts)
 }
 
 // initAgentComponentsResult holds the results of initAgentComponents.
 type initAgentComponentsResult struct {
 	llmProvider  *webapi.BifrostProvider
 	toolRegistry *toolkit.ToolRegistry
-	batchWriter  *pipelinepkg.BatchWriter
 	agentUC      *agent.UseCase
 	activities   *orchestration.AgentActivities
 }
@@ -922,9 +1005,7 @@ func initAgentComponents(
 	l *logger.Logger,
 	cfg *config.Config,
 	pg *postgres.Postgres,
-	rdb *goredis.Redis,
 	llmResult *webapi.LLMProvidersResult,
-	messageRepo *temporalrepo.MessageRepo,
 	agentRepo *cached.AgentRepo,
 	dataPlane *agentostemporal.StreamingDataPlane,
 ) *initAgentComponentsResult {
@@ -938,22 +1019,36 @@ func initAgentComponents(
 	toolRegistry := toolkit.NewRegistry()
 	registerEnvTools(l, toolRegistry)
 
-	toolPipe := tool.Pipeline{
-		Executor: toolRegistry,
+	// The tool pipeline is assembled with every protective stage present, and
+	// refuses to build otherwise: a missing authorization or idempotency stage
+	// would run tools with a check silently absent.
+	toolPipe, err := tool.NewPipeline(&tool.PipelineConfig{
+		Authorizer: &tool.TenantAuthorizer{
+			Authorizer: authz.TenantAuthorizer{},
+			Audit:      tool.NewLoggerAuditSink(l),
+		},
+		Executor:    toolRegistry,
+		Redactor:    tool.NewRedactor(nil),
+		Policies:    &tool.DefaultPolicyProvider{},
+		Idempotency: temporalrepo.NewToolIdempotencyStore(pg),
+	})
+	if err != nil {
+		l.Fatal(fmt.Errorf("app - Run - tool pipeline: %w", err))
 	}
-	toolExecutor := framework.NewToolPipeline(&toolPipe)
+
+	toolExecutor := framework.NewToolPipeline(toolPipe)
 
 	agentCompressor := compressor.New(compressor.Config{LLM: llmProvider})
-	wal := pipelinepkg.NewWriteAheadLog(rdb.GeneralClient)
-	dlq := pipelinepkg.NewDeadLetterQueue(rdb.GeneralClient)
 
-	batchWriter := pipelinepkg.NewBatchWriter(wal, dlq, messageRepo, l)
-	batchWriter.Start()
-
-	agentUC := agent.New(llmProvider, toolExecutor, wal, agentCompressor, toolRegistry, agentRepo)
+	agentUC := agent.New(llmProvider, toolExecutor, agentCompressor, toolRegistry, agentRepo)
 	agentUC.SetLogger(l)
 
-	mcpManager := mcpRepo.NewManager()
+	mcpManager := mcpRepo.NewManager(mcpRepo.NewTransportPolicy(&mcpRepo.TransportPolicyOptions{
+		AllowedCommands:  cfg.MCP.AllowedCommands,
+		InheritedEnvKeys: cfg.MCP.InheritedEnvKeys,
+		ConfigEnvKeys:    cfg.MCP.ConfigEnvKeys,
+		AllowedHTTPHosts: cfg.MCP.AllowedHTTPHosts,
+	}))
 	if toolRegistry != nil {
 		mcpManager.SetRegistry(toolRegistry)
 		l.Info("app - Run - mcp manager created for per-agent JIT tool registration")
@@ -965,7 +1060,7 @@ func initAgentComponents(
 	configureStreamingActivities(activities, dataPlane)
 	l.Info("app - Run - agent components initialized")
 
-	return &initAgentComponentsResult{llmProvider, toolRegistry, batchWriter, agentUC, activities}
+	return &initAgentComponentsResult{llmProvider, toolRegistry, agentUC, activities}
 }
 
 func registerToolsOnRegistry(l *logger.Logger, toolRegistry *toolkit.ToolRegistry) {

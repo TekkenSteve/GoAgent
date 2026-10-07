@@ -43,15 +43,30 @@ const defaultHTTPTimeout = 30 * time.Second
 type Client struct {
 	baseURL   string
 	accountID string
+	projectID string
 	http      *http.Client
 }
 
+// defaultProjectID is the project runs are started in when a caller names none.
+// A project is part of a run's identity, so one is always sent; the environment
+// overrides it for a deployment that names its projects.
+const defaultProjectID = "default"
+
 // New creates a Client targeting the given base URL.
-// accountID is the default account sent with every request.
+//
+// accountID is the default account sent with every request, and PROJECT_ID (or
+// defaultProjectID) the default project: both are needed to start a run,
+// because a run's work is authorized as its tenant.
 func New(baseURL, accountID string) *Client {
+	projectID := os.Getenv("PROJECT_ID")
+	if projectID == "" {
+		projectID = defaultProjectID
+	}
+
 	return &Client{
 		baseURL:   strings.TrimRight(baseURL, "/"),
 		accountID: accountID,
+		projectID: projectID,
 		http:      &http.Client{Timeout: defaultHTTPTimeout},
 	}
 }
@@ -152,39 +167,11 @@ func (e *APIError) Error() string {
 	return fmt.Sprintf("API error %d: %s", e.Code, e.Body)
 }
 
-func (c *Client) pollStatus(ctx context.Context, runID, pathPrefix, desc string, interval, timeout time.Duration) (*RunStatus, error) {
-	deadline := time.Now().Add(timeout)
-
-	for {
-		var status RunStatus
-
-		err := c.Do(ctx, http.MethodGet, pathPrefix+runID, nil, &status)
-
-		stable, werr := pollOnce(&status, err)
-		if werr != nil {
-			return nil, werr
-		}
-
-		if stable {
-			return &status, nil
-		}
-
-		if time.Now().After(deadline) {
-			return nil, fmt.Errorf("%w: %s %s after %v", ErrWaitTimeout, desc, runID, timeout)
-		}
-
-		select {
-		case <-ctx.Done():
-			return nil, ctx.Err()
-		case <-time.After(interval):
-		}
-	}
-}
-
-// WaitForOrchestrationCompletion polls GET /v1/orchestration/status/{runID} until a
-// terminal state (completed, failed, canceled) is reached.
+// WaitForOrchestrationCompletion polls a run started by
+// ExecuteOrchestration until it reaches a terminal state. It is the control
+// plane's run wait: the step queue is a run like any other.
 func (c *Client) WaitForOrchestrationCompletion(ctx context.Context, runID string, interval, timeout time.Duration) (*RunStatus, error) {
-	return c.pollStatus(ctx, runID, "/v1/orchestration/status/", "orchestration run", interval, timeout)
+	return c.WaitForCompletion(ctx, runID, interval, timeout)
 }
 
 // WaitForCompletion polls GET /v1/agentos/runs/{runID}/status until the run reaches

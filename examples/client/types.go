@@ -39,11 +39,14 @@ type AgentOSControlRequest struct {
 	Metadata       map[string]string `json:"metadata,omitempty"`
 }
 
-// OrchestrationRequest is the payload for POST /v1/orchestration/execute.
-// Use TeamSpec or Steps (not both).
+// OrchestrationRequest asks the native backend for its step-queue execution
+// mode: a team it expands, or a queue the caller authored. Use one, not both.
+//
+// It is a convenience over the control plane's run request — the caller names
+// what to run and the client puts it where the native backend reads it.
 type OrchestrationRequest struct {
 	RunID     string `json:"run_id"`
-	AccountID string `json:"account_id"`
+	ProjectID string `json:"project_id,omitempty"`
 	TeamSpec  any    `json:"team_spec,omitempty"` // native team spec JSON
 	Steps     any    `json:"steps,omitempty"`     // native step queue JSON
 }

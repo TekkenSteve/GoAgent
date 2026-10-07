@@ -13,6 +13,15 @@ type StepMutation struct {
 	DeleteSteps []string `json:"delete_steps,omitempty"` // delete these step IDs
 }
 
+// IsEmpty reports whether the mutation changes nothing.
+//
+// A mutation that says nothing is a mistake rather than a no-op: applying it
+// would leave the queue exactly as it was and report success, which hides the
+// caller's error until the run does not do what they asked.
+func (m *StepMutation) IsEmpty() bool {
+	return m.AppendAfter == "" && len(m.InsertSteps) == 0 && m.ModifyStep == "" && len(m.DeleteSteps) == 0
+}
+
 // WaitCondition configures a StepWait for HITL or external events.
 type WaitCondition struct {
 	SignalName string         `json:"signal_name,omitempty"` // Temporal Signal to wait for
