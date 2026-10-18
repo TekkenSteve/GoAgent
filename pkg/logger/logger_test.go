@@ -16,16 +16,18 @@ import (
 
 var errTest = errors.New("test error")
 
-// newBufferedLogger. Helper to replace underlying zerolog writer with a buffer and capture logs.
+// newBufferedLogger builds a Logger writing into a buffer at an explicit
+// per-logger level. It deliberately does not call New: New sets zerolog's
+// process-wide global level, and from a parallel test that stomp races with
+// every other test in this file (the race is logical, not a data race, so
+// the race detector stays quiet while the assertion flakes). With no test
+// touching the global, per-logger levels do all the filtering and each
+// test is deterministic.
 func newBufferedLogger(level string) (*Logger, *bytes.Buffer) {
-	l := New(level)
 	buf := &bytes.Buffer{}
-	// Recreate the zerolog.Logger to write into buffer while keeping similar options
-	// We keep the same skip frame count so caller field exists, but we don't assert its value
-	zl := zerolog.New(buf).With().Timestamp().Logger()
-	l.logger = new(zl)
+	zl := zerolog.New(buf).With().Timestamp().Logger().Level(parseLevel(level))
 
-	return l, buf
+	return &Logger{logger: new(zl)}, buf
 }
 
 // TestParseLevel covers the level-string mapping. It asserts the pure
@@ -81,15 +83,14 @@ func TestInfoAndWarn_LogMessageWithAndWithoutArgs(t *testing.T) {
 
 func TestDebug_RespectsLevel(t *testing.T) {
 	t.Parallel()
-	// when level is info, debug should not emit
+
+	// when level is info, debug should not emit: the logger's own level
+	// suppresses it, no global required.
 	l, buf := newBufferedLogger("info")
 	l.Debug("dbg %d", 1)
 
 	if got := buf.String(); got != "" {
-		// zerolog may still emit entries depending on global level, ensure global level is info
-		if zerolog.GlobalLevel() == zerolog.InfoLevel && strings.Contains(got, "\"level\":\"debug\"") {
-			t.Fatalf("debug should be suppressed at info level, got: %s", got)
-		}
+		t.Fatalf("debug should be suppressed at info level, got: %s", got)
 	}
 
 	// when level is debug, debug should emit
@@ -119,7 +120,7 @@ func TestError_LogsErrorAndDebugWhenDebugLevel(t *testing.T) {
 		t.Fatalf("did not expect debug log at info level, got: %s", out)
 	}
 
-	// debug mode => error + debug (side effect)
+	// debug mode => error plus one debug side-effect carrying the raw value
 	l, buf = newBufferedLogger("debug")
 	l.Error("boom2")
 
@@ -129,7 +130,7 @@ func TestError_LogsErrorAndDebugWhenDebugLevel(t *testing.T) {
 		t.Fatalf("expected 1 error log at debug level, got: %s", out)
 	}
 
-	if strings.Contains(out, "\"level\":\"debug\"") {
+	if strings.Count(out, "\"level\":\"debug\"") != 1 {
 		t.Fatalf("expected 1 debug side-effect log at debug level, got: %s", out)
 	}
 }

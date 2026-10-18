@@ -6,6 +6,7 @@ import (
 	"crypto/rsa"
 	"encoding/json"
 	"errors"
+	"maps"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -58,9 +59,7 @@ func hmacToken(t *testing.T, claims jwt.MapClaims) string {
 		"sub": "account-1",
 		"exp": time.Now().Add(time.Hour).Unix(),
 	}
-	for name, value := range claims {
-		base[name] = value
-	}
+	maps.Copy(base, claims)
 
 	signed, err := jwt.NewWithClaims(jwt.SigningMethodHS256, base).SignedString([]byte(testSecret))
 	if err != nil {

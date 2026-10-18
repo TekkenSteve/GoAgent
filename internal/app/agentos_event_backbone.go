@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"sync"
 	"time"
 
 	"github.com/TekkenSteve/GoAgent/config"
@@ -14,17 +13,11 @@ import (
 	temporalrepo "github.com/TekkenSteve/GoAgent/internal/repo/persistent"
 	"github.com/TekkenSteve/GoAgent/pkg/eventlog"
 	eventlognats "github.com/TekkenSteve/GoAgent/pkg/eventlog/nats"
+	"github.com/TekkenSteve/GoAgent/pkg/jobgroup"
 	"github.com/TekkenSteve/GoAgent/pkg/logger"
 )
 
 const (
-	// eventBackboneStopTimeout bounds how long Stop waits for the drain loops to
-	// notice cancellation. A drain pass is a claim plus a bounded batch of
-	// publishes, so exceeding this means the log is not answering, and blocking
-	// process shutdown on it would be worse than letting the goroutine die with
-	// the process.
-	eventBackboneStopTimeout = 15 * time.Second
-
 	// conversationOutboxDomain names the conversation outbox in drain logs.
 	conversationOutboxDomain = "conversation"
 
@@ -35,7 +28,19 @@ const (
 	// projection. The name is the consumer's progress: reusing it resumes
 	// where it stopped, so a restart continues instead of replaying.
 	runProjectionConsumer = "agentos-run-projection"
+
+	// runProjectionReaderRelease names the projection reader's release in
+	// the group's stop reporting.
+	runProjectionReaderRelease = "run-projection-reader"
+
+	// publisherRelease names the event log publisher's release in the
+	// group's stop reporting.
+	publisherRelease = "eventlog-publisher"
 )
+
+// eventBackboneComponent names the backbone's jobs in the shared job
+// observer's reports.
+const eventBackboneComponent = "event backbone"
 
 // outboxDomain pairs a domain's outbox with the name its drainer logs under, so
 // one domain's publish failure is attributable without reading its SQL.
@@ -44,9 +49,17 @@ type outboxDomain struct {
 	source outbox.PendingSource
 }
 
+// drainJobPrefix names the outbox drain jobs in the group's reporting.
+const drainJobPrefix = "outbox-drain:"
+
+// runProjectionJob names the run timeline projection job in the group's
+// reporting.
+const runProjectionJob = "run-projection"
+
 // eventBackbone is the event backbone's process-local assembly: one producer
 // shared by every domain's outbox, one drain loop per domain, and the run
-// timeline projection consuming the log back into the durable timeline.
+// timeline projection consuming the log back into the durable timeline — all
+// owned by one job group that stops them in order.
 //
 // The producer side is the only place in the process that publishes to the
 // log, which is the point of an outbox: a domain records what must be
@@ -64,12 +77,9 @@ type outboxDomain struct {
 // enqueue outbox rows by enabling its domain's outbox, while exactly one
 // process per deployment runs the drainer and the projection.
 type eventBackbone struct {
-	publisher  *eventlognats.Publisher
-	logger     logger.Interface
-	done       chan struct{}
-	cancel     context.CancelFunc
-	stopReader func()
-	once       sync.Once
+	publisher *eventlognats.Publisher
+	logger    logger.Interface
+	jobs      *jobgroup.Group
 }
 
 // startEventBackbone builds and starts the backbone write path. An empty URL
@@ -112,26 +122,19 @@ func startEventBackbone(parent context.Context, l logger.Interface, cfg *config.
 		return nil, err
 	}
 
-	ctx, cancel := context.WithCancel(parent)
 	backbone := &eventBackbone{
 		publisher: publisher,
 		logger:    l,
-		done:      make(chan struct{}),
-		cancel:    cancel,
-		stopReader: func() {
-			if err := reader.Close(); err != nil {
-				l.Error(fmt.Errorf("app - eventBackbone.Stop - close reader: %w", err))
-			}
-		},
+		jobs:      jobgroup.New(parent, jobgroup.WithObserver(jobObserver{component: eventBackboneComponent, logger: l})),
 	}
 
-	runDomainDrainers(ctx, l, backbone, drainers)
+	for _, drained := range drainers {
+		backbone.jobs.Go(drainJobPrefix+drained.domain.name, drained.drainer.Run)
+	}
 
-	go func() {
-		if err := projector.Run(ctx); err != nil {
-			l.Error(fmt.Errorf("app - startEventBackbone - run projection: %w", err))
-		}
-	}()
+	backbone.jobs.Go(runProjectionJob, projector.Run)
+	backbone.jobs.Defer(runProjectionReaderRelease, reader.Close)
+	backbone.jobs.Defer(publisherRelease, publisher.Close)
 
 	l.Info("app - startEventBackbone - event backbone started: %d outbox domains + run projection on %s",
 		len(drainers), backboneCfg.URL)
@@ -177,9 +180,9 @@ func newRunTimelineProjector(parent context.Context, l logger.Interface, backbon
 	return projector, reader, nil
 }
 
-// Stop cancels the drain loops and the projection, waits for the drainers to
-// finish, releases the projection's reader, then flushes and releases the
-// producer. It is idempotent, and a no-op on a disabled backbone.
+// Stop cancels the drain loops and the projection, waits them out within the
+// stop budget, then releases the projection's reader and the producer in
+// that order. It is idempotent, and a no-op on a disabled backbone.
 //
 // Stop must run before the Postgres pool the loops read from is closed: a
 // drain pass that loses its pool mid-claim is an error an operator has to read,
@@ -189,24 +192,7 @@ func (b *eventBackbone) Stop() {
 		return
 	}
 
-	b.once.Do(func() {
-		b.cancel()
-
-		select {
-		case <-b.done:
-		case <-time.After(eventBackboneStopTimeout):
-		}
-
-		if b.stopReader != nil {
-			b.stopReader()
-		}
-
-		if err := b.publisher.Close(); err != nil {
-			// The log may already be unreachable during shutdown, and the
-			// process is going down either way: report it, do not block on it.
-			b.logger.Error(fmt.Errorf("app - eventBackbone.Stop - close publisher: %w", err))
-		}
-	})
+	stopJobGroup(b.logger, b.jobs)
 }
 
 // eventBackboneConfig maps the application configuration onto the backbone
@@ -294,29 +280,6 @@ func startAppEventBackbone(parent context.Context, l logger.Interface, cfg *conf
 type backboneDrainer struct {
 	domain  outboxDomain
 	drainer *outbox.Drainer
-}
-
-// runDomainDrainers starts one loop per domain and closes the backbone's done
-// channel once every loop has stopped, which is what Stop waits on.
-func runDomainDrainers(ctx context.Context, l logger.Interface, backbone *eventBackbone, drainers []backboneDrainer) {
-	var draining sync.WaitGroup
-
-	for _, drained := range drainers {
-		draining.Add(1)
-
-		go func(domain outboxDomain, drainer *outbox.Drainer) {
-			defer draining.Done()
-
-			if err := drainer.Run(ctx); err != nil {
-				l.Error(fmt.Errorf("app - event backbone - drain %s outbox: %w", domain.name, err))
-			}
-		}(drained.domain, drained.drainer)
-	}
-
-	go func() {
-		draining.Wait()
-		close(backbone.done)
-	}()
 }
 
 // newDomainDrainers builds one drainer per domain outbox this process owns.
