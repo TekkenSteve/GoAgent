@@ -8,12 +8,12 @@ import (
 	"slices"
 	"strconv"
 	"strings"
-	"sync"
 
 	"github.com/TekkenSteve/GoAgent/config"
 	"github.com/TekkenSteve/GoAgent/internal/repo/agentos/temporalrouter"
 	"github.com/TekkenSteve/GoAgent/pkg/eventlog"
 	eventlognats "github.com/TekkenSteve/GoAgent/pkg/eventlog/nats"
+	"github.com/TekkenSteve/GoAgent/pkg/jobgroup"
 	"github.com/TekkenSteve/GoAgent/pkg/logger"
 )
 
@@ -344,14 +344,22 @@ type domainRoutes struct {
 	routes []temporalrouter.Route
 }
 
-// ingressBridge owns the running bridge: one routing loop per routed domain,
-// and the consumers they read from.
+// ingressComponent names the bridge's jobs in the shared job observer's
+// reports.
+const ingressComponent = "cross-town ingress"
+
+// ingressJobPrefix names the routing loops in the group's reporting.
+const ingressJobPrefix = "ingress:"
+
+// ingressReaderReleasePrefix names the consumers' releases in the group's
+// stop reporting.
+const ingressReaderReleasePrefix = "ingress-reader:"
+
+// ingressBridge owns the running bridge: one routing loop per routed domain
+// and the consumers they read from, all stopped as one job group.
 type ingressBridge struct {
-	logger  logger.Interface
-	cancel  context.CancelFunc
-	done    chan struct{}
-	readers []*eventlognats.Reader
-	once    sync.Once
+	logger logger.Interface
+	jobs   *jobgroup.Group
 }
 
 // startAppIngress starts the cross-town bridge and returns the function that
@@ -401,30 +409,22 @@ func startAgentOSIngress(
 		return nil, fmt.Errorf("app - startAgentOSIngress - temporalrouter.NewTemporalIngress: %w", err)
 	}
 
-	ctx, cancel := context.WithCancel(parent)
-
 	bridge := &ingressBridge{
 		logger: l,
-		cancel: cancel,
-		done:   make(chan struct{}),
+		jobs:   jobgroup.New(parent, jobgroup.WithObserver(jobObserver{component: ingressComponent, logger: l})),
 	}
 
-	var loops sync.WaitGroup
-
-	if err := bridge.openDomains(parent, ctx, eventBackboneConfig(cfg), &ingressCfg, ingress, l, &loops); err != nil {
-		bridge.releaseReaders()
-		cancel()
+	if err := bridge.openDomains(parent, eventBackboneConfig(cfg), &ingressCfg, ingress, l); err != nil {
+		// Stopping the never-announced group runs the releases of the
+		// consumers that did open and waits out any loop that already
+		// started: one cleanup path for every point of failure.
+		stopJobGroup(l, bridge.jobs)
 
 		return nil, err
 	}
 
-	go func() {
-		loops.Wait()
-		close(bridge.done)
-	}()
-
-	l.Info("app - startAgentOSIngress - cross-town ingress started: %d domains, task queue %s",
-		len(bridge.readers), ingressCfg.taskQueue)
+	l.Info("app - startAgentOSIngress - cross-town ingress started: task queue %s",
+		ingressCfg.taskQueue)
 
 	return bridge, nil
 }
@@ -435,12 +435,10 @@ func startAgentOSIngress(
 // to start.
 func (b *ingressBridge) openDomains(
 	parent context.Context,
-	ctx context.Context,
 	backboneCfg eventlognats.Config,
 	ingressCfg *ingressConfig,
 	ingress *temporalrouter.TemporalIngress,
 	log logger.Interface,
-	loops *sync.WaitGroup,
 ) error {
 	for _, grouped := range groupRoutesByDomain(ingressCfg.routes) {
 		consumer := ingressConsumerName(ingressCfg.consumerPrefix, grouped.domain, ingressCfg.shards, backboneCfg.Shards)
@@ -460,7 +458,7 @@ func (b *ingressBridge) openDomains(
 			return fmt.Errorf("app - startAgentOSIngress - eventlog/nats.NewReader(%s): %w", grouped.domain, err)
 		}
 
-		b.readers = append(b.readers, reader)
+		b.jobs.Defer(ingressReaderReleasePrefix+grouped.domain, reader.Close)
 
 		router, err := temporalrouter.NewRouter(temporalrouter.Config{
 			Reader:  reader,
@@ -472,15 +470,7 @@ func (b *ingressBridge) openDomains(
 			return fmt.Errorf("app - startAgentOSIngress - temporalrouter.NewRouter(%s): %w", grouped.domain, err)
 		}
 
-		loops.Add(1)
-
-		go func(domain string, router *temporalrouter.Router) {
-			defer loops.Done()
-
-			if err := router.Run(ctx); err != nil {
-				log.Error(fmt.Errorf("app - startAgentOSIngress - route %s: %w", domain, err))
-			}
-		}(grouped.domain, router)
+		b.jobs.Go(ingressJobPrefix+grouped.domain, router.Run)
 
 		log.Info("app - startAgentOSIngress - consuming %s on consumer %s", grouped.domain, consumer)
 	}
@@ -488,40 +478,15 @@ func (b *ingressBridge) openDomains(
 	return nil
 }
 
-// Stop cancels the routing loops, waits for them to leave their poll, then
-// releases the consumers. It is idempotent, and a no-op on a bridge that never
-// started.
+// Stop cancels the routing loops, waits them out within the stop budget,
+// then releases the consumers. It is idempotent, and a no-op on a bridge that
+// never started.
 func (b *ingressBridge) Stop() {
 	if b == nil {
 		return
 	}
 
-	b.once.Do(func() {
-		if b.cancel == nil {
-			return
-		}
-
-		b.cancel()
-
-		if b.done != nil {
-			<-b.done
-		}
-
-		b.releaseReaders()
-	})
-}
-
-// releaseReaders closes the consumers this bridge opened, reporting a failure
-// instead of hiding it: a consumer that cannot be released leaves the
-// connection behind.
-func (b *ingressBridge) releaseReaders() {
-	for _, reader := range b.readers {
-		if err := reader.Close(); err != nil && b.logger != nil {
-			b.logger.Error(fmt.Errorf("app - ingressBridge.Stop - close reader: %w", err))
-		}
-	}
-
-	b.readers = nil
+	stopJobGroup(b.logger, b.jobs)
 }
 
 // startAppIngressForComponents starts the bridge against the Temporal client

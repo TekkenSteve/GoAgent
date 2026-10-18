@@ -19,6 +19,7 @@ import (
 	"github.com/TekkenSteve/GoAgent/internal/repo/agentos/streamadapter"
 	"github.com/TekkenSteve/GoAgent/internal/repo/persistent"
 	"github.com/TekkenSteve/GoAgent/internal/repo/stream/memstream"
+	"github.com/TekkenSteve/GoAgent/pkg/jobgroup"
 )
 
 const (
@@ -147,13 +148,18 @@ func run(args []string, stdout, stderr io.Writer) int {
 	gen := NewGenerator(bus, cfg.rate, cfg.mode, recorder, cfg.seed)
 
 	// Generator workers publish runs continuously (or a fixed count) until the
-	// process is interrupted. Each run flows through the real adapter paths.
-	stopWorkers := make(chan struct{})
+	// process is interrupted. Each run flows through the real adapter paths,
+	// and the group cancels and waits them out as one unit on shutdown.
+	workers := jobgroup.New(ctx)
 
 	var started atomic.Int64
 
-	for i := 0; i < cfg.concurrency; i++ {
-		go worker(ctx, stopWorkers, gen, obs, &cfg.runs, &started, stderr)
+	for i := range cfg.concurrency {
+		workers.Go(fmt.Sprintf("worker-%d", i), func(ctx context.Context) error {
+			worker(ctx, gen, obs, &cfg.runs, &started, stderr)
+
+			return nil
+		})
 	}
 
 	fmt.Fprintf(stdout, "bus-dashboard: listening on http://%s transport=%s rate=%s concurrency=%d projection=%v\n",
@@ -165,17 +171,14 @@ func run(args []string, stdout, stderr io.Writer) int {
 		ReadHeaderTimeout: readHeaderTimeout,
 	}
 
-	if err := serve(srv, stopWorkers); err != nil {
+	if err := serve(srv); err != nil {
 		fmt.Fprintf(stderr, "bus-dashboard: http server: %v\n", err)
 
 		return exitError
 	}
 
-	shutdownCtx, cancelShutdown := context.WithTimeout(ctx, shutdownTimeout)
-	defer cancelShutdown()
-
-	if err := srv.Shutdown(shutdownCtx); err != nil {
-		fmt.Fprintf(stderr, "bus-dashboard: shutdown: %v\n", err)
+	if err := shutdown(srv, workers, stderr); err != nil {
+		fmt.Fprintf(stderr, "bus-dashboard: %v\n", err)
 
 		return exitError
 	}
@@ -183,9 +186,30 @@ func run(args []string, stdout, stderr io.Writer) int {
 	return exitOK
 }
 
-// serve runs the HTTP server until it fails or the process is interrupted,
-// then signals the generator workers to stop exactly once.
-func serve(srv *http.Server, stopWorkers chan struct{}) error {
+// shutdown stops the generator workers under the shutdown budget, then
+// drains the HTTP server. A worker stop failure is reported but not fatal —
+// each worker has already reported its own errors — while a server that
+// cannot drain is.
+func shutdown(srv *http.Server, workers *jobgroup.Group, stderr io.Writer) error {
+	stopCtx, cancelStop := context.WithTimeout(context.Background(), shutdownTimeout)
+	defer cancelStop()
+
+	if err := workers.Stop(stopCtx); err != nil {
+		fmt.Fprintf(stderr, "bus-dashboard: stop workers: %v\n", err)
+	}
+
+	shutdownCtx, cancelShutdown := context.WithTimeout(context.Background(), shutdownTimeout)
+	defer cancelShutdown()
+
+	if err := srv.Shutdown(shutdownCtx); err != nil {
+		return fmt.Errorf("shutdown: %w", err)
+	}
+
+	return nil
+}
+
+// serve runs the HTTP server until it fails or the process is interrupted.
+func serve(srv *http.Server) error {
 	serveErr := make(chan error, 1)
 
 	go func() {
@@ -195,14 +219,10 @@ func serve(srv *http.Server, stopWorkers chan struct{}) error {
 	select {
 	case err := <-serveErr:
 		if err != nil && !errors.Is(err, http.ErrServerClosed) {
-			close(stopWorkers)
-
 			return err
 		}
 	case <-waitInterrupt():
 	}
-
-	close(stopWorkers)
 
 	return nil
 }
@@ -235,11 +255,11 @@ func wireProjection(pgURL string) (*streamadapter.MilestoneRecorder, *persistent
 }
 
 // worker drives one generator loop: publish a run, then immediately start the
-// next, until the fixed count is reached or the worker is stopped.
-func worker(ctx context.Context, stop <-chan struct{}, gen *Generator, obs *Observer, runs *int, started *atomic.Int64, stderr io.Writer) {
+// next, until the fixed count is reached or the worker's context is canceled.
+func worker(ctx context.Context, gen *Generator, obs *Observer, runs *int, started *atomic.Int64, stderr io.Writer) {
 	for {
 		select {
-		case <-stop:
+		case <-ctx.Done():
 			return
 		default:
 		}
