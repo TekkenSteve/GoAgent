@@ -165,11 +165,7 @@ func newRuntime(ctx context.Context, config Config) (*Runtime, error) {
 // that were waiting for them. It owns a goroutine for the runtime's lifetime,
 // and stops with the runtime's context.
 func (r *Runtime) startLeaseSweeper() {
-	r.workers.Add(1)
-
-	go func() {
-		defer r.workers.Done()
-
+	r.workers.Go(func() {
 		ticker := time.NewTicker(r.leaseSweepInterval)
 		defer ticker.Stop()
 
@@ -188,7 +184,7 @@ func (r *Runtime) startLeaseSweeper() {
 				}
 			}
 		}
-	}()
+	})
 }
 
 // Close cancels background workers and closes the Postgres pool. Close is

@@ -210,10 +210,7 @@ func retryWindow(initial, maximum time.Duration, coefficient float64, totalAttem
 	for attempt := 1; attempt < totalAttempts; attempt++ {
 		window += interval
 
-		next := time.Duration(float64(interval) * coefficient)
-		if next > maximum {
-			next = maximum
-		}
+		next := min(time.Duration(float64(interval)*coefficient), maximum)
 
 		interval = next
 	}

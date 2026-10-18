@@ -3,6 +3,7 @@ package middleware_test
 import (
 	"context"
 	"io"
+	"maps"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -53,9 +54,7 @@ func tokenFor(t *testing.T, claims jwt.MapClaims) string {
 		"sub": "account-1",
 		"exp": time.Now().Add(time.Hour).Unix(),
 	}
-	for name, value := range claims {
-		base[name] = value
-	}
+	maps.Copy(base, claims)
 
 	signed, err := jwt.NewWithClaims(jwt.SigningMethodHS256, base).SignedString([]byte(testSecret))
 	require.NoError(t, err)

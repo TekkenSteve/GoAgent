@@ -1,6 +1,7 @@
 package tool
 
 import (
+	"slices"
 	"strings"
 )
 
@@ -135,10 +136,8 @@ func (r *Redactor) redactSlice(input []any) []any {
 func (r *Redactor) sensitive(key string) bool {
 	lowered := strings.ToLower(key)
 
-	for _, exact := range r.keys.Exact {
-		if lowered == exact {
-			return true
-		}
+	if slices.Contains(r.keys.Exact, lowered) {
+		return true
 	}
 
 	for _, suffix := range r.keys.Suffixes {
